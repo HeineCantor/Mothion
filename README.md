@@ -72,7 +72,7 @@ src/
 ├─ ui/       MainWindow, DockLayout (disposizione e persistenza), PanelDock, Theme, IconFactory
 │  └─ panels/ Strumenti, Sotto-strumento (preset con anteprima), Proprietà strumento,
 │             slider verticali Dimensione/Opacità, Ruota colore, Set di colori,
-│             Navigatore, Livelli (segnaposto); timeline/ = timeline con dati finti
+│             Navigatore, Livelli; timeline/ = timeline delle esposizioni (stile Harmony)
 └─ app/      main.cpp
 ```
 
@@ -110,7 +110,10 @@ Dopo `toPenSample()` nessuna parte del programma tocca eventi Qt di input.
 | Rotazione | Maiusc + rotella, Spazio+Maiusc+trascina, Ctrl , / Ctrl . / Ctrl / (azzera) |
 | Annulla / Ripeti | Ctrl+Z / Ctrl+Maiusc+Z o Ctrl+Y (fino a 500 passi o 1 GB) |
 | Overlay debug input | F12 |
-| Timeline | clic/trascina per spostare il frame, ← → Home Fine, Ctrl+rotella = zoom frame |
+| Timeline | clic/trascina: frame e livello correnti; ← → Home Fine, ↑ ↓ livello; Ctrl+rotella = zoom frame |
+| Hold | trascina il bordo destro di un blocco (i frame successivi si spostano) |
+| Disegni | disegnare su un frame vuoto crea un disegno; tasto destro sulla timeline: nuovo disegno, svuota frame, inserisci/elimina frame, elimina disegno |
+| Livelli | + / cestino / frecce; occhio = visibilità, lucchetto = blocco; doppio clic = rinomina |
 | Navigatore | clic/trascina sulla miniatura per spostare la vista; slider zoom/rotazione; specchia O/V |
 | Layout | Finestra → Ripristina layout predefinito |
 

@@ -177,6 +177,43 @@ void drawGlyph(QPainter &p, IconId id)
         path.lineTo(15, 18);
         path.closeSubpath();
         break;
+    case IconId::Lock:
+        path.addRoundedRect(QRectF(6, 11, 12, 9), 1.5, 1.5);
+        path.moveTo(8.5, 11);
+        path.lineTo(8.5, 8);
+        path.arcTo(QRectF(8.5, 4.5, 7, 7), 180, -180);
+        path.lineTo(15.5, 11);
+        break;
+    case IconId::Add:
+        path.moveTo(12, 5);
+        path.lineTo(12, 19);
+        path.moveTo(5, 12);
+        path.lineTo(19, 12);
+        break;
+    case IconId::Delete: // bin
+        path.moveTo(5, 7);
+        path.lineTo(19, 7);
+        path.moveTo(10, 7);
+        path.lineTo(10, 4.5);
+        path.lineTo(14, 4.5);
+        path.lineTo(14, 7);
+        path.moveTo(7, 7);
+        path.lineTo(8, 20);
+        path.lineTo(16, 20);
+        path.lineTo(17, 7);
+        break;
+    case IconId::ArrowUp:
+    case IconId::ArrowDown:
+        if (id == IconId::ArrowDown) {
+            p.translate(0, 24);
+            p.scale(1, -1);
+        }
+        path.moveTo(12, 19);
+        path.lineTo(12, 5);
+        path.moveTo(6, 11);
+        path.lineTo(12, 5);
+        path.lineTo(18, 11);
+        break;
     case IconId::Eye:
         path.moveTo(2, 12);
         path.quadTo(12, 3, 22, 12);

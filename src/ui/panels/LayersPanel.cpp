@@ -1,111 +1,366 @@
 #include "ui/panels/LayersPanel.h"
 
+#include "canvas/TileQt.h"
+#include "core/document/commands/LayerCommands.h"
+#include "document/DocumentController.h"
 #include "ui/IconFactory.h"
 
 #include <QComboBox>
 #include <QHBoxLayout>
+#include <QInputDialog>
 #include <QLabel>
 #include <QListWidget>
 #include <QPainter>
+#include <QSignalBlocker>
 #include <QSlider>
 #include <QSpinBox>
 #include <QToolButton>
 #include <QVBoxLayout>
 
+#include <cmath>
+
 namespace mothion::ui {
+
+using document::DocumentController;
 
 namespace {
 
-// Thumbnail: checkerboard for a transparent layer, plain white for the paper.
-QPixmap thumbnail(bool paper)
+constexpr QSize kThumbSize(40, 24);
+constexpr int kLayerIdRole = Qt::UserRole + 1;
+
+const doc::BlendMode kBlendModes[] = {doc::BlendMode::Normal, doc::BlendMode::Multiply, doc::BlendMode::Screen,
+                                      doc::BlendMode::Overlay, doc::BlendMode::Add};
+
+QString blendName(doc::BlendMode mode)
 {
-    QPixmap pm(36, 26);
-    QPainter p(&pm);
-    if (paper) {
-        pm.fill(Qt::white);
-    } else {
-        for (int y = 0; y < pm.height(); y += 6)
-            for (int x = 0; x < pm.width(); x += 6)
-                p.fillRect(x, y, 6, 6, ((x + y) / 6) % 2 ? QColor(0xcc, 0xcc, 0xcc) : Qt::white);
+    switch (mode) {
+    case doc::BlendMode::Normal: return LayersPanel::tr("Normale");
+    case doc::BlendMode::Multiply: return LayersPanel::tr("Moltiplica");
+    case doc::BlendMode::Screen: return LayersPanel::tr("Scherma");
+    case doc::BlendMode::Overlay: return LayersPanel::tr("Sovrapponi");
+    case doc::BlendMode::Add: return LayersPanel::tr("Aggiungi");
     }
-    p.setPen(QColor(0x18, 0x18, 0x1a));
-    p.drawRect(pm.rect().adjusted(0, 0, -1, -1));
-    return pm;
+    return {};
 }
 
-QWidget *layerRow(const QString &name, const QString &info, bool paper, QWidget *parent)
+// Thumbnail of the drawing shown at the current frame: checkerboard (or
+// paper color) background, tiles scaled down without building a full image.
+QPixmap thumbnail(const doc::Drawing *drawing, const QSize &docSize, const QColor *paper)
 {
-    auto *row = new QWidget(parent);
-    auto *eye = new QToolButton(row);
-    eye->setObjectName(QStringLiteral("LayerEye")); // styled without the "checked" fill
-    eye->setIconSize(QSize(14, 14));
-    eye->setCheckable(true);
-    eye->setAutoRaise(true);
-    // Visible: eye icon; hidden: empty slot.
-    QObject::connect(eye, &QToolButton::toggled, eye,
-                     [eye](bool on) { eye->setIcon(on ? icon(IconId::Eye) : QIcon()); });
-    eye->setChecked(true);
-    eye->setToolTip(QObject::tr("Mostra / nascondi"));
-    auto *thumb = new QLabel(row);
-    thumb->setPixmap(thumbnail(paper));
-    auto *text = new QLabel(info.isEmpty() ? name : QStringLiteral("%1\n%2").arg(info, name), row);
+    QImage img(kThumbSize, QImage::Format_ARGB32_Premultiplied);
+    QPainter p(&img);
+    if (paper) {
+        img.fill(*paper);
+    } else {
+        for (int y = 0; y < img.height(); y += 6)
+            for (int x = 0; x < img.width(); x += 6)
+                p.fillRect(x, y, 6, 6, ((x + y) / 6) % 2 ? QColor(0xcc, 0xcc, 0xcc) : Qt::white);
+    }
+    if (drawing) {
+        p.save();
+        p.setRenderHint(QPainter::SmoothPixmapTransform);
+        p.scale(double(kThumbSize.width()) / docSize.width(), double(kThumbSize.height()) / docSize.height());
+        for (const doc::TileCoord &c : drawing->image.tileCoords())
+            p.drawImage(canvas::tileRect(c).topLeft(), canvas::tileImage(*drawing->image.tile(c)));
+        p.restore();
+    }
+    p.setPen(QColor(0x18, 0x18, 0x1a));
+    p.drawRect(img.rect().adjusted(0, 0, -1, -1));
+    return QPixmap::fromImage(img);
+}
 
-    auto *layout = new QHBoxLayout(row);
-    layout->setContentsMargins(2, 2, 2, 2);
-    layout->setSpacing(6);
-    layout->addWidget(eye);
-    layout->addWidget(thumb);
-    layout->addWidget(text, 1);
-    return row;
+QToolButton *toggleButton(IconId id, const QString &tip, QWidget *parent)
+{
+    auto *b = new QToolButton(parent);
+    b->setObjectName(QStringLiteral("LayerEye")); // styled without the "checked" fill
+    b->setIconSize(QSize(14, 14));
+    b->setCheckable(true);
+    b->setAutoRaise(true);
+    b->setToolTip(tip);
+    // Checked: icon shown; unchecked: empty slot.
+    QObject::connect(b, &QToolButton::toggled, b, [b, id](bool on) { b->setIcon(on ? icon(id) : QIcon()); });
+    return b;
+}
+
+QToolButton *actionButton(IconId id, const QString &tip, QWidget *parent)
+{
+    auto *b = new QToolButton(parent);
+    b->setIcon(icon(id));
+    b->setIconSize(QSize(16, 16));
+    b->setAutoRaise(true);
+    b->setToolTip(tip);
+    return b;
 }
 
 } // namespace
 
-LayersPanel::LayersPanel(QWidget *parent)
+LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     : QWidget(parent)
+    , m_document(document)
+    , m_blend(new QComboBox(this))
+    , m_opacity(new QSlider(Qt::Horizontal, this))
+    , m_opacityValue(new QSpinBox(this))
+    , m_list(new QListWidget(this))
+    , m_add(actionButton(IconId::Add, tr("Nuovo livello"), this))
+    , m_remove(actionButton(IconId::Delete, tr("Elimina livello"), this))
+    , m_up(actionButton(IconId::ArrowUp, tr("Sposta su"), this))
+    , m_down(actionButton(IconId::ArrowDown, tr("Sposta giù"), this))
 {
-    auto *blend = new QComboBox(this);
-    blend->addItems({tr("Normale"), tr("Moltiplica"), tr("Scherma"), tr("Sovrapponi"), tr("Aggiungi")});
-    auto *opacity = new QSlider(Qt::Horizontal, this);
-    opacity->setRange(0, 100);
-    opacity->setValue(100);
-    auto *opacityValue = new QSpinBox(this);
-    opacityValue->setRange(0, 100);
-    opacityValue->setValue(100);
-    opacityValue->setButtonSymbols(QAbstractSpinBox::NoButtons);
-    connect(opacity, &QSlider::valueChanged, opacityValue, &QSpinBox::setValue);
-    connect(opacityValue, &QSpinBox::valueChanged, opacity, &QSlider::setValue);
+    for (doc::BlendMode mode : kBlendModes)
+        m_blend->addItem(blendName(mode));
+    m_opacity->setRange(0, 100);
+    m_opacityValue->setRange(0, 100);
+    m_opacityValue->setSuffix(QStringLiteral(" %"));
+    m_opacityValue->setButtonSymbols(QAbstractSpinBox::NoButtons);
+    m_opacityValue->setKeyboardTracking(false);
+    m_list->setFrameShape(QFrame::NoFrame);
 
     auto *header = new QHBoxLayout;
     header->setSpacing(4);
-    header->addWidget(blend);
-    header->addWidget(opacity, 1);
-    header->addWidget(opacityValue);
+    header->addWidget(m_blend);
+    header->addWidget(m_opacity, 1);
+    header->addWidget(m_opacityValue);
 
-    auto *list = new QListWidget(this);
-    list->setFrameShape(QFrame::NoFrame);
-    struct Layer { QString name; QString info; bool paper; };
-    const Layer layers[] = {
-        {tr("Livello 1"), tr("100 % Normale"), false},
-        {tr("Carta"), QString(), true},
-    };
-    for (const Layer &l : layers) {
-        auto *item = new QListWidgetItem(list);
-        QWidget *row = layerRow(l.name, l.info, l.paper, list);
-        item->setSizeHint(row->sizeHint());
-        list->setItemWidget(item, row);
-    }
-    list->setCurrentRow(0);
-
-    auto *note = new QLabel(tr("Segnaposto – nessun modello dati"), this);
-    note->setEnabled(false);
+    auto *buttons = new QHBoxLayout;
+    buttons->setSpacing(0);
+    buttons->addWidget(m_add);
+    buttons->addWidget(m_remove);
+    buttons->addStretch(1);
+    buttons->addWidget(m_up);
+    buttons->addWidget(m_down);
 
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(4, 4, 4, 4);
     layout->setSpacing(4);
     layout->addLayout(header);
-    layout->addWidget(list, 1);
-    layout->addWidget(note);
+    layout->addWidget(m_list, 1);
+    layout->addLayout(buttons);
+
+    // Header edits.
+    connect(m_blend, &QComboBox::activated, this, [this](int index) {
+        editCurrentLayer([index](doc::LayerProperties &p) { p.blend = kBlendModes[index]; });
+    });
+    // Opacity: the slider previews in the spin box while dragged and is
+    // committed once, on release, so a drag is a single undo step.
+    connect(m_opacity, &QSlider::valueChanged, this, [this](int v) {
+        const QSignalBlocker block(m_opacityValue);
+        m_opacityValue->setValue(v);
+        if (!m_opacity->isSliderDown())
+            commitOpacity();
+    });
+    connect(m_opacity, &QSlider::sliderReleased, this, &LayersPanel::commitOpacity);
+    connect(m_opacityValue, &QSpinBox::valueChanged, this, [this](int v) {
+        const QSignalBlocker block(m_opacity);
+        m_opacity->setValue(v);
+        commitOpacity();
+    });
+
+    // Stack edits.
+    connect(m_add, &QToolButton::clicked, this, [this] {
+        doc::Document &d = m_document->documentForCommands();
+        const int index = d.indexOf(m_document->currentLayer()) + 1; // above the current one
+        auto add = std::make_unique<doc::AddLayerCommand>(
+            d, index, doc::LayerProperties{tr("Livello %1").arg(d.layerCount() + 1).toStdString()});
+        const doc::LayerId id = add->layerId();
+        m_document->execute(std::move(add));
+        m_document->setCurrentLayer(id);
+    });
+    connect(m_remove, &QToolButton::clicked, this, [this] {
+        m_document->execute(std::make_unique<doc::RemoveLayerCommand>(m_document->currentLayer()));
+    });
+    connect(m_up, &QToolButton::clicked, this, [this] {
+        const doc::LayerId id = m_document->currentLayer();
+        m_document->execute(std::make_unique<doc::MoveLayerCommand>(id, m_document->document().indexOf(id) + 1));
+    });
+    connect(m_down, &QToolButton::clicked, this, [this] {
+        const doc::LayerId id = m_document->currentLayer();
+        m_document->execute(std::make_unique<doc::MoveLayerCommand>(id, m_document->document().indexOf(id) - 1));
+    });
+
+    // Selection and renaming.
+    connect(m_list, &QListWidget::currentItemChanged, this, [this](QListWidgetItem *item) {
+        if (item && item->data(kLayerIdRole).isValid())
+            m_document->setCurrentLayer(item->data(kLayerIdRole).value<doc::LayerId>());
+    });
+    connect(m_list, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem *item) {
+        if (item->data(kLayerIdRole).isValid())
+            renameLayer(item->data(kLayerIdRole).value<doc::LayerId>());
+    });
+
+    // Model -> view.
+    m_thumbnailTimer.setSingleShot(true);
+    m_thumbnailTimer.setInterval(250);
+    connect(&m_thumbnailTimer, &QTimer::timeout, this, &LayersPanel::refreshThumbnails);
+    auto scheduleThumbnails = [this] {
+        if (!m_thumbnailTimer.isActive())
+            m_thumbnailTimer.start();
+    };
+    // Queued: a row's own button may trigger the change, and must not be
+    // destroyed while its click is still being delivered.
+    connect(m_document, &DocumentController::structureChanged, this, &LayersPanel::rebuildList,
+            Qt::QueuedConnection);
+    connect(m_document, &DocumentController::currentLayerChanged, this, [this] {
+        selectCurrentRow();
+        syncHeader();
+    });
+    connect(m_document, &DocumentController::pixelsChanged, this, scheduleThumbnails);
+    connect(m_document, &DocumentController::currentFrameChanged, this, scheduleThumbnails);
+    rebuildList();
+}
+
+template<typename Edit>
+void LayersPanel::editCurrentLayer(Edit edit)
+{
+    const doc::Layer *layer = m_document->document().layer(m_document->currentLayer());
+    if (!layer)
+        return;
+    doc::LayerProperties props = layer->properties();
+    edit(props);
+    m_document->execute(doc::makeSetLayerProperties(m_document->document(), layer->id(), props));
+}
+
+void LayersPanel::commitOpacity()
+{
+    const float opacity = float(m_opacity->value()) / 100.0f;
+    editCurrentLayer([opacity](doc::LayerProperties &p) { p.opacity = opacity; });
+}
+
+void LayersPanel::renameLayer(doc::LayerId id)
+{
+    const doc::Layer *layer = m_document->document().layer(id);
+    if (!layer)
+        return;
+    bool ok = false;
+    const QString name = QInputDialog::getText(this, tr("Rinomina livello"), tr("Nome:"), QLineEdit::Normal,
+                                               QString::fromStdString(layer->properties().name), &ok);
+    if (!ok || name.trimmed().isEmpty())
+        return;
+    doc::LayerProperties props = layer->properties();
+    props.name = name.trimmed().toStdString();
+    m_document->execute(doc::makeSetLayerProperties(m_document->document(), id, props));
+}
+
+void LayersPanel::rebuildList()
+{
+    const QSignalBlocker block(m_list);
+    m_list->clear();
+    const doc::Document &d = m_document->document();
+    const QSize docSize(d.width(), d.height());
+    const int frame = m_document->currentFrame();
+
+    for (int i = d.layerCount() - 1; i >= 0; --i) { // top layer first
+        const doc::Layer &layer = d.layerAt(i);
+        const doc::LayerProperties &props = layer.properties();
+        const doc::LayerId id = layer.id();
+
+        auto *row = new QWidget(m_list);
+        auto *eye = toggleButton(IconId::Eye, tr("Mostra / nascondi"), row);
+        eye->setChecked(true); // set the icon via toggled
+        eye->setChecked(props.visible);
+        auto *lock = toggleButton(IconId::Lock, tr("Blocca / sblocca"), row);
+        lock->setChecked(true);
+        lock->setChecked(props.locked);
+        auto *thumb = new QLabel(row);
+        thumb->setObjectName(QStringLiteral("thumbnail"));
+        thumb->setPixmap(thumbnail(layer.drawingAt(frame), docSize, nullptr));
+        auto *text = new QLabel(QStringLiteral("%1 % %2\n%3")
+                                    .arg(std::lround(props.opacity * 100))
+                                    .arg(blendName(props.blend), QString::fromStdString(props.name)),
+                                row);
+        auto *h = new QHBoxLayout(row);
+        h->setContentsMargins(2, 2, 2, 2);
+        h->setSpacing(4);
+        h->addWidget(eye);
+        h->addWidget(lock);
+        h->addWidget(thumb);
+        h->addWidget(text, 1);
+
+        connect(eye, &QToolButton::clicked, this, [this, id](bool visible) {
+            const doc::Layer *l = m_document->document().layer(id);
+            doc::LayerProperties p = l->properties();
+            p.visible = visible;
+            m_document->execute(doc::makeSetLayerProperties(m_document->document(), id, p));
+        });
+        connect(lock, &QToolButton::clicked, this, [this, id](bool locked) {
+            const doc::Layer *l = m_document->document().layer(id);
+            doc::LayerProperties p = l->properties();
+            p.locked = locked;
+            m_document->execute(doc::makeSetLayerProperties(m_document->document(), id, p));
+        });
+
+        auto *item = new QListWidgetItem(m_list);
+        item->setData(kLayerIdRole, QVariant::fromValue(id));
+        item->setSizeHint(row->sizeHint());
+        m_list->setItemWidget(item, row);
+    }
+
+    // The paper: always at the bottom, not a layer of the model, not selectable.
+    auto *paperRow = new QWidget(m_list);
+    const QColor paper = QColor::fromRgba(d.paperColor());
+    auto *paperThumb = new QLabel(paperRow);
+    paperThumb->setPixmap(thumbnail(nullptr, docSize, &paper));
+    auto *h = new QHBoxLayout(paperRow);
+    h->setContentsMargins(42, 2, 2, 2);
+    h->setSpacing(4);
+    h->addWidget(paperThumb);
+    h->addWidget(new QLabel(tr("Carta"), paperRow), 1);
+    auto *paperItem = new QListWidgetItem(m_list);
+    paperItem->setFlags(Qt::NoItemFlags);
+    paperItem->setSizeHint(paperRow->sizeHint());
+    m_list->setItemWidget(paperItem, paperRow);
+
+    selectCurrentRow();
+    syncHeader();
+}
+
+void LayersPanel::refreshThumbnails()
+{
+    const doc::Document &d = m_document->document();
+    const QSize docSize(d.width(), d.height());
+    for (int row = 0; row < m_list->count(); ++row) {
+        QListWidgetItem *item = m_list->item(row);
+        if (!item->data(kLayerIdRole).isValid())
+            continue;
+        const doc::Layer *layer = d.layer(item->data(kLayerIdRole).value<doc::LayerId>());
+        auto *thumb = m_list->itemWidget(item)->findChild<QLabel *>(QStringLiteral("thumbnail"));
+        if (layer && thumb)
+            thumb->setPixmap(thumbnail(layer->drawingAt(m_document->currentFrame()), docSize, nullptr));
+    }
+}
+
+void LayersPanel::selectCurrentRow()
+{
+    const QSignalBlocker block(m_list);
+    for (int row = 0; row < m_list->count(); ++row) {
+        const QVariant id = m_list->item(row)->data(kLayerIdRole);
+        if (id.isValid() && id.value<doc::LayerId>() == m_document->currentLayer()) {
+            m_list->setCurrentRow(row);
+            return;
+        }
+    }
+}
+
+void LayersPanel::syncHeader()
+{
+    const doc::Document &d = m_document->document();
+    const doc::Layer *layer = d.layer(m_document->currentLayer());
+    const int index = layer ? d.indexOf(layer->id()) : -1;
+
+    for (QWidget *w : std::initializer_list<QWidget *>{m_blend, m_opacity, m_opacityValue})
+        w->setEnabled(layer != nullptr);
+    m_remove->setEnabled(layer && d.layerCount() > 1); // keep at least one layer
+    m_up->setEnabled(layer && index + 1 < d.layerCount());
+    m_down->setEnabled(layer && index > 0);
+    if (!layer)
+        return;
+
+    const QSignalBlocker b1(m_blend), b2(m_opacity), b3(m_opacityValue);
+    const doc::LayerProperties &props = layer->properties();
+    m_blend->setCurrentIndex(int(std::find(std::begin(kBlendModes), std::end(kBlendModes), props.blend)
+                                 - std::begin(kBlendModes)));
+    const int opacity = int(std::lround(props.opacity * 100));
+    m_opacity->setValue(opacity);
+    m_opacityValue->setValue(opacity);
 }
 
 } // namespace mothion::ui

@@ -48,7 +48,7 @@ MainWindow::MainWindow(QWidget *parent)
     panels.colorWheel = new ColorWheelPanel(m_toolState, this);
     panels.colorSet = new ColorSetPanel(m_toolState, this);
     panels.navigator = new NavigatorPanel(m_canvas, this);
-    panels.layers = new LayersPanel(this);
+    panels.layers = new LayersPanel(m_document, this);
     panels.timeline = new TimelinePanel(m_document, this);
 
     // Pen proximity only reaches the QApplication; the filter forwards it to the canvas.
