@@ -17,7 +17,6 @@
 #include "ui/panels/ToolPalettePanel.h"
 #include "ui/panels/ToolPropertiesPanel.h"
 #include "ui/panels/timeline/TimelinePanel.h"
-#include "ui/panels/timeline/TimelineView.h"
 
 #include <QAction>
 #include <QApplication>
@@ -50,11 +49,7 @@ MainWindow::MainWindow(QWidget *parent)
     panels.colorSet = new ColorSetPanel(m_toolState, this);
     panels.navigator = new NavigatorPanel(m_canvas, this);
     panels.layers = new LayersPanel(this);
-    auto *timeline = new TimelinePanel(this);
-    panels.timeline = timeline;
-    // Provisional: the placeholder timeline only drives the current frame.
-    connect(timeline->view(), &TimelineView::currentFrameChanged, m_document,
-            &document::DocumentController::setCurrentFrame);
+    panels.timeline = new TimelinePanel(m_document, this);
 
     // Pen proximity only reaches the QApplication; the filter forwards it to the canvas.
     auto *proximity = new input::ProximityFilter(this);

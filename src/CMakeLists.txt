@@ -69,7 +69,6 @@ qt_add_library(mothion_gui STATIC
     ui/panels/ColorSetPanel.h ui/panels/ColorSetPanel.cpp
     ui/panels/NavigatorPanel.h ui/panels/NavigatorPanel.cpp
     ui/panels/LayersPanel.h ui/panels/LayersPanel.cpp
-    ui/panels/timeline/FakeTimelineData.h ui/panels/timeline/FakeTimelineData.cpp
     ui/panels/timeline/TimelineMetrics.h
     ui/panels/timeline/TimelineView.h ui/panels/timeline/TimelineView.cpp
     ui/panels/timeline/TimelinePanel.h ui/panels/timeline/TimelinePanel.cpp

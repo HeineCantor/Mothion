@@ -1,50 +1,113 @@
 #include "ui/panels/timeline/TimelineView.h"
 
+#include "core/document/commands/DrawingCommands.h"
+#include "core/document/commands/TimingCommands.h"
+#include "document/DocumentController.h"
+
+#include <QContextMenuEvent>
 #include <QKeyEvent>
+#include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QScrollBar>
 #include <QWheelEvent>
 
 #include <algorithm>
+#include <cmath>
 
 namespace mothion::ui {
 
+using document::DocumentController;
+
 namespace {
 
-// Provisional colors, derived from the widget palette where possible.
 const QColor kCursorColor(0xe0, 0x4a, 0x4a);
 const QColor kSecondLine(0x60, 0x60, 0x68);
+constexpr int kEdgeGrab = 4;          // pixels around a block's right edge that start a resize
+constexpr int kExtraFrames = 24;      // shown past the last exposure, room to keep animating
 
 } // namespace
 
-TimelineView::TimelineView(QWidget *parent)
+TimelineView::TimelineView(DocumentController *document, QWidget *parent)
     : QAbstractScrollArea(parent)
+    , m_document(document)
 {
     setFocusPolicy(Qt::StrongFocus);
-    setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    viewport()->setMouseTracking(false);
-}
+    viewport()->setMouseTracking(true); // resize cursor over block edges
 
-void TimelineView::setTimeline(FakeTimeline timeline)
-{
-    m_timeline = std::move(timeline);
-    m_currentFrame = std::clamp(m_currentFrame, 0, std::max(0, m_timeline.frameCount - 1));
+    connect(m_document, &DocumentController::structureChanged, this, &TimelineView::onStructureChanged);
+    connect(m_document, &DocumentController::currentFrameChanged, this, [this](int frame) {
+        ensureFrameVisible(frame);
+        viewport()->update();
+    });
+    connect(m_document, &DocumentController::currentLayerChanged, viewport(), qOverload<>(&QWidget::update));
     updateScrollBars();
-    viewport()->update();
 }
 
-void TimelineView::setCurrentFrame(int frame)
+// --- model helpers ---------------------------------------------------------------
+
+int TimelineView::rowCount() const
 {
-    frame = std::clamp(frame, 0, std::max(0, m_timeline.frameCount - 1));
-    if (frame == m_currentFrame)
-        return;
-    m_currentFrame = frame;
-    ensureFrameVisible(frame);
-    viewport()->update();
-    emit currentFrameChanged(frame);
+    return m_document->document().layerCount();
 }
+
+int TimelineView::layerIndexForRow(int row) const
+{
+    return rowCount() - 1 - row;
+}
+
+int TimelineView::rowAt(int y) const
+{
+    if (y < m_metrics.rulerHeight)
+        return -1;
+    const int row = (y - m_metrics.rulerHeight + m_metrics.scrollY) / m_metrics.rowHeight;
+    return row < rowCount() ? row : -1;
+}
+
+int TimelineView::frameAt(int x) const
+{
+    return std::clamp(m_metrics.frameAt(x), 0, displayedFrames() - 1);
+}
+
+int TimelineView::displayedFrames() const
+{
+    const doc::Document &d = m_document->document();
+    int last = 0;
+    for (int i = 0; i < d.layerCount(); ++i)
+        last = std::max(last, d.layerAt(i).timing().lastFrame());
+    if (m_resize)
+        last = std::max(last, m_previewTiming.lastFrame());
+    return std::max({d.frameCount(), last + kExtraFrames, m_document->currentFrame() + 1});
+}
+
+const doc::Timing &TimelineView::timingForPainting(int layerIndex) const
+{
+    if (m_resize && m_resize->layerIndex == layerIndex)
+        return m_previewTiming;
+    return m_document->document().layerAt(layerIndex).timing();
+}
+
+std::optional<TimelineView::Resize> TimelineView::edgeAt(const QPoint &pos) const
+{
+    const int row = rowAt(pos.y());
+    if (row < 0 || pos.x() < m_metrics.headerWidth)
+        return std::nullopt;
+    const int layerIndex = layerIndexForRow(row);
+    for (const doc::Exposure &e : m_document->document().layerAt(layerIndex).timing().exposures()) {
+        if (std::abs(pos.x() - m_metrics.frameX(e.end())) <= kEdgeGrab)
+            return Resize{layerIndex, e.start, e.length};
+    }
+    return std::nullopt;
+}
+
+QColor TimelineView::colorForLayer(int layerIndex)
+{
+    static const QColor colors[] = {QColor(0x4f, 0x8c, 0xd6), QColor(0xd0, 0x8a, 0x4a), QColor(0x5a, 0x9a, 0x6a),
+                                    QColor(0xb0, 0x6a, 0xd0), QColor(0xc8, 0x5a, 0x6a), QColor(0x4a, 0xa8, 0xa8)};
+    return colors[layerIndex % int(std::size(colors))];
+}
+
+// --- scrolling --------------------------------------------------------------------
 
 void TimelineView::setFrameWidth(int width)
 {
@@ -52,21 +115,26 @@ void TimelineView::setFrameWidth(int width)
     if (width == m_metrics.frameWidth)
         return;
     // Keep the current frame at the same screen position while zooming.
-    const int cursorX = m_metrics.frameX(m_currentFrame);
+    const int frame = m_document->currentFrame();
+    const int cursorX = m_metrics.frameX(frame);
     m_metrics.frameWidth = width;
     updateScrollBars();
-    horizontalScrollBar()->setValue(m_metrics.headerWidth + m_currentFrame * width - cursorX);
+    horizontalScrollBar()->setValue(m_metrics.headerWidth + frame * width - cursorX);
     viewport()->update();
     emit frameWidthChanged(width);
 }
 
-// --- scrolling ---------------------------------------------------------------
+void TimelineView::onStructureChanged()
+{
+    updateScrollBars();
+    viewport()->update();
+}
 
 void TimelineView::updateScrollBars()
 {
     const QSize vp = viewport()->size();
-    const int contentW = m_timeline.frameCount * m_metrics.frameWidth;
-    const int contentH = int(m_timeline.tracks.size()) * m_metrics.rowHeight;
+    const int contentW = displayedFrames() * m_metrics.frameWidth;
+    const int contentH = rowCount() * m_metrics.rowHeight;
     const int visibleW = std::max(0, vp.width() - m_metrics.headerWidth);
     const int visibleH = std::max(0, vp.height() - m_metrics.rulerHeight);
 
@@ -80,6 +148,7 @@ void TimelineView::updateScrollBars()
 
 void TimelineView::ensureFrameVisible(int frame)
 {
+    updateScrollBars(); // the frame may be past the previous range
     const int left = m_metrics.headerWidth;
     const int right = viewport()->width();
     const int x = m_metrics.frameX(frame);
@@ -102,7 +171,7 @@ void TimelineView::scrollContentsBy(int, int)
     viewport()->update();
 }
 
-// --- painting ----------------------------------------------------------------
+// --- painting ---------------------------------------------------------------------
 
 void TimelineView::paintEvent(QPaintEvent *)
 {
@@ -145,38 +214,50 @@ void TimelineView::paintEvent(QPaintEvent *)
 void TimelineView::paintCells(QPainter &p) const
 {
     const TimelineMetrics &m = m_metrics;
+    const doc::Document &d = m_document->document();
     const int bottom = viewport()->height();
-    const int endX = m.frameX(m_timeline.frameCount);
+    const int frames = displayedFrames();
+    const int endX = m.frameX(frames);
+    const int fps = std::max(1, int(std::lround(d.frameRate().fps())));
 
-    // Row backgrounds.
-    for (int row = 0; row < int(m_timeline.tracks.size()); ++row) {
-        const int y = m.rowY(row);
-        p.fillRect(QRect(m.headerWidth, y, endX - m.headerWidth, m.rowHeight),
-                   row % 2 ? palette().alternateBase() : palette().base());
+    // Row backgrounds; the current layer's row is highlighted.
+    for (int row = 0; row < rowCount(); ++row) {
+        const bool current = d.layerAt(layerIndexForRow(row)).id() == m_document->currentLayer();
+        const QColor bg = current ? palette().highlight().color().darker(260)
+                                  : (row % 2 ? palette().alternateBase().color() : palette().base().color());
+        p.fillRect(QRect(m.headerWidth, m.rowY(row), endX - m.headerWidth, m.rowHeight), bg);
     }
+    // Past the scene length: dimmed.
+    p.fillRect(QRect(m.frameX(d.frameCount()), m.rulerHeight, std::max(0, endX - m.frameX(d.frameCount())), bottom),
+               QColor(0, 0, 0, 60));
     // Current frame column.
-    p.fillRect(QRect(m.frameX(m_currentFrame), m.rulerHeight, m.frameWidth, bottom),
+    p.fillRect(QRect(m.frameX(m_document->currentFrame()), m.rulerHeight, m.frameWidth, bottom),
                QColor(kCursorColor.red(), kCursorColor.green(), kCursorColor.blue(), 40));
 
     // Frame grid: thin line per frame, strong line every second.
     const int first = std::max(0, m.frameAt(m.headerWidth));
-    const int last = std::min(m_timeline.frameCount, m.frameAt(viewport()->width()) + 1);
+    const int last = std::min(frames, m.frameAt(viewport()->width()) + 1);
     for (int f = first; f <= last; ++f) {
-        const bool second = m_timeline.fps > 0 && f % m_timeline.fps == 0;
-        p.setPen(second ? kSecondLine : palette().mid().color());
+        p.setPen(f % fps == 0 ? kSecondLine : palette().mid().color());
         p.drawLine(m.frameX(f), m.rulerHeight, m.frameX(f), bottom);
     }
 
     // Exposures.
-    for (int row = 0; row < int(m_timeline.tracks.size()); ++row) {
-        const TimelineTrack &track = m_timeline.tracks[std::size_t(row)];
-        for (const Exposure &e : track.exposures)
-            if (e.start <= last && e.start + e.length >= first)
-                paintExposure(p, e, track.color, m.rowY(row));
+    for (int row = 0; row < rowCount(); ++row) {
+        const int layerIndex = layerIndexForRow(row);
+        const doc::Layer &layer = d.layerAt(layerIndex);
+        for (const doc::Exposure &e : timingForPainting(layerIndex).exposures()) {
+            if (e.end() < first || e.start > last)
+                continue;
+            const doc::Drawing *drawing = layer.drawing(e.drawing);
+            const QString name = drawing ? QString::fromStdString(drawing->name) : QStringLiteral("?");
+            paintExposure(p, e, name, colorForLayer(layerIndex), m.rowY(row));
+        }
     }
 }
 
-void TimelineView::paintExposure(QPainter &p, const Exposure &e, const QColor &color, int y) const
+void TimelineView::paintExposure(QPainter &p, const doc::Exposure &e, const QString &name, const QColor &color,
+                                 int y) const
 {
     const TimelineMetrics &m = m_metrics;
     const QRect block(m.frameX(e.start) + 1, y + 2, e.length * m.frameWidth - 2, m.rowHeight - 4);
@@ -189,9 +270,9 @@ void TimelineView::paintExposure(QPainter &p, const Exposure &e, const QColor &c
     // Drawing name at the start of the block; the rest of the hold shows a line.
     p.setPen(palette().text().color());
     const QRect textRect = block.adjusted(5, 0, -2, 0);
-    const QString name = p.fontMetrics().elidedText(e.drawing, Qt::ElideRight, textRect.width());
-    p.drawText(textRect, Qt::AlignVCenter | Qt::AlignLeft, name);
-    const int lineStart = textRect.left() + p.fontMetrics().horizontalAdvance(name) + 4;
+    const QString shown = p.fontMetrics().elidedText(name, Qt::ElideRight, textRect.width());
+    p.drawText(textRect, Qt::AlignVCenter | Qt::AlignLeft, shown);
+    const int lineStart = textRect.left() + p.fontMetrics().horizontalAdvance(shown) + 4;
     if (lineStart < block.right() - 4) {
         p.setPen(color);
         const int cy = block.center().y();
@@ -205,7 +286,7 @@ void TimelineView::paintRuler(QPainter &p) const
     p.fillRect(QRect(m.headerWidth, 0, viewport()->width(), m.rulerHeight), palette().window());
 
     const int first = std::max(0, m.frameAt(m.headerWidth));
-    const int last = std::min(m_timeline.frameCount - 1, m.frameAt(viewport()->width()));
+    const int last = std::min(displayedFrames() - 1, m.frameAt(viewport()->width()));
     // Label every frame if there is room, otherwise every 5 / 10.
     const int labelEvery = m.frameWidth >= 22 ? 1 : (m.frameWidth >= 10 ? 5 : 10);
     for (int f = first; f <= last; ++f) {
@@ -225,13 +306,19 @@ void TimelineView::paintRuler(QPainter &p) const
 void TimelineView::paintHeaders(QPainter &p) const
 {
     const TimelineMetrics &m = m_metrics;
+    const doc::Document &d = m_document->document();
     p.fillRect(QRect(0, m.rulerHeight, m.headerWidth, viewport()->height()), palette().window());
-    for (int row = 0; row < int(m_timeline.tracks.size()); ++row) {
-        const TimelineTrack &track = m_timeline.tracks[std::size_t(row)];
+    for (int row = 0; row < rowCount(); ++row) {
+        const int layerIndex = layerIndexForRow(row);
+        const doc::Layer &layer = d.layerAt(layerIndex);
         const QRect r(0, m.rowY(row), m.headerWidth - 1, m.rowHeight);
-        p.fillRect(QRect(r.left() + 4, r.top() + 6, 4, r.height() - 12), track.color);
-        p.setPen(palette().text().color());
-        p.drawText(r.adjusted(14, 0, -4, 0), Qt::AlignVCenter | Qt::AlignLeft, track.name);
+        if (layer.id() == m_document->currentLayer())
+            p.fillRect(r, palette().highlight().color().darker(200));
+        p.fillRect(QRect(r.left() + 4, r.top() + 6, 4, r.height() - 12), colorForLayer(layerIndex));
+        p.setPen(layer.properties().visible ? palette().text().color()
+                                            : palette().color(QPalette::Disabled, QPalette::Text));
+        p.drawText(r.adjusted(14, 0, -4, 0), Qt::AlignVCenter | Qt::AlignLeft,
+                   QString::fromStdString(layer.properties().name));
         p.setPen(palette().mid().color());
         p.drawLine(r.bottomLeft(), r.bottomRight());
     }
@@ -240,36 +327,122 @@ void TimelineView::paintHeaders(QPainter &p) const
 void TimelineView::paintCursor(QPainter &p) const
 {
     const TimelineMetrics &m = m_metrics;
-    const int x = m.frameX(m_currentFrame);
+    const int frame = m_document->currentFrame();
+    const int x = m.frameX(frame);
     // Frame number badge in the ruler, line through the cells.
     const QRect badge(x, 1, std::max(m.frameWidth, 26), m.rulerHeight - 3);
     p.fillRect(badge, kCursorColor);
     p.setPen(Qt::white);
-    p.drawText(badge, Qt::AlignCenter, QString::number(m_currentFrame + 1));
+    p.drawText(badge, Qt::AlignCenter, QString::number(frame + 1));
     p.setPen(QPen(kCursorColor, 1));
     const int cx = x + m.frameWidth / 2;
     p.drawLine(cx, m.rulerHeight, cx, viewport()->height());
 }
 
-// --- interaction -------------------------------------------------------------
+// --- interaction ------------------------------------------------------------------
+
+void TimelineView::scrubTo(const QPoint &pos, bool selectLayer)
+{
+    if (selectLayer) {
+        const int row = rowAt(pos.y());
+        if (row >= 0)
+            m_document->setCurrentLayer(m_document->document().layerAt(layerIndexForRow(row)).id());
+    }
+    m_document->setCurrentFrame(frameAt(pos.x()));
+}
 
 void TimelineView::mousePressEvent(QMouseEvent *event)
 {
-    if (event->button() == Qt::LeftButton && event->position().x() >= m_metrics.headerWidth) {
-        m_scrubbing = true;
-        setCurrentFrame(m_metrics.frameAt(int(event->position().x())));
+    if (event->button() != Qt::LeftButton || event->position().x() < m_metrics.headerWidth) {
+        // Clicking a layer name selects the layer.
+        if (event->button() == Qt::LeftButton) {
+            const int row = rowAt(int(event->position().y()));
+            if (row >= 0)
+                m_document->setCurrentLayer(m_document->document().layerAt(layerIndexForRow(row)).id());
+        }
+        return;
     }
+    const QPoint pos = event->position().toPoint();
+    if (auto edge = edgeAt(pos)) {
+        m_resize = edge;
+        m_previewTiming = m_document->document().layerAt(edge->layerIndex).timing();
+        return;
+    }
+    m_scrubbing = true;
+    scrubTo(pos, pos.y() >= m_metrics.rulerHeight);
 }
 
 void TimelineView::mouseMoveEvent(QMouseEvent *event)
 {
-    if (m_scrubbing)
-        setCurrentFrame(m_metrics.frameAt(int(event->position().x())));
+    const QPoint pos = event->position().toPoint();
+    if (m_resize) {
+        // New length: up to the frame under the pointer, at least one frame.
+        const int length = std::max(1, m_metrics.frameAt(pos.x() + m_metrics.frameWidth / 2) - m_resize->start);
+        if (length != m_resize->newLength) {
+            m_resize->newLength = length;
+            m_previewTiming = m_document->document().layerAt(m_resize->layerIndex).timing();
+            m_previewTiming.resizeExposure(m_resize->start, length);
+            updateScrollBars();
+            viewport()->update();
+        }
+        return;
+    }
+    if (m_scrubbing) {
+        scrubTo(pos, false);
+        return;
+    }
+    viewport()->setCursor(edgeAt(pos) ? Qt::SizeHorCursor : Qt::ArrowCursor);
 }
 
 void TimelineView::mouseReleaseEvent(QMouseEvent *)
 {
     m_scrubbing = false;
+    if (!m_resize)
+        return;
+    const Resize r = *m_resize;
+    m_resize.reset();
+    const doc::LayerId layer = m_document->document().layerAt(r.layerIndex).id();
+    m_document->execute(doc::makeResizeExposure(m_document->document(), layer, r.start, r.newLength));
+    updateScrollBars();
+    viewport()->update();
+}
+
+void TimelineView::contextMenuEvent(QContextMenuEvent *event)
+{
+    const int row = rowAt(event->pos().y());
+    if (row < 0 || event->pos().x() < m_metrics.headerWidth)
+        return;
+    const int frame = frameAt(event->pos().x());
+    const doc::Layer &layer = m_document->document().layerAt(layerIndexForRow(row));
+    const doc::LayerId layerId = layer.id();
+    m_document->setCurrentLayer(layerId);
+    m_document->setCurrentFrame(frame);
+
+    QMenu menu(this);
+    menu.addAction(tr("Nuovo disegno"), this, [this, layerId, frame] {
+        m_document->execute(doc::makeNewDrawing(m_document->documentForCommands(), layerId, frame).command);
+    });
+    const doc::Drawing *drawing = layer.drawingAt(frame);
+    QAction *clear = menu.addAction(tr("Svuota frame"), this, [this, layerId, frame] {
+        m_document->execute(doc::makeSetExposure(m_document->document(), layerId, frame, 1, doc::kNoId));
+    });
+    clear->setEnabled(drawing != nullptr);
+    menu.addSeparator();
+    menu.addAction(tr("Inserisci frame vuoto"), this, [this, layerId, frame] {
+        m_document->execute(doc::makeInsertEmptyFrames(m_document->document(), layerId, frame, 1));
+    });
+    menu.addAction(tr("Elimina frame"), this, [this, layerId, frame] {
+        m_document->execute(doc::makeRemoveFrames(m_document->document(), layerId, frame, 1));
+    });
+    if (drawing) {
+        menu.addSeparator();
+        const doc::DrawingId id = drawing->id;
+        menu.addAction(tr("Elimina disegno «%1» (da tutti i frame)").arg(QString::fromStdString(drawing->name)),
+                       this, [this, layerId, id] {
+                           m_document->execute(std::make_unique<doc::RemoveDrawingCommand>(layerId, id));
+                       });
+    }
+    menu.exec(event->globalPos());
 }
 
 void TimelineView::wheelEvent(QWheelEvent *event)
@@ -285,11 +458,22 @@ void TimelineView::wheelEvent(QWheelEvent *event)
 
 void TimelineView::keyPressEvent(QKeyEvent *event)
 {
+    const int frame = m_document->currentFrame();
+    const doc::Document &d = m_document->document();
+    const int layerIndex = d.indexOf(m_document->currentLayer());
     switch (event->key()) {
-    case Qt::Key_Left: setCurrentFrame(m_currentFrame - 1); break;
-    case Qt::Key_Right: setCurrentFrame(m_currentFrame + 1); break;
-    case Qt::Key_Home: setCurrentFrame(0); break;
-    case Qt::Key_End: setCurrentFrame(m_timeline.frameCount - 1); break;
+    case Qt::Key_Left: m_document->setCurrentFrame(frame - 1); break;
+    case Qt::Key_Right: m_document->setCurrentFrame(frame + 1); break;
+    case Qt::Key_Home: m_document->setCurrentFrame(0); break;
+    case Qt::Key_End: m_document->setCurrentFrame(d.frameCount() - 1); break;
+    case Qt::Key_Up: // up the list = higher layer
+        if (layerIndex >= 0 && layerIndex + 1 < d.layerCount())
+            m_document->setCurrentLayer(d.layerAt(layerIndex + 1).id());
+        break;
+    case Qt::Key_Down:
+        if (layerIndex > 0)
+            m_document->setCurrentLayer(d.layerAt(layerIndex - 1).id());
+        break;
     default: QAbstractScrollArea::keyPressEvent(event); return;
     }
 }

@@ -1,16 +1,29 @@
 #pragma once
 
-#include "ui/panels/timeline/FakeTimelineData.h"
+#include "core/document/Timing.h"
 #include "ui/panels/timeline/TimelineMetrics.h"
 
 #include <QAbstractScrollArea>
 
+#include <optional>
+
+namespace mothion::document {
+class DocumentController;
+}
+
 namespace mothion::ui {
 
-// Placeholder exposure timeline (inspired by Toon Boom Harmony's Xsheet/Timeline):
-// one row per layer, frames horizontally, each exposure drawn as a block that
-// spans its hold with the drawing name. A ruler on top shows frame numbers
-// and the current-frame cursor. Click or drag in the ruler/cells to scrub.
+// Exposure timeline (Harmony style) of the document:
+// one row per layer (top layer first), frames horizontally, each exposure a
+// block spanning its hold with the drawing name. A ruler on top shows frame
+// numbers and the current-frame cursor.
+//
+// Interaction:
+//  - click / drag in the ruler or cells: current frame (and layer, in cells);
+//  - drag the right edge of a block: change the hold length (ripple), one
+//    undo step on release;
+//  - right click: new drawing, clear frame, insert/remove frames, delete drawing;
+//  - Left/Right: frame, Up/Down: layer.
 //
 // Everything is custom-painted in one widget so the ruler, names and cells
 // scroll together without synchronising several widgets.
@@ -19,19 +32,15 @@ class TimelineView : public QAbstractScrollArea
     Q_OBJECT
 
 public:
-    explicit TimelineView(QWidget *parent = nullptr);
-
-    void setTimeline(FakeTimeline timeline);
-    const FakeTimeline &timeline() const { return m_timeline; }
-
-    int currentFrame() const { return m_currentFrame; }
-    void setCurrentFrame(int frame);
+    explicit TimelineView(document::DocumentController *document, QWidget *parent = nullptr);
 
     int frameWidth() const { return m_metrics.frameWidth; }
     void setFrameWidth(int width);
 
+    // Frames shown: the scene length, extended past the last exposure.
+    int displayedFrames() const;
+
 signals:
-    void currentFrameChanged(int frame);
     void frameWidthChanged(int width);
 
 protected:
@@ -43,21 +52,43 @@ protected:
     void mouseReleaseEvent(QMouseEvent *event) override;
     void wheelEvent(QWheelEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
+    void contextMenuEvent(QContextMenuEvent *event) override;
 
 private:
+    // Hold-length drag in progress.
+    struct Resize
+    {
+        int layerIndex = -1;
+        int start = 0;     // first frame of the exposure being resized
+        int newLength = 1;
+    };
+
+    int rowCount() const;
+    int layerIndexForRow(int row) const; // rows are top-first, layers bottom-first
+    int rowAt(int y) const;              // -1 outside the rows
+    int frameAt(int x) const;
+    // Exposure whose right edge is under (x, row), as {layer index, start}.
+    std::optional<Resize> edgeAt(const QPoint &pos) const;
+    const doc::Timing &timingForPainting(int layerIndex) const; // preview while resizing
+
+    void onStructureChanged();
     void updateScrollBars();
     void ensureFrameVisible(int frame);
+    void scrubTo(const QPoint &pos, bool selectLayer);
 
     void paintCells(QPainter &p) const;
-    void paintExposure(QPainter &p, const Exposure &e, const QColor &color, int y) const;
+    void paintExposure(QPainter &p, const doc::Exposure &e, const QString &name, const QColor &color,
+                       int y) const;
     void paintRuler(QPainter &p) const;
     void paintHeaders(QPainter &p) const;
     void paintCursor(QPainter &p) const;
+    static QColor colorForLayer(int layerIndex);
 
-    FakeTimeline m_timeline;
+    document::DocumentController *m_document;
     TimelineMetrics m_metrics;
-    int m_currentFrame = 0;
     bool m_scrubbing = false;
+    std::optional<Resize> m_resize;
+    doc::Timing m_previewTiming; // the resized layer's timing during a drag
 };
 
 } // namespace mothion::ui
