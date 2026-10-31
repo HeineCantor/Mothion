@@ -1,12 +1,14 @@
 #include "ui/MainWindow.h"
 
 #include "canvas/CanvasView.h"
+#include "input/ProximityFilter.h"
 #include "tools/ToolState.h"
 #include "ui/DockLayout.h"
 #include "ui/IconFactory.h"
 #include "ui/PanelDock.h"
 #include "ui/panels/ColorPanel.h"
 #include "ui/panels/LayersPanel.h"
+#include "ui/panels/PressureCurveEditor.h"
 #include "ui/panels/ToolPalettePanel.h"
 #include "ui/panels/ToolPropertiesPanel.h"
 
@@ -37,6 +39,16 @@ MainWindow::MainWindow(QWidget *parent)
     panels.color = new ColorPanel(m_toolState, this);
     panels.layers = new LayersPanel(this);
     panels.timeline = new QLabel(tr("Timeline"), this);
+
+    // Pen proximity only reaches the QApplication; the filter forwards it to the canvas.
+    auto *proximity = new input::ProximityFilter(this);
+    connect(proximity, &input::ProximityFilter::proximityChanged, m_canvas,
+            &canvas::CanvasView::setPenProximity);
+    // Live marker on the pressure curve while the tip touches.
+    connect(m_canvas, &canvas::CanvasView::sampleReceived, properties->curveEditor(),
+            [editor = properties->curveEditor()](const PenSample &s) {
+                editor->showInputPressure(s.tipDown() ? s.pressure : -1.0f);
+            });
 
     createCommandBar();
     m_dockLayout = new DockLayout(this, panels);

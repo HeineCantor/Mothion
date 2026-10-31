@@ -5,9 +5,11 @@
 add_library(mothion_core STATIC
     core/PenSample.h
     core/PressureCurve.h core/PressureCurve.cpp
+    core/StrokeSmoother.h core/StrokeSmoother.cpp
 )
 set_target_properties(mothion_core PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
 target_include_directories(mothion_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(mothion_core PUBLIC cxx_std_20) # our headers need C++20
 mothion_set_warnings(mothion_core)
 
 # ---------------------------------------------------------------------------
@@ -17,6 +19,12 @@ mothion_set_warnings(mothion_core)
 qt_add_library(mothion_gui STATIC
     tools/ToolState.h tools/ToolState.cpp
 
+    input/TabletInputAdapter.h input/TabletInputAdapter.cpp
+    input/ProximityFilter.h input/ProximityFilter.cpp
+    input/TabletBackend.h input/TabletBackend.cpp
+
+    canvas/RasterSurface.h canvas/RasterSurface.cpp
+    canvas/StrokeRenderer.h canvas/StrokeRenderer.cpp
     canvas/ViewTransform.h canvas/ViewTransform.cpp
     canvas/NavigationGesture.h canvas/NavigationGesture.cpp
     canvas/CanvasView.h canvas/CanvasView.cpp
@@ -38,6 +46,15 @@ qt_add_resources(mothion_gui "mothion_resources"
     BASE "${PROJECT_SOURCE_DIR}/resources"
     FILES "${PROJECT_SOURCE_DIR}/resources/theme/dark.qss"
 )
+# Tablet backend selection: Wintab needs Qt's private GUI API, Windows only.
+if(WIN32 AND MOTHION_ENABLE_WINTAB)
+    find_package(Qt6 REQUIRED COMPONENTS GuiPrivate)
+    target_sources(mothion_gui PRIVATE input/TabletBackend_wintab.cpp)
+    target_link_libraries(mothion_gui PRIVATE Qt6::GuiPrivate)
+else()
+    target_sources(mothion_gui PRIVATE input/TabletBackend_nowintab.cpp)
+endif()
+
 target_include_directories(mothion_gui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(mothion_gui PUBLIC mothion_core Qt6::Widgets)
 mothion_set_warnings(mothion_gui)
