@@ -3,10 +3,12 @@
 #include <QMainWindow>
 
 class QMenu;
-class QUndoStack;
 
 namespace mothion::canvas {
 class CanvasView;
+}
+namespace mothion::document {
+class DocumentController;
 }
 namespace mothion::tools {
 class ToolState;
@@ -37,8 +39,9 @@ private:
     void notImplemented(const QString &what);
 
     tools::ToolState *m_toolState = nullptr;
+    // Declared before m_canvas: the canvas needs the controller at construction.
+    document::DocumentController *m_document = nullptr;
     canvas::CanvasView *m_canvas = nullptr;
-    QUndoStack *m_undoStack = nullptr;
     DockLayout *m_dockLayout = nullptr;
     QMenu *m_viewMenu = nullptr;
     QList<QAction *> m_fileActions;

@@ -1,6 +1,7 @@
 #include "ui/MainWindow.h"
 
 #include "canvas/CanvasView.h"
+#include "document/DocumentController.h"
 #include "input/ProximityFilter.h"
 #include "tools/ToolState.h"
 #include "ui/DockLayout.h"
@@ -16,6 +17,7 @@
 #include "ui/panels/ToolPalettePanel.h"
 #include "ui/panels/ToolPropertiesPanel.h"
 #include "ui/panels/timeline/TimelinePanel.h"
+#include "ui/panels/timeline/TimelineView.h"
 
 #include <QAction>
 #include <QApplication>
@@ -24,23 +26,19 @@
 #include <QMenuBar>
 #include <QStatusBar>
 #include <QToolBar>
-#include <QUndoStack>
 
 namespace mothion::ui {
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , m_toolState(new tools::ToolState(this))
-    , m_canvas(new canvas::CanvasView(m_toolState, this))
-    , m_undoStack(new QUndoStack(this))
+    , m_document(new document::DocumentController(this))
+    , m_canvas(new canvas::CanvasView(m_toolState, m_document, this))
 {
     setWindowTitle(QStringLiteral("Mothion"));
     resize(1400, 900);
 
     setCentralWidget(m_canvas);
-    // Each entry stores the stroke's bounding box twice; the limit caps memory.
-    m_undoStack->setUndoLimit(100);
-    m_canvas->setUndoStack(m_undoStack);
 
     auto *properties = new ToolPropertiesPanel(m_toolState, this);
     WorkspacePanels panels;
@@ -52,7 +50,11 @@ MainWindow::MainWindow(QWidget *parent)
     panels.colorSet = new ColorSetPanel(m_toolState, this);
     panels.navigator = new NavigatorPanel(m_canvas, this);
     panels.layers = new LayersPanel(this);
-    panels.timeline = new TimelinePanel(this);
+    auto *timeline = new TimelinePanel(this);
+    panels.timeline = timeline;
+    // Provisional: the placeholder timeline only drives the current frame.
+    connect(timeline->view(), &TimelineView::currentFrameChanged, m_document,
+            &document::DocumentController::setCurrentFrame);
 
     // Pen proximity only reaches the QApplication; the filter forwards it to the canvas.
     auto *proximity = new input::ProximityFilter(this);
@@ -68,6 +70,8 @@ MainWindow::MainWindow(QWidget *parent)
     m_dockLayout = new DockLayout(this, panels);
     createMenus();
     statusBar()->showMessage(tr("Pronto"));
+    connect(m_canvas, &canvas::CanvasView::statusMessage, this,
+            [this](const QString &text) { statusBar()->showMessage(text, 4000); });
     auto *viewInfo = new QLabel(this);
     statusBar()->addPermanentWidget(viewInfo);
     connect(m_canvas, &canvas::CanvasView::viewChanged, viewInfo, [viewInfo](double zoom, double rot) {
@@ -95,19 +99,27 @@ void MainWindow::createCommandBar()
     for (const Command &c : fileCommands)
         m_fileActions << make(c);
 
-    // Undo/redo come from the stack, which keeps text ("Annulla tratto") and
-    // enabled state in sync. Shortcuts must be set here: Qt 6 does not assign them.
-    QAction *undo = m_undoStack->createUndoAction(this, tr("Annulla"));
-    undo->setIcon(icon(IconId::Undo));
+    // Undo/redo run on the document's History; labels ("Annulla tratto") and
+    // enabled state follow DocumentController::historyChanged.
+    QAction *undo = new QAction(icon(IconId::Undo), tr("Annulla"), this);
     undo->setShortcuts(QKeySequence::Undo); // Ctrl+Z
-    QAction *redo = m_undoStack->createRedoAction(this, tr("Ripeti"));
-    redo->setIcon(icon(IconId::Redo));
+    QAction *redo = new QAction(icon(IconId::Redo), tr("Ripeti"), this);
     // Platform standard (Ctrl+Shift+Z on Linux, Ctrl+Y on Windows) plus both everywhere.
     QList<QKeySequence> redoKeys = QKeySequence::keyBindings(QKeySequence::Redo);
     for (const QKeySequence &k : {QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Z), QKeySequence(Qt::CTRL | Qt::Key_Y)})
         if (!redoKeys.contains(k))
             redoKeys << k;
     redo->setShortcuts(redoKeys);
+    connect(undo, &QAction::triggered, m_document, &document::DocumentController::undo);
+    connect(redo, &QAction::triggered, m_document, &document::DocumentController::redo);
+    auto syncHistory = [this, undo, redo] {
+        undo->setEnabled(m_document->canUndo());
+        undo->setText(m_document->undoText());
+        redo->setEnabled(m_document->canRedo());
+        redo->setText(m_document->redoText());
+    };
+    connect(m_document, &document::DocumentController::historyChanged, this, syncHistory);
+    syncHistory();
     m_editActions << undo << redo;
 
     auto *bar = new QToolBar(tr("Comandi"), this);

@@ -57,11 +57,15 @@ build\src\RelWithDebInfo\mothion.exe
 src/
 ├─ core/     C++ puro, NESSUNA dipendenza da Qt (lo impone CMake: mothion_core non linka Qt)
 │            PenSample, PressureCurve, StrokeSmoother, RateMeter
+│  └─ document/ modello del progetto: TiledImage (tasselli 64×64 copy-on-write), Drawing,
+│              Timing (esposizioni stile Harmony), Layer, Document, Command + commands/, History
+├─ document/ DocumentController: possiede Document e History, livello/frame correnti,
+│            esegue i comandi e li traduce in segnali Qt (unico accesso dell'UI al modello)
 ├─ input/    unico punto che conosce QTabletEvent/QMouseEvent → PenSample
 │            TabletInputAdapter, ProximityFilter, TabletBackend(_wintab|_nowintab)
 ├─ canvas/   CanvasView (widget), ViewTransform (zoom/pan/rotazione/specchiatura), NavigationGesture,
-│            StrokeRenderer (dab equidistanti), RasterSurface (immagine + tratto corrente),
-│            RasterEditCommand (undo/redo di un tratto: pixel prima/dopo del suo riquadro),
+│            DabSpacer (dab equidistanti), StrokeSession (tratto dal vivo su un TiledImage),
+│            FrameRenderer (composizione dei livelli visibili nel frame), TileQt (ponte tasselli↔QImage),
 │            DebugOverlay (F12)
 ├─ tools/    ToolState: strumento attivo, dimensione, opacità, colori, curva, stabilizzazione;
 │            BrushPreset: preset predefiniti ("sotto-strumenti")
@@ -82,7 +86,9 @@ QTabletEvent / QMouseEvent ──input::toPenSample()──▶ PenSample
    │  (prossimità: solo a QApplication → ProximityFilter)│
    ▼                                                    ▼
 CanvasView::handleSample ──▶ NavigationGesture (mano / zoom / rotazione)
-                         └─▶ StrokeSmoother → PressureCurve → StrokeRenderer → RasterSurface
+                         └─▶ StrokeSmoother → PressureCurve → DabSpacer → StrokeSession
+                              (sul disegno del livello/frame corrente; a fine tratto
+                               PaintCommand → History tramite DocumentController)
 ```
 
 Dopo `toPenSample()` nessuna parte del programma tocca eventi Qt di input.
@@ -102,7 +108,7 @@ Dopo `toPenSample()` nessuna parte del programma tocca eventi Qt di input.
 | Pan | Spazio + trascina, tasto centrale, pulsante laterale della penna, strumento Mano |
 | Zoom | rotella, Spazio+Ctrl+trascina, strumento Zoom, Ctrl + / Ctrl − / Ctrl 0 (adatta) |
 | Rotazione | Maiusc + rotella, Spazio+Maiusc+trascina, Ctrl , / Ctrl . / Ctrl / (azzera) |
-| Annulla / Ripeti tratto | Ctrl+Z / Ctrl+Maiusc+Z o Ctrl+Y (fino a 100 passi) |
+| Annulla / Ripeti | Ctrl+Z / Ctrl+Maiusc+Z o Ctrl+Y (fino a 500 passi o 1 GB) |
 | Overlay debug input | F12 |
 | Timeline | clic/trascina per spostare il frame, ← → Home Fine, Ctrl+rotella = zoom frame |
 | Navigatore | clic/trascina sulla miniatura per spostare la vista; slider zoom/rotazione; specchia O/V |

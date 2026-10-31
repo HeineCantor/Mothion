@@ -1,7 +1,7 @@
 #include "canvas/CanvasView.h"
 
 #include "canvas/DebugOverlay.h"
-#include "canvas/RasterEditCommand.h"
+#include "document/DocumentController.h"
 #include "input/TabletInputAdapter.h"
 #include "tools/ToolState.h"
 
@@ -10,7 +10,6 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QTabletEvent>
-#include <QUndoStack>
 #include <QWheelEvent>
 
 #include <cmath>
@@ -24,20 +23,28 @@ using tools::ToolState;
 namespace {
 constexpr double kZoomStep = 1.25;
 constexpr double kRotateStep = 15.0;
-const QSize kDocumentSize(1920, 1080); // fixed until there is a document model
 } // namespace
 
-CanvasView::CanvasView(ToolState *toolState, QWidget *parent)
+CanvasView::CanvasView(ToolState *toolState, document::DocumentController *document, QWidget *parent)
     : QWidget(parent)
     , m_toolState(toolState)
-    , m_surface(kDocumentSize)
+    , m_document(document)
     , m_overlay(new DebugOverlay(this))
 {
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);  // hover moves from the mouse
     setTabletTracking(true); // hover moves from the pen (needed for proximity/outline/overlay)
     setAttribute(Qt::WA_OpaquePaintEvent);
-    m_view.setDocumentSize(kDocumentSize);
+    const doc::Document &d = m_document->document();
+    m_view.setDocumentSize(QSizeF(d.width(), d.height()));
+    m_frame.renderAll(d, m_document->currentFrame());
+
+    using document::DocumentController;
+    connect(m_document, &DocumentController::pixelsChanged, this,
+            [this](doc::LayerId, doc::DrawingId, const QRect &rect) { renderDocumentRect(rect); });
+    connect(m_document, &DocumentController::structureChanged, this, &CanvasView::renderWholeFrame);
+    connect(m_document, &DocumentController::currentFrameChanged, this, &CanvasView::renderWholeFrame);
+    connect(m_document, &DocumentController::strokeInterrupted, this, &CanvasView::cancelStroke);
 
     m_overlay->move(8, 8);
     m_overlay->hide();
@@ -139,9 +146,7 @@ void CanvasView::paintEvent(QPaintEvent *)
     p.setRenderHint(QPainter::SmoothPixmapTransform, m_view.zoom() < 2.0);
     p.save();
     p.setTransform(m_view.documentToView());
-    const QRectF paper(QPointF(0, 0), m_view.documentSize());
-    p.fillRect(paper, Qt::white);
-    p.drawImage(QPointF(0, 0), m_surface.image());
+    p.drawImage(QPointF(0, 0), m_frame.image()); // paper included
     p.restore();
 
     if (m_pointerVisible && ToolState::isPaintTool(m_toolState->activeTool()) && !m_gesture.isActive()) {
@@ -168,6 +173,20 @@ void CanvasView::updateBrushOutline(const QPointF &newPos)
     update(brushOutlineRect().toAlignedRect().adjusted(-2, -2, 2, 2));
     m_pointerPos = newPos;
     update(brushOutlineRect().toAlignedRect().adjusted(-2, -2, 2, 2));
+}
+
+void CanvasView::renderWholeFrame()
+{
+    m_frame.renderAll(m_document->document(), m_document->currentFrame());
+    update();
+    emit documentChanged(m_frame.image().rect());
+}
+
+void CanvasView::renderDocumentRect(const QRect &docRect)
+{
+    // Re-composing all layers of the rect is correct whichever layer changed.
+    m_frame.render(m_document->document(), m_document->currentFrame(), docRect);
+    updateDocumentRect(docRect);
 }
 
 void CanvasView::updateDocumentRect(const QRect &docRect)
@@ -262,7 +281,7 @@ void CanvasView::handleSample(const PenSample &sample)
     m_pointerVisible = true;
     updateBrushOutline(QPointF(sample.x, sample.y));
 
-    const bool busy = m_gesture.isActive() || m_surface.inStroke();
+    const bool busy = m_gesture.isActive() || m_stroke.has_value();
     switch (sample.phase) {
     case SamplePhase::Press:
         if (busy)
@@ -277,7 +296,7 @@ void CanvasView::handleSample(const PenSample &sample)
         if (m_gesture.isActive()) {
             m_gesture.update(QPointF(sample.x, sample.y), m_view);
             viewWasChanged();
-        } else if (m_surface.inStroke()) {
+        } else if (m_stroke) {
             continueStroke(sample);
         }
         break;
@@ -316,29 +335,47 @@ Mode CanvasView::navigationModeFor(const PenSample &sample) const
 void CanvasView::beginStroke(const PenSample &sample)
 {
     m_eraseStroke = sample.tool == InputTool::Eraser || m_toolState->activeTool() == ToolId::Eraser;
+    // Erasing an empty frame has nothing to act on, so only the brush creates drawings.
+    QString reason;
+    const auto target = m_document->beginPaint(!m_eraseStroke, &reason);
+    if (!target) {
+        if (!reason.isEmpty())
+            emit statusMessage(reason);
+        return;
+    }
     const tools::BrushSettings settings = m_toolState->settings(m_eraseStroke ? ToolId::Eraser : ToolId::Brush);
-    m_surface.beginStroke(m_toolState->color(), settings.opacity, m_eraseStroke);
+    const doc::Document &d = m_document->document();
+    m_stroke.emplace(*target->image, m_toolState->color(), settings.opacity, m_eraseStroke,
+                     QRect(0, 0, d.width(), d.height()));
 
     m_smoother.setStrength(m_toolState->smoothing());
     m_smoother.reset();
-    updateDocumentRect(m_surface.addDabs(m_spacer.begin(strokePoint(m_smoother.filter(sample)))));
+    m_document->notifyPainted(m_stroke->addDabs(m_spacer.begin(strokePoint(m_smoother.filter(sample)))));
 }
 
 void CanvasView::continueStroke(const PenSample &sample)
 {
-    updateDocumentRect(m_surface.addDabs(m_spacer.continueTo(strokePoint(m_smoother.filter(sample)))));
+    m_document->notifyPainted(m_stroke->addDabs(m_spacer.continueTo(strokePoint(m_smoother.filter(sample)))));
 }
 
 void CanvasView::endStroke()
 {
     // The release sample itself is not drawn: its pressure is often already 0.
-    std::optional<RasterEdit> edit = m_surface.endStroke();
-    if (!edit || !m_undoStack)
+    if (!m_stroke)
         return;
-    m_undoStack->push(new RasterEditCommand(m_eraseStroke ? tr("cancellazione") : tr("tratto"),
-                                            std::move(*edit), [this](const RasterPatch &patch) {
-                                                updateDocumentRect(m_surface.applyPatch(patch));
-                                            }));
+    m_document->endPaint(m_stroke->before());
+    m_stroke.reset();
+}
+
+void CanvasView::cancelStroke()
+{
+    if (!m_stroke)
+        return;
+    // Restore pixels first: cancelPaint() may remove the drawing they live in.
+    m_stroke->cancel();
+    m_stroke.reset();
+    m_document->cancelPaint();
+    renderWholeFrame();
 }
 
 DabSpacer::Point CanvasView::strokePoint(const PenSample &smoothed) const

@@ -33,6 +33,8 @@ mothion_set_warnings(mothion_core)
 # A static library so tests and tools can link it without main().
 # ---------------------------------------------------------------------------
 qt_add_library(mothion_gui STATIC
+    document/DocumentController.h document/DocumentController.cpp
+
     tools/ToolState.h tools/ToolState.cpp
     tools/BrushPreset.h tools/BrushPreset.cpp
 
@@ -41,8 +43,6 @@ qt_add_library(mothion_gui STATIC
     input/TabletBackend.h input/TabletBackend.cpp
 
     canvas/DebugOverlay.h canvas/DebugOverlay.cpp
-    canvas/RasterSurface.h canvas/RasterSurface.cpp
-    canvas/RasterEditCommand.h canvas/RasterEditCommand.cpp
     canvas/Dab.h
     canvas/DabSpacer.h canvas/DabSpacer.cpp
     canvas/TileQt.h canvas/TileQt.cpp

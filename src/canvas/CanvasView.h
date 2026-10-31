@@ -1,17 +1,22 @@
 #pragma once
 
-#include "canvas/NavigationGesture.h"
-#include "canvas/RasterSurface.h"
 #include "canvas/DabSpacer.h"
+#include "canvas/FrameRenderer.h"
+#include "canvas/NavigationGesture.h"
+#include "canvas/StrokeSession.h"
 #include "canvas/ViewTransform.h"
 #include "core/PenSample.h"
 #include "core/StrokeSmoother.h"
 
 #include <QWidget>
 
-class QPointingDevice;
-class QUndoStack;
+#include <optional>
 
+class QPointingDevice;
+
+namespace mothion::document {
+class DocumentController;
+}
 namespace mothion::tools {
 class ToolState;
 }
@@ -25,20 +30,20 @@ class DebugOverlay;
 // Input path: Qt tablet/mouse event -> input::toPenSample() -> handleSample().
 // From handleSample() on, only PenSamples are used. A sample either drives a
 // NavigationGesture (hand / zoom / rotate) or a stroke:
-//   sample -> StrokeSmoother -> pressure curve -> DabSpacer -> RasterSurface.
+//   sample -> StrokeSmoother -> pressure curve -> DabSpacer -> StrokeSession,
+// painting into the drawing the DocumentController picks for the current
+// layer and frame. What is shown is the FrameRenderer's composition of the
+// current frame, refreshed from the controller's change signals.
 class CanvasView : public QWidget
 {
     Q_OBJECT
 
 public:
-    explicit CanvasView(tools::ToolState *toolState, QWidget *parent = nullptr);
+    CanvasView(tools::ToolState *toolState, document::DocumentController *document, QWidget *parent = nullptr);
 
     const ViewTransform &view() const { return m_view; }
     // The document pixels as displayed (for thumbnails such as the navigator).
-    const QImage &documentImage() const { return m_surface.image(); }
-
-    // Finished strokes are pushed here (not owned). Without a stack, no undo.
-    void setUndoStack(QUndoStack *stack) { m_undoStack = stack; }
+    const QImage &documentImage() const { return m_frame.image(); }
 
 public slots:
     void zoomIn();
@@ -65,6 +70,8 @@ signals:
     void sampleReceived(const mothion::PenSample &sample);
     // Emitted when the device behind the samples changes.
     void deviceChanged(const mothion::InputDeviceInfo &device);
+    // Something worth telling the user (e.g. why a stroke was refused).
+    void statusMessage(const QString &text);
 
 protected:
     void paintEvent(QPaintEvent *event) override;
@@ -89,8 +96,11 @@ private:
     void beginStroke(const PenSample &sample);
     void continueStroke(const PenSample &sample);
     void endStroke();
+    void cancelStroke(); // the controller interrupted the stroke (undo, frame change...)
     DabSpacer::Point strokePoint(const PenSample &smoothed) const;
 
+    void renderWholeFrame();                     // frame, layers or timing changed
+    void renderDocumentRect(const QRect &docRect); // pixels changed
     void updateDocumentRect(const QRect &docRect);
     void updateBrushOutline(const QPointF &newPos);
     QRectF brushOutlineRect() const; // view coordinates
@@ -98,14 +108,15 @@ private:
     void viewWasChanged();
 
     tools::ToolState *m_toolState;
+    document::DocumentController *m_document;
     ViewTransform m_view;
     NavigationGesture m_gesture;
-    RasterSurface m_surface;
+    FrameRenderer m_frame;
+    std::optional<StrokeSession> m_stroke; // set while a stroke is in progress
     DabSpacer m_spacer;
     StrokeSmoother m_smoother;
     bool m_eraseStroke = false; // current stroke erases (eraser tool or eraser end)
     DebugOverlay *m_overlay;
-    QUndoStack *m_undoStack = nullptr;
 
     const QPointingDevice *m_lastDevice = nullptr;
     QPointF m_pointerPos;      // last pointer position (view coordinates)
