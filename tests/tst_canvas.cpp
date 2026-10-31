@@ -64,6 +64,26 @@ private slots:
         QVERIFY(near(v.documentToView().map(v.mapToDocument(p)), p));
     }
 
+    void flipKeepsAnchorAndMirrors()
+    {
+        ViewTransform v = makeView();
+        const QPointF anchor(400, 300); // viewport center = document center after fit
+        v.setFlippedAround(anchor, true, false);
+        QVERIFY(near(v.documentToView().map(QPointF(960, 540)), anchor));
+        // Left of the document now appears right of center.
+        QVERIFY(v.documentToView().map(QPointF(0, 540)).x() > 400);
+        v.setFlippedAround(anchor, false, false);
+        QVERIFY(v.documentToView().map(QPointF(0, 540)).x() < 400);
+    }
+
+    void centerOnMovesPointToCenter()
+    {
+        ViewTransform v = makeView();
+        v.rotateAround({100, 100}, 40);
+        v.centerOn({200, 300});
+        QVERIFY(near(v.documentToView().map(QPointF(200, 300)), v.viewportCenter()));
+    }
+
     void strokeLeavesNoGaps()
     {
         RasterSurface surface({200, 50});

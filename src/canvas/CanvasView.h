@@ -34,6 +34,8 @@ public:
     explicit CanvasView(tools::ToolState *toolState, QWidget *parent = nullptr);
 
     const ViewTransform &view() const { return m_view; }
+    // The document pixels as displayed (for thumbnails such as the navigator).
+    const QImage &documentImage() const { return m_surface.image(); }
 
     // Finished strokes are pushed here (not owned). Without a stack, no undo.
     void setUndoStack(QUndoStack *stack) { m_undoStack = stack; }
@@ -45,11 +47,20 @@ public slots:
     void rotateLeft();
     void rotateRight();
     void resetRotation();
+    void actualSize();                // zoom 100 %
+    void setZoom(double zoom);        // around the viewport center
+    void setRotation(double degrees); // around the viewport center
+    void setFlipHorizontal(bool flipped);
+    void setFlipVertical(bool flipped);
+    void centerOn(const QPointF &docPoint);
     void setPenProximity(const mothion::ProximityEvent &event);
     void setDebugOverlayVisible(bool visible);
 
 signals:
+    // Zoom, rotation, mirroring or pan changed (read the rest from view()).
     void viewChanged(double zoom, double rotationDegrees);
+    // Document pixels changed in this rect (document coordinates).
+    void documentChanged(const QRect &docRect);
     // Every input sample, before smoothing (for the debug overlay and the curve editor).
     void sampleReceived(const mothion::PenSample &sample);
     // Emitted when the device behind the samples changes.

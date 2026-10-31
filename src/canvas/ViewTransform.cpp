@@ -11,7 +11,7 @@ QTransform ViewTransform::documentToView() const
     QTransform t;
     t.translate(m_viewport.width() / 2 + m_pan.x(), m_viewport.height() / 2 + m_pan.y());
     t.rotate(m_rotation);
-    t.scale(m_zoom, m_zoom);
+    t.scale(m_flipH ? -m_zoom : m_zoom, m_flipV ? -m_zoom : m_zoom);
     t.translate(-m_document.width() / 2, -m_document.height() / 2);
     return t;
 }
@@ -36,6 +36,19 @@ void ViewTransform::rotateAround(const QPointF &viewAnchor, double degrees)
         r += 360.0;
     m_rotation = r;
     keepAnchored(doc, viewAnchor);
+}
+
+void ViewTransform::setFlippedAround(const QPointF &viewAnchor, bool horizontal, bool vertical)
+{
+    const QPointF doc = mapToDocument(viewAnchor);
+    m_flipH = horizontal;
+    m_flipV = vertical;
+    keepAnchored(doc, viewAnchor);
+}
+
+void ViewTransform::centerOn(const QPointF &docPoint)
+{
+    keepAnchored(docPoint, viewportCenter());
 }
 
 void ViewTransform::fitToView()

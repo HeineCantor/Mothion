@@ -87,6 +87,41 @@ void CanvasView::resetRotation()
     viewWasChanged();
 }
 
+void CanvasView::actualSize()
+{
+    setZoom(1.0);
+}
+
+void CanvasView::setZoom(double zoom)
+{
+    m_view.setZoomAround(m_view.viewportCenter(), zoom);
+    viewWasChanged();
+}
+
+void CanvasView::setRotation(double degrees)
+{
+    m_view.setRotationAround(m_view.viewportCenter(), degrees);
+    viewWasChanged();
+}
+
+void CanvasView::setFlipHorizontal(bool flipped)
+{
+    m_view.setFlippedAround(m_view.viewportCenter(), flipped, m_view.isFlippedVertically());
+    viewWasChanged();
+}
+
+void CanvasView::setFlipVertical(bool flipped)
+{
+    m_view.setFlippedAround(m_view.viewportCenter(), m_view.isFlippedHorizontally(), flipped);
+    viewWasChanged();
+}
+
+void CanvasView::centerOn(const QPointF &docPoint)
+{
+    m_view.centerOn(docPoint);
+    viewWasChanged();
+}
+
 void CanvasView::viewWasChanged()
 {
     update();
@@ -139,6 +174,7 @@ void CanvasView::updateDocumentRect(const QRect &docRect)
 {
     if (docRect.isEmpty())
         return;
+    emit documentChanged(docRect);
     update(m_view.documentToView().mapRect(QRectF(docRect)).toAlignedRect().adjusted(-2, -2, 2, 2));
 }
 
