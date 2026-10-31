@@ -8,6 +8,8 @@ enum class IconId {
     New, Open, Save, Undo, Redo,
     Brush, Eraser, Hand, Zoom,
     Collapse, Expand, Float, Close,
+    ZoomOut, ZoomFit, ZoomActual, RotateLeft, RotateRight, RotateReset,
+    FlipHorizontal, FlipVertical, Eye,
 };
 
 // Provisional icons, drawn in code as simple line art on a 24x24 grid.

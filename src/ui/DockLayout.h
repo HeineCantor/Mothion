@@ -14,8 +14,12 @@ class PanelDock;
 struct WorkspacePanels
 {
     QWidget *tools = nullptr;
+    QWidget *subTools = nullptr;
     QWidget *toolProperties = nullptr;
-    QWidget *color = nullptr;
+    QWidget *brushSliders = nullptr;
+    QWidget *colorWheel = nullptr;
+    QWidget *colorSet = nullptr;
+    QWidget *navigator = nullptr;
     QWidget *layers = nullptr;
     QWidget *timeline = nullptr;
 };
@@ -50,8 +54,12 @@ private:
     QMainWindow *m_window;
     QList<PanelDock *> m_docks;
     PanelDock *m_tools = nullptr;
+    PanelDock *m_subTools = nullptr;
     PanelDock *m_toolProperties = nullptr;
-    PanelDock *m_color = nullptr;
+    PanelDock *m_brushSliders = nullptr;
+    PanelDock *m_colorWheel = nullptr;
+    PanelDock *m_colorSet = nullptr;
+    PanelDock *m_navigator = nullptr;
     PanelDock *m_layers = nullptr;
     PanelDock *m_timeline = nullptr;
     bool m_defaultSizesPending = false;

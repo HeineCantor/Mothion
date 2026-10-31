@@ -117,6 +117,72 @@ void drawGlyph(QPainter &p, IconId id)
         path.moveTo(18, 6);
         path.lineTo(6, 18);
         break;
+    case IconId::ZoomOut:
+        path.addEllipse(QPointF(10, 10), 6, 6);
+        path.moveTo(14.5, 14.5);
+        path.lineTo(20, 20);
+        path.moveTo(7, 10);
+        path.lineTo(13, 10);
+        break;
+    case IconId::ZoomFit: // four corners pointing out
+        for (const QPointF &c : {QPointF(4, 4), QPointF(20, 4), QPointF(20, 20), QPointF(4, 20)}) {
+            const double dx = c.x() < 12 ? 5 : -5;
+            const double dy = c.y() < 12 ? 5 : -5;
+            path.moveTo(c.x() + dx, c.y());
+            path.lineTo(c);
+            path.lineTo(c.x(), c.y() + dy);
+        }
+        break;
+    case IconId::ZoomActual: // "1:1"
+        path.moveTo(6, 8);
+        path.lineTo(8, 6);
+        path.lineTo(8, 18);
+        path.moveTo(16, 8);
+        path.lineTo(18, 6);
+        path.lineTo(18, 18);
+        path.addEllipse(QPointF(12, 10), 0.6, 0.6);
+        path.addEllipse(QPointF(12, 15), 0.6, 0.6);
+        break;
+    case IconId::RotateLeft:
+    case IconId::RotateRight:
+        if (id == IconId::RotateRight) {
+            p.translate(24, 0);
+            p.scale(-1, 1);
+        }
+        path.arcMoveTo(QRectF(5, 5, 14, 14), 90);
+        path.arcTo(QRectF(5, 5, 14, 14), 90, 270);
+        path.moveTo(9, 2);
+        path.lineTo(12, 5);
+        path.lineTo(9, 8);
+        break;
+    case IconId::RotateReset:
+        path.addEllipse(QPointF(12, 12), 7, 7);
+        path.moveTo(12, 12);
+        path.lineTo(12, 5);
+        break;
+    case IconId::FlipHorizontal:
+    case IconId::FlipVertical:
+        if (id == IconId::FlipVertical) {
+            p.translate(24, 0);
+            p.rotate(90);
+        }
+        path.moveTo(12, 3);
+        path.lineTo(12, 21);
+        path.moveTo(9, 6);
+        path.lineTo(3, 18);
+        path.lineTo(9, 18);
+        path.closeSubpath();
+        path.moveTo(15, 6);
+        path.lineTo(21, 18);
+        path.lineTo(15, 18);
+        path.closeSubpath();
+        break;
+    case IconId::Eye:
+        path.moveTo(2, 12);
+        path.quadTo(12, 3, 22, 12);
+        path.quadTo(12, 21, 2, 12);
+        path.addEllipse(QPointF(12, 12), 3, 3);
+        break;
     }
     p.drawPath(path);
 }

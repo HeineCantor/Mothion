@@ -11,7 +11,7 @@ namespace mothion::ui {
 namespace {
 
 // Bump when panels are added/renamed so stale saved layouts are ignored.
-constexpr int kLayoutVersion = 1;
+constexpr int kLayoutVersion = 2;
 
 const char *kGeometryKey = "layout/geometry";
 const char *kStateKey = "layout/state";
@@ -25,15 +25,23 @@ DockLayout::DockLayout(QMainWindow *window, const WorkspacePanels &panels)
 {
     window->setDockOptions(QMainWindow::AnimatedDocks | QMainWindow::AllowNestedDocks
                            | QMainWindow::AllowTabbedDocks | QMainWindow::GroupedDragging);
-    // The timeline spans the full width under the side panels (as in Harmony / CSP).
-    window->setCorner(Qt::BottomLeftCorner, Qt::BottomDockWidgetArea);
-    window->setCorner(Qt::BottomRightCorner, Qt::BottomDockWidgetArea);
+    // Side columns run the full height (tall brush sliders); the timeline
+    // sits under the canvas only.
+    window->setCorner(Qt::TopLeftCorner, Qt::LeftDockWidgetArea);
+    window->setCorner(Qt::BottomLeftCorner, Qt::LeftDockWidgetArea);
+    window->setCorner(Qt::TopRightCorner, Qt::RightDockWidgetArea);
+    window->setCorner(Qt::BottomRightCorner, Qt::RightDockWidgetArea);
     window->setTabPosition(Qt::AllDockWidgetAreas, QTabWidget::North);
 
     m_tools = addDock(QStringLiteral("dock.tools"), tr("Strumenti"), panels.tools);
+    m_subTools = addDock(QStringLiteral("dock.subTools"), tr("Sotto-strumento"), panels.subTools);
     m_toolProperties = addDock(QStringLiteral("dock.toolProperties"), tr("Proprietà strumento"),
                                panels.toolProperties);
-    m_color = addDock(QStringLiteral("dock.color"), tr("Colore"), panels.color);
+    m_brushSliders = addDock(QStringLiteral("dock.brushSliders"), tr("Dimensione e opacità"),
+                             panels.brushSliders);
+    m_colorWheel = addDock(QStringLiteral("dock.colorWheel"), tr("Ruota colore"), panels.colorWheel);
+    m_colorSet = addDock(QStringLiteral("dock.colorSet"), tr("Set di colori"), panels.colorSet);
+    m_navigator = addDock(QStringLiteral("dock.navigator"), tr("Navigatore"), panels.navigator);
     m_layers = addDock(QStringLiteral("dock.layers"), tr("Livelli"), panels.layers);
     m_timeline = addDock(QStringLiteral("dock.timeline"), tr("Timeline"), panels.timeline);
 
@@ -55,17 +63,24 @@ void DockLayout::applyDefault()
         m_window->removeDockWidget(dock); // also un-tabifies
     }
 
-    // Left: narrow tool palette, tool properties beside it.
+    // Left, three columns:  tools | sub tool+properties / color wheel / color set | sliders.
+    // Order matters: the columns are split first, then only the middle one is
+    // split vertically, so the tool palette and the sliders keep the full height.
     m_window->addDockWidget(Qt::LeftDockWidgetArea, m_tools);
-    m_window->splitDockWidget(m_tools, m_toolProperties, Qt::Horizontal);
-    // Right: color on top, layers below.
-    m_window->addDockWidget(Qt::RightDockWidgetArea, m_color);
-    m_window->splitDockWidget(m_color, m_layers, Qt::Vertical);
-    // Bottom: timeline.
+    m_window->splitDockWidget(m_tools, m_subTools, Qt::Horizontal);
+    m_window->splitDockWidget(m_subTools, m_brushSliders, Qt::Horizontal);
+    m_window->splitDockWidget(m_subTools, m_colorWheel, Qt::Vertical);
+    m_window->splitDockWidget(m_colorWheel, m_colorSet, Qt::Vertical);
+    m_window->tabifyDockWidget(m_subTools, m_toolProperties);
+    // Right: navigator on top, layers below.
+    m_window->addDockWidget(Qt::RightDockWidgetArea, m_navigator);
+    m_window->splitDockWidget(m_navigator, m_layers, Qt::Vertical);
+    // Bottom (under the canvas): timeline.
     m_window->addDockWidget(Qt::BottomDockWidgetArea, m_timeline);
 
     for (PanelDock *dock : m_docks)
         dock->show();
+    m_subTools->raise(); // front tab of the sub tool / properties group
 
     // resizeDocks() is ignored until the main window has laid itself out once,
     // so the default sizes are applied on the next event-loop turn.
@@ -74,9 +89,10 @@ void DockLayout::applyDefault()
         if (!m_defaultSizesPending) // a saved layout was restored meanwhile
             return;
         m_defaultSizesPending = false;
-        m_window->resizeDocks({m_tools}, {48}, Qt::Horizontal);
-        m_window->resizeDocks({m_toolProperties, m_color}, {260, 260}, Qt::Horizontal);
-        m_window->resizeDocks({m_color, m_layers, m_timeline}, {260, 320, 220}, Qt::Vertical);
+        m_window->resizeDocks({m_tools, m_subTools, m_brushSliders, m_navigator}, {48, 240, 52, 280},
+                              Qt::Horizontal);
+        m_window->resizeDocks({m_subTools, m_colorWheel, m_colorSet}, {330, 270, 150}, Qt::Vertical);
+        m_window->resizeDocks({m_navigator, m_layers, m_timeline}, {300, 400, 210}, Qt::Vertical);
     });
 }
 

@@ -59,13 +59,16 @@ src/
 │            PenSample, PressureCurve, StrokeSmoother, RateMeter
 ├─ input/    unico punto che conosce QTabletEvent/QMouseEvent → PenSample
 │            TabletInputAdapter, ProximityFilter, TabletBackend(_wintab|_nowintab)
-├─ canvas/   CanvasView (widget), ViewTransform (zoom/pan/rotazione), NavigationGesture,
+├─ canvas/   CanvasView (widget), ViewTransform (zoom/pan/rotazione/specchiatura), NavigationGesture,
 │            StrokeRenderer (dab equidistanti), RasterSurface (immagine + tratto corrente),
 │            RasterEditCommand (undo/redo di un tratto: pixel prima/dopo del suo riquadro),
 │            DebugOverlay (F12)
-├─ tools/    ToolState: strumento attivo, dimensione, opacità, colore, curva, stabilizzazione
+├─ tools/    ToolState: strumento attivo, dimensione, opacità, colori, curva, stabilizzazione;
+│            BrushPreset: preset predefiniti ("sotto-strumenti")
 ├─ ui/       MainWindow, DockLayout (disposizione e persistenza), PanelDock, Theme, IconFactory
-│  └─ panels/ pannelli; timeline/ = timeline segnaposto con dati finti
+│  └─ panels/ Strumenti, Sotto-strumento (preset con anteprima), Proprietà strumento,
+│             slider verticali Dimensione/Opacità, Ruota colore, Set di colori,
+│             Navigatore, Livelli (segnaposto); timeline/ = timeline con dati finti
 └─ app/      main.cpp
 ```
 
@@ -86,6 +89,7 @@ Dopo `toPenSample()` nessuna parte del programma tocca eventi Qt di input.
 
 **Regole di dipendenza**
 - I pannelli non conoscono il canvas: parlano solo con `ToolState` (segnali/slot).
+  Unica eccezione: il Navigatore, che è una vista della vista e usa l'API pubblica di `CanvasView`.
 - `DockLayout` è l'unico posto che conosce la disposizione dei pannelli: rifare la UX
   significa cambiare lì (e in `Theme`/`dark.qss`/`IconFactory` per l'aspetto).
 - Il codice che usa API private di Qt è confinato in `input/TabletBackend_wintab.cpp`.
@@ -101,6 +105,7 @@ Dopo `toPenSample()` nessuna parte del programma tocca eventi Qt di input.
 | Annulla / Ripeti tratto | Ctrl+Z / Ctrl+Maiusc+Z o Ctrl+Y (fino a 100 passi) |
 | Overlay debug input | F12 |
 | Timeline | clic/trascina per spostare il frame, ← → Home Fine, Ctrl+rotella = zoom frame |
+| Navigatore | clic/trascina sulla miniatura per spostare la vista; slider zoom/rotazione; specchia O/V |
 | Layout | Finestra → Ripristina layout predefinito |
 
 ## Note su Qt 6 e tavolette (verificate su documentazione e sorgenti Qt 6.10)

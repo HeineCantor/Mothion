@@ -6,9 +6,13 @@
 #include "ui/DockLayout.h"
 #include "ui/IconFactory.h"
 #include "ui/PanelDock.h"
-#include "ui/panels/ColorPanel.h"
+#include "ui/panels/BrushSlidersPanel.h"
+#include "ui/panels/ColorSetPanel.h"
+#include "ui/panels/ColorWheelPanel.h"
 #include "ui/panels/LayersPanel.h"
+#include "ui/panels/NavigatorPanel.h"
 #include "ui/panels/PressureCurveEditor.h"
+#include "ui/panels/SubToolPanel.h"
 #include "ui/panels/ToolPalettePanel.h"
 #include "ui/panels/ToolPropertiesPanel.h"
 #include "ui/panels/timeline/TimelinePanel.h"
@@ -41,8 +45,12 @@ MainWindow::MainWindow(QWidget *parent)
     auto *properties = new ToolPropertiesPanel(m_toolState, this);
     WorkspacePanels panels;
     panels.tools = new ToolPalettePanel(m_toolState, this);
+    panels.subTools = new SubToolPanel(m_toolState, this);
     panels.toolProperties = properties;
-    panels.color = new ColorPanel(m_toolState, this);
+    panels.brushSliders = new BrushSlidersPanel(m_toolState, this);
+    panels.colorWheel = new ColorWheelPanel(m_toolState, this);
+    panels.colorSet = new ColorSetPanel(m_toolState, this);
+    panels.navigator = new NavigatorPanel(m_canvas, this);
     panels.layers = new LayersPanel(this);
     panels.timeline = new TimelinePanel(this);
 

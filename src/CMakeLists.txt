@@ -19,6 +19,7 @@ mothion_set_warnings(mothion_core)
 # ---------------------------------------------------------------------------
 qt_add_library(mothion_gui STATIC
     tools/ToolState.h tools/ToolState.cpp
+    tools/BrushPreset.h tools/BrushPreset.cpp
 
     input/TabletInputAdapter.h input/TabletInputAdapter.cpp
     input/ProximityFilter.h input/ProximityFilter.cpp
@@ -41,7 +42,13 @@ qt_add_library(mothion_gui STATIC
     ui/panels/ToolPropertiesPanel.h ui/panels/ToolPropertiesPanel.cpp
     ui/panels/SliderField.h ui/panels/SliderField.cpp
     ui/panels/PressureCurveEditor.h ui/panels/PressureCurveEditor.cpp
-    ui/panels/ColorPanel.h ui/panels/ColorPanel.cpp
+    ui/panels/SubToolPanel.h ui/panels/SubToolPanel.cpp
+    ui/panels/VerticalValueSlider.h ui/panels/VerticalValueSlider.cpp
+    ui/panels/BrushSlidersPanel.h ui/panels/BrushSlidersPanel.cpp
+    ui/panels/ColorWheel.h ui/panels/ColorWheel.cpp
+    ui/panels/ColorWheelPanel.h ui/panels/ColorWheelPanel.cpp
+    ui/panels/ColorSetPanel.h ui/panels/ColorSetPanel.cpp
+    ui/panels/NavigatorPanel.h ui/panels/NavigatorPanel.cpp
     ui/panels/LayersPanel.h ui/panels/LayersPanel.cpp
     ui/panels/timeline/FakeTimelineData.h ui/panels/timeline/FakeTimelineData.cpp
     ui/panels/timeline/TimelineMetrics.h

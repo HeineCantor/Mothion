@@ -31,7 +31,7 @@ void ToolState::setActiveTool(ToolId tool)
 
 void ToolState::setSize(ToolId tool, double size)
 {
-    size = std::clamp(size, 1.0, 500.0);
+    size = std::clamp(size, kMinSize, kMaxSize);
     auto &s = m_settings[index(tool)];
     if (qFuzzyCompare(s.size, size))
         return;
@@ -55,6 +55,21 @@ void ToolState::setColor(const QColor &color)
         return;
     m_color = color;
     emit colorChanged(color);
+}
+
+void ToolState::setSecondaryColor(const QColor &color)
+{
+    if (!color.isValid() || color == m_secondaryColor)
+        return;
+    m_secondaryColor = color;
+    emit secondaryColorChanged(color);
+}
+
+void ToolState::swapColors()
+{
+    std::swap(m_color, m_secondaryColor);
+    emit colorChanged(m_color);
+    emit secondaryColorChanged(m_secondaryColor);
 }
 
 void ToolState::setPressureCurve(const PressureCurve &curve)

@@ -32,6 +32,9 @@ class ToolState : public QObject
 public:
     explicit ToolState(QObject *parent = nullptr);
 
+    static constexpr double kMinSize = 1.0;   // brush diameter limits, document px
+    static constexpr double kMaxSize = 500.0;
+
     static bool isPaintTool(ToolId tool) { return tool == ToolId::Brush || tool == ToolId::Eraser; }
     static QString displayName(ToolId tool);
 
@@ -42,8 +45,12 @@ public:
     void setSize(ToolId tool, double size);
     void setOpacity(ToolId tool, double opacity);
 
+    // Main color (what the brush paints) and secondary color; swapColors() exchanges them.
     QColor color() const { return m_color; }
     void setColor(const QColor &color);
+    QColor secondaryColor() const { return m_secondaryColor; }
+    void setSecondaryColor(const QColor &color);
+    void swapColors();
 
     const PressureCurve &pressureCurve() const { return m_pressureCurve; }
     void setPressureCurve(const PressureCurve &curve);
@@ -56,6 +63,7 @@ signals:
     void activeToolChanged(mothion::tools::ToolId tool);
     void toolSettingsChanged(mothion::tools::ToolId tool);
     void colorChanged(const QColor &color);
+    void secondaryColorChanged(const QColor &color);
     void pressureCurveChanged();
     void smoothingChanged(double amount);
 
@@ -65,6 +73,7 @@ private:
     ToolId m_activeTool = ToolId::Brush;
     std::array<BrushSettings, kToolCount> m_settings;
     QColor m_color = QColor(0x20, 0x20, 0x24);
+    QColor m_secondaryColor = Qt::white;
     PressureCurve m_pressureCurve;
     double m_smoothing = 0.3;
 };
