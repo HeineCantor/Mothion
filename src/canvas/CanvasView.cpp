@@ -1,6 +1,7 @@
 #include "canvas/CanvasView.h"
 
 #include "canvas/DebugOverlay.h"
+#include "canvas/RasterEditCommand.h"
 #include "input/TabletInputAdapter.h"
 #include "tools/ToolState.h"
 
@@ -9,6 +10,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QTabletEvent>
+#include <QUndoStack>
 #include <QWheelEvent>
 
 #include <cmath>
@@ -294,7 +296,13 @@ void CanvasView::continueStroke(const PenSample &sample)
 void CanvasView::endStroke()
 {
     // The release sample itself is not drawn: its pressure is often already 0.
-    m_surface.endStroke();
+    std::optional<RasterEdit> edit = m_surface.endStroke();
+    if (!edit || !m_undoStack)
+        return;
+    m_undoStack->push(new RasterEditCommand(m_eraseStroke ? tr("cancellazione") : tr("tratto"),
+                                            std::move(*edit), [this](const RasterPatch &patch) {
+                                                updateDocumentRect(m_surface.applyPatch(patch));
+                                            }));
 }
 
 StrokeRenderer::Point CanvasView::strokePoint(const PenSample &smoothed) const

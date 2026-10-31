@@ -20,6 +20,7 @@
 #include <QMenuBar>
 #include <QStatusBar>
 #include <QToolBar>
+#include <QUndoStack>
 
 namespace mothion::ui {
 
@@ -27,11 +28,15 @@ MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , m_toolState(new tools::ToolState(this))
     , m_canvas(new canvas::CanvasView(m_toolState, this))
+    , m_undoStack(new QUndoStack(this))
 {
     setWindowTitle(QStringLiteral("Mothion"));
     resize(1400, 900);
 
     setCentralWidget(m_canvas);
+    // Each entry stores the stroke's bounding box twice; the limit caps memory.
+    m_undoStack->setUndoLimit(100);
+    m_canvas->setUndoStack(m_undoStack);
 
     auto *properties = new ToolPropertiesPanel(m_toolState, this);
     WorkspacePanels panels;
@@ -72,10 +77,6 @@ void MainWindow::createCommandBar()
         {IconId::Open, tr("Apri…"), QKeySequence::Open},
         {IconId::Save, tr("Salva"), QKeySequence::Save},
     };
-    const Command editCommands[] = {
-        {IconId::Undo, tr("Annulla"), QKeySequence::Undo},
-        {IconId::Redo, tr("Ripeti"), QKeySequence::Redo},
-    };
 
     auto make = [this](const Command &c) {
         auto *a = new QAction(icon(c.icon), c.text, this);
@@ -85,8 +86,21 @@ void MainWindow::createCommandBar()
     };
     for (const Command &c : fileCommands)
         m_fileActions << make(c);
-    for (const Command &c : editCommands)
-        m_editActions << make(c);
+
+    // Undo/redo come from the stack, which keeps text ("Annulla tratto") and
+    // enabled state in sync. Shortcuts must be set here: Qt 6 does not assign them.
+    QAction *undo = m_undoStack->createUndoAction(this, tr("Annulla"));
+    undo->setIcon(icon(IconId::Undo));
+    undo->setShortcuts(QKeySequence::Undo); // Ctrl+Z
+    QAction *redo = m_undoStack->createRedoAction(this, tr("Ripeti"));
+    redo->setIcon(icon(IconId::Redo));
+    // Platform standard (Ctrl+Shift+Z on Linux, Ctrl+Y on Windows) plus both everywhere.
+    QList<QKeySequence> redoKeys = QKeySequence::keyBindings(QKeySequence::Redo);
+    for (const QKeySequence &k : {QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Z), QKeySequence(Qt::CTRL | Qt::Key_Y)})
+        if (!redoKeys.contains(k))
+            redoKeys << k;
+    redo->setShortcuts(redoKeys);
+    m_editActions << undo << redo;
 
     auto *bar = new QToolBar(tr("Comandi"), this);
     bar->setObjectName(QStringLiteral("toolbar.commands")); // needed by saveState()

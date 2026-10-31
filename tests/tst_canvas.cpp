@@ -1,8 +1,10 @@
+#include "canvas/RasterEditCommand.h"
 #include "canvas/RasterSurface.h"
 #include "canvas/StrokeRenderer.h"
 #include "canvas/ViewTransform.h"
 
 #include <QTest>
+#include <QUndoStack>
 
 using namespace mothion::canvas;
 
@@ -101,6 +103,50 @@ private slots:
         surface.endStroke();
         QCOMPARE(qAlpha(surface.image().pixel(50, 10)), 0);
         QVERIFY(qAlpha(surface.image().pixel(20, 10)) > 200);
+    }
+
+    void undoRedoRestoresStroke()
+    {
+        RasterSurface surface({100, 20});
+        StrokeRenderer renderer;
+        QUndoStack stack;
+        auto drawLine = [&](bool erase, QPointF a, QPointF b) {
+            surface.beginStroke(Qt::black, 1.0, erase);
+            renderer.begin({a, 4.0}, surface);
+            renderer.continueTo({b, 4.0}, surface);
+            auto edit = surface.endStroke();
+            QVERIFY(edit);
+            stack.push(new RasterEditCommand(QStringLiteral("t"), std::move(*edit),
+                                             [&](const RasterPatch &p) { surface.applyPatch(p); }));
+        };
+        auto alphaAt = [&](int x, int y) { return qAlpha(surface.image().pixel(x, y)); };
+
+        drawLine(false, {10, 10}, {90, 10});
+        drawLine(true, {50, 0}, {50, 19});
+        QCOMPARE(alphaAt(50, 10), 0);
+
+        stack.undo(); // eraser gone
+        QVERIFY(alphaAt(50, 10) > 200);
+        stack.undo(); // line gone
+        QCOMPARE(alphaAt(20, 10), 0);
+        stack.redo();
+        QVERIFY(alphaAt(20, 10) > 200);
+        QVERIFY(alphaAt(50, 10) > 200);
+        stack.redo();
+        QCOMPARE(alphaAt(50, 10), 0);
+    }
+
+    void undoDuringStrokeCancelsIt()
+    {
+        RasterSurface surface({100, 20});
+        StrokeRenderer renderer;
+        surface.beginStroke(Qt::black, 1.0, false);
+        renderer.begin({{10, 10}, 4.0}, surface);
+        renderer.continueTo({{90, 10}, 4.0}, surface);
+        surface.applyPatch({{0, 0}, QImage()}); // what an undo does mid-stroke
+        QVERIFY(!surface.inStroke());
+        QCOMPARE(qAlpha(surface.image().pixel(50, 10)), 0);
+        QVERIFY(!surface.endStroke());
     }
 };
 

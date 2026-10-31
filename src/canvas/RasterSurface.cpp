@@ -67,20 +67,52 @@ void RasterSurface::recompose(const QRect &rect)
     p.drawImage(rect.topLeft(), m_strokeMask, rect);
 }
 
-void RasterSurface::endStroke()
+std::optional<RasterEdit> RasterSurface::endStroke()
+{
+    if (!m_inStroke)
+        return std::nullopt;
+    m_inStroke = false;
+    if (m_strokeBounds.isEmpty())
+        return std::nullopt;
+
+    // Only the stroke's bounding box is stored, not the whole image.
+    const QRect r = m_strokeBounds;
+    RasterEdit edit{{r.topLeft(), m_committed.copy(r)}, {r.topLeft(), m_composite.copy(r)}};
+
+    // The composite already shows the final result: make it the committed state.
+    QPainter commit(&m_committed);
+    commit.setCompositionMode(QPainter::CompositionMode_Source);
+    commit.drawImage(r.topLeft(), m_composite, r);
+    QPainter clear(&m_strokeMask);
+    clear.setCompositionMode(QPainter::CompositionMode_Clear);
+    clear.fillRect(r, Qt::transparent);
+    return edit;
+}
+
+void RasterSurface::cancelStroke()
 {
     if (!m_inStroke)
         return;
     m_inStroke = false;
     if (m_strokeBounds.isEmpty())
         return;
-    // The composite already shows the final result: make it the committed state.
-    QPainter commit(&m_committed);
-    commit.setCompositionMode(QPainter::CompositionMode_Source);
-    commit.drawImage(m_strokeBounds.topLeft(), m_composite, m_strokeBounds);
     QPainter clear(&m_strokeMask);
     clear.setCompositionMode(QPainter::CompositionMode_Clear);
     clear.fillRect(m_strokeBounds, Qt::transparent);
+    QPainter restore(&m_composite);
+    restore.setCompositionMode(QPainter::CompositionMode_Source);
+    restore.drawImage(m_strokeBounds.topLeft(), m_committed, m_strokeBounds);
+}
+
+QRect RasterSurface::applyPatch(const RasterPatch &patch)
+{
+    cancelStroke();
+    for (QImage *target : {&m_committed, &m_composite}) {
+        QPainter p(target);
+        p.setCompositionMode(QPainter::CompositionMode_Source);
+        p.drawImage(patch.pos, patch.pixels);
+    }
+    return QRect(patch.pos, patch.pixels.size());
 }
 
 } // namespace mothion::canvas

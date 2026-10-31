@@ -3,6 +3,7 @@
 #include <QMainWindow>
 
 class QMenu;
+class QUndoStack;
 
 namespace mothion::canvas {
 class CanvasView;
@@ -37,6 +38,7 @@ private:
 
     tools::ToolState *m_toolState = nullptr;
     canvas::CanvasView *m_canvas = nullptr;
+    QUndoStack *m_undoStack = nullptr;
     DockLayout *m_dockLayout = nullptr;
     QMenu *m_viewMenu = nullptr;
     QList<QAction *> m_fileActions;

@@ -61,6 +61,7 @@ src/
 │            TabletInputAdapter, ProximityFilter, TabletBackend(_wintab|_nowintab)
 ├─ canvas/   CanvasView (widget), ViewTransform (zoom/pan/rotazione), NavigationGesture,
 │            StrokeRenderer (dab equidistanti), RasterSurface (immagine + tratto corrente),
+│            RasterEditCommand (undo/redo di un tratto: pixel prima/dopo del suo riquadro),
 │            DebugOverlay (F12)
 ├─ tools/    ToolState: strumento attivo, dimensione, opacità, colore, curva, stabilizzazione
 ├─ ui/       MainWindow, DockLayout (disposizione e persistenza), PanelDock, Theme, IconFactory
@@ -97,6 +98,7 @@ Dopo `toPenSample()` nessuna parte del programma tocca eventi Qt di input.
 | Pan | Spazio + trascina, tasto centrale, pulsante laterale della penna, strumento Mano |
 | Zoom | rotella, Spazio+Ctrl+trascina, strumento Zoom, Ctrl + / Ctrl − / Ctrl 0 (adatta) |
 | Rotazione | Maiusc + rotella, Spazio+Maiusc+trascina, Ctrl , / Ctrl . / Ctrl / (azzera) |
+| Annulla / Ripeti tratto | Ctrl+Z / Ctrl+Maiusc+Z o Ctrl+Y (fino a 100 passi) |
 | Overlay debug input | F12 |
 | Timeline | clic/trascina per spostare il frame, ← → Home Fine, Ctrl+rotella = zoom frame |
 | Layout | Finestra → Ripristina layout predefinito |

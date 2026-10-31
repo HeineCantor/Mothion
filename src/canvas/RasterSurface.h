@@ -5,6 +5,7 @@
 #include <QPointF>
 #include <QRect>
 
+#include <optional>
 #include <span>
 
 namespace mothion::canvas {
@@ -14,6 +15,20 @@ struct Dab
 {
     QPointF center;
     double radius = 1.0;
+};
+
+// A rectangle of pixels at a position in the document.
+struct RasterPatch
+{
+    QPoint pos;
+    QImage pixels;
+};
+
+// The pixels a finished stroke changed, before and after: enough to undo/redo it.
+struct RasterEdit
+{
+    RasterPatch before;
+    RasterPatch after;
 };
 
 // In-memory raster the strokes are drawn on.
@@ -33,8 +48,15 @@ public:
     void beginStroke(const QColor &color, double opacity, bool erase);
     // Draws the dabs into the stroke and returns the document rect that changed.
     QRect addDabs(std::span<const Dab> dabs);
-    void endStroke();
+    // Commits the stroke. Returns what changed (nothing if the stroke drew nothing).
+    std::optional<RasterEdit> endStroke();
+    // Drops the stroke in progress, restoring the committed pixels.
+    void cancelStroke();
     bool inStroke() const { return m_inStroke; }
+
+    // Writes pixels into the committed image (undo/redo). Cancels a stroke in
+    // progress first. Returns the document rect that changed.
+    QRect applyPatch(const RasterPatch &patch);
 
 private:
     void recompose(const QRect &rect);

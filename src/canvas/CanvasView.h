@@ -10,6 +10,7 @@
 #include <QWidget>
 
 class QPointingDevice;
+class QUndoStack;
 
 namespace mothion::tools {
 class ToolState;
@@ -33,6 +34,9 @@ public:
     explicit CanvasView(tools::ToolState *toolState, QWidget *parent = nullptr);
 
     const ViewTransform &view() const { return m_view; }
+
+    // Finished strokes are pushed here (not owned). Without a stack, no undo.
+    void setUndoStack(QUndoStack *stack) { m_undoStack = stack; }
 
 public slots:
     void zoomIn();
@@ -90,6 +94,7 @@ private:
     StrokeSmoother m_smoother;
     bool m_eraseStroke = false; // current stroke erases (eraser tool or eraser end)
     DebugOverlay *m_overlay;
+    QUndoStack *m_undoStack = nullptr;
 
     const QPointingDevice *m_lastDevice = nullptr;
     QPointF m_pointerPos;      // last pointer position (view coordinates)
