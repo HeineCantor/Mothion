@@ -9,4 +9,5 @@ function(mothion_add_test name)
 endfunction()
 
 mothion_add_test(tst_core mothion_core)
+mothion_add_test(tst_document mothion_core)
 mothion_add_test(tst_canvas mothion_gui)

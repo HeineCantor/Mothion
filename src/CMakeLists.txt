@@ -7,6 +7,9 @@ add_library(mothion_core STATIC
     core/PressureCurve.h core/PressureCurve.cpp
     core/StrokeSmoother.h core/StrokeSmoother.cpp
     core/RateMeter.h core/RateMeter.cpp
+
+    core/document/Tile.h
+    core/document/TiledImage.h core/document/TiledImage.cpp
 )
 set_target_properties(mothion_core PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
 target_include_directories(mothion_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
