@@ -1,6 +1,7 @@
 // Tests for the Qt-free core (QtTest is only the test runner here).
 
 #include "core/PressureCurve.h"
+#include "core/RateMeter.h"
 #include "core/StrokeSmoother.h"
 
 #include <QTest>
@@ -68,6 +69,16 @@ private slots:
         s.x = 7;
         s.y = 3;
         QCOMPARE(smoother.filter(s).x, 7.0);
+    }
+
+    void rateMeterCountsSlidingWindow()
+    {
+        RateMeter meter(1.0);
+        for (int i = 0; i < 200; ++i)
+            meter.add(i * 0.005); // 200 Hz for one second
+        QCOMPARE(meter.rateHz(0.999), 200.0);
+        QCOMPARE(meter.rateHz(1.5), 100.0); // the first half fell out of the window
+        QCOMPARE(meter.rateHz(10.0), 0.0);
     }
 };
 

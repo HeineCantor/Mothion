@@ -123,6 +123,12 @@ void MainWindow::createMenus()
     addView(tr("Ruota a sinistra"), {QKeySequence(Qt::CTRL | Qt::Key_Comma)}, &canvas::CanvasView::rotateLeft);
     addView(tr("Ruota a destra"), {QKeySequence(Qt::CTRL | Qt::Key_Period)}, &canvas::CanvasView::rotateRight);
     addView(tr("Azzera rotazione"), {QKeySequence(Qt::CTRL | Qt::Key_Slash)}, &canvas::CanvasView::resetRotation);
+    m_viewMenu->addSeparator();
+    QAction *debug = m_viewMenu->addAction(tr("Overlay di debug input"));
+    debug->setCheckable(true);
+    debug->setShortcut(QKeySequence(Qt::Key_F12));
+    debug->setShortcutContext(Qt::ApplicationShortcut); // also when a floating panel has focus
+    connect(debug, &QAction::toggled, m_canvas, &canvas::CanvasView::setDebugOverlayVisible);
 
     QMenu *window = menuBar()->addMenu(tr("&Finestra"));
     for (PanelDock *dock : m_dockLayout->docks())

@@ -6,6 +6,7 @@ add_library(mothion_core STATIC
     core/PenSample.h
     core/PressureCurve.h core/PressureCurve.cpp
     core/StrokeSmoother.h core/StrokeSmoother.cpp
+    core/RateMeter.h core/RateMeter.cpp
 )
 set_target_properties(mothion_core PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
 target_include_directories(mothion_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -23,6 +24,7 @@ qt_add_library(mothion_gui STATIC
     input/ProximityFilter.h input/ProximityFilter.cpp
     input/TabletBackend.h input/TabletBackend.cpp
 
+    canvas/DebugOverlay.h canvas/DebugOverlay.cpp
     canvas/RasterSurface.h canvas/RasterSurface.cpp
     canvas/StrokeRenderer.h canvas/StrokeRenderer.cpp
     canvas/ViewTransform.h canvas/ViewTransform.cpp

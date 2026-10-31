@@ -17,6 +17,8 @@ class ToolState;
 
 namespace mothion::canvas {
 
+class DebugOverlay;
+
 // The central drawing widget.
 //
 // Input path: Qt tablet/mouse event -> input::toPenSample() -> handleSample().
@@ -40,6 +42,7 @@ public slots:
     void rotateRight();
     void resetRotation();
     void setPenProximity(const mothion::ProximityEvent &event);
+    void setDebugOverlayVisible(bool visible);
 
 signals:
     void viewChanged(double zoom, double rotationDegrees);
@@ -86,6 +89,7 @@ private:
     StrokeRenderer m_renderer;
     StrokeSmoother m_smoother;
     bool m_eraseStroke = false; // current stroke erases (eraser tool or eraser end)
+    DebugOverlay *m_overlay;
 
     const QPointingDevice *m_lastDevice = nullptr;
     QPointF m_pointerPos;      // last pointer position (view coordinates)

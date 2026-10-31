@@ -1,5 +1,6 @@
 #include "canvas/CanvasView.h"
 
+#include "canvas/DebugOverlay.h"
 #include "input/TabletInputAdapter.h"
 #include "tools/ToolState.h"
 
@@ -28,12 +29,18 @@ CanvasView::CanvasView(ToolState *toolState, QWidget *parent)
     : QWidget(parent)
     , m_toolState(toolState)
     , m_surface(kDocumentSize)
+    , m_overlay(new DebugOverlay(this))
 {
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);  // hover moves from the mouse
     setTabletTracking(true); // hover moves from the pen (needed for proximity/outline/overlay)
     setAttribute(Qt::WA_OpaquePaintEvent);
     m_view.setDocumentSize(kDocumentSize);
+
+    m_overlay->move(8, 8);
+    m_overlay->hide();
+    connect(this, &CanvasView::sampleReceived, m_overlay, &DebugOverlay::addSample);
+    connect(this, &CanvasView::deviceChanged, m_overlay, &DebugOverlay::setDevice);
 
     connect(m_toolState, &ToolState::activeToolChanged, this, &CanvasView::updateCursor);
     connect(m_toolState, &ToolState::toolSettingsChanged, this, [this] { updateBrushOutline(m_pointerPos); });
@@ -186,8 +193,14 @@ void CanvasView::noteDevice(const QPointingDevice *device)
     emit deviceChanged(input::describeDevice(device));
 }
 
+void CanvasView::setDebugOverlayVisible(bool visible)
+{
+    m_overlay->setVisible(visible);
+}
+
 void CanvasView::setPenProximity(const ProximityEvent &event)
 {
+    m_overlay->setProximity(event);
     m_pointerTool = event.tool;
     if (!event.entering) {
         m_pointerVisible = false;
