@@ -4,6 +4,9 @@
 
 class QMenu;
 
+namespace mothion::canvas {
+class CanvasView;
+}
 namespace mothion::tools {
 class ToolState;
 }
@@ -33,6 +36,7 @@ private:
     void notImplemented(const QString &what);
 
     tools::ToolState *m_toolState = nullptr;
+    canvas::CanvasView *m_canvas = nullptr;
     DockLayout *m_dockLayout = nullptr;
     QMenu *m_viewMenu = nullptr;
     QList<QAction *> m_fileActions;

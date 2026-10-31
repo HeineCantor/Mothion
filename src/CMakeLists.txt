@@ -17,6 +17,10 @@ mothion_set_warnings(mothion_core)
 qt_add_library(mothion_gui STATIC
     tools/ToolState.h tools/ToolState.cpp
 
+    canvas/ViewTransform.h canvas/ViewTransform.cpp
+    canvas/NavigationGesture.h canvas/NavigationGesture.cpp
+    canvas/CanvasView.h canvas/CanvasView.cpp
+
     ui/MainWindow.h ui/MainWindow.cpp
     ui/DockLayout.h ui/DockLayout.cpp
     ui/PanelDock.h ui/PanelDock.cpp

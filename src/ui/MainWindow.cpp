@@ -1,5 +1,6 @@
 #include "ui/MainWindow.h"
 
+#include "canvas/CanvasView.h"
 #include "tools/ToolState.h"
 #include "ui/DockLayout.h"
 #include "ui/IconFactory.h"
@@ -22,11 +23,12 @@ namespace mothion::ui {
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , m_toolState(new tools::ToolState(this))
+    , m_canvas(new canvas::CanvasView(m_toolState, this))
 {
     setWindowTitle(QStringLiteral("Mothion"));
     resize(1400, 900);
 
-    setCentralWidget(new QLabel(tr("Canvas"), this));
+    setCentralWidget(m_canvas);
 
     auto *properties = new ToolPropertiesPanel(m_toolState, this);
     WorkspacePanels panels;
@@ -40,6 +42,11 @@ MainWindow::MainWindow(QWidget *parent)
     m_dockLayout = new DockLayout(this, panels);
     createMenus();
     statusBar()->showMessage(tr("Pronto"));
+    auto *viewInfo = new QLabel(this);
+    statusBar()->addPermanentWidget(viewInfo);
+    connect(m_canvas, &canvas::CanvasView::viewChanged, viewInfo, [viewInfo](double zoom, double rot) {
+        viewInfo->setText(tr("Zoom %1%  ·  Rotazione %2°").arg(qRound(zoom * 100)).arg(qRound(rot)));
+    });
 
     m_dockLayout->restore();
 }
@@ -90,6 +97,20 @@ void MainWindow::createMenus()
     edit->addActions(m_editActions);
 
     m_viewMenu = menuBar()->addMenu(tr("&Vista"));
+    // Provisional shortcuts; real keymap comes with the UX design.
+    auto addView = [this](const QString &text, const QList<QKeySequence> &keys, auto slot) {
+        QAction *a = m_viewMenu->addAction(text, m_canvas, slot);
+        a->setShortcuts(keys);
+        return a;
+    };
+    addView(tr("Ingrandisci"), {QKeySequence(Qt::CTRL | Qt::Key_Plus), QKeySequence(Qt::CTRL | Qt::Key_Equal)},
+            &canvas::CanvasView::zoomIn);
+    addView(tr("Riduci"), {QKeySequence(Qt::CTRL | Qt::Key_Minus)}, &canvas::CanvasView::zoomOut);
+    addView(tr("Adatta alla finestra"), {QKeySequence(Qt::CTRL | Qt::Key_0)}, &canvas::CanvasView::fitToView);
+    m_viewMenu->addSeparator();
+    addView(tr("Ruota a sinistra"), {QKeySequence(Qt::CTRL | Qt::Key_Comma)}, &canvas::CanvasView::rotateLeft);
+    addView(tr("Ruota a destra"), {QKeySequence(Qt::CTRL | Qt::Key_Period)}, &canvas::CanvasView::rotateRight);
+    addView(tr("Azzera rotazione"), {QKeySequence(Qt::CTRL | Qt::Key_Slash)}, &canvas::CanvasView::resetRotation);
 
     QMenu *window = menuBar()->addMenu(tr("&Finestra"));
     for (PanelDock *dock : m_dockLayout->docks())
