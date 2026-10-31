@@ -10,4 +10,5 @@ endfunction()
 
 mothion_add_test(tst_core mothion_core)
 mothion_add_test(tst_document mothion_core)
+mothion_add_test(tst_commands mothion_core)
 mothion_add_test(tst_canvas mothion_gui)
