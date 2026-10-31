@@ -1,0 +1,36 @@
+/* Provisional dark, compact theme. Colors come from the QPalette set in Theme.cpp;
+   this file only tightens spacing. */
+
+QMainWindow::separator {
+    width: 3px;
+    height: 3px;
+    background: palette(dark);
+}
+
+QToolBar {
+    border: none;
+    spacing: 2px;
+    padding: 2px;
+}
+
+QToolButton {
+    padding: 2px;
+    border: 1px solid transparent;
+    border-radius: 3px;
+}
+QToolButton:hover   { border-color: palette(light); }
+QToolButton:checked { background: palette(highlight); }
+
+QTabBar::tab {
+    padding: 2px 8px;
+    min-width: 40px;
+}
+
+QLabel#PanelTitle {
+    font-weight: 600;
+    padding-left: 4px;
+}
+
+QWidget#PanelTitleBar {
+    background: palette(mid);
+}
