@@ -1,8 +1,10 @@
 #include "ui/IconFactory.h"
 
+#include <QApplication>
 #include <QHash>
 #include <QPainter>
 #include <QPainterPath>
+#include <QPalette>
 #include <QPixmap>
 
 namespace mothion::ui {
@@ -245,11 +247,15 @@ QIcon icon(IconId id)
     if (auto it = cache.constFind(key); it != cache.constEnd())
         return *it;
 
+    // Colors come from the application palette (set by Theme before any icon
+    // is requested); "On" is drawn over the highlight of checked buttons.
+    const QPalette pal = QApplication::palette();
     QIcon result;
     for (int size : {16, 24, 32, 48, 64}) {
-        result.addPixmap(render(id, size, QColor(0xd0, 0xd0, 0xd6)), QIcon::Normal);
-        result.addPixmap(render(id, size, QColor(0x6a, 0x6a, 0x70)), QIcon::Disabled);
-        result.addPixmap(render(id, size, Qt::white), QIcon::Normal, QIcon::On);
+        result.addPixmap(render(id, size, pal.color(QPalette::Normal, QPalette::ButtonText)), QIcon::Normal);
+        result.addPixmap(render(id, size, pal.color(QPalette::Disabled, QPalette::ButtonText)), QIcon::Disabled);
+        result.addPixmap(render(id, size, pal.color(QPalette::Normal, QPalette::HighlightedText)), QIcon::Normal,
+                         QIcon::On);
     }
     cache.insert(key, result);
     return result;

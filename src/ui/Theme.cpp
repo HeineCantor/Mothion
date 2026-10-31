@@ -3,9 +3,22 @@
 #include <QApplication>
 #include <QFile>
 #include <QPalette>
+#include <QStyle>
 #include <QStyleFactory>
+#include <QStyleHints>
 
 namespace mothion::ui {
+
+namespace {
+
+void applyStyleSheet(QApplication &app)
+{
+    QFile qss(QStringLiteral(":/theme/dark.qss"));
+    if (qss.open(QIODevice::ReadOnly))
+        app.setStyleSheet(QString::fromUtf8(qss.readAll()));
+}
+
+} // namespace
 
 void applyDarkTheme(QApplication &app)
 {
@@ -41,10 +54,23 @@ void applyDarkTheme(QApplication &app)
     for (auto role : {QPalette::WindowText, QPalette::Text, QPalette::ButtonText})
         p.setColor(QPalette::Disabled, role, disabledText);
     app.setPalette(p);
+    applyStyleSheet(app);
+}
 
-    QFile qss(QStringLiteral(":/theme/dark.qss"));
-    if (qss.open(QIODevice::ReadOnly))
-        app.setStyleSheet(QString::fromUtf8(qss.readAll()));
+void applyLightTheme(QApplication &app)
+{
+    app.setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
+    app.setPalette(app.style()->standardPalette());
+    // The .qss only sets spacing and palette() roles, so it suits both themes.
+    applyStyleSheet(app);
+}
+
+void applySystemTheme(QApplication &app)
+{
+    if (QGuiApplication::styleHints()->colorScheme() == Qt::ColorScheme::Light)
+        applyLightTheme(app);
+    else
+        applyDarkTheme(app);
 }
 
 } // namespace mothion::ui

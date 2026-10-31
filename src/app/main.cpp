@@ -33,7 +33,7 @@ int main(int argc, char *argv[])
         qWarning("Wintab is not available (not on Windows, disabled at build time, or no wintab32.dll); "
                  "using the default tablet backend.");
 
-    mothion::ui::applyDarkTheme(app);
+    mothion::ui::applySystemTheme(app);
 
     mothion::ui::MainWindow window;
     window.show();
