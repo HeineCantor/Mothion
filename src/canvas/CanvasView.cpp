@@ -321,12 +321,12 @@ void CanvasView::beginStroke(const PenSample &sample)
 
     m_smoother.setStrength(m_toolState->smoothing());
     m_smoother.reset();
-    updateDocumentRect(m_renderer.begin(strokePoint(m_smoother.filter(sample)), m_surface));
+    updateDocumentRect(m_surface.addDabs(m_spacer.begin(strokePoint(m_smoother.filter(sample)))));
 }
 
 void CanvasView::continueStroke(const PenSample &sample)
 {
-    updateDocumentRect(m_renderer.continueTo(strokePoint(m_smoother.filter(sample)), m_surface));
+    updateDocumentRect(m_surface.addDabs(m_spacer.continueTo(strokePoint(m_smoother.filter(sample)))));
 }
 
 void CanvasView::endStroke()
@@ -341,7 +341,7 @@ void CanvasView::endStroke()
                                             }));
 }
 
-StrokeRenderer::Point CanvasView::strokePoint(const PenSample &smoothed) const
+DabSpacer::Point CanvasView::strokePoint(const PenSample &smoothed) const
 {
     const double size = m_toolState->settings(m_eraseStroke ? ToolId::Eraser : ToolId::Brush).size;
     const float pressure = m_toolState->pressureCurve().map(smoothed.pressure);

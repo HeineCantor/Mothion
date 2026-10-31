@@ -43,7 +43,11 @@ qt_add_library(mothion_gui STATIC
     canvas/DebugOverlay.h canvas/DebugOverlay.cpp
     canvas/RasterSurface.h canvas/RasterSurface.cpp
     canvas/RasterEditCommand.h canvas/RasterEditCommand.cpp
-    canvas/StrokeRenderer.h canvas/StrokeRenderer.cpp
+    canvas/Dab.h
+    canvas/DabSpacer.h canvas/DabSpacer.cpp
+    canvas/TileQt.h canvas/TileQt.cpp
+    canvas/StrokeSession.h canvas/StrokeSession.cpp
+    canvas/FrameRenderer.h canvas/FrameRenderer.cpp
     canvas/ViewTransform.h canvas/ViewTransform.cpp
     canvas/NavigationGesture.h canvas/NavigationGesture.cpp
     canvas/CanvasView.h canvas/CanvasView.cpp

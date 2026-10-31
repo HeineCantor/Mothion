@@ -1,7 +1,8 @@
 #include "ui/panels/SubToolPanel.h"
 
-#include "canvas/RasterSurface.h"
-#include "canvas/StrokeRenderer.h"
+#include "canvas/DabSpacer.h"
+#include "canvas/StrokeSession.h"
+#include "canvas/TileQt.h"
 
 #include <QLabel>
 #include <QListWidget>
@@ -21,12 +22,13 @@ constexpr QSize kPreviewSize(118, 40); // leaves room for the name on the right
 constexpr int kPreviewRole = Qt::UserRole + 1;
 
 // Draws an S-shaped stroke with a press-and-lift pressure profile using the
-// actual StrokeRenderer + RasterSurface, so the preview shows what the brush does.
+// real DabSpacer + StrokeSession, so the preview shows what the brush does.
 QImage renderPreview(const tools::BrushPreset &preset, const QColor &ink)
 {
-    canvas::RasterSurface surface(kPreviewSize);
-    canvas::StrokeRenderer renderer;
-    surface.beginStroke(ink, preset.opacity, false);
+    doc::TiledImage image;
+    const QRect area(QPoint(0, 0), kPreviewSize);
+    canvas::StrokeSession session(image, ink, preset.opacity, false, area);
+    canvas::DabSpacer spacer;
     // Big brushes are scaled down to fit the row, keeping their pressure response.
     const double maxRadius = std::min(preset.size, 22.0) / 2.0;
     constexpr int kSteps = 60;
@@ -35,11 +37,10 @@ QImage renderPreview(const tools::BrushPreset &preset, const QColor &ink)
         const QPointF pos(8 + t * (kPreviewSize.width() - 16),
                           kPreviewSize.height() / 2.0 - std::sin(t * 2 * std::numbers::pi) * 7);
         const float pressure = float(std::sin(t * std::numbers::pi)); // 0 -> 1 -> 0
-        const canvas::StrokeRenderer::Point p{pos, std::max(0.4, maxRadius * preset.curve.map(pressure))};
-        i == 0 ? renderer.begin(p, surface) : renderer.continueTo(p, surface);
+        const canvas::DabSpacer::Point p{pos, std::max(0.4, maxRadius * preset.curve.map(pressure))};
+        session.addDabs(i == 0 ? spacer.begin(p) : spacer.continueTo(p));
     }
-    surface.endStroke();
-    return surface.image();
+    return canvas::toQImage(image, area);
 }
 
 // One row: stroke preview on the left, preset name bottom-right.

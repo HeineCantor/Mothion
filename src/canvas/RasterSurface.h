@@ -1,5 +1,7 @@
 #pragma once
 
+#include "canvas/Dab.h"
+
 #include <QColor>
 #include <QImage>
 #include <QPointF>
@@ -9,13 +11,6 @@
 #include <span>
 
 namespace mothion::canvas {
-
-// A round brush stamp in document coordinates.
-struct Dab
-{
-    QPointF center;
-    double radius = 1.0;
-};
 
 // A rectangle of pixels at a position in the document.
 struct RasterPatch

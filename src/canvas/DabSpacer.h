@@ -1,8 +1,8 @@
 #pragma once
 
-#include "canvas/RasterSurface.h"
+#include "canvas/Dab.h"
 
-#include <QRect>
+#include <vector>
 
 namespace mothion::canvas {
 
@@ -12,7 +12,8 @@ namespace mothion::canvas {
 // leave gaps on fast strokes. Between two points we interpolate position and
 // radius and place a dab every `spacing` pixels, carrying the remainder over
 // to the next segment so spacing stays even across samples.
-class StrokeRenderer
+// It only computes where dabs go; StrokeSession puts them on pixels.
+class DabSpacer
 {
 public:
     struct Point
@@ -21,10 +22,10 @@ public:
         double radius; // document pixels
     };
 
-    // Starts a stroke with a single dab. Returns the changed document rect.
-    QRect begin(const Point &p, RasterSurface &surface);
-    // Extends the stroke to p. Returns the changed document rect.
-    QRect continueTo(const Point &p, RasterSurface &surface);
+    // Starts a stroke: a single dab at p.
+    std::vector<Dab> begin(const Point &p);
+    // Dabs from the previous point to p (may be empty for tiny moves).
+    std::vector<Dab> continueTo(const Point &p);
 
 private:
     Point m_last{};

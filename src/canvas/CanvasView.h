@@ -2,7 +2,7 @@
 
 #include "canvas/NavigationGesture.h"
 #include "canvas/RasterSurface.h"
-#include "canvas/StrokeRenderer.h"
+#include "canvas/DabSpacer.h"
 #include "canvas/ViewTransform.h"
 #include "core/PenSample.h"
 #include "core/StrokeSmoother.h"
@@ -25,7 +25,7 @@ class DebugOverlay;
 // Input path: Qt tablet/mouse event -> input::toPenSample() -> handleSample().
 // From handleSample() on, only PenSamples are used. A sample either drives a
 // NavigationGesture (hand / zoom / rotate) or a stroke:
-//   sample -> StrokeSmoother -> pressure curve -> StrokeRenderer -> RasterSurface.
+//   sample -> StrokeSmoother -> pressure curve -> DabSpacer -> RasterSurface.
 class CanvasView : public QWidget
 {
     Q_OBJECT
@@ -89,7 +89,7 @@ private:
     void beginStroke(const PenSample &sample);
     void continueStroke(const PenSample &sample);
     void endStroke();
-    StrokeRenderer::Point strokePoint(const PenSample &smoothed) const;
+    DabSpacer::Point strokePoint(const PenSample &smoothed) const;
 
     void updateDocumentRect(const QRect &docRect);
     void updateBrushOutline(const QPointF &newPos);
@@ -101,7 +101,7 @@ private:
     ViewTransform m_view;
     NavigationGesture m_gesture;
     RasterSurface m_surface;
-    StrokeRenderer m_renderer;
+    DabSpacer m_spacer;
     StrokeSmoother m_smoother;
     bool m_eraseStroke = false; // current stroke erases (eraser tool or eraser end)
     DebugOverlay *m_overlay;

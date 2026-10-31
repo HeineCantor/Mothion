@@ -1,9 +1,8 @@
-#include "canvas/StrokeRenderer.h"
+#include "canvas/DabSpacer.h"
 
 #include <QLineF>
 
 #include <algorithm>
-#include <vector>
 
 namespace mothion::canvas {
 
@@ -17,15 +16,14 @@ double spacingFor(double radius)
 
 } // namespace
 
-QRect StrokeRenderer::begin(const Point &p, RasterSurface &surface)
+std::vector<Dab> DabSpacer::begin(const Point &p)
 {
     m_last = p;
     m_distanceSinceDab = 0.0;
-    const Dab dab{p.pos, p.radius};
-    return surface.addDabs({&dab, 1});
+    return {Dab{p.pos, p.radius}};
 }
 
-QRect StrokeRenderer::continueTo(const Point &p, RasterSurface &surface)
+std::vector<Dab> DabSpacer::continueTo(const Point &p)
 {
     const double length = QLineF(m_last.pos, p.pos).length();
     if (length <= 0.0) {
@@ -50,7 +48,7 @@ QRect StrokeRenderer::continueTo(const Point &p, RasterSurface &surface)
     }
     m_distanceSinceDab += length - travelled;
     m_last = p;
-    return surface.addDabs(dabs);
+    return dabs;
 }
 
 } // namespace mothion::canvas
