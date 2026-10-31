@@ -10,6 +10,11 @@ add_library(mothion_core STATIC
 
     core/document/Tile.h
     core/document/TiledImage.h core/document/TiledImage.cpp
+    core/document/Ids.h
+    core/document/Drawing.h
+    core/document/Timing.h core/document/Timing.cpp
+    core/document/Layer.h core/document/Layer.cpp
+    core/document/Document.h core/document/Document.cpp
 )
 set_target_properties(mothion_core PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
 target_include_directories(mothion_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
