@@ -42,6 +42,10 @@ qt_add_library(mothion_gui STATIC
     ui/panels/PressureCurveEditor.h ui/panels/PressureCurveEditor.cpp
     ui/panels/ColorPanel.h ui/panels/ColorPanel.cpp
     ui/panels/LayersPanel.h ui/panels/LayersPanel.cpp
+    ui/panels/timeline/FakeTimelineData.h ui/panels/timeline/FakeTimelineData.cpp
+    ui/panels/timeline/TimelineMetrics.h
+    ui/panels/timeline/TimelineView.h ui/panels/timeline/TimelineView.cpp
+    ui/panels/timeline/TimelinePanel.h ui/panels/timeline/TimelinePanel.cpp
 )
 qt_add_resources(mothion_gui "mothion_resources"
     PREFIX "/"

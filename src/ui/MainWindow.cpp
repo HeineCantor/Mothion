@@ -11,6 +11,7 @@
 #include "ui/panels/PressureCurveEditor.h"
 #include "ui/panels/ToolPalettePanel.h"
 #include "ui/panels/ToolPropertiesPanel.h"
+#include "ui/panels/timeline/TimelinePanel.h"
 
 #include <QAction>
 #include <QApplication>
@@ -38,7 +39,7 @@ MainWindow::MainWindow(QWidget *parent)
     panels.toolProperties = properties;
     panels.color = new ColorPanel(m_toolState, this);
     panels.layers = new LayersPanel(this);
-    panels.timeline = new QLabel(tr("Timeline"), this);
+    panels.timeline = new TimelinePanel(this);
 
     // Pen proximity only reaches the QApplication; the filter forwards it to the canvas.
     auto *proximity = new input::ProximityFilter(this);
