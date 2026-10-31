@@ -1,0 +1,47 @@
+# Claude Code (configurazione locale)
+.claude/
+
+# Build
+build/
+build-*/
+out/
+cmake-build-*/
+_deps/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+compile_commands.json
+CMakeUserPresets.json
+
+# Generati da Qt (moc/uic/rcc)
+*_autogen/
+moc_*.cpp
+ui_*.h
+qrc_*.cpp
+*.qm
+
+# Binari e oggetti
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.so.*
+*.dll
+*.exe
+*.pdb
+*.ilk
+*.exp
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.user
+*.user.*
+*.suo
+*.swp
+*~
+.DS_Store
