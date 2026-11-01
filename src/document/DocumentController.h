@@ -31,6 +31,20 @@ public:
 
     const doc::Document &document() const { return *m_document; }
 
+    // --- whole document ---------------------------------------------------------
+    // Starts over with a new default document.
+    void newDocument();
+    // Puts a loaded document in place of the current one: history cleared,
+    // the top layer and frame 1 current, nothing selected.
+    void replaceDocument(std::unique_ptr<doc::Document> document);
+    // Changes since the last save (or since the document was created or loaded).
+    bool isModified() const { return !m_history.isClean(); }
+    // The document now matches the saved file.
+    void markSaved();
+    // Applies edits left open (a puppet warp) and cancels a stroke in
+    // progress, so that the document is complete, e.g. before saving.
+    void finishEdits() { interruptStroke(); }
+
     doc::LayerId currentLayer() const { return m_currentLayer; }
     int currentFrame() const { return m_currentFrame; }
 
@@ -100,11 +114,15 @@ signals:
     // Emitted before anything that must not happen mid-stroke (undo, frame
     // change...): whoever is painting should cancel its stroke now.
     void strokeInterrupted();
+    // A new or loaded document took the place of the old one (size and frame
+    // rate may differ); structureChanged and the current-item signals follow.
+    void documentReplaced();
 
 private:
     void interruptStroke();
     void publish(const doc::ChangeSet &changes);
     void ensureValidCurrentLayer();
+    static std::unique_ptr<doc::Document> makeDefaultDocument();
 
     std::unique_ptr<doc::Document> m_document;
     doc::History m_history;

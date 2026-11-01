@@ -30,16 +30,56 @@ QRect boundsOf(const std::vector<doc::TileCoord> &tiles)
 
 DocumentController::DocumentController(QObject *parent)
     : QObject(parent)
-    , m_document(std::make_unique<doc::Document>(kDefaultWidth, kDefaultHeight, doc::FrameRate{24, 1}))
+    , m_document(makeDefaultDocument())
 {
-    m_document->setFrameCount(kDefaultFrames);
-    // The first layer is part of the new document, not an undoable step.
-    doc::AddLayerCommand first(*m_document, 0, {tr("Layer 1").toStdString()});
-    first.apply(*m_document);
-    m_currentLayer = first.layerId();
+    m_currentLayer = m_document->layerAt(0).id();
 }
 
 DocumentController::~DocumentController() = default;
+
+std::unique_ptr<doc::Document> DocumentController::makeDefaultDocument()
+{
+    auto d = std::make_unique<doc::Document>(kDefaultWidth, kDefaultHeight, doc::FrameRate{24, 1});
+    d->setFrameCount(kDefaultFrames);
+    // The first layer is part of the new document, not an undoable step.
+    doc::AddLayerCommand first(*d, 0, {tr("Layer 1").toStdString()});
+    first.apply(*d);
+    return d;
+}
+
+// --- whole document ----------------------------------------------------------------
+
+void DocumentController::newDocument()
+{
+    replaceDocument(makeDefaultDocument());
+}
+
+void DocumentController::replaceDocument(std::unique_ptr<doc::Document> document)
+{
+    if (!document)
+        return;
+    interruptStroke(); // open edits land in the old document before it goes
+    m_document = std::move(document);
+    m_history.clear();
+    m_history.markClean();
+    m_currentLayer = m_document->layerCount() > 0 ? m_document->layerAt(m_document->layerCount() - 1).id()
+                                                  : doc::kNoId;
+    m_currentFrame = 0;
+    m_selection = QPainterPath();
+
+    emit documentReplaced();
+    emit structureChanged();
+    emit currentLayerChanged(m_currentLayer);
+    emit currentFrameChanged(m_currentFrame);
+    emit selectionChanged();
+    emit historyChanged();
+}
+
+void DocumentController::markSaved()
+{
+    m_history.markClean();
+    emit historyChanged();
+}
 
 // --- commands ------------------------------------------------------------------
 

@@ -39,7 +39,7 @@ void FrameRenderer::render(const doc::Document &doc, int frame, const QRect &rec
     QPainter p(&m_image);
     p.setClipRect(area);
     p.setCompositionMode(QPainter::CompositionMode_Source);
-    p.fillRect(area, QColor::fromRgba(doc.paperColor()));
+    p.fillRect(area, m_paper ? QColor::fromRgba(doc.paperColor()) : QColor(Qt::transparent));
 
     const std::vector<doc::TileCoord> tiles = tilesIn(area);
     for (int i = 0; i < doc.layerCount(); ++i) {

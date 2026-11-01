@@ -19,6 +19,9 @@ class FrameRenderer
 public:
     const QImage &image() const { return m_image; }
 
+    // Without paper the frame starts transparent (PNG export).
+    void setPaperVisible(bool visible) { m_paper = visible; }
+
     // Whole frame (frame changed, layers changed, document resized...).
     void renderAll(const doc::Document &doc, int frame);
     // Only `rect` (document coordinates).
@@ -26,6 +29,7 @@ public:
 
 private:
     QImage m_image;
+    bool m_paper = true;
 };
 
 } // namespace mothion::canvas

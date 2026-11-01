@@ -54,4 +54,17 @@ void Document::moveLayer(LayerId id, int newIndex)
         insertLayer(newIndex, std::move(taken));
 }
 
+void Document::restoreIdCounters(LayerId nextLayer, DrawingId nextDrawing)
+{
+    LayerId layerFloor = 1;
+    DrawingId drawingFloor = 1;
+    for (const auto &l : m_layers) {
+        layerFloor = std::max(layerFloor, l->id() + 1);
+        if (!l->drawings().empty())
+            drawingFloor = std::max(drawingFloor, l->drawings().rbegin()->first + 1);
+    }
+    m_nextLayerId = std::max(nextLayer, layerFloor);
+    m_nextDrawingId = std::max(nextDrawing, drawingFloor);
+}
+
 } // namespace mothion::doc

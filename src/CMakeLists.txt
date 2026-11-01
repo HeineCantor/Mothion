@@ -51,6 +51,9 @@ mothion_set_warnings(mothion_core)
 qt_add_library(mothion_gui STATIC
     document/DocumentController.h document/DocumentController.cpp
 
+    io/ProjectFile.h io/ProjectFile.cpp
+    io/FrameExport.h io/FrameExport.cpp
+
     tools/ToolState.h tools/ToolState.cpp
     tools/BrushDefinition.h
     tools/BrushPreset.h tools/BrushPreset.cpp
@@ -77,6 +80,7 @@ qt_add_library(mothion_gui STATIC
 
     ui/MainWindow.h ui/MainWindow.cpp
     ui/DockLayout.h ui/DockLayout.cpp
+    ui/ExportDialog.h ui/ExportDialog.cpp
     ui/PanelDock.h ui/PanelDock.cpp
     ui/IconFactory.h ui/IconFactory.cpp
     ui/Theme.h ui/Theme.cpp
@@ -111,7 +115,7 @@ else()
 endif()
 
 target_include_directories(mothion_gui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-find_package(Qt6 REQUIRED COMPONENTS Sql) # .sut brushes are SQLite databases
+find_package(Qt6 REQUIRED COMPONENTS Sql) # .sut brushes and .mothion projects are SQLite databases
 target_link_libraries(mothion_gui PUBLIC mothion_core Qt6::Widgets PRIVATE Qt6::Sql)
 mothion_set_warnings(mothion_gui)
 

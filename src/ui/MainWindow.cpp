@@ -3,9 +3,12 @@
 #include "canvas/CanvasView.h"
 #include "document/DocumentController.h"
 #include "input/ProximityFilter.h"
+#include "io/FrameExport.h"
+#include "io/ProjectFile.h"
 #include "tools/BrushLibrary.h"
 #include "tools/ToolState.h"
 #include "ui/DockLayout.h"
+#include "ui/ExportDialog.h"
 #include "ui/IconFactory.h"
 #include "ui/PanelDock.h"
 #include "ui/Theme.h"
@@ -24,12 +27,15 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QCloseEvent>
+#include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QImageReader>
 #include <QMessageBox>
 #include <QLabel>
 #include <QMenuBar>
+#include <QProgressDialog>
+#include <QSettings>
 #include <QStatusBar>
 #include <QToolBar>
 
@@ -81,26 +87,27 @@ MainWindow::MainWindow(QWidget *parent)
         viewInfo->setText(tr("Zoom %1%  ·  Rotation %2°").arg(qRound(zoom * 100)).arg(qRound(rot)));
     });
 
+    connect(m_document, &document::DocumentController::historyChanged, this, &MainWindow::updateTitle);
+    updateTitle();
+
     m_dockLayout->restore();
 }
 
 void MainWindow::createCommandBar()
 {
-    struct Command { IconId icon; QString text; QKeySequence key; };
-    const Command fileCommands[] = {
-        {IconId::New, tr("New"), QKeySequence::New},
-        {IconId::Open, tr("Open…"), QKeySequence::Open},
-        {IconId::Save, tr("Save"), QKeySequence::Save},
-    };
-
-    auto make = [this](const Command &c) {
-        auto *a = new QAction(icon(c.icon), c.text, this);
-        a->setShortcut(c.key);
-        connect(a, &QAction::triggered, this, [this, text = c.text] { notImplemented(text); });
+    auto make = [this](IconId id, const QString &text, QKeySequence::StandardKey key, auto slot) {
+        auto *a = new QAction(icon(id), text, this);
+        a->setShortcut(key);
+        connect(a, &QAction::triggered, this, slot);
         return a;
     };
-    for (const Command &c : fileCommands)
-        m_fileActions << make(c);
+    m_fileActions << make(IconId::New, tr("New"), QKeySequence::New, &MainWindow::newDocument)
+                  << make(IconId::Open, tr("Open…"), QKeySequence::Open, &MainWindow::open)
+                  << make(IconId::Save, tr("Save"), QKeySequence::Save, &MainWindow::save);
+    m_saveAsAction = new QAction(tr("Save as…"), this);
+    // Not every platform has a standard Save As key (Windows has none).
+    m_saveAsAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S));
+    connect(m_saveAsAction, &QAction::triggered, this, &MainWindow::saveAs);
 
     // Undo/redo run on the document's History; labels ("Undo stroke") and
     // enabled state follow DocumentController::historyChanged.
@@ -139,9 +146,12 @@ void MainWindow::createMenus()
 {
     QMenu *file = menuBar()->addMenu(tr("&File"));
     file->addActions(m_fileActions);
+    file->addAction(m_saveAsAction);
     file->addSeparator();
     file->addAction(tr("Import image…"), this, &MainWindow::importImage);
     file->addAction(tr("Import brush (.sut)…"), this, &MainWindow::importBrush);
+    file->addSeparator();
+    file->addAction(tr("Export frames…"), QKeySequence(Qt::CTRL | Qt::Key_E), this, &MainWindow::exportFrames);
     file->addSeparator();
     QAction *quit = file->addAction(tr("Quit"), this, &QWidget::close);
     quit->setShortcut(QKeySequence::Quit);
@@ -239,13 +249,172 @@ void MainWindow::importBrush()
     }
 }
 
-void MainWindow::notImplemented(const QString &what)
+// --- project files ---------------------------------------------------------------
+
+namespace {
+
+const QString kProjectDirKey = QStringLiteral("paths/projects");
+
+QString projectFilter()
 {
-    statusBar()->showMessage(tr("%1: not implemented yet").arg(what), 3000);
+    return MainWindow::tr("Mothion projects (*.%1)").arg(QLatin1String(io::kProjectSuffix));
+}
+
+QString projectDirectory()
+{
+    return QSettings().value(kProjectDirKey).toString();
+}
+
+void rememberProjectDirectory(const QString &file)
+{
+    QSettings().setValue(kProjectDirKey, QFileInfo(file).absolutePath());
+}
+
+} // namespace
+
+void MainWindow::newDocument()
+{
+    if (!maybeSave())
+        return;
+    m_document->newDocument();
+    m_filePath.clear();
+    updateTitle();
+}
+
+void MainWindow::open()
+{
+    if (!maybeSave())
+        return;
+    const QString file = QFileDialog::getOpenFileName(this, tr("Open project"), projectDirectory(), projectFilter());
+    if (!file.isEmpty())
+        openFile(file);
+}
+
+bool MainWindow::openFile(const QString &path)
+{
+    QString error;
+    std::unique_ptr<doc::Document> loaded = io::loadProject(path, &error);
+    if (!loaded) {
+        QMessageBox::warning(this, tr("Open project"), error);
+        return false;
+    }
+    m_document->replaceDocument(std::move(loaded));
+    m_filePath = QFileInfo(path).absoluteFilePath();
+    rememberProjectDirectory(m_filePath);
+    updateTitle();
+    statusBar()->showMessage(tr("Opened %1").arg(QFileInfo(path).fileName()), 4000);
+    return true;
+}
+
+bool MainWindow::save()
+{
+    return m_filePath.isEmpty() ? saveAs() : saveTo(m_filePath);
+}
+
+bool MainWindow::saveAs()
+{
+    const QString start = m_filePath.isEmpty()
+        ? QDir(projectDirectory()).filePath(tr("Untitled") + QLatin1Char('.') + QLatin1String(io::kProjectSuffix))
+        : m_filePath;
+    QString file = QFileDialog::getSaveFileName(this, tr("Save project"), start, projectFilter());
+    if (file.isEmpty())
+        return false;
+    if (QFileInfo(file).suffix() != QLatin1String(io::kProjectSuffix))
+        file += QLatin1Char('.') + QLatin1String(io::kProjectSuffix);
+    return saveTo(file);
+}
+
+bool MainWindow::saveTo(const QString &path)
+{
+    m_document->finishEdits(); // an open puppet warp goes into the file
+    QString error;
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    const bool saved = io::saveProject(m_document->document(), path, &error);
+    QApplication::restoreOverrideCursor();
+    if (!saved) {
+        QMessageBox::critical(this, tr("Save project"), error);
+        return false;
+    }
+    m_filePath = QFileInfo(path).absoluteFilePath();
+    rememberProjectDirectory(m_filePath);
+    m_document->markSaved();
+    updateTitle();
+    statusBar()->showMessage(tr("Saved %1").arg(QFileInfo(path).fileName()), 4000);
+    return true;
+}
+
+bool MainWindow::maybeSave()
+{
+    m_document->finishEdits();
+    if (!m_document->isModified())
+        return true;
+    const QString name = m_filePath.isEmpty() ? tr("Untitled") : QFileInfo(m_filePath).fileName();
+    const auto answer = QMessageBox::warning(this, tr("Unsaved changes"),
+                                             tr("Save the changes to %1 before closing it?").arg(name),
+                                             QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
+                                             QMessageBox::Save);
+    if (answer == QMessageBox::Save)
+        return save();
+    return answer == QMessageBox::Discard;
+}
+
+void MainWindow::updateTitle()
+{
+    const QString name = m_filePath.isEmpty() ? tr("Untitled") : QFileInfo(m_filePath).completeBaseName();
+    setWindowTitle(name + QStringLiteral("[*] — Mothion"));
+    setWindowModified(m_document->isModified());
+}
+
+void MainWindow::exportFrames()
+{
+    m_document->finishEdits();
+    const doc::Document &d = m_document->document();
+    const QString name = m_filePath.isEmpty() ? QString() : QFileInfo(m_filePath).completeBaseName();
+    ExportDialog dialog(m_document->currentFrame(), d.frameCount(), name, this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+
+    QString error;
+    bool done = false;
+    const QString file = dialog.path();
+    if (!dialog.isSequence()) {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        done = io::exportFrame(d, dialog.firstFrame(), file, dialog.options(), &error);
+        QApplication::restoreOverrideCursor();
+    } else {
+        const int total = dialog.lastFrame() - dialog.firstFrame() + 1;
+        QProgressDialog progress(tr("Exporting frames…"), tr("Cancel"), 0, total, this);
+        progress.setWindowModality(Qt::WindowModal);
+        progress.setMinimumDuration(500);
+        done = io::exportSequence(d, dialog.firstFrame(), dialog.lastFrame(), file, dialog.options(),
+                                  [&progress](int count, int) {
+                                      progress.setValue(count);
+                                      return !progress.wasCanceled();
+                                  },
+                                  &error);
+        done = done && !progress.wasCanceled();
+        if (progress.wasCanceled() && error.isEmpty()) {
+            statusBar()->showMessage(tr("Export cancelled"), 4000);
+            return;
+        }
+    }
+    if (!done) {
+        QMessageBox::critical(this, tr("Export frames"), error);
+        return;
+    }
+    statusBar()->showMessage(dialog.isSequence()
+                                 ? tr("Exported %1 frames to %2").arg(dialog.lastFrame() - dialog.firstFrame() + 1)
+                                       .arg(QFileInfo(file).absolutePath())
+                                 : tr("Exported %1").arg(QFileInfo(file).fileName()),
+                             4000);
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
+    if (!maybeSave()) {
+        event->ignore();
+        return;
+    }
     m_dockLayout->save();
     QMainWindow::closeEvent(event);
 }

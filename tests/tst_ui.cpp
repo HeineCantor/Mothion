@@ -4,13 +4,20 @@
 #include "canvas/PuppetTool.h"
 #include "canvas/SelectionTool.h"
 #include "document/DocumentController.h"
+#include "io/ProjectFile.h"
 #include "tools/ToolState.h"
+#include "ui/ExportDialog.h"
+#include "ui/MainWindow.h"
 #include "ui/PanelDock.h"
 #include "ui/panels/ToolPropertiesPanel.h"
 
+#include <QComboBox>
 #include <QElapsedTimer>
+#include <QFileInfo>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QStandardPaths>
+#include <QTemporaryDir>
 #include <QTest>
 
 using namespace mothion;
@@ -20,6 +27,33 @@ class TestUi : public QObject
     Q_OBJECT
 
 private slots:
+    void initTestCase() { QStandardPaths::setTestModeEnabled(true); } // keep the user's brushes out
+
+    // Opening a project swaps the whole document under every panel and the
+    // canvas (another size, other layers); the window then shows its name.
+    void mainWindowOpensAProject()
+    {
+        QTemporaryDir dir;
+        const QString path = dir.filePath(QStringLiteral("shot 12.mothion"));
+        doc::Document saved(640, 360);
+        saved.insertLayer(0, std::make_unique<doc::Layer>(saved.allocateLayerId(), doc::LayerProperties{"BG"}));
+        doc::Layer &ink = saved.insertLayer(1, std::make_unique<doc::Layer>(saved.allocateLayerId(),
+                                                                             doc::LayerProperties{"Ink"}));
+        doc::Drawing &drawing = ink.addDrawing({saved.allocateDrawingId(), "1", {}});
+        drawing.image.setPixel(5, 5, 0xff000000);
+        ink.timing().setExposure(0, 12, drawing.id);
+        QString error;
+        QVERIFY2(io::saveProject(saved, path, &error), qPrintable(error));
+
+        ui::MainWindow window;
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        QVERIFY(window.openFile(path));
+        QVERIFY(window.windowTitle().startsWith(QStringLiteral("shot 12")));
+        QVERIFY(!window.isWindowModified());
+        QTest::qWait(50); // let the panels repaint against the new document
+    }
+
     // A dock shorter than its panel (short or highly scaled screen) scrolls
     // the panel instead of squeezing it under the next dock; with room to
     // spare the panel fills the dock and nothing scrolls.
@@ -40,6 +74,22 @@ private slots:
         dock.resize(260, 900);
         QTRY_COMPARE(scroll->verticalScrollBar()->maximum(), 0);
         QCOMPARE(panel->height(), scroll->viewport()->height()); // fills the dock
+    }
+
+    // The file name follows the chosen format; whatever the remembered
+    // choices, the frames asked for stay within what the dialog offers.
+    void exportDialogKeepsNameAndFormatInStep()
+    {
+        ui::ExportDialog dialog(4, 24, QStringLiteral("walk"));
+        auto *format = dialog.findChild<QComboBox *>();
+        QVERIFY(format);
+        for (int i : {1, 0, 1}) {
+            format->setCurrentIndex(i);
+            QCOMPARE(io::formatForFile(dialog.path()), std::optional(dialog.options().format));
+        }
+        QCOMPARE(QFileInfo(dialog.path()).completeBaseName(), QStringLiteral("walk"));
+        QVERIFY(dialog.firstFrame() >= 0 && dialog.firstFrame() <= dialog.lastFrame());
+        QVERIFY(!dialog.options().transparent); // JPEG selected: never transparent
     }
 
     void importedImageGetsItsOwnLayer()

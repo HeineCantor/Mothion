@@ -5,7 +5,7 @@ Frame-by-frame 2D animation software for solo animators and small studios.
 **Status: prototype.** There is a document model (layers, drawings, Harmony-style
 exposure timing) with undo, a timeline and a layers panel, tablet input, a brush
 engine that can import Clip Studio Paint brushes, image import, move and selection
-tools and a puppet warp. There is no saving yet.
+tools, a puppet warp, saving and loading projects (`.mothion`) and PNG/JPEG export of frames.
 
 ## Build
 
@@ -76,6 +76,7 @@ build\RelWithDebInfo\mothion.exe
 
 ### Command line options
 
+- `mothion [project.mothion]`: opens a project at startup.
 - `--wintab` (Windows): use Wintab instead of Windows Ink. Needs the tablet driver's `wintab32.dll`.
 
 ## Architecture
@@ -97,6 +98,9 @@ src/
 │              Timing (Harmony-style exposures), Layer, Document, Command + commands/, History
 ├─ document/ DocumentController: owns Document and History, current layer/frame,
 │            runs commands and turns them into Qt signals (the UI's only access to the model)
+├─ io/       ProjectFile: .mothion projects (SQLite: document, layers, drawings, exposures,
+│            zlib-compressed tiles; versioned, saved to a temporary file then renamed);
+│            FrameExport: frames to PNG/JPEG, one image or a numbered sequence
 ├─ input/    the only place that knows QTabletEvent/QMouseEvent → PenSample
 │            TabletInputAdapter, ProximityFilter, TabletBackend(_wintab|_nowintab)
 ├─ canvas/   CanvasView (widget), ViewTransform (zoom/pan/rotation/mirroring), NavigationGesture,
@@ -168,6 +172,8 @@ After `toPenSample()`, no part of the program touches Qt input events.
 | Theme | Window → Theme → System / Light / Dark |
 | Brushes | File → Import brush (.sut)…: it appears in Sub tool |
 | Images | File → Import image…: a new layer above the current one, one drawing for the whole scene |
+| Projects | New (Ctrl+N), Open (Ctrl+O), Save (Ctrl+S), Save as (Ctrl+Shift+S); `.mothion` files. Unsaved changes are asked about before closing |
+| Export | File → Export frames… (Ctrl+E): PNG (optionally transparent) or JPEG; the current frame, the whole scene or a range (`name_0001.png`, …) |
 
 ## Notes on Qt 6 and tablets (checked against Qt 6.10 docs and sources)
 

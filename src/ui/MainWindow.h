@@ -31,13 +31,24 @@ class MainWindow : public QMainWindow
 public:
     explicit MainWindow(QWidget *parent = nullptr);
 
+    // Opens a project (no unsaved-changes question); false if it could not be read.
+    bool openFile(const QString &path);
+
 protected:
     void closeEvent(QCloseEvent *event) override;
 
 private:
     void createCommandBar();
     void createMenus();
-    void notImplemented(const QString &what);
+    void newDocument();
+    void open();
+    bool save();
+    bool saveAs();
+    bool saveTo(const QString &path);
+    // Asks what to do with unsaved changes; false if the user cancels.
+    bool maybeSave();
+    void updateTitle();
+    void exportFrames();
     void importImage();
     void importBrush();
 
@@ -50,6 +61,8 @@ private:
     QMenu *m_viewMenu = nullptr;
     QList<QAction *> m_fileActions;
     QList<QAction *> m_editActions;
+    QAction *m_saveAsAction = nullptr;
+    QString m_filePath; // empty until saved or opened
 };
 
 } // namespace mothion::ui

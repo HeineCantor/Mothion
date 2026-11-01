@@ -27,6 +27,8 @@ int main(int argc, char *argv[])
     const QCommandLineOption wintab(QStringLiteral("wintab"),
                                     QStringLiteral("Windows: use the Wintab tablet API instead of Windows Ink."));
     parser.addOption(wintab);
+    parser.addPositionalArgument(QStringLiteral("project"), QStringLiteral("A .mothion project to open."),
+                                 QStringLiteral("[project]"));
     parser.process(app);
 
     if (parser.isSet(wintab) && !mothion::input::setWinTabEnabled(true))
@@ -37,5 +39,7 @@ int main(int argc, char *argv[])
 
     mothion::ui::MainWindow window;
     window.show();
+    if (!parser.positionalArguments().isEmpty())
+        window.openFile(parser.positionalArguments().constFirst());
     return app.exec();
 }

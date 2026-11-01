@@ -51,6 +51,12 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
     connect(m_document, &DocumentController::structureChanged, this, &CanvasView::renderWholeFrame);
     connect(m_document, &DocumentController::currentFrameChanged, this, &CanvasView::renderWholeFrame);
     connect(m_document, &DocumentController::strokeInterrupted, this, &CanvasView::cancelStroke);
+    connect(m_document, &DocumentController::documentReplaced, this, [this] {
+        const doc::Document &replaced = m_document->document();
+        m_view.setDocumentSize(QSizeF(replaced.width(), replaced.height()));
+        m_view.fitToView(); // the frame itself is redrawn on structureChanged, which follows
+        emit viewChanged(m_view.zoom(), m_view.rotation());
+    });
 
     m_overlay->move(8, 8);
     m_overlay->hide();

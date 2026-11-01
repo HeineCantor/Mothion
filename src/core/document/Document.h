@@ -53,6 +53,11 @@ public:
     // Fresh ids; never reused within this document.
     LayerId allocateLayerId() { return m_nextLayerId++; }
     DrawingId allocateDrawingId() { return m_nextDrawingId++; }
+    // The next ids to allocate, as a saved file records them.
+    LayerId nextLayerId() const { return m_nextLayerId; }
+    DrawingId nextDrawingId() const { return m_nextDrawingId; }
+    // For loading: never moves the counters back below an id already in use.
+    void restoreIdCounters(LayerId nextLayer, DrawingId nextDrawing);
 
 private:
     int m_width;
