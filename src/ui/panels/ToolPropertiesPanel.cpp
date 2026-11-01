@@ -35,9 +35,8 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
     layout->addWidget(m_smoothing);
     layout->addSpacing(6);
     layout->addWidget(new QLabel(tr("Pressure curve"), this));
-    layout->addWidget(m_curveEditor);
+    layout->addWidget(m_curveEditor, 1); // takes the panel's spare height
     layout->addWidget(resetCurve, 0, Qt::AlignRight);
-    layout->addStretch(1);
 
     connect(m_size, &SliderField::valueEdited, this,
             [this](int v) { m_state->setSize(m_state->activeTool(), v); });

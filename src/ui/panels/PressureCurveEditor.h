@@ -6,7 +6,8 @@
 
 namespace mothion::ui {
 
-// Square editor for a PressureCurve: x = raw pen pressure, y = effective pressure.
+// Editor for a PressureCurve, drawn as the largest square that fits:
+// x = raw pen pressure, y = effective pressure.
 // The two Bézier control points can be dragged. A marker shows the last
 // pressure coming from the pen, to see the mapping live while testing.
 class PressureCurveEditor : public QWidget
@@ -20,8 +21,6 @@ public:
     const PressureCurve &curve() const { return m_curve; }
 
     QSize sizeHint() const override { return {180, 180}; }
-    bool hasHeightForWidth() const override { return true; }
-    int heightForWidth(int width) const override { return width; }
 
 public slots:
     // Raw pressure of the current pen sample, or a negative value to hide the marker.

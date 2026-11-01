@@ -16,10 +16,11 @@ constexpr double kHandleRadius = 5.0;
 PressureCurveEditor::PressureCurveEditor(QWidget *parent)
     : QWidget(parent)
 {
+    // Takes the room the panel gives it and draws the largest square that
+    // fits (plotRect). No height-for-width: dock areas ignore it when they
+    // size the panel, so a wide column made the editor taller than the panel.
     setMinimumSize(120, 120);
-    QSizePolicy policy(QSizePolicy::Preferred, QSizePolicy::Preferred);
-    policy.setHeightForWidth(true);
-    setSizePolicy(policy);
+    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     setToolTip(tr("Pressure curve: drag the two control points"));
 }
 

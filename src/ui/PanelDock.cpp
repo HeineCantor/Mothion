@@ -2,8 +2,10 @@
 
 #include "ui/IconFactory.h"
 
+#include <QEvent>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QScrollArea>
 #include <QToolButton>
 
 namespace mothion::ui {
@@ -21,6 +23,52 @@ QToolButton *makeTitleButton(IconId id, const QString &tip, QWidget *parent)
     return b;
 }
 
+// Holds a panel's content. The content gets the whole visible area, never
+// less than its minimum size; when the dock is smaller than that (a short
+// or highly scaled screen), the rest scrolls instead of spilling under the
+// next dock. Unlike QScrollArea's widgetResizable, height-for-width is not
+// applied, so square widgets keep fitting the height they are given, as
+// when the content sat in the dock directly.
+class PanelScrollArea : public QScrollArea
+{
+public:
+    explicit PanelScrollArea(QWidget *content, QWidget *parent)
+        : QScrollArea(parent)
+    {
+        setWidget(content); // also makes QScrollArea watch the content's events
+        setFrameShape(QFrame::NoFrame);
+        viewport()->setAutoFillBackground(false);
+        content->setAutoFillBackground(false);
+    }
+
+    // The dock area sizes docks from the content, as before.
+    QSize sizeHint() const override { return widget()->sizeHint(); }
+
+protected:
+    bool viewportEvent(QEvent *event) override
+    {
+        if (event->type() == QEvent::Resize)
+            fitContent();
+        return QScrollArea::viewportEvent(event);
+    }
+
+    bool eventFilter(QObject *watched, QEvent *event) override
+    {
+        const bool result = QScrollArea::eventFilter(watched, event);
+        if (watched == widget() && event->type() == QEvent::LayoutRequest)
+            fitContent(); // the content's minimum may have changed
+        return result;
+    }
+
+private:
+    void fitContent()
+    {
+        QWidget *content = widget();
+        const QSize minimum = content->minimumSizeHint().expandedTo(content->minimumSize());
+        content->resize(viewport()->size().expandedTo(minimum));
+    }
+};
+
 } // namespace
 
 PanelDock::PanelDock(const QString &title, const QString &objectName, QWidget *content,
@@ -28,7 +76,8 @@ PanelDock::PanelDock(const QString &title, const QString &objectName, QWidget *c
     : QDockWidget(title, parent)
 {
     setObjectName(objectName);
-    setWidget(content);
+    // Scrolls when the dock area has less room than the panel needs.
+    setWidget(new PanelScrollArea(content, this));
     setFeatures(DockWidgetMovable | DockWidgetFloatable | DockWidgetClosable);
 
     // Custom title bar. Mouse presses that the buttons don't take fall through
