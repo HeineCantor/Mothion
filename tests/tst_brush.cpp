@@ -62,6 +62,36 @@ class TestBrush : public QObject
     Q_OBJECT
 
 private slots:
+    // Tilt counts as Clip Studio does: 1 upright, 0 laid down (60° from vertical).
+    void tiltInputGrowsAsThePenStandsUp()
+    {
+        QCOMPARE(tiltInput(0, 0), 1.0);
+        QCOMPARE(tiltInput(60, 0), 0.0);
+        QCOMPARE(tiltInput(0, -60), 0.0);
+        QCOMPARE(tiltInput(90, 0), 0.0); // past what tablets report: clamped
+        QVERIFY(qAbs(tiltInput(30, 0) - 0.5) < 1e-9);
+        QCOMPARE(tiltInput(-25, 10), tiltInput(25, -10));
+        // 45° on both axes is 54.7° from vertical, not √2·45° = 63.6° (fully laid down).
+        QVERIFY(qAbs(tiltInput(45, 45) - (1.0 - 54.7356 / 60.0)) < 1e-4);
+    }
+
+    // "Weird pen": size with tilt on, linear, minimum 10 %. Upright draws the
+    // full size, laid down a tenth of it.
+    void tiltOnSizeIsWidestUpright()
+    {
+        Effector e;
+        e.available = e.active = InputTilt;
+        e.tiltMin = 0.1;
+        BrushInput in;
+        QCOMPARE(e.evaluate(17.0, in, nullptr), 17.0); // default input: upright
+        in.tilt = tiltInput(0, 0);
+        QCOMPARE(e.evaluate(17.0, in, nullptr), 17.0);
+        in.tilt = tiltInput(60, 0);
+        QVERIFY(qAbs(e.evaluate(17.0, in, nullptr) - 1.7) < 1e-9);
+        in.tilt = tiltInput(30, 0);
+        QVERIFY(e.evaluate(17.0, in, nullptr) < 17.0 && e.evaluate(17.0, in, nullptr) > 1.7);
+    }
+
     void lcgMatchesReferenceSequence()
     {
         Lcg rng(1);

@@ -518,10 +518,10 @@ brush::BrushInput CanvasView::brushInput(const PenSample &smoothed)
     in.y = doc.y();
     in.pressure = m_toolState->pressureCurve().map(smoothed.pressure);
     in.velocity = m_velocity.sample(smoothed.t, smoothed.x, smoothed.y);
-    const double tilt = std::hypot(smoothed.tiltX, smoothed.tiltY);
-    in.tilt = std::clamp(tilt / 60.0, 0.0, 1.0);
+    in.tilt = brush::tiltInput(smoothed.tiltX, smoothed.tiltY);
     // Barrel rotation when the pen reports it, else the direction it leans to.
-    in.penAngle = smoothed.rotation != 0.0f || tilt == 0.0
+    const bool leaning = smoothed.tiltX != 0.0f || smoothed.tiltY != 0.0f;
+    in.penAngle = smoothed.rotation != 0.0f || !leaning
                       ? double(smoothed.rotation)
                       : std::atan2(double(smoothed.tiltY), double(smoothed.tiltX)) * 180.0 / std::numbers::pi;
     return in;

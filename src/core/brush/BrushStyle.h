@@ -2,7 +2,10 @@
 
 #include "core/brush/Effector.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
+#include <numbers>
 
 namespace mothion::brush {
 
@@ -12,13 +15,28 @@ struct BrushInput
     double x = 0.0, y = 0.0;  // document pixels
     double pressure = 1.0;    // 0..1, after the global pressure curve
     double velocity = 0.0;    // 0..1 (see VelocityMeter)
-    double tilt = 0.0;        // 0..1, 0 = pen upright
+    double tilt = 1.0;        // 0..1, 1 = pen upright, 0 = leaning 60° or more (see tiltInput)
     double penAngle = 0.0;    // degrees: barrel rotation, or tilt direction
     double inOut = 1.0;       // 0..1 start/end-of-stroke factor, 1 in the middle
     double sizeScale = 1.0;   // multiplies the size
     double flowScale = 1.0;   // multiplies the flow
     double direction = 0.0;   // degrees, direction of travel (document, y down)
 };
+
+// The tilt input from the pen's X and Y tilt (degrees from vertical, as
+// tablets report them, ±60°). It grows as the pen stands up, as in Clip
+// Studio: with tilt on the size, an upright pen draws widest and a pen laid
+// down draws thinnest. The angle from vertical is the true one,
+// atan(√(tan²x + tan²y)), not √(x² + y²), which overstates diagonal tilts.
+inline double tiltInput(double tiltXDegrees, double tiltYDegrees)
+{
+    constexpr double kMaxTilt = 60.0; // what tablets report at most
+    constexpr double toRadians = std::numbers::pi / 180.0;
+    const double tx = std::tan(std::clamp(tiltXDegrees, -kMaxTilt, kMaxTilt) * toRadians);
+    const double ty = std::tan(std::clamp(tiltYDegrees, -kMaxTilt, kMaxTilt) * toRadians);
+    const double fromVertical = std::atan(std::hypot(tx, ty)) / toRadians;
+    return std::clamp(1.0 - fromVertical / kMaxTilt, 0.0, 1.0);
+}
 
 // How dabs are spaced along the stroke (BrushAutoIntervalType).
 enum class SpacingMode : std::uint8_t {
