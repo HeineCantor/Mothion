@@ -7,11 +7,13 @@
 #include "core/PenSample.h"
 #include "core/StrokeSmoother.h"
 #include "core/brush/DabGenerator.h"
+#include "core/brush/StrokeShaper.h"
 #include "core/brush/VelocityMeter.h"
 
 #include <QWidget>
 
 #include <optional>
+#include <vector>
 
 class QPointingDevice;
 
@@ -100,6 +102,12 @@ private:
     void endStroke();
     void cancelStroke(); // the controller interrupted the stroke (undo, frame change...)
     brush::BrushInput brushInput(const PenSample &smoothed);
+    // Records a stroke point (the anti-jitter filter may replace the last
+    // one instead) and draws the points that are settled.
+    void addStrokePoint(const brush::BrushInput &in);
+    // Draws the recorded points not drawn yet; `all` includes the last,
+    // which the anti-jitter filter otherwise holds back.
+    void drawPendingPoints(bool all);
 
     void renderWholeFrame();                     // frame, layers or timing changed
     void renderDocumentRect(const QRect &docRect); // pixels changed
@@ -116,6 +124,10 @@ private:
     FrameRenderer m_frame;
     std::optional<StrokeSession> m_stroke; // set while a stroke is in progress
     std::optional<brush::DabGenerator> m_dabs;
+    std::vector<brush::BrushInput> m_points; // the stroke so far, for the final pass
+    std::size_t m_drawnPoints = 0;           // points already given to m_dabs
+    double m_drawnLength = 0.0;              // length of the stroke through them, px
+    std::uint32_t m_seed = 0;                // the stroke's random seed, reused by the final pass
     brush::VelocityMeter m_velocity;
     StrokeSmoother m_smoother;
     bool m_eraseStroke = false; // current stroke erases (eraser tool or eraser end)

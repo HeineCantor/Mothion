@@ -1,6 +1,7 @@
 #include "tools/SutImporter.h"
 
 #include "core/brush/Effector.h"
+#include "core/brush/StrokeShaper.h"
 
 #include <QFileInfo>
 #include <QHash>
@@ -121,26 +122,49 @@ bool hasBlob(const Params &p, const char *key)
     return v.typeId() == QMetaType::QByteArray && v.toByteArray().size() > 1;
 }
 
-// Start/end tapering with at least one parameter actually targeted.
-bool usesInOut(const Params &p)
+// Start/end targets: [12, N, 12] then N triples (parameter id, enabled,
+// minimum %). Each enabled one switches on the in/out input of that
+// parameter's Effector.
+void applyInOutTargets(const Params &p, brush::BrushStyle &s)
 {
-    if (!flag(p, "BrushUseIn") && !flag(p, "BrushUseOut"))
-        return false;
     const QByteArray targets = p.value(QStringLiteral("BrushInOutTarget")).toByteArray();
     qint32 count = 0;
-    if (!readInt32BE(targets, 4, count))
-        return false;
-    // [12, N, 12, ...] then N triples (id, enabled, value); some files omit the 4th int.
+    if (!readInt32BE(targets, 4, count) || count < 0)
+        return;
+    // Some files carry a 4th header int (the byte size of the list).
     const qsizetype start = targets.size() >= (4 + 3 * qsizetype(count)) * 4 ? 4 : 3;
     for (qint32 k = 0; k < count; ++k) {
-        qint32 enabled = 0;
-        if (readInt32BE(targets, (start + 3 * k + 1) * 4, enabled) && enabled != 0)
-            return true;
+        qint32 id = 0, enabled = 0, minimum = 0;
+        const qsizetype at = (start + 3 * qsizetype(k)) * 4;
+        if (!readInt32BE(targets, at, id) || !readInt32BE(targets, at + 4, enabled)
+            || !readInt32BE(targets, at + 8, minimum) || enabled == 0)
+            continue;
+        brush::Effector *e = nullptr;
+        switch (id) {
+        case 1001: e = &s.sizeEffector; break;
+        case 1011: e = &s.dabOpacityEffector; break;
+        case 1021: e = &s.flowEffector; break;
+        case 1041: e = &s.spacingEffector; break;
+        case 1051: e = &s.thicknessEffector; break;
+        case 1082: e = &s.mix.amountEffector; break;
+        case 1084: e = &s.mix.densityEffector; break;
+        case 1100: e = &s.color.subColorEffector; break;
+        case 1104: e = &s.color.hueEffector; break;
+        case 1106: e = &s.color.saturationEffector; break;
+        case 1108: e = &s.color.valueEffector; break;
+        case 1132: e = &s.spraySizeEffector; break;
+        case 1134: e = &s.sprayDensityEffector; break;
+        default: break; // texture density, blur, dual brush: not drawn
+        }
+        if (!e)
+            continue;
+        e->available |= brush::InputInOut;
+        e->active |= brush::InputInOut;
+        e->inOutMin = minimum * 0.01;
     }
-    return false;
 }
 
-QStringList unsupported(const Params &p)
+QStringList unsupported(const Params &p, const brush::BrushStyle &s)
 {
     QStringList w;
     auto check = [&](bool used, const QString &what) {
@@ -149,16 +173,15 @@ QStringList unsupported(const Params &p)
     };
     check(number(p, "CompositeMode") != 0, QObject::tr("metodo di fusione"));
     check(hasBlob(p, "TextureImage"), QObject::tr("texture"));
-    check(flag(p, "BrushWaterColor"), QObject::tr("acquerello"));
-    check(flag(p, "BrushUseWaterEdge"), QObject::tr("bordo acquerello"));
     check(flag(p, "UseDualBrush"), QObject::tr("doppia punta"));
-    check(flag(p, "BrushRibbon"), QObject::tr("nastro"));
-    check(flag(p, "BrushHueChange") || flag(p, "BrushSaturationChange") || flag(p, "BrushValueChange"),
-          QObject::tr("variazione di colore per timbro"));
-    check(flag(p, "BrushSubColor"), QObject::tr("colore secondario"));
-    check(flag(p, "BrushChangeStrokeColor"), QObject::tr("variazione di colore per tratto"));
-    check(flag(p, "BrushUseRevision"), QObject::tr("correzione a posteriori"));
-    check(usesInOut(p), QObject::tr("inizio e fine del tratto"));
+    check(number(p, "BrushWaterColor") > 1, QObject::tr("modalità di miscela %1").arg(number(p, "BrushWaterColor")));
+    check(s.mix.on && number(p, "BrushColorMixingMode") != 0, QObject::tr("miscela dei colori LMS"));
+    check(brush::usesInOut(s) && flag(p, "BrushInOutBySpeed"), QObject::tr("inizio e fine in base alla velocità"));
+    check(brush::usesInOut(s) && s.inOut.type != brush::InOutType::Ratio
+              && (number(p, "BrushInLengthUnit") != 0 || number(p, "BrushOutLengthUnit") != 0),
+          QObject::tr("inizio e fine in unità diverse dai pixel"));
+    check(s.waterEdge.on && (number(p, "BrushWaterEdgeRadiusUnit") != 0 || number(p, "BrushWaterEdgeBlurUnit") != 0),
+          QObject::tr("bordo acquerello in unità diverse dai pixel"));
     check(flag(p, "BrushUseSpray") && flag(p, "BrushSprayUseFixedPoint"), QObject::tr("spruzzo a punti fissi"));
     check(flag(p, "BrushUsePatternImage") && number(p, "BrushPatternOrderType") == 5,
           QObject::tr("ordine delle punte a elenco"));
@@ -202,6 +225,58 @@ brush::BrushStyle styleFrom(const Params &p, int tipCount)
     s.sprayDensity = number(p, "BrushSprayDensity", 1.0);
     s.sprayDensityEffector = effector(p, "BrushSprayDensityEffector");
     s.sprayBias = number(p, "BrushSprayBias") / 100.0;
+
+    s.ribbon = flag(p, "BrushRibbon");
+
+    // Start and end of the stroke.
+    s.inOut.in = flag(p, "BrushUseIn");
+    s.inOut.out = flag(p, "BrushUseOut");
+    const int inOutType = int(number(p, "BrushInOutType"));
+    s.inOut.type = inOutType >= 0 && inOutType <= 2 ? brush::InOutType(inOutType) : brush::InOutType::Length;
+    s.inOut.inLength = number(p, "BrushInLength");
+    s.inOut.outLength = number(p, "BrushOutLength");
+    s.inOut.inRatio = number(p, "BrushInRatio") / 100.0;
+    s.inOut.outRatio = number(p, "BrushOutRatio") / 100.0;
+
+    // Correction: the level (ID 40) ramps the start pressure; the flag
+    // after it (ID 41) switches on the anti-jitter filter.
+    s.correction = std::max(0, int(number(p, "FlickerReduction")));
+    s.flickerFilter = flag(p, "FlickerReductionBySpeed");
+    s.revision = flag(p, "BrushUseRevision") ? std::max(1, int(number(p, "BrushRevision", 10.0))) : 0;
+
+    // Color: secondary color blend and H/S/V shifts, per dab and per stroke.
+    brush::ColorStyle &c = s.color;
+    c.subColor = number(p, "BrushSubColor") / 100.0;
+    c.subColorEffector = effector(p, "BrushSubColorEffector");
+    c.hue = number(p, "BrushHueChange"); // degrees
+    c.hueEffector = effector(p, "BrushHueChangeEffector");
+    c.saturation = number(p, "BrushSaturationChange") / 100.0;
+    c.saturationEffector = effector(p, "BrushSaturationChangeEffector");
+    c.value = number(p, "BrushValueChange") / 100.0;
+    c.valueEffector = effector(p, "BrushValueChangeEffector");
+    c.perStroke = flag(p, "BrushChangeStrokeColor");
+    c.strokeSubColor = number(p, "BrushStrokeSubColor") / 100.0;
+    c.strokeHue = number(p, "BrushStrokeHueChange");
+    c.strokeSaturation = number(p, "BrushStrokeSaturationChange") / 100.0;
+    c.strokeValue = number(p, "BrushStrokeValueChange") / 100.0;
+    const int target = int(number(p, "BrushChangeColorTarget", 1.0));
+    c.target = target >= 0 && target <= 2 ? brush::ColorTarget(target) : brush::ColorTarget::Main;
+
+    // Watercolor mixing (mode 1).
+    s.mix.on = number(p, "BrushWaterColor") == 1.0;
+    s.mix.amount = number(p, "BrushMixColor", 100.0) / 100.0;
+    s.mix.amountEffector = effector(p, "BrushMixColorEffector");
+    s.mix.density = number(p, "BrushMixAlpha", 100.0) / 100.0;
+    s.mix.densityEffector = effector(p, "BrushMixAlphaEffector");
+    s.mix.stretch = number(p, "BrushMixColorExtension") / 100.0;
+
+    s.waterEdge.on = flag(p, "BrushUseWaterEdge");
+    s.waterEdge.radius = number(p, "BrushWaterEdgeRadius", 3.0);
+    s.waterEdge.alphaPower = number(p, "BrushWaterEdgeAlphaPower", 20.0) / 100.0;
+    s.waterEdge.valuePower = number(p, "BrushWaterEdgeValuePower") / 100.0;
+    s.waterEdge.blur = number(p, "BrushWaterEdgeBlur");
+
+    applyInOutTargets(p, s);
     return s;
 }
 
@@ -392,7 +467,7 @@ std::optional<SutImport> importSut(const QString &path, QString *error)
             result.warnings << QObject::tr("punte non leggibili: uso un timbro tondo");
     }
     definition->style = styleFrom(params, int(definition->tips.size()));
-    result.warnings << unsupported(params);
+    result.warnings << unsupported(params, definition->style);
 
     BrushPreset &preset = result.preset;
     preset.name = name;

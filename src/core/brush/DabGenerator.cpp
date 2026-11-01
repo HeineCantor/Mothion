@@ -60,6 +60,14 @@ std::vector<BrushDab> DabGenerator::begin(const BrushInput &first)
 {
     m_last = first;
     m_dabIndex = 0;
+    const ColorStyle &c = m_style.color;
+    if (c.perStroke) {
+        // One shift for the whole stroke: either way for H/S/V, towards the secondary color for the blend.
+        m_strokeColor.hue = (2.0 * m_rng.next01() - 1.0) * c.strokeHue;
+        m_strokeColor.saturation = (2.0 * m_rng.next01() - 1.0) * c.strokeSaturation;
+        m_strokeColor.value = (2.0 * m_rng.next01() - 1.0) * c.strokeValue;
+        m_strokeColor.subColor = m_rng.next01() * c.strokeSubColor;
+    }
     std::vector<BrushDab> dabs;
     m_remainder = place(first, dabs);
     return dabs;
@@ -191,6 +199,20 @@ DabGenerator::Single DabGenerator::computeDab(const BrushInput &in, bool applyRa
             angle += (rng->next01() - 0.5) * s.rotationRandom * 360.0;
     }
     dab.angle = wrapDegrees(angle + angleExtra);
+
+    // Color variations and watercolor mixing.
+    const ColorStyle &c = s.color;
+    if (c.varies()) {
+        dab.color.subColor = std::clamp(c.subColorEffector.evaluate(c.subColor, in, rng) + m_strokeColor.subColor, 0.0, 1.0);
+        dab.color.hue = c.hueEffector.evaluate(c.hue, in, rng) + m_strokeColor.hue;
+        dab.color.saturation = c.saturationEffector.evaluate(c.saturation, in, rng) + m_strokeColor.saturation;
+        dab.color.value = c.valueEffector.evaluate(c.value, in, rng) + m_strokeColor.value;
+    }
+    dab.color.target = c.target;
+    if (s.mix.on) {
+        dab.mixAmount = std::clamp(s.mix.amountEffector.evaluate(s.mix.amount, in, rng), 0.0, 1.0);
+        dab.mixDensity = std::clamp(s.mix.densityEffector.evaluate(s.mix.density, in, rng), 0.0, 1.0);
+    }
     return result;
 }
 

@@ -355,22 +355,56 @@ void CanvasView::beginStroke(const PenSample &sample)
     style.size = settings.size / 2.0;
     auto stamper = std::make_shared<DabStamper>(m_toolState->color(), style.hardness, definition->tips,
                                                 style.verticalThickness);
+    stamper->setSecondaryColor(m_toolState->secondaryColor());
     const doc::Document &d = m_document->document();
     m_stroke.emplace(*target->image, std::move(stamper), settings.opacity, m_eraseStroke,
                      QRect(0, 0, d.width(), d.height()));
-    m_dabs.emplace(style, QRandomGenerator::global()->generate());
+    m_stroke->setStyle(style);
+    m_seed = QRandomGenerator::global()->generate();
+    m_dabs.emplace(style, m_seed);
+    m_points.clear();
+    m_drawnPoints = 0;
+    m_drawnLength = 0.0;
 
     m_smoother.setStrength(m_toolState->smoothing());
     m_smoother.reset();
     m_velocity.reset();
-    const auto dabs = m_dabs->begin(brushInput(m_smoother.filter(sample)));
-    m_document->notifyPainted(m_stroke->addDabs(dabs));
+    addStrokePoint(brushInput(m_smoother.filter(sample)));
 }
 
 void CanvasView::continueStroke(const PenSample &sample)
 {
-    const auto dabs = m_dabs->continueTo(brushInput(m_smoother.filter(sample)));
-    m_document->notifyPainted(m_stroke->addDabs(dabs));
+    addStrokePoint(brushInput(m_smoother.filter(sample)));
+}
+
+void CanvasView::addStrokePoint(const brush::BrushInput &in)
+{
+    const std::size_t n = m_points.size();
+    // A wobble replaces the last point, which is why that one is not drawn yet.
+    if (m_dabs->style().flickerFilter && n >= 2 && m_drawnPoints < n
+        && brush::isJitter(m_points[n - 2], m_points[n - 1], in, 0.05 / m_view.zoom()))
+        m_points.back() = in;
+    else
+        m_points.push_back(in);
+    drawPendingPoints(!m_dabs->style().flickerFilter);
+}
+
+void CanvasView::drawPendingPoints(bool all)
+{
+    const std::size_t end = all ? m_points.size() : m_points.size() - std::min<std::size_t>(1, m_points.size());
+    QRect changed;
+    for (; m_drawnPoints < end; ++m_drawnPoints) {
+        brush::BrushInput in = m_points[m_drawnPoints];
+        if (m_drawnPoints > 0) {
+            const brush::BrushInput &prev = m_points[m_drawnPoints - 1];
+            m_drawnLength += std::hypot(in.x - prev.x, in.y - prev.y);
+        }
+        // Live start/end: the start ramp or the fade; the rest needs the whole stroke.
+        in.inOut = brush::liveInOut(m_dabs->style().inOut, m_drawnLength);
+        const auto dabs = m_drawnPoints == 0 ? m_dabs->begin(in) : m_dabs->continueTo(in);
+        changed |= m_stroke->addDabs(dabs);
+    }
+    m_document->notifyPainted(changed);
 }
 
 void CanvasView::endStroke()
@@ -378,9 +412,22 @@ void CanvasView::endStroke()
     // The release sample itself is not drawn: its pressure is often already 0.
     if (!m_stroke)
         return;
+    drawPendingPoints(true);
+    const brush::BrushStyle style = m_dabs->style();
+    if (brush::needsFinalPass(style)) {
+        // Redraw the whole stroke as it is drawn for good, with the same random seed.
+        QRect changed = m_stroke->restart();
+        const std::vector<brush::BrushInput> points = brush::finalPoints(style, m_points);
+        brush::DabGenerator generator(style, m_seed);
+        for (std::size_t i = 0; i < points.size(); ++i)
+            changed |= m_stroke->addDabs(i == 0 ? generator.begin(points[i]) : generator.continueTo(points[i]));
+        m_document->notifyPainted(changed);
+    }
+    m_document->notifyPainted(m_stroke->finish());
     m_document->endPaint(m_stroke->before());
     m_stroke.reset();
     m_dabs.reset();
+    m_points.clear();
 }
 
 void CanvasView::cancelStroke()

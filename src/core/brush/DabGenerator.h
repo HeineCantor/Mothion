@@ -56,6 +56,7 @@ private:
     BrushInput m_last;
     double m_remainder = 0.0; // distance from the last point to the next dab
     int m_dabIndex = 0;       // counts dab positions for the tip order
+    DabColor m_strokeColor;   // per-stroke color shift, drawn in begin()
 };
 
 } // namespace mothion::brush

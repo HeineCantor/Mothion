@@ -161,6 +161,86 @@ private slots:
         QCOMPARE(image.tile({0, 0}).get(), original.tile({0, 0}).get());
     }
 
+    void dabsTakeTheSecondaryColor()
+    {
+        doc::TiledImage image;
+        auto stamper = std::make_shared<canvas::DabStamper>(Qt::black, 1.0);
+        stamper->setSecondaryColor(Qt::red);
+        canvas::StrokeSession session(image, stamper, 1.0, false);
+        brush::BrushStyle s = roundStyle(5.0);
+        s.color.subColor = 1.0; // all the way to the secondary color
+        brush::DabGenerator gen(s);
+        session.addDabs(gen.begin(point(20, 20)));
+        QCOMPARE(QColor::fromRgba(image.pixel(20, 20)), QColor(Qt::red));
+    }
+
+    void watercolorPicksUpThePaintUnderneath()
+    {
+        doc::TiledImage image;
+        stroke(image, Qt::red, 1.0, false, {0, 20}, {100, 20}, 10.0);
+        auto stamper = std::make_shared<canvas::DabStamper>(Qt::blue, 1.0);
+        canvas::StrokeSession session(image, stamper, 1.0, false);
+        brush::BrushStyle s = roundStyle(4.0);
+        s.mix.on = true;
+        s.mix.amount = 0.0; // no paint of its own: only what it picks up
+        session.setStyle(s);
+        brush::DabGenerator gen(s);
+        session.addDabs(gen.begin(point(50, 20)));
+        QCOMPARE(QColor::fromRgba(image.pixel(50, 20)), QColor(Qt::red));
+        // On an empty spot there is nothing to pick up, and no paint of its own.
+        session.addDabs(brush::DabGenerator(s).begin(point(50, 80)));
+        QCOMPARE(qAlpha(image.pixel(50, 80)), 0);
+    }
+
+    void ribbonFillsBetweenDabs()
+    {
+        doc::TiledImage image;
+        canvas::StrokeSession session(image, Qt::black, 1.0, false);
+        brush::BrushStyle s = roundStyle(5.0);
+        s.ribbon = true;
+        s.spacing = 4.0; // dabs 40 px apart
+        session.setStyle(s);
+        brush::DabGenerator gen(s);
+        session.addDabs(gen.begin(point(10, 30)));
+        session.addDabs(gen.continueTo(point(90, 30)));
+        QCOMPARE(qAlpha(image.pixel(30, 30)), 255); // between two dabs
+        QCOMPARE(qAlpha(image.pixel(30, 34)), 255); // across: the dab's half width
+        QCOMPARE(qAlpha(image.pixel(30, 40)), 0);
+    }
+
+    void waterEdgeDarkensTheRim()
+    {
+        doc::TiledImage image;
+        auto stamper = std::make_shared<canvas::DabStamper>(QColor(200, 200, 200), 1.0);
+        canvas::StrokeSession session(image, stamper, 1.0, false);
+        brush::BrushStyle s = roundStyle(20.0);
+        s.flow = 0.5;
+        s.waterEdge.on = true;
+        s.waterEdge.radius = 4.0;
+        s.waterEdge.valuePower = 0.5;
+        session.setStyle(s);
+        session.addDabs(brush::DabGenerator(s).begin(point(50, 50)));
+        const QRgb centreBefore = image.pixel(50, 50);
+        QVERIFY(!session.finish().isEmpty());
+        QCOMPARE(image.pixel(50, 50), centreBefore); // deep inside: untouched
+        const QColor rim = QColor::fromRgba(image.pixel(50, 31)); // 1 px inside the edge
+        const QColor centre = QColor::fromRgba(centreBefore);
+        QVERIFY(rim.alpha() >= centre.alpha());
+        QVERIFY(qRed(image.pixel(50, 31)) * 255 / std::max(1, rim.alpha()) < 200); // darker once unpremultiplied
+    }
+
+    void restartClearsTheStrokeForTheFinalPass()
+    {
+        doc::TiledImage image;
+        canvas::StrokeSession session(image, Qt::black, 1.0, false);
+        brush::DabGenerator gen(roundStyle(5.0));
+        session.addDabs(gen.begin(point(10, 10)));
+        QVERIFY(!session.restart().isEmpty());
+        QCOMPARE(qAlpha(image.pixel(10, 10)), 0);
+        session.addDabs(brush::DabGenerator(roundStyle(5.0)).begin(point(40, 10)));
+        QCOMPARE(qAlpha(image.pixel(40, 10)), 255);
+    }
+
     // --- FrameRenderer ---------------------------------------------------------
 
     void frameRendererComposesVisibleLayersAtFrame()

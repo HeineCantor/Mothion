@@ -38,8 +38,8 @@ QImage renderPreview(const tools::BrushPreset &preset, const QColor &ink)
     canvas::StrokeSession session(
         image, std::make_shared<canvas::DabStamper>(ink, style.hardness, definition->tips, style.verticalThickness),
         preset.opacity, false, area);
-    brush::DabGenerator generator(style, 12345); // fixed seed: the preview never changes
     constexpr int kSteps = 60;
+    std::vector<brush::BrushInput> points;
     for (int i = 0; i <= kSteps; ++i) {
         const double t = double(i) / kSteps;
         brush::BrushInput in;
@@ -47,9 +47,9 @@ QImage renderPreview(const tools::BrushPreset &preset, const QColor &ink)
         in.y = kPreviewSize.height() / 2.0 - std::sin(t * 2 * std::numbers::pi) * 7;
         in.pressure = preset.curve.map(float(std::sin(t * std::numbers::pi))); // 0 -> 1 -> 0
         in.velocity = 0.3;
-        const auto dabs = i == 0 ? generator.begin(in) : generator.continueTo(in);
-        session.addDabs(dabs);
+        points.push_back(in);
     }
+    session.paintStroke(style, 12345, std::move(points)); // fixed seed: the preview never changes
     return canvas::toQImage(image, area);
 }
 

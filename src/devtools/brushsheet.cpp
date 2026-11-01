@@ -4,8 +4,8 @@
 //
 // One panel per brush (the built-in round brush first), drawn at the brush's
 // real size and scaled down to the sheet, with strokes that exercise
-// pressure, speed and direction. For brushes with image tips a second panel
-// uses the tip thumbnails as drawn instead of the filled interpretation.
+// pressure, speed and direction. Main color dark gray, secondary orange;
+// brushes that mix colors get two blue bands to mix with.
 
 #include "canvas/StrokeSession.h"
 #include "canvas/TileQt.h"
@@ -91,17 +91,26 @@ QImage renderPanel(const QString &title, const tools::BrushPreset &preset, const
     const QRect area(0, 0, int(unit * 8.0), int(unit * 3.6));
 
     doc::TiledImage image;
-    auto stamper = std::make_shared<canvas::DabStamper>(QColor(0x20, 0x20, 0x24), style.hardness, tips,
-                                                        style.verticalThickness);
-    canvas::StrokeSession session(image, stamper, preset.opacity, false, area);
-    std::uint32_t seed = 1;
-    for (const Stroke &s : testStrokes(unit)) {
-        brush::DabGenerator gen(style, seed++);
-        for (std::size_t i = 0; i < s.points.size(); ++i) {
-            const auto dabs = i == 0 ? gen.begin(s.points[i]) : gen.continueTo(s.points[i]);
-            session.addDabs(dabs);
+    if (style.mix.on) {
+        // Something to mix with: two bands of paint under the strokes.
+        canvas::StrokeSession bands(image, QColor(0x2a, 0x6f, 0xd0), 1.0, false, area);
+        brush::BrushStyle band;
+        band.size = unit * 0.35;
+        band.sizeEffector = {};
+        for (double y : {1.4, 2.2}) {
+            brush::DabGenerator gen(band);
+            brush::BrushInput a, b;
+            a.x = 0.0, a.y = b.y = unit * y, b.x = unit * 8.0;
+            bands.addDabs(gen.begin(a));
+            bands.addDabs(gen.continueTo(b));
         }
     }
+    auto stamper = std::make_shared<canvas::DabStamper>(QColor(0x20, 0x20, 0x24), style.hardness, tips,
+                                                        style.verticalThickness);
+    stamper->setSecondaryColor(QColor(0xe0, 0x60, 0x30));
+    std::uint32_t seed = 1;
+    for (const Stroke &s : testStrokes(unit))
+        canvas::StrokeSession(image, stamper, preset.opacity, false, area).paintStroke(style, seed++, s.points);
 
     QImage panel(kPanelWidth, kPanelHeight + kLabelHeight, QImage::Format_ARGB32_Premultiplied);
     panel.fill(QColor(0xf4, 0xf4, 0xf0));
@@ -152,9 +161,6 @@ int main(int argc, char *argv[])
         if (!imported->warnings.isEmpty())
             title += QStringLiteral("   [non riprodotto: %1]").arg(imported->warnings.join(QStringLiteral(", ")));
         panels << renderPanel(title, preset, preset.brush->tips);
-        if (!imported->tipThumbnails.isEmpty())
-            panels << renderPanel(preset.name + QStringLiteral(" — punte come disegnate (solo contorno)"), preset,
-                                  imported->tipThumbnails);
         std::printf("%s: %d punte, %s\n", qPrintable(preset.name), int(preset.brush->tips.size()),
                     imported->warnings.isEmpty() ? "tutto supportato"
                                                  : qPrintable(imported->warnings.join(QStringLiteral("; "))));

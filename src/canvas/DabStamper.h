@@ -23,6 +23,9 @@ namespace mothion::canvas {
 //
 // A dab is drawn at its alpha with SourceOver, so overlapping dabs build up
 // as a + c·(1 − a): flow < 1 accumulates towards full coverage.
+//
+// Dabs with color variations (brush::DabColor) are drawn in their own color:
+// the stamp is recolored on the fly, so plain dabs stay as cheap as before.
 class DabStamper
 {
 public:
@@ -30,7 +33,19 @@ public:
     DabStamper(const QColor &color, double hardness, const QList<QImage> &tips = {},
                bool verticalThickness = false);
 
+    // The color variations blend towards and shift this one too (default white).
+    void setSecondaryColor(const QColor &color);
+    QColor color() const { return m_color; }
+
+    // The dab's color: main and secondary color shifted in H/S/V, then blended.
+    QColor colorFor(const brush::DabColor &variation) const;
+
     void draw(QPainter &painter, const brush::BrushDab &dab) const;
+    void draw(QPainter &painter, const brush::BrushDab &dab, const QColor &color) const;
+    // Ribbon: the tip stretched over the quad joining two dabs, its width
+    // across the segment (each dab's radius on either side), its height along it.
+    void drawRibbon(QPainter &painter, const brush::BrushDab &from, const brush::BrushDab &to,
+                    const QColor &color) const;
 
     // Document area a dab can touch.
     QRectF bounds(const brush::BrushDab &dab) const;
@@ -43,8 +58,12 @@ private:
     };
     static Mipmap buildMipmap(const QImage &coverage, const QColor &color);
     QSizeF footprint(const brush::BrushDab &dab) const; // full width × height before rotation
+    // `stamp` in `color` (it is stored in the main color).
+    QImage recolored(const QImage &stamp, const QColor &color) const;
+    const QImage *stampFor(const brush::BrushDab &dab, double pixels) const; // null = hard ellipse
 
     QColor m_color;
+    QColor m_secondary = Qt::white;
     bool m_hard;
     bool m_verticalThickness;
     Mipmap m_soft;

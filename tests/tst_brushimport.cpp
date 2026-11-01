@@ -125,10 +125,15 @@ void writeSut(const QString &file, const QImage &thumbnail)
             "create table Variant(_PW_ID integer primary key, VariantID integer, BrushSize real, BrushSizeUnit integer, "
             "BrushSizeEffector blob, BrushFlow integer, BrushHardness integer, BrushInterval real, Opacity integer, "
             "BrushUsePatternImage integer, BrushPatternImageArray blob, BrushPatternOrderType integer, "
-            "BrushRotation real, BrushRotationEffector integer, BrushWaterColor integer)")));
-        q.prepare(QStringLiteral("insert into Variant values(1, 2, 300.0, 0, ?, 20, 80, 50.0, 90, 1, ?, 3, 90.0, 67, 1)"));
+            "BrushRotation real, BrushRotationEffector integer, BrushWaterColor integer, BrushUseIn integer, "
+            "BrushUseOut integer, BrushInLength real, BrushInOutTarget blob)")));
+        q.prepare(QStringLiteral(
+            "insert into Variant values(1, 2, 300.0, 0, ?, 20, 80, 50.0, 90, 1, ?, 3, 90.0, 67, 1, 1, 0, 25.0, ?)"));
         q.addBindValue(fromHex(kSizeEffector));
         q.addBindValue(patternArray(QStringLiteral(".:Paint001:abc:data:material.layer")));
+        // Start/end targets: size enabled, flow listed but off.
+        q.addBindValue(int32BE(12) + int32BE(2) + int32BE(12) + int32BE(1001) + int32BE(1) + int32BE(0) + int32BE(1021)
+                       + int32BE(0) + int32BE(0));
         QVERIFY(q.exec());
         QVERIFY(q.exec(QStringLiteral("create table MaterialFile(_PW_ID integer primary key, OriginalPath text, "
                                       "FileData blob)")));
@@ -168,13 +173,18 @@ private slots:
         QCOMPARE(s.flow, 0.2);
         QCOMPARE(s.hardness, 0.8);
         QCOMPARE(s.spacing, 0.5);
-        QCOMPARE(s.sizeEffector.inputs(), std::uint32_t(brush::InputPressure | brush::InputVelocity));
+        QCOMPARE(s.sizeEffector.inputs(),
+                 std::uint32_t(brush::InputPressure | brush::InputVelocity | brush::InputInOut));
         QCOMPARE(s.sizeEffector.velocityTo, 3.0);
         QCOMPARE(s.tipCount, 1);
         QCOMPARE(s.tipOrder, brush::TipOrder::Random);
         QCOMPARE(s.rotationMode, 67u);
         QCOMPARE(preset.brush->tips.size(), 1);
-        QVERIFY(imported->warnings.join(' ').contains(QStringLiteral("acquerello")));
+        QVERIFY(s.mix.on); // watercolor mode 1
+        QVERIFY(s.sizeEffector.uses(brush::InputInOut)); // a start/end target
+        QVERIFY(!s.flowEffector.uses(brush::InputInOut)); // listed but not enabled
+        QVERIFY(s.inOut.in && !s.inOut.out);
+        QCOMPARE(s.inOut.inLength, 25.0);
     }
 
     void glowThumbnailBecomesAFilledShape()

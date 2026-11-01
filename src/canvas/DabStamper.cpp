@@ -3,9 +3,12 @@
 #include "core/brush/Hardness.h"
 
 #include <QPainter>
+#include <QPolygonF>
+#include <QTransform>
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 
 namespace mothion::canvas {
 
@@ -97,7 +100,67 @@ QRectF DabStamper::bounds(const brush::BrushDab &dab) const
     return QRectF(dab.x - r, dab.y - r, 2.0 * r, 2.0 * r);
 }
 
+void DabStamper::setSecondaryColor(const QColor &color)
+{
+    m_secondary = color;
+    m_secondary.setAlpha(255);
+}
+
+namespace {
+
+QColor shifted(const QColor &c, const brush::DabColor &v)
+{
+    if (v.hue == 0.0 && v.saturation == 0.0 && v.value == 0.0)
+        return c;
+    float h = 0, s = 0, val = 0;
+    c.getHsvF(&h, &s, &val);
+    double hue = std::fmod(std::max(0.0, double(h)) * 360.0 + v.hue, 360.0);
+    if (hue < 0.0)
+        hue += 360.0;
+    return QColor::fromHsvF(float(hue / 360.0), float(std::clamp(s + v.saturation, 0.0, 1.0)),
+                            float(std::clamp(val + v.value, 0.0, 1.0)));
+}
+
+} // namespace
+
+QColor DabStamper::colorFor(const brush::DabColor &v) const
+{
+    if (v.isPlain())
+        return m_color;
+    using brush::ColorTarget;
+    const QColor main = v.target != ColorTarget::Secondary ? shifted(m_color, v) : m_color;
+    const QColor secondary = v.target != ColorTarget::Main ? shifted(m_secondary, v) : m_secondary;
+    const double t = std::clamp(v.subColor, 0.0, 1.0);
+    auto mix = [t](float a, float b) { return float(a + (b - a) * t); };
+    return QColor::fromRgbF(mix(main.redF(), secondary.redF()), mix(main.greenF(), secondary.greenF()),
+                            mix(main.blueF(), secondary.blueF()));
+}
+
+QImage DabStamper::recolored(const QImage &stamp, const QColor &color) const
+{
+    QImage out(stamp.size(), QImage::Format_ARGB32_Premultiplied);
+    out.fill(color);
+    QPainter p(&out);
+    p.setCompositionMode(QPainter::CompositionMode_DestinationIn);
+    p.drawImage(0, 0, stamp);
+    return out;
+}
+
+const QImage *DabStamper::stampFor(const brush::BrushDab &dab, double pixels) const
+{
+    if (dab.tip >= 0 && std::size_t(dab.tip) < m_tips.size())
+        return &m_tips[std::size_t(dab.tip)].pick(pixels);
+    if (m_hard || m_soft.levels.empty())
+        return nullptr;
+    return &m_soft.pick(pixels);
+}
+
 void DabStamper::draw(QPainter &painter, const brush::BrushDab &dab) const
+{
+    draw(painter, dab, colorFor(dab.color));
+}
+
+void DabStamper::draw(QPainter &painter, const brush::BrushDab &dab, const QColor &color) const
 {
     if (dab.alpha <= 0.0)
         return;
@@ -110,15 +173,49 @@ void DabStamper::draw(QPainter &painter, const brush::BrushDab &dab) const
     if (dab.mirror)
         painter.scale(-1.0, 1.0);
     painter.setOpacity(std::clamp(dab.alpha, 0.0, 1.0));
-    if (dab.tip >= 0 && std::size_t(dab.tip) < m_tips.size()) {
-        const Mipmap &tip = m_tips[std::size_t(dab.tip)];
-        painter.drawImage(rect, tip.pick(std::max(s.width(), s.height())));
-    } else if (m_hard || m_soft.levels.empty()) {
-        painter.setPen(Qt::NoPen);
-        painter.setBrush(m_color);
-        painter.drawEllipse(rect);
+    if (const QImage *stamp = stampFor(dab, std::max(s.width(), s.height()))) {
+        if (color.rgb() == m_color.rgb())
+            painter.drawImage(rect, *stamp);
+        else
+            painter.drawImage(rect, recolored(*stamp, color));
     } else {
-        painter.drawImage(rect, m_soft.pick(std::max(s.width(), s.height())));
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(QColor(color.rgb()));
+        painter.drawEllipse(rect);
+    }
+    painter.restore();
+}
+
+void DabStamper::drawRibbon(QPainter &painter, const brush::BrushDab &from, const brush::BrushDab &to,
+                            const QColor &color) const
+{
+    const double alpha = std::clamp((from.alpha + to.alpha) / 2.0, 0.0, 1.0);
+    if (alpha <= 0.0)
+        return;
+    // Edges across the segment at each dab, as wide as the dab.
+    const double length = std::hypot(to.x - from.x, to.y - from.y);
+    if (length <= 1e-9)
+        return;
+    const double nx = -(to.y - from.y) / length, ny = (to.x - from.x) / length;
+    auto edge = [&](const brush::BrushDab &d, double sign) {
+        return QPointF(d.x + sign * nx * d.radius, d.y + sign * ny * d.radius);
+    };
+    // Same corner order as the tip's rect: its top edge lies across the stroke at `from`.
+    QPolygonF quad;
+    quad << edge(from, -1.0) << edge(from, 1.0) << edge(to, 1.0) << edge(to, -1.0);
+
+    painter.save();
+    painter.setOpacity(alpha);
+    const QImage *stamp = stampFor(to, std::max(2.0 * to.radius, length));
+    QTransform map;
+    if (stamp && QTransform::quadToQuad(QPolygonF(QRectF(stamp->rect())), quad, map)) {
+        // The tip's width runs across the stroke, its height along it.
+        painter.setTransform(map, true);
+        painter.drawImage(QPointF(0, 0), color.rgb() == m_color.rgb() ? *stamp : recolored(*stamp, color));
+    } else {
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(QColor(color.rgb()));
+        painter.drawPolygon(quad);
     }
     painter.restore();
 }

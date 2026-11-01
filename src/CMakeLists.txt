@@ -13,6 +13,7 @@ add_library(mothion_core STATIC
     core/brush/BrushStyle.h
     core/brush/DabGenerator.h core/brush/DabGenerator.cpp
     core/brush/Hardness.h
+    core/brush/StrokeShaper.h core/brush/StrokeShaper.cpp
     core/brush/VelocityMeter.h core/brush/VelocityMeter.cpp
 
     core/document/Tile.h

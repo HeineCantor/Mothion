@@ -61,8 +61,9 @@ src/
 │            PenSample, PressureCurve, StrokeSmoother, RateMeter
 │  ├─ brush/  motore dei pennelli: Effector (dinamiche: pressione, velocità, inclinazione, casuale,
 │  │          curve a spline quadratica), BrushStyle (pennello "compilato"), DabGenerator (spaziatura
-│  │          ricalcolata a ogni timbro con resto tra i segmenti, punte, rotazione, spruzzo; Lcg
-│  │          deterministico per tratto), VelocityMeter, profilo di durezza
+│  │          ricalcolata a ogni timbro con resto tra i segmenti, punte, rotazione, spruzzo, variazioni
+│  │          di colore; Lcg deterministico per tratto), StrokeShaper (inizio e fine del tratto,
+│  │          filtro anti-tremolio, correzione), VelocityMeter, profilo di durezza
 │  └─ document/ modello del progetto: TiledImage (tasselli 64×64 copy-on-write), Drawing,
 │              Timing (esposizioni stile Harmony), Layer, Document, Command + commands/, History
 ├─ document/ DocumentController: possiede Document e History, livello/frame correnti,
@@ -71,7 +72,8 @@ src/
 │            TabletInputAdapter, ProximityFilter, TabletBackend(_wintab|_nowintab)
 ├─ canvas/   CanvasView (widget), ViewTransform (zoom/pan/rotazione/specchiatura), NavigationGesture,
 │            DabStamper (timbri tondi/sfumati/da immagine, già colorati, con mipmap),
-│            StrokeSession (tratto dal vivo su un TiledImage: flusso che si accumula, opacità come tetto),
+│            StrokeSession (tratto dal vivo su un TiledImage: flusso che si accumula, opacità come tetto,
+│            miscela acquerello, nastro, bordo acquerello),
 │            FrameRenderer (composizione dei livelli visibili nel frame), TileQt (ponte tasselli↔QImage),
 │            DebugOverlay (F12)
 ├─ tools/    ToolState: strumento attivo, dimensione, opacità, colori, curva, stabilizzazione;
@@ -97,8 +99,9 @@ QTabletEvent / QMouseEvent ──input::toPenSample()──▶ PenSample
 CanvasView::handleSample ──▶ NavigationGesture (mano / zoom / rotazione)
                          └─▶ StrokeSmoother → BrushInput (curva di pressione, velocità, inclinazione)
                               → brush::DabGenerator → StrokeSession (DabStamper)
-                              (sul disegno del livello/frame corrente; a fine tratto
-                               PaintCommand → History tramite DocumentController)
+                              (sul disegno del livello/frame corrente; a fine tratto, se il pennello
+                               lo richiede, il tratto è ridisegnato dai punti finali di StrokeShaper
+                               con lo stesso seme, poi PaintCommand → History tramite DocumentController)
 ```
 
 Dopo `toPenSample()` nessuna parte del programma tocca eventi Qt di input.
