@@ -17,11 +17,11 @@ BrushSlidersPanel::BrushSlidersPanel(ToolState *state, QWidget *parent)
                                      VerticalValueSlider::Scale::Logarithmic, this))
     , m_opacity(new VerticalValueSlider(0.0, 100.0, VerticalValueSlider::Scale::Linear, this))
 {
-    m_size->setToolTip(tr("Dimensione pennello"));
+    m_size->setToolTip(tr("Brush size"));
     m_size->setFormatter([](double v) {
         return QStringLiteral("%1\npx").arg(v, 0, 'f', v < 100 ? 1 : 0);
     });
-    m_opacity->setToolTip(tr("Opacità"));
+    m_opacity->setToolTip(tr("Opacity"));
     m_opacity->setFormatter([](double v) { return QStringLiteral("%1\n%").arg(std::lround(v)); });
 
     auto *layout = new QVBoxLayout(this);

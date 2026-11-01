@@ -51,10 +51,10 @@ std::vector<Stroke> testStrokes(double unit)
         }
         strokes.push_back(s);
     };
-    line(QStringLiteral("pressione 0→1→0, lento"), 0.9, 0.05);
-    line(QStringLiteral("pressione 0→1→0, veloce"), 2.7, 0.5);
+    line(QStringLiteral("pressure 0→1→0, slow"), 0.9, 0.05);
+    line(QStringLiteral("pressure 0→1→0, fast"), 2.7, 0.5);
 
-    Stroke wave{QStringLiteral("onda"), {}};
+    Stroke wave{QStringLiteral("wave"), {}};
     for (int i = 0; i <= 120; ++i) {
         const double t = i / 120.0;
         brush::BrushInput in;
@@ -66,7 +66,7 @@ std::vector<Stroke> testStrokes(double unit)
     }
     strokes.push_back(wave);
 
-    Stroke spiral{QStringLiteral("spirale"), {}};
+    Stroke spiral{QStringLiteral("spiral"), {}};
     for (int i = 0; i <= 160; ++i) {
         const double t = i / 160.0;
         const double a = t * 3.2 * std::numbers::pi;
@@ -126,7 +126,7 @@ QImage renderPanel(const QString &title, const tools::BrushPreset &preset, const
     p.setFont(f);
     p.drawText(QRect(8, 0, kPanelWidth - 16, kLabelHeight), Qt::AlignVCenter | Qt::AlignLeft, title);
     p.drawText(QRect(8, 0, kPanelWidth - 16, kLabelHeight), Qt::AlignVCenter | Qt::AlignRight,
-               QStringLiteral("diametro %1 px, scala 1:%2").arg(preset.size).arg(unit * 8.0 / kPanelWidth, 0, 'f', 1));
+               QStringLiteral("diameter %1 px, scale 1:%2").arg(preset.size).arg(unit * 8.0 / kPanelWidth, 0, 'f', 1));
     p.setPen(QColor(0xc8, 0xc8, 0xc8));
     p.drawRect(target.adjusted(0, 0, -1, -1));
     return panel;
@@ -145,7 +145,7 @@ int main(int argc, char *argv[])
 
     QList<QImage> panels;
     tools::BrushPreset round;
-    round.name = QStringLiteral("Tondo (predefinito)");
+    round.name = QStringLiteral("Round (default)");
     round.size = 40.0;
     panels << renderPanel(round.name, round, {});
 
@@ -159,10 +159,10 @@ int main(int argc, char *argv[])
         const tools::BrushPreset &preset = imported->preset;
         QString title = preset.name;
         if (!imported->warnings.isEmpty())
-            title += QStringLiteral("   [non riprodotto: %1]").arg(imported->warnings.join(QStringLiteral(", ")));
+            title += QStringLiteral("   [not reproduced: %1]").arg(imported->warnings.join(QStringLiteral(", ")));
         panels << renderPanel(title, preset, preset.brush->tips);
-        std::printf("%s: %d punte, %s\n", qPrintable(preset.name), int(preset.brush->tips.size()),
-                    imported->warnings.isEmpty() ? "tutto supportato"
+        std::printf("%s: %d tips, %s\n", qPrintable(preset.name), int(preset.brush->tips.size()),
+                    imported->warnings.isEmpty() ? "all supported"
                                                  : qPrintable(imported->warnings.join(QStringLiteral("; "))));
     }
 

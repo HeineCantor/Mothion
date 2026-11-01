@@ -32,7 +32,7 @@ struct ChangeSet
     }
 };
 
-// For UI labels ("Annulla tratto"); the core stays free of display strings.
+// For UI labels ("Undo stroke"); the core stays free of display strings.
 enum class CommandKind {
     Paint,
     AddDrawing,

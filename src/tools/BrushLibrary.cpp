@@ -49,7 +49,7 @@ bool BrushLibrary::importSut(const QString &path, QString *error, QStringList *w
     QFile in(path);
     if (!in.open(QIODevice::ReadOnly)) {
         if (error)
-            *error = tr("Impossibile leggere %1").arg(path);
+            *error = tr("Cannot read %1").arg(path);
         return false;
     }
     const QByteArray hash = QCryptographicHash::hash(in.readAll(), QCryptographicHash::Sha1).toHex().left(12);
@@ -60,7 +60,7 @@ bool BrushLibrary::importSut(const QString &path, QString *error, QStringList *w
     const bool known = QFileInfo::exists(stored);
     if (!known && !QFile::copy(path, stored)) {
         if (error)
-            *error = tr("Impossibile copiare il pennello in %1").arg(storageFolder());
+            *error = tr("Cannot copy the brush to %1").arg(storageFolder());
         return false;
     }
     if (warnings)

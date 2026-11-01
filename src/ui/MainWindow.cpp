@@ -71,13 +71,13 @@ MainWindow::MainWindow(QWidget *parent)
     createCommandBar();
     m_dockLayout = new DockLayout(this, panels);
     createMenus();
-    statusBar()->showMessage(tr("Pronto"));
+    statusBar()->showMessage(tr("Ready"));
     connect(m_canvas, &canvas::CanvasView::statusMessage, this,
             [this](const QString &text) { statusBar()->showMessage(text, 4000); });
     auto *viewInfo = new QLabel(this);
     statusBar()->addPermanentWidget(viewInfo);
     connect(m_canvas, &canvas::CanvasView::viewChanged, viewInfo, [viewInfo](double zoom, double rot) {
-        viewInfo->setText(tr("Zoom %1%  ·  Rotazione %2°").arg(qRound(zoom * 100)).arg(qRound(rot)));
+        viewInfo->setText(tr("Zoom %1%  ·  Rotation %2°").arg(qRound(zoom * 100)).arg(qRound(rot)));
     });
 
     m_dockLayout->restore();
@@ -87,9 +87,9 @@ void MainWindow::createCommandBar()
 {
     struct Command { IconId icon; QString text; QKeySequence key; };
     const Command fileCommands[] = {
-        {IconId::New, tr("Nuovo"), QKeySequence::New},
-        {IconId::Open, tr("Apri…"), QKeySequence::Open},
-        {IconId::Save, tr("Salva"), QKeySequence::Save},
+        {IconId::New, tr("New"), QKeySequence::New},
+        {IconId::Open, tr("Open…"), QKeySequence::Open},
+        {IconId::Save, tr("Save"), QKeySequence::Save},
     };
 
     auto make = [this](const Command &c) {
@@ -101,11 +101,11 @@ void MainWindow::createCommandBar()
     for (const Command &c : fileCommands)
         m_fileActions << make(c);
 
-    // Undo/redo run on the document's History; labels ("Annulla tratto") and
+    // Undo/redo run on the document's History; labels ("Undo stroke") and
     // enabled state follow DocumentController::historyChanged.
-    QAction *undo = new QAction(icon(IconId::Undo), tr("Annulla"), this);
+    QAction *undo = new QAction(icon(IconId::Undo), tr("Undo"), this);
     undo->setShortcuts(QKeySequence::Undo); // Ctrl+Z
-    QAction *redo = new QAction(icon(IconId::Redo), tr("Ripeti"), this);
+    QAction *redo = new QAction(icon(IconId::Redo), tr("Redo"), this);
     // Platform standard (Ctrl+Shift+Z on Linux, Ctrl+Y on Windows) plus both everywhere.
     QList<QKeySequence> redoKeys = QKeySequence::keyBindings(QKeySequence::Redo);
     for (const QKeySequence &k : {QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Z), QKeySequence(Qt::CTRL | Qt::Key_Y)})
@@ -124,7 +124,7 @@ void MainWindow::createCommandBar()
     syncHistory();
     m_editActions << undo << redo;
 
-    auto *bar = new QToolBar(tr("Comandi"), this);
+    auto *bar = new QToolBar(tr("Commands"), this);
     bar->setObjectName(QStringLiteral("toolbar.commands")); // needed by saveState()
     bar->setMovable(false);
     bar->setIconSize(QSize(20, 20));
@@ -139,46 +139,46 @@ void MainWindow::createMenus()
     QMenu *file = menuBar()->addMenu(tr("&File"));
     file->addActions(m_fileActions);
     file->addSeparator();
-    file->addAction(tr("Importa pennello (.sut)…"), this, &MainWindow::importBrush);
+    file->addAction(tr("Import brush (.sut)…"), this, &MainWindow::importBrush);
     file->addSeparator();
-    QAction *quit = file->addAction(tr("Esci"), this, &QWidget::close);
+    QAction *quit = file->addAction(tr("Quit"), this, &QWidget::close);
     quit->setShortcut(QKeySequence::Quit);
 
-    QMenu *edit = menuBar()->addMenu(tr("&Modifica"));
+    QMenu *edit = menuBar()->addMenu(tr("&Edit"));
     edit->addActions(m_editActions);
 
-    m_viewMenu = menuBar()->addMenu(tr("&Vista"));
+    m_viewMenu = menuBar()->addMenu(tr("&View"));
     // Provisional shortcuts; real keymap comes with the UX design.
     auto addView = [this](const QString &text, const QList<QKeySequence> &keys, auto slot) {
         QAction *a = m_viewMenu->addAction(text, m_canvas, slot);
         a->setShortcuts(keys);
         return a;
     };
-    addView(tr("Ingrandisci"), {QKeySequence(Qt::CTRL | Qt::Key_Plus), QKeySequence(Qt::CTRL | Qt::Key_Equal)},
+    addView(tr("Zoom in"), {QKeySequence(Qt::CTRL | Qt::Key_Plus), QKeySequence(Qt::CTRL | Qt::Key_Equal)},
             &canvas::CanvasView::zoomIn);
-    addView(tr("Riduci"), {QKeySequence(Qt::CTRL | Qt::Key_Minus)}, &canvas::CanvasView::zoomOut);
-    addView(tr("Adatta alla finestra"), {QKeySequence(Qt::CTRL | Qt::Key_0)}, &canvas::CanvasView::fitToView);
+    addView(tr("Zoom out"), {QKeySequence(Qt::CTRL | Qt::Key_Minus)}, &canvas::CanvasView::zoomOut);
+    addView(tr("Fit to window"), {QKeySequence(Qt::CTRL | Qt::Key_0)}, &canvas::CanvasView::fitToView);
     m_viewMenu->addSeparator();
-    addView(tr("Ruota a sinistra"), {QKeySequence(Qt::CTRL | Qt::Key_Comma)}, &canvas::CanvasView::rotateLeft);
-    addView(tr("Ruota a destra"), {QKeySequence(Qt::CTRL | Qt::Key_Period)}, &canvas::CanvasView::rotateRight);
-    addView(tr("Azzera rotazione"), {QKeySequence(Qt::CTRL | Qt::Key_Slash)}, &canvas::CanvasView::resetRotation);
+    addView(tr("Rotate left"), {QKeySequence(Qt::CTRL | Qt::Key_Comma)}, &canvas::CanvasView::rotateLeft);
+    addView(tr("Rotate right"), {QKeySequence(Qt::CTRL | Qt::Key_Period)}, &canvas::CanvasView::rotateRight);
+    addView(tr("Reset rotation"), {QKeySequence(Qt::CTRL | Qt::Key_Slash)}, &canvas::CanvasView::resetRotation);
     m_viewMenu->addSeparator();
-    QAction *debug = m_viewMenu->addAction(tr("Overlay di debug input"));
+    QAction *debug = m_viewMenu->addAction(tr("Input debug overlay"));
     debug->setCheckable(true);
     debug->setShortcut(QKeySequence(Qt::Key_F12));
     debug->setShortcutContext(Qt::ApplicationShortcut); // also when a floating panel has focus
     connect(debug, &QAction::toggled, m_canvas, &canvas::CanvasView::setDebugOverlayVisible);
 
-    QMenu *window = menuBar()->addMenu(tr("&Finestra"));
+    QMenu *window = menuBar()->addMenu(tr("&Window"));
     for (PanelDock *dock : m_dockLayout->docks())
         window->addAction(dock->toggleViewAction());
     window->addSeparator();
-    QMenu *theme = window->addMenu(tr("Tema"));
+    QMenu *theme = window->addMenu(tr("Theme"));
     auto *themeGroup = new QActionGroup(this);
     const std::pair<QString, ThemeChoice> themes[] = {
-        {tr("Sistema"), ThemeChoice::System},
-        {tr("Chiaro"), ThemeChoice::Light},
-        {tr("Scuro"), ThemeChoice::Dark},
+        {tr("System"), ThemeChoice::System},
+        {tr("Light"), ThemeChoice::Light},
+        {tr("Dark"), ThemeChoice::Dark},
     };
     for (const auto &[text, choice] : themes) {
         QAction *a = theme->addAction(text);
@@ -188,25 +188,25 @@ void MainWindow::createMenus()
         connect(a, &QAction::triggered, this, [choice] { setThemeChoice(*qApp, choice); });
     }
     window->addSeparator();
-    window->addAction(tr("Ripristina layout predefinito"), m_dockLayout, &DockLayout::resetToDefault);
+    window->addAction(tr("Reset default layout"), m_dockLayout, &DockLayout::resetToDefault);
 }
 
 void MainWindow::importBrush()
 {
-    const QStringList files = QFileDialog::getOpenFileNames(this, tr("Importa pennello"), QString(),
-                                                            tr("Sotto-strumenti Clip Studio Paint (*.sut)"));
+    const QStringList files = QFileDialog::getOpenFileNames(this, tr("Import brush"), QString(),
+                                                            tr("Clip Studio Paint sub tools (*.sut)"));
     for (const QString &file : files) {
         QString error;
         QStringList warnings;
         if (!m_brushes->importSut(file, &error, &warnings)) {
-            QMessageBox::warning(this, tr("Importa pennello"), error);
+            QMessageBox::warning(this, tr("Import brush"), error);
             continue;
         }
         if (warnings.isEmpty())
-            statusBar()->showMessage(tr("Pennello importato: %1").arg(QFileInfo(file).completeBaseName()), 4000);
+            statusBar()->showMessage(tr("Brush imported: %1").arg(QFileInfo(file).completeBaseName()), 4000);
         else
-            QMessageBox::information(this, tr("Importa pennello"),
-                                     tr("%1 importato. Non ancora riprodotto:\n• %2")
+            QMessageBox::information(this, tr("Import brush"),
+                                     tr("%1 imported. Not reproduced yet:\n• %2")
                                          .arg(QFileInfo(file).completeBaseName(),
                                               warnings.join(QStringLiteral("\n• "))));
     }
@@ -214,7 +214,7 @@ void MainWindow::importBrush()
 
 void MainWindow::notImplemented(const QString &what)
 {
-    statusBar()->showMessage(tr("%1: non ancora implementato").arg(what), 3000);
+    statusBar()->showMessage(tr("%1: not implemented yet").arg(what), 3000);
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)

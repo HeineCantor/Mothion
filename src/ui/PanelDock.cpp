@@ -41,9 +41,9 @@ PanelDock::PanelDock(const QString &title, const QString &objectName, QWidget *c
     // Let the title shrink, so narrow panels (the tool palette) are not
     // forced wider than their content by the title text.
     label->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-    m_collapseButton = makeTitleButton(IconId::Collapse, tr("Riduci"), m_titleBar);
-    auto *floatButton = makeTitleButton(IconId::Float, tr("Sgancia / aggancia"), m_titleBar);
-    auto *closeButton = makeTitleButton(IconId::Close, tr("Chiudi"), m_titleBar);
+    m_collapseButton = makeTitleButton(IconId::Collapse, tr("Zoom out"), m_titleBar);
+    auto *floatButton = makeTitleButton(IconId::Float, tr("Float / dock"), m_titleBar);
+    auto *closeButton = makeTitleButton(IconId::Close, tr("Close"), m_titleBar);
 
     auto *row = new QHBoxLayout(m_titleBar);
     row->setContentsMargins(2, 1, 2, 1);
@@ -75,7 +75,7 @@ void PanelDock::setCollapsed(bool collapsed)
 void PanelDock::updateButtons()
 {
     m_collapseButton->setIcon(icon(m_collapsed ? IconId::Expand : IconId::Collapse));
-    m_collapseButton->setToolTip(m_collapsed ? tr("Espandi") : tr("Riduci"));
+    m_collapseButton->setToolTip(m_collapsed ? tr("Expand") : tr("Zoom out"));
 }
 
 } // namespace mothion::ui

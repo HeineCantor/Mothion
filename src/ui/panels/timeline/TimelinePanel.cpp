@@ -23,22 +23,22 @@ TimelinePanel::TimelinePanel(DocumentController *document, QWidget *parent)
     auto *prev = new QToolButton(this);
     prev->setArrowType(Qt::LeftArrow);
     prev->setAutoRaise(true);
-    prev->setToolTip(tr("Frame precedente"));
+    prev->setToolTip(tr("Previous frame"));
     auto *next = new QToolButton(this);
     next->setArrowType(Qt::RightArrow);
     next->setAutoRaise(true);
-    next->setToolTip(tr("Frame successivo"));
+    next->setToolTip(tr("Next frame"));
     auto *frameLabel = new QLabel(this);
     frameLabel->setMinimumWidth(150);
 
-    auto *newDrawing = new QPushButton(tr("Nuovo disegno"), this);
-    newDrawing->setToolTip(tr("Crea un disegno vuoto nel frame corrente del livello corrente"));
+    auto *newDrawing = new QPushButton(tr("New drawing"), this);
+    newDrawing->setToolTip(tr("Create an empty drawing at the current frame of the current layer"));
 
     auto *zoom = new QSlider(Qt::Horizontal, this);
     zoom->setRange(6, 60);
     zoom->setValue(m_view->frameWidth());
     zoom->setMaximumWidth(140);
-    zoom->setToolTip(tr("Larghezza frame (Ctrl+rotella sulla timeline)"));
+    zoom->setToolTip(tr("Frame width (Ctrl+wheel on the timeline)"));
 
     auto *bar = new QHBoxLayout;
     bar->setContentsMargins(4, 2, 4, 2);

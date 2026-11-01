@@ -171,21 +171,21 @@ QStringList unsupported(const Params &p, const brush::BrushStyle &s)
         if (used)
             w << what;
     };
-    check(number(p, "CompositeMode") != 0, QObject::tr("metodo di fusione"));
+    check(number(p, "CompositeMode") != 0, QObject::tr("blend mode"));
     check(hasBlob(p, "TextureImage"), QObject::tr("texture"));
-    check(flag(p, "UseDualBrush"), QObject::tr("doppia punta"));
-    check(number(p, "BrushWaterColor") > 1, QObject::tr("modalità di miscela %1").arg(number(p, "BrushWaterColor")));
-    check(s.mix.on && number(p, "BrushColorMixingMode") != 0, QObject::tr("miscela dei colori LMS"));
-    check(brush::usesInOut(s) && flag(p, "BrushInOutBySpeed"), QObject::tr("inizio e fine in base alla velocità"));
+    check(flag(p, "UseDualBrush"), QObject::tr("dual brush"));
+    check(number(p, "BrushWaterColor") > 1, QObject::tr("color mixing mode %1").arg(number(p, "BrushWaterColor")));
+    check(s.mix.on && number(p, "BrushColorMixingMode") != 0, QObject::tr("LMS color mixing"));
+    check(brush::usesInOut(s) && flag(p, "BrushInOutBySpeed"), QObject::tr("start/end by speed"));
     check(brush::usesInOut(s) && s.inOut.type != brush::InOutType::Ratio
               && (number(p, "BrushInLengthUnit") != 0 || number(p, "BrushOutLengthUnit") != 0),
-          QObject::tr("inizio e fine in unità diverse dai pixel"));
+          QObject::tr("start/end in units other than pixels"));
     check(s.waterEdge.on && (number(p, "BrushWaterEdgeRadiusUnit") != 0 || number(p, "BrushWaterEdgeBlurUnit") != 0),
-          QObject::tr("bordo acquerello in unità diverse dai pixel"));
-    check(flag(p, "BrushUseSpray") && flag(p, "BrushSprayUseFixedPoint"), QObject::tr("spruzzo a punti fissi"));
+          QObject::tr("water edge in units other than pixels"));
+    check(flag(p, "BrushUseSpray") && flag(p, "BrushSprayUseFixedPoint"), QObject::tr("fixed-point spray"));
     check(flag(p, "BrushUsePatternImage") && number(p, "BrushPatternOrderType") == 5,
-          QObject::tr("ordine delle punte a elenco"));
-    check(number(p, "BrushSizeUnit") != 0, QObject::tr("dimensione in unità diverse dai pixel"));
+          QObject::tr("listed tip order"));
+    check(number(p, "BrushSizeUnit") != 0, QObject::tr("size in units other than pixels"));
     return w;
 }
 
@@ -400,7 +400,7 @@ std::optional<SutImport> importSut(const QString &path, QString *error)
         return std::nullopt;
     };
     if (!QFileInfo(path).isFile())
-        return fail(QObject::tr("File non trovato: %1").arg(path));
+        return fail(QObject::tr("File not found: %1").arg(path));
 
     const QString connection = QStringLiteral("sut-import-") + QUuid::createUuid().toString(QUuid::WithoutBraces);
     QString name;
@@ -412,11 +412,11 @@ std::optional<SutImport> importSut(const QString &path, QString *error)
         db.setDatabaseName(path);
         db.setConnectOptions(QStringLiteral("QSQLITE_OPEN_READONLY"));
         if (!db.open()) {
-            failure = QObject::tr("Impossibile aprire il file: %1").arg(db.lastError().text());
+            failure = QObject::tr("Cannot open the file: %1").arg(db.lastError().text());
         } else {
             QSqlQuery q(db);
             if (!q.exec(QStringLiteral("select NodeName, NodeVariantID from Node")) || !q.next()) {
-                failure = QObject::tr("Non è un sotto-strumento di Clip Studio Paint (manca Node).");
+                failure = QObject::tr("Not a Clip Studio Paint sub tool (no Node table).");
             } else {
                 name = q.value(0).toString();
                 const qlonglong variant = q.value(1).toLongLong();
@@ -424,7 +424,7 @@ std::optional<SutImport> importSut(const QString &path, QString *error)
                 v.prepare(QStringLiteral("select * from Variant where VariantID = ?"));
                 v.addBindValue(variant);
                 if (!v.exec() || !v.next()) {
-                    failure = QObject::tr("Variante %1 non trovata.").arg(variant);
+                    failure = QObject::tr("Variant %1 not found.").arg(variant);
                 } else {
                     const QSqlRecord rec = v.record();
                     for (int i = 0; i < rec.count(); ++i)
@@ -462,9 +462,9 @@ std::optional<SutImport> importSut(const QString &path, QString *error)
             definition->tips << tipCoverageFromThumbnail(thumb);
         }
         if (!definition->tips.isEmpty())
-            result.warnings << QObject::tr("punte ricavate dalle anteprime (provvisorie)");
+            result.warnings << QObject::tr("tips taken from the previews (provisional)");
         else if (!tipPaths.isEmpty())
-            result.warnings << QObject::tr("punte non leggibili: uso un timbro tondo");
+            result.warnings << QObject::tr("tips not readable: using a round dab");
     }
     definition->style = styleFrom(params, int(definition->tips.size()));
     result.warnings << unsupported(params, definition->style);

@@ -15,7 +15,7 @@ BrushDefinitionPtr roundBrush()
 {
     static const BrushDefinitionPtr round = [] {
         auto b = std::make_shared<BrushDefinition>();
-        b->name = QObject::tr("Tondo");
+        b->name = QObject::tr("Round");
         return b; // BrushStyle's defaults: hard, radius × pressure, dense spacing
     }();
     return round;
@@ -24,9 +24,9 @@ BrushDefinitionPtr roundBrush()
 QString ToolState::displayName(ToolId tool)
 {
     switch (tool) {
-    case ToolId::Brush: return tr("Pennello");
-    case ToolId::Eraser: return tr("Gomma");
-    case ToolId::Hand: return tr("Mano");
+    case ToolId::Brush: return tr("Brush");
+    case ToolId::Eraser: return tr("Eraser");
+    case ToolId::Hand: return tr("Hand");
     case ToolId::Zoom: return tr("Zoom");
     }
     return {};

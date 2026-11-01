@@ -34,7 +34,7 @@ DocumentController::DocumentController(QObject *parent)
 {
     m_document->setFrameCount(kDefaultFrames);
     // The first layer is part of the new document, not an undoable step.
-    doc::AddLayerCommand first(*m_document, 0, {tr("Livello 1").toStdString()});
+    doc::AddLayerCommand first(*m_document, 0, {tr("Layer 1").toStdString()});
     first.apply(*m_document);
     m_currentLayer = first.layerId();
 }
@@ -73,14 +73,14 @@ void DocumentController::redo()
 QString DocumentController::commandName(doc::CommandKind kind)
 {
     switch (kind) {
-    case doc::CommandKind::Paint: return tr("tratto");
-    case doc::CommandKind::AddDrawing: return tr("nuovo disegno");
-    case doc::CommandKind::RemoveDrawing: return tr("elimina disegno");
-    case doc::CommandKind::ChangeTiming: return tr("modifica timing");
-    case doc::CommandKind::AddLayer: return tr("nuovo livello");
-    case doc::CommandKind::RemoveLayer: return tr("elimina livello");
-    case doc::CommandKind::MoveLayer: return tr("sposta livello");
-    case doc::CommandKind::ChangeLayerProperties: return tr("proprietà livello");
+    case doc::CommandKind::Paint: return tr("stroke");
+    case doc::CommandKind::AddDrawing: return tr("new drawing");
+    case doc::CommandKind::RemoveDrawing: return tr("delete drawing");
+    case doc::CommandKind::ChangeTiming: return tr("timing change");
+    case doc::CommandKind::AddLayer: return tr("new layer");
+    case doc::CommandKind::RemoveLayer: return tr("delete layer");
+    case doc::CommandKind::MoveLayer: return tr("move layer");
+    case doc::CommandKind::ChangeLayerProperties: return tr("layer properties");
     }
     return {};
 }
@@ -88,13 +88,13 @@ QString DocumentController::commandName(doc::CommandKind kind)
 QString DocumentController::undoText() const
 {
     const doc::Command *c = m_history.undoCommand();
-    return c ? tr("Annulla %1").arg(commandName(c->kind())) : tr("Annulla");
+    return c ? tr("Undo %1").arg(commandName(c->kind())) : tr("Undo");
 }
 
 QString DocumentController::redoText() const
 {
     const doc::Command *c = m_history.redoCommand();
-    return c ? tr("Ripeti %1").arg(commandName(c->kind())) : tr("Ripeti");
+    return c ? tr("Redo %1").arg(commandName(c->kind())) : tr("Redo");
 }
 
 void DocumentController::publish(const doc::ChangeSet &changes)
@@ -152,11 +152,11 @@ std::optional<DocumentController::PaintTarget> DocumentController::beginPaint(bo
     interruptStroke(); // a previous stroke left open
     doc::Layer *layer = m_document->layer(m_currentLayer);
     if (!layer)
-        return fail(tr("Nessun livello selezionato"));
+        return fail(tr("No layer selected"));
     if (!layer->properties().visible)
-        return fail(tr("Il livello «%1» è nascosto").arg(QString::fromStdString(layer->properties().name)));
+        return fail(tr("Layer “%1” is hidden").arg(QString::fromStdString(layer->properties().name)));
     if (layer->properties().locked)
-        return fail(tr("Il livello «%1» è bloccato").arg(QString::fromStdString(layer->properties().name)));
+        return fail(tr("Layer “%1” is locked").arg(QString::fromStdString(layer->properties().name)));
 
     PaintState state;
     doc::DrawingId drawing = layer->timing().drawingAt(m_currentFrame);

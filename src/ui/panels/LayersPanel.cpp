@@ -34,11 +34,11 @@ const doc::BlendMode kBlendModes[] = {doc::BlendMode::Normal, doc::BlendMode::Mu
 QString blendName(doc::BlendMode mode)
 {
     switch (mode) {
-    case doc::BlendMode::Normal: return LayersPanel::tr("Normale");
-    case doc::BlendMode::Multiply: return LayersPanel::tr("Moltiplica");
-    case doc::BlendMode::Screen: return LayersPanel::tr("Scherma");
-    case doc::BlendMode::Overlay: return LayersPanel::tr("Sovrapponi");
-    case doc::BlendMode::Add: return LayersPanel::tr("Aggiungi");
+    case doc::BlendMode::Normal: return LayersPanel::tr("Normal");
+    case doc::BlendMode::Multiply: return LayersPanel::tr("Multiply");
+    case doc::BlendMode::Screen: return LayersPanel::tr("Screen");
+    case doc::BlendMode::Overlay: return LayersPanel::tr("Overlay");
+    case doc::BlendMode::Add: return LayersPanel::tr("Add");
     }
     return {};
 }
@@ -101,10 +101,10 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     , m_opacity(new QSlider(Qt::Horizontal, this))
     , m_opacityValue(new QSpinBox(this))
     , m_list(new QListWidget(this))
-    , m_add(actionButton(IconId::Add, tr("Nuovo livello"), this))
-    , m_remove(actionButton(IconId::Delete, tr("Elimina livello"), this))
-    , m_up(actionButton(IconId::ArrowUp, tr("Sposta su"), this))
-    , m_down(actionButton(IconId::ArrowDown, tr("Sposta giù"), this))
+    , m_add(actionButton(IconId::Add, tr("New layer"), this))
+    , m_remove(actionButton(IconId::Delete, tr("Delete layer"), this))
+    , m_up(actionButton(IconId::ArrowUp, tr("Move up"), this))
+    , m_down(actionButton(IconId::ArrowDown, tr("Move down"), this))
 {
     for (doc::BlendMode mode : kBlendModes)
         m_blend->addItem(blendName(mode));
@@ -160,7 +160,7 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
         doc::Document &d = m_document->documentForCommands();
         const int index = d.indexOf(m_document->currentLayer()) + 1; // above the current one
         auto add = std::make_unique<doc::AddLayerCommand>(
-            d, index, doc::LayerProperties{tr("Livello %1").arg(d.layerCount() + 1).toStdString()});
+            d, index, doc::LayerProperties{tr("Layer %1").arg(d.layerCount() + 1).toStdString()});
         const doc::LayerId id = add->layerId();
         m_document->execute(std::move(add));
         m_document->setCurrentLayer(id);
@@ -231,7 +231,7 @@ void LayersPanel::renameLayer(doc::LayerId id)
     if (!layer)
         return;
     bool ok = false;
-    const QString name = QInputDialog::getText(this, tr("Rinomina livello"), tr("Nome:"), QLineEdit::Normal,
+    const QString name = QInputDialog::getText(this, tr("Rename layer"), tr("Name:"), QLineEdit::Normal,
                                                QString::fromStdString(layer->properties().name), &ok);
     if (!ok || name.trimmed().isEmpty())
         return;
@@ -254,10 +254,10 @@ void LayersPanel::rebuildList()
         const doc::LayerId id = layer.id();
 
         auto *row = new QWidget(m_list);
-        auto *eye = toggleButton(IconId::Eye, tr("Mostra / nascondi"), row);
+        auto *eye = toggleButton(IconId::Eye, tr("Show / hide"), row);
         eye->setChecked(true); // set the icon via toggled
         eye->setChecked(props.visible);
-        auto *lock = toggleButton(IconId::Lock, tr("Blocca / sblocca"), row);
+        auto *lock = toggleButton(IconId::Lock, tr("Lock / unlock"), row);
         lock->setChecked(true);
         lock->setChecked(props.locked);
         auto *thumb = new QLabel(row);
@@ -303,7 +303,7 @@ void LayersPanel::rebuildList()
     h->setContentsMargins(42, 2, 2, 2);
     h->setSpacing(4);
     h->addWidget(paperThumb);
-    h->addWidget(new QLabel(tr("Carta"), paperRow), 1);
+    h->addWidget(new QLabel(tr("Paper"), paperRow), 1);
     auto *paperItem = new QListWidgetItem(m_list);
     paperItem->setFlags(Qt::NoItemFlags);
     paperItem->setSizeHint(paperRow->sizeHint());

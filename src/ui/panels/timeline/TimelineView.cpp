@@ -419,25 +419,25 @@ void TimelineView::contextMenuEvent(QContextMenuEvent *event)
     m_document->setCurrentFrame(frame);
 
     QMenu menu(this);
-    menu.addAction(tr("Nuovo disegno"), this, [this, layerId, frame] {
+    menu.addAction(tr("New drawing"), this, [this, layerId, frame] {
         m_document->execute(doc::makeNewDrawing(m_document->documentForCommands(), layerId, frame).command);
     });
     const doc::Drawing *drawing = layer.drawingAt(frame);
-    QAction *clear = menu.addAction(tr("Svuota frame"), this, [this, layerId, frame] {
+    QAction *clear = menu.addAction(tr("Clear frame"), this, [this, layerId, frame] {
         m_document->execute(doc::makeSetExposure(m_document->document(), layerId, frame, 1, doc::kNoId));
     });
     clear->setEnabled(drawing != nullptr);
     menu.addSeparator();
-    menu.addAction(tr("Inserisci frame vuoto"), this, [this, layerId, frame] {
+    menu.addAction(tr("Insert empty frame"), this, [this, layerId, frame] {
         m_document->execute(doc::makeInsertEmptyFrames(m_document->document(), layerId, frame, 1));
     });
-    menu.addAction(tr("Elimina frame"), this, [this, layerId, frame] {
+    menu.addAction(tr("Delete frame"), this, [this, layerId, frame] {
         m_document->execute(doc::makeRemoveFrames(m_document->document(), layerId, frame, 1));
     });
     if (drawing) {
         menu.addSeparator();
         const doc::DrawingId id = drawing->id;
-        menu.addAction(tr("Elimina disegno «%1» (da tutti i frame)").arg(QString::fromStdString(drawing->name)),
+        menu.addAction(tr("Delete drawing “%1” (from all frames)").arg(QString::fromStdString(drawing->name)),
                        this, [this, layerId, id] {
                            m_document->execute(std::make_unique<doc::RemoveDrawingCommand>(layerId, id));
                        });

@@ -12,8 +12,8 @@ namespace {
 QString toolName(InputTool tool)
 {
     switch (tool) {
-    case InputTool::Pen: return QStringLiteral("penna");
-    case InputTool::Eraser: return QStringLiteral("gomma");
+    case InputTool::Pen: return QStringLiteral("pen");
+    case InputTool::Eraser: return QStringLiteral("eraser");
     case InputTool::Mouse: return QStringLiteral("mouse");
     }
     return {};
@@ -34,15 +34,15 @@ QString buttonNames(std::uint8_t b)
 {
     QStringList names;
     if (b & PenButtonTip)
-        names << QStringLiteral("punta/sx");
+        names << QStringLiteral("tip/left");
     if (b & PenButtonMiddle)
-        names << QStringLiteral("centrale");
+        names << QStringLiteral("middle");
     if (b & PenButtonRight)
-        names << QStringLiteral("destro");
+        names << QStringLiteral("right");
     return names.isEmpty() ? QStringLiteral("–") : names.join(QStringLiteral(" + "));
 }
 
-QString yesNo(bool v) { return v ? QStringLiteral("sì") : QStringLiteral("no"); }
+QString yesNo(bool v) { return v ? QStringLiteral("yes") : QStringLiteral("no"); }
 
 } // namespace
 
@@ -97,27 +97,27 @@ QStringList DebugOverlay::lines()
     const PenSample &s = m_last;
     const double hz = m_rate.rateHz(seconds());
     const QString device = m_device.name.empty()
-        ? QStringLiteral("(nessun evento ancora)")
+        ? QStringLiteral("(no events yet)")
         : QStringLiteral("%1  [%2, %3]").arg(QString::fromStdString(m_device.name),
                                              QString::fromStdString(m_device.type), toolName(m_device.tool));
     return {
         QStringLiteral("DEBUG INPUT (F12)"),
-        QStringLiteral("Piattaforma: %1  ·  Backend: %2").arg(QGuiApplication::platformName(), m_backend),
-        QStringLiteral("Dispositivo: %1").arg(device),
-        QStringLiteral("Capacità: pressione %1 · inclinazione %2 · rotazione %3")
+        QStringLiteral("Platform: %1  ·  Backend: %2").arg(QGuiApplication::platformName(), m_backend),
+        QStringLiteral("Device: %1").arg(device),
+        QStringLiteral("Capabilities: pressure %1 · tilt %2 · rotation %3")
             .arg(yesNo(m_device.hasPressure), yesNo(m_device.hasTilt), yesNo(m_device.hasRotation)),
-        QStringLiteral("Prossimità: %1").arg(m_proximityKnown ? (m_inProximity ? QStringLiteral("dentro")
-                                                                               : QStringLiteral("fuori"))
-                                                              : QStringLiteral("nessun evento")),
-        QStringLiteral("Frequenza: %1 Hz  ·  campioni: %2 (tratto: %3)")
+        QStringLiteral("Proximity: %1").arg(m_proximityKnown ? (m_inProximity ? QStringLiteral("in")
+                                                                               : QStringLiteral("out"))
+                                                              : QStringLiteral("no events")),
+        QStringLiteral("Rate: %1 Hz  ·  samples: %2 (stroke: %3)")
             .arg(hz, 0, 'f', 0).arg(m_totalSamples).arg(m_strokeSamples),
         QString(),
-        QStringLiteral("Punta: %1  ·  fase: %2  ·  pulsanti: %3")
+        QStringLiteral("Tool: %1  ·  phase: %2  ·  buttons: %3")
             .arg(toolName(s.tool), phaseName(s.phase), buttonNames(s.buttons)),
-        QStringLiteral("Posizione: %1, %2").arg(s.x, 0, 'f', 2).arg(s.y, 0, 'f', 2),
-        QStringLiteral("Pressione: %1").arg(s.pressure, 0, 'f', 3),
-        QStringLiteral("Inclinazione: X %1°  Y %2°").arg(s.tiltX, 0, 'f', 1).arg(s.tiltY, 0, 'f', 1),
-        QStringLiteral("Rotazione: %1°").arg(s.rotation, 0, 'f', 1),
+        QStringLiteral("Position: %1, %2").arg(s.x, 0, 'f', 2).arg(s.y, 0, 'f', 2),
+        QStringLiteral("Pressure: %1").arg(s.pressure, 0, 'f', 3),
+        QStringLiteral("Tilt: X %1°  Y %2°").arg(s.tiltX, 0, 'f', 1).arg(s.tiltY, 0, 'f', 1),
+        QStringLiteral("Rotation: %1°").arg(s.rotation, 0, 'f', 1),
         QStringLiteral("Timestamp: %1 s").arg(s.t, 0, 'f', 3),
     };
 }

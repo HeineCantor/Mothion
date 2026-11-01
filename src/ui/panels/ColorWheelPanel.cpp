@@ -18,7 +18,7 @@ ColorSwatchPair::ColorSwatchPair(QWidget *parent)
     : QWidget(parent)
 {
     setFixedSize(sizeHint());
-    setToolTip(tr("Colore principale / secondario (clic sul secondario per scambiarli)"));
+    setToolTip(tr("Main / secondary color (click the secondary to swap them)"));
 }
 
 void ColorSwatchPair::setColors(const QColor &main, const QColor &secondary)
@@ -90,7 +90,7 @@ ColorWheelPanel::ColorWheelPanel(tools::ToolState *state, QWidget *parent)
     connect(m_wheel, &ColorWheel::colorEdited, m_state, &tools::ToolState::setColor);
     connect(m_swatches, &ColorSwatchPair::swapRequested, m_state, &tools::ToolState::swapColors);
     connect(m_swatches, &ColorSwatchPair::mainClicked, this, [this] {
-        const QColor c = QColorDialog::getColor(m_state->color(), this, tr("Scegli colore"));
+        const QColor c = QColorDialog::getColor(m_state->color(), this, tr("Choose color"));
         m_state->setColor(c); // an invalid (cancelled) color is ignored by ToolState
     });
     connect(m_hex, &QLineEdit::editingFinished, this, [this] { m_state->setColor(QColor(m_hex->text())); });

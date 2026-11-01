@@ -147,8 +147,8 @@ NavigatorPanel::NavigatorPanel(CanvasView *canvas, QWidget *parent)
     , m_zoomLabel(new QLabel(this))
     , m_rotation(new QSlider(Qt::Horizontal, this))
     , m_rotationLabel(new QLabel(this))
-    , m_flipH(makeButton(IconId::FlipHorizontal, tr("Specchia orizzontalmente"), this, true))
-    , m_flipV(makeButton(IconId::FlipVertical, tr("Specchia verticalmente"), this, true))
+    , m_flipH(makeButton(IconId::FlipHorizontal, tr("Flip horizontally"), this, true))
+    , m_flipV(makeButton(IconId::FlipVertical, tr("Flip vertically"), this, true))
 {
     m_zoom->setRange(0, kZoomSteps);
     m_rotation->setRange(-180, 180);
@@ -157,13 +157,13 @@ NavigatorPanel::NavigatorPanel(CanvasView *canvas, QWidget *parent)
         l->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     }
 
-    auto *zoomOut = makeButton(IconId::ZoomOut, tr("Riduci"), this);
-    auto *zoomIn = makeButton(IconId::Zoom, tr("Ingrandisci"), this);
-    auto *actual = makeButton(IconId::ZoomActual, tr("Dimensioni reali (100 %)"), this);
-    auto *fit = makeButton(IconId::ZoomFit, tr("Adatta alla finestra"), this);
-    auto *rotLeft = makeButton(IconId::RotateLeft, tr("Ruota a sinistra"), this);
-    auto *rotRight = makeButton(IconId::RotateRight, tr("Ruota a destra"), this);
-    auto *rotReset = makeButton(IconId::RotateReset, tr("Azzera rotazione"), this);
+    auto *zoomOut = makeButton(IconId::ZoomOut, tr("Zoom out"), this);
+    auto *zoomIn = makeButton(IconId::Zoom, tr("Zoom in"), this);
+    auto *actual = makeButton(IconId::ZoomActual, tr("Actual size (100 %)"), this);
+    auto *fit = makeButton(IconId::ZoomFit, tr("Fit to window"), this);
+    auto *rotLeft = makeButton(IconId::RotateLeft, tr("Rotate left"), this);
+    auto *rotRight = makeButton(IconId::RotateRight, tr("Rotate right"), this);
+    auto *rotReset = makeButton(IconId::RotateReset, tr("Reset rotation"), this);
 
     // Two rows: [slider][value][buttons...]
     auto *controls = new QGridLayout;

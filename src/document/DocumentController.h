@@ -40,7 +40,7 @@ public:
 
     bool canUndo() const { return m_history.canUndo(); }
     bool canRedo() const { return m_history.canRedo(); }
-    QString undoText() const; // "Annulla tratto", or plain "Annulla"
+    QString undoText() const; // "Undo stroke", or plain "Undo"
     QString redoText() const;
     static QString commandName(doc::CommandKind kind);
 

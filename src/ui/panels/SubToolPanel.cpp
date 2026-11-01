@@ -96,7 +96,7 @@ SubToolPanel::SubToolPanel(tools::ToolState *state, tools::BrushLibrary *library
     , m_state(state)
     , m_library(library)
     , m_list(new QListWidget(this))
-    , m_empty(new QLabel(tr("Nessun sotto-strumento"), this))
+    , m_empty(new QLabel(tr("No sub tools"), this))
 {
     m_list->setItemDelegate(new PresetDelegate(m_list));
     m_list->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);

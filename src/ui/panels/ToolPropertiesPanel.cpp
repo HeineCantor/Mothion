@@ -18,13 +18,13 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
     : QWidget(parent)
     , m_state(state)
     , m_toolName(new QLabel(this))
-    , m_size(new SliderField(tr("Dimensione"), int(ToolState::kMinSize), int(ToolState::kMaxSize), QStringLiteral(" px"), this))
-    , m_opacity(new SliderField(tr("Opacità"), 0, 100, QStringLiteral(" %"), this))
-    , m_smoothing(new SliderField(tr("Stabilizz."), 0, 95, QStringLiteral(" %"), this))
+    , m_size(new SliderField(tr("Size"), int(ToolState::kMinSize), int(ToolState::kMaxSize), QStringLiteral(" px"), this))
+    , m_opacity(new SliderField(tr("Opacity"), 0, 100, QStringLiteral(" %"), this))
+    , m_smoothing(new SliderField(tr("Stabilizer"), 0, 95, QStringLiteral(" %"), this))
     , m_curveEditor(new PressureCurveEditor(this))
 {
     m_toolName->setObjectName(QStringLiteral("PanelTitle"));
-    auto *resetCurve = new QPushButton(tr("Curva lineare"), this);
+    auto *resetCurve = new QPushButton(tr("Linear curve"), this);
 
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(6, 6, 6, 6);
@@ -34,7 +34,7 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
     layout->addWidget(m_opacity);
     layout->addWidget(m_smoothing);
     layout->addSpacing(6);
-    layout->addWidget(new QLabel(tr("Curva di pressione"), this));
+    layout->addWidget(new QLabel(tr("Pressure curve"), this));
     layout->addWidget(m_curveEditor);
     layout->addWidget(resetCurve, 0, Qt::AlignRight);
     layout->addStretch(1);

@@ -20,7 +20,7 @@ PressureCurveEditor::PressureCurveEditor(QWidget *parent)
     QSizePolicy policy(QSizePolicy::Preferred, QSizePolicy::Preferred);
     policy.setHeightForWidth(true);
     setSizePolicy(policy);
-    setToolTip(tr("Curva di pressione: trascina i due punti di controllo"));
+    setToolTip(tr("Pressure curve: drag the two control points"));
 }
 
 void PressureCurveEditor::setCurve(const PressureCurve &curve)

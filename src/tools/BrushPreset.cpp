@@ -17,18 +17,18 @@ QList<BrushPreset> builtInPresets(ToolId tool)
     switch (tool) {
     case ToolId::Brush:
         return {
-            {QObject::tr("Matita"), tool, 6.0, 0.85, kFirm, 0.2},
-            {QObject::tr("Penna"), tool, 5.0, 1.0, kLinear, 0.45},
-            {QObject::tr("Pennino"), tool, 9.0, 1.0, kTaper, 0.5},
-            {QObject::tr("Pennarello"), tool, 14.0, 1.0, kSteady, 0.25},
-            {QObject::tr("Pennello"), tool, 32.0, 0.7, kLinear, 0.15},
-            {QObject::tr("Riempitivo"), tool, 80.0, 1.0, kSteady, 0.1},
+            {QObject::tr("Pencil"), tool, 6.0, 0.85, kFirm, 0.2},
+            {QObject::tr("Pen"), tool, 5.0, 1.0, kLinear, 0.45},
+            {QObject::tr("Nib"), tool, 9.0, 1.0, kTaper, 0.5},
+            {QObject::tr("Marker"), tool, 14.0, 1.0, kSteady, 0.25},
+            {QObject::tr("Brush"), tool, 32.0, 0.7, kLinear, 0.15},
+            {QObject::tr("Fill"), tool, 80.0, 1.0, kSteady, 0.1},
         };
     case ToolId::Eraser:
         return {
-            {QObject::tr("Gomma"), tool, 30.0, 1.0, kSteady, 0.1},
-            {QObject::tr("Gomma fine"), tool, 6.0, 1.0, kLinear, 0.2},
-            {QObject::tr("Gomma grande"), tool, 120.0, 1.0, kSteady, 0.0},
+            {QObject::tr("Eraser"), tool, 30.0, 1.0, kSteady, 0.1},
+            {QObject::tr("Fine eraser"), tool, 6.0, 1.0, kLinear, 0.2},
+            {QObject::tr("Large eraser"), tool, 120.0, 1.0, kSteady, 0.0},
         };
     case ToolId::Hand:
     case ToolId::Zoom:

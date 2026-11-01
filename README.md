@@ -1,16 +1,16 @@
 # Mothion
 
-Software di animazione 2D frame-by-frame per animatori singoli e piccoli studi.
+Frame-by-frame 2D animation software for solo animators and small studios.
 
-**Stato: prototipo.** Questo passo contiene solo la shell dell'interfaccia
-(provvisoria) e l'input da tavoletta grafica con un pennello di prova.
-Non ci sono modello dati, timeline funzionante né salvataggio.
+**Status: prototype.** There is a document model (layers, drawings, Harmony-style
+exposure timing) with undo, a timeline and a layers panel, tablet input, and a brush
+engine that can import Clip Studio Paint brushes. There is no saving yet.
 
 ## Build
 
-Requisiti: CMake ≥ 3.21, compilatore C++20, Qt ≥ 6.5 (Core, Gui, Widgets, Sql; Test per i test).
-Sql serve a leggere i pennelli `.sut` (database SQLite, driver `qsqlite` incluso in Qt).
-Qt va linkato **dinamicamente** (LGPL): CMake si ferma con un errore se trova un Qt statico.
+Requirements: CMake ≥ 3.21, a C++20 compiler, Qt ≥ 6.5 (Core, Gui, Widgets, Sql; Test for the tests).
+Sql reads `.sut` brushes (SQLite databases, through the `qsqlite` driver shipped with Qt).
+Qt must be linked **dynamically** (LGPL): CMake stops with an error if it finds a static Qt.
 
 ### Linux (Ubuntu / Debian)
 
@@ -18,18 +18,18 @@ Qt va linkato **dinamicamente** (LGPL): CMake si ferma con un errore se trova un
 sudo apt install build-essential cmake qt6-base-dev qt6-wayland
 cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build -j
-ctest --test-dir build          # test unitari
+ctest --test-dir build          # unit tests
 ./build/mothion
 ```
 
-Per provare il percorso X11 da una sessione Wayland (via XWayland):
+To try the X11 path from a Wayland session (through XWayland):
 `QT_QPA_PLATFORM=xcb ./build/mothion`.
 
 ### Windows (MSVC)
 
-1. Installa Visual Studio 2022 (workload "Sviluppo di applicazioni desktop con C++") e,
-   con il Qt Online Installer, Qt 6.x per **MSVC 2022 64-bit**.
-2. Da un "x64 Native Tools Command Prompt for VS 2022":
+1. Install Visual Studio 2022 (workload "Desktop development with C++") and, with the
+   Qt Online Installer, Qt 6.x for **MSVC 2022 64-bit**.
+2. From an "x64 Native Tools Command Prompt for VS 2022":
 
 ```bat
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH=C:\Qt\6.10.2\msvc2022_64
@@ -39,160 +39,161 @@ C:\Qt\6.10.2\msvc2022_64\bin\windeployqt.exe build\RelWithDebInfo\mothion.exe
 build\RelWithDebInfo\mothion.exe
 ```
 
-`windeployqt` copia accanto all'eseguibile le DLL e i plugin di Qt (linking dinamico).
+`windeployqt` copies Qt's DLLs and plugins next to the executable (dynamic linking).
 
-### Opzioni CMake
+### CMake options
 
-| Opzione | Default | Effetto |
+| Option | Default | Effect |
 |---|---|---|
-| `MOTHION_BUILD_TESTS` | ON | Compila i test (QtTest). |
-| `MOTHION_BUILD_DEVTOOLS` | OFF | Compila `mothion_brushsheet`: `mothion_brushsheet out.png [pennello.sut ...]` disegna tratti di prova dei pennelli in un PNG. |
-| `MOTHION_ENABLE_WINTAB` | ON | Solo Windows: abilita `--wintab`. Usa un'API **privata** di Qt (`Qt6::GuiPrivate`); se un aggiornamento di Qt la rompe, impostala a OFF. |
+| `MOTHION_BUILD_TESTS` | ON | Builds the tests (QtTest). |
+| `MOTHION_BUILD_DEVTOOLS` | OFF | Builds `mothion_brushsheet`: `mothion_brushsheet out.png [brush.sut ...]` renders test strokes of brushes to a PNG. |
+| `MOTHION_ENABLE_WINTAB` | ON | Windows only: enables `--wintab`. Uses a **private** Qt API (`Qt6::GuiPrivate`); if a Qt update breaks it, set it to OFF. |
 
-### Opzioni da riga di comando
+### Command line options
 
-- `--wintab` (Windows): usa Wintab invece di Windows Ink. Richiede `wintab32.dll` del driver della tavoletta.
+- `--wintab` (Windows): use Wintab instead of Windows Ink. Needs the tablet driver's `wintab32.dll`.
 
-## Architettura
+## Architecture
 
 ```
 src/
-├─ core/     C++ puro, NESSUNA dipendenza da Qt (lo impone CMake: mothion_core non linka Qt)
+├─ core/     plain C++, NO Qt dependency (enforced by CMake: mothion_core does not link Qt)
 │            PenSample, PressureCurve, StrokeSmoother, RateMeter
-│  ├─ brush/  motore dei pennelli: Effector (dinamiche: pressione, velocità, inclinazione, casuale,
-│  │          curve a spline quadratica), BrushStyle (pennello "compilato"), DabGenerator (spaziatura
-│  │          ricalcolata a ogni timbro con resto tra i segmenti, punte, rotazione, spruzzo, variazioni
-│  │          di colore; Lcg deterministico per tratto), StrokeShaper (inizio e fine del tratto,
-│  │          filtro anti-tremolio, correzione), VelocityMeter, profilo di durezza
-│  └─ document/ modello del progetto: TiledImage (tasselli 64×64 copy-on-write), Drawing,
-│              Timing (esposizioni stile Harmony), Layer, Document, Command + commands/, History
-├─ document/ DocumentController: possiede Document e History, livello/frame correnti,
-│            esegue i comandi e li traduce in segnali Qt (unico accesso dell'UI al modello)
-├─ input/    unico punto che conosce QTabletEvent/QMouseEvent → PenSample
+│  ├─ brush/  brush engine: Effector (dynamics: pressure, velocity, tilt, random, quadratic
+│  │          spline curves), BrushStyle (a "compiled" brush), DabGenerator (spacing recomputed
+│  │          at every dab with the remainder carried across segments, tips, rotation, spray,
+│  │          color variation; deterministic Lcg per stroke), StrokeShaper (stroke start/end,
+│  │          anti-jitter filter, correction), VelocityMeter, hardness profile
+│  └─ document/ project model: TiledImage (64×64 copy-on-write tiles), Drawing,
+│              Timing (Harmony-style exposures), Layer, Document, Command + commands/, History
+├─ document/ DocumentController: owns Document and History, current layer/frame,
+│            runs commands and turns them into Qt signals (the UI's only access to the model)
+├─ input/    the only place that knows QTabletEvent/QMouseEvent → PenSample
 │            TabletInputAdapter, ProximityFilter, TabletBackend(_wintab|_nowintab)
-├─ canvas/   CanvasView (widget), ViewTransform (zoom/pan/rotazione/specchiatura), NavigationGesture,
-│            DabStamper (timbri tondi/sfumati/da immagine, già colorati, con mipmap),
-│            StrokeSession (tratto dal vivo su un TiledImage: flusso che si accumula, opacità come tetto,
-│            miscela acquerello, nastro, bordo acquerello),
-│            FrameRenderer (composizione dei livelli visibili nel frame), TileQt (ponte tasselli↔QImage),
+├─ canvas/   CanvasView (widget), ViewTransform (zoom/pan/rotation/mirroring), NavigationGesture,
+│            DabStamper (round, soft and image dabs, pre-colored, mipmapped),
+│            StrokeSession (live stroke on a TiledImage: flow builds up, opacity is a ceiling,
+│            watercolor mixing, ribbon, water edge),
+│            FrameRenderer (composes the visible layers at a frame), TileQt (tiles↔QImage),
 │            DebugOverlay (F12)
-├─ tools/    ToolState: strumento attivo, dimensione, opacità, colori, curva, stabilizzazione;
-│            BrushPreset: preset ("sotto-strumenti"); BrushDefinition: stile + immagini delle punte;
-│            BrushLibrary: pennelli importati (copie in AppData/brushes, ricaricate all'avvio);
-│            SutImporter: lettura dei .sut di Clip Studio Paint (parametri, dinamiche, punte)
-├─ ui/       MainWindow, DockLayout (disposizione e persistenza), PanelDock, Theme, IconFactory
-│  └─ panels/ Strumenti, Sotto-strumento (preset con anteprima), Proprietà strumento,
-│             slider verticali Dimensione/Opacità, Ruota colore, Set di colori,
-│             Navigatore, Livelli; timeline/ = timeline delle esposizioni (stile Harmony)
+├─ tools/    ToolState: active tool, size, opacity, colors, curve, stabilizer;
+│            BrushPreset: presets ("sub tools"); BrushDefinition: style + tip images;
+│            BrushLibrary: imported brushes (copies in AppData/brushes, reloaded at startup);
+│            SutImporter: reads Clip Studio Paint .sut files (parameters, dynamics, tips)
+├─ ui/       MainWindow, DockLayout (arrangement and persistence), PanelDock, Theme, IconFactory
+│  └─ panels/ Tools, Sub tool (presets with previews), Tool properties,
+│             vertical Size/Opacity sliders, Color wheel, Color set,
+│             Navigator, Layers; timeline/ = exposure timeline (Harmony-style)
 └─ app/      main.cpp
 ```
 
-Librerie: `mothion_core` (statica, senza Qt) ← `mothion_gui` (statica, Qt Widgets) ← `mothion` (eseguibile, solo `main`).
+Libraries: `mothion_core` (static, no Qt) ← `mothion_gui` (static, Qt Widgets) ← `mothion` (executable, `main` only).
 
-**Flusso dell'input**
+**Input flow**
 
 ```
 QTabletEvent / QMouseEvent ──input::toPenSample()──▶ PenSample
    │                                                    │
-   │  (prossimità: solo a QApplication → ProximityFilter)│
+   │  (proximity: only to QApplication → ProximityFilter)│
    ▼                                                    ▼
-CanvasView::handleSample ──▶ NavigationGesture (mano / zoom / rotazione)
-                         └─▶ StrokeSmoother → BrushInput (curva di pressione, velocità, inclinazione)
+CanvasView::handleSample ──▶ NavigationGesture (hand / zoom / rotate)
+                         └─▶ StrokeSmoother → BrushInput (pressure curve, velocity, tilt)
                               → brush::DabGenerator → StrokeSession (DabStamper)
-                              (sul disegno del livello/frame corrente; a fine tratto, se il pennello
-                               lo richiede, il tratto è ridisegnato dai punti finali di StrokeShaper
-                               con lo stesso seme, poi PaintCommand → History tramite DocumentController)
+                              (into the drawing at the current layer/frame; when the pen lifts,
+                               the stroke is redrawn from StrokeShaper's final points with the
+                               same seed if the brush needs it, then PaintCommand → History
+                               through DocumentController)
 ```
 
-Dopo `toPenSample()` nessuna parte del programma tocca eventi Qt di input.
+After `toPenSample()`, no part of the program touches Qt input events.
 
-**Regole di dipendenza**
-- I pannelli non conoscono il canvas: parlano solo con `ToolState` (segnali/slot).
-  Unica eccezione: il Navigatore, che è una vista della vista e usa l'API pubblica di `CanvasView`.
-- `DockLayout` è l'unico posto che conosce la disposizione dei pannelli: rifare la UX
-  significa cambiare lì (e in `Theme`/`dark.qss`/`IconFactory` per l'aspetto).
-- Il codice che usa API private di Qt è confinato in `input/TabletBackend_wintab.cpp`.
+**Dependency rules**
+- Panels do not know the canvas: they only talk to `ToolState` (signals/slots).
+  The one exception is the Navigator, a view of the view, which uses `CanvasView`'s public API.
+- `DockLayout` is the only place that knows how panels are arranged: redoing the UX
+  means changing it there (and `Theme`/`dark.qss`/`IconFactory` for the look).
+- Code using Qt private APIs is confined to `input/TabletBackend_wintab.cpp`.
 
-## Comandi (provvisori)
+## Controls (provisional)
 
-| Azione | Comando |
+| Action | Control |
 |---|---|
-| Pennello / Gomma / Mano / Zoom | B / E / H / Z |
-| Pan | Spazio + trascina, tasto centrale, pulsante laterale della penna, strumento Mano |
-| Zoom | rotella, Spazio+Ctrl+trascina, strumento Zoom, Ctrl + / Ctrl − / Ctrl 0 (adatta) |
-| Rotazione | Maiusc + rotella, Spazio+Maiusc+trascina, Ctrl , / Ctrl . / Ctrl / (azzera) |
-| Annulla / Ripeti | Ctrl+Z / Ctrl+Maiusc+Z o Ctrl+Y (fino a 500 passi o 1 GB) |
-| Overlay debug input | F12 |
-| Timeline | clic/trascina: frame e livello correnti; ← → Home Fine, ↑ ↓ livello; Ctrl+rotella = zoom frame |
-| Hold | trascina il bordo destro di un blocco (i frame successivi si spostano) |
-| Disegni | disegnare su un frame vuoto crea un disegno; tasto destro sulla timeline: nuovo disegno, svuota frame, inserisci/elimina frame, elimina disegno |
-| Livelli | + / cestino / frecce; occhio = visibilità, lucchetto = blocco; doppio clic = rinomina |
-| Navigatore | clic/trascina sulla miniatura per spostare la vista; slider zoom/rotazione; specchia O/V |
-| Layout | Finestra → Ripristina layout predefinito |
-| Tema | Finestra → Tema → Sistema / Chiaro / Scuro |
-| Pennelli | File → Importa pennello (.sut)…: compare in Sotto-strumento |
+| Brush / Eraser / Hand / Zoom | B / E / H / Z |
+| Pan | Space + drag, middle button, pen side button, Hand tool |
+| Zoom | wheel, Space+Ctrl+drag, Zoom tool, Ctrl + / Ctrl − / Ctrl 0 (fit) |
+| Rotate | Shift + wheel, Space+Shift+drag, Ctrl , / Ctrl . / Ctrl / (reset) |
+| Undo / Redo | Ctrl+Z / Ctrl+Shift+Z or Ctrl+Y (up to 500 steps or 1 GB) |
+| Input debug overlay | F12 |
+| Timeline | click/drag: current frame and layer; ← → Home End, ↑ ↓ layer; Ctrl+wheel = frame zoom |
+| Hold | drag the right edge of a block (later frames shift) |
+| Drawings | drawing on an empty frame creates a drawing; right-click the timeline: new drawing, clear frame, insert/delete frame, delete drawing |
+| Layers | + / bin / arrows; eye = visibility, padlock = lock; double-click = rename |
+| Navigator | click/drag the thumbnail to move the view; zoom/rotation sliders; flip H/V |
+| Layout | Window → Reset default layout |
+| Theme | Window → Theme → System / Light / Dark |
+| Brushes | File → Import brush (.sut)…: it appears in Sub tool |
 
-## Note su Qt 6 e tavolette (verificate su documentazione e sorgenti Qt 6.10)
+## Notes on Qt 6 and tablets (checked against Qt 6.10 docs and sources)
 
-- **Windows**: per default Qt 6 usa **Windows Ink** (messaggi `WM_POINTER`), senza configurazione.
-  Wintab si attiva solo da codice con `QWindowsApplication::setWinTabEnabled()` (API privata),
-  da noi esposto come `--wintab`. L'opzione `-platform windows:nowmpointer` citata in vecchia
-  documentazione non esiste più.
-- **Compressione**: `Qt::AA_CompressTabletEvents` è false per default (lo ribadiamo in `main.cpp`):
-  su Windows Qt consegna anche i campioni storici (`GetPointerPenInfoHistory`), su X11 non comprime
-  i movimenti del tablet. Gli eventi tablet vanno sempre **accettati**, altrimenti Qt li trasforma
-  in eventi mouse, che possono essere compressi.
-- **Prossimità**: `TabletEnterProximity`/`TabletLeaveProximity` arrivano solo a `QApplication`.
-- **X11**: Qt riconosce penna/gomma dal **nome** del device XInput ("stylus", "pen", "eraser", ...).
-  Con driver che espongono un solo device la gomma può non essere distinguibile.
-- **Wayland**: protocollo `tablet-unstable-v2`, il tipo gomma arriva dal compositor; nessuna
-  compressione lato Qt, posizione in passi di 1/256 px. Serve un compositor che lo supporti
+- **Windows**: by default Qt 6 uses **Windows Ink** (`WM_POINTER` messages), with no setup.
+  Wintab is only enabled from code with `QWindowsApplication::setWinTabEnabled()` (private API),
+  which we expose as `--wintab`. The `-platform windows:nowmpointer` option quoted in older
+  documentation no longer exists.
+- **Compression**: `Qt::AA_CompressTabletEvents` is false by default (we set it again in `main.cpp`):
+  on Windows Qt also delivers historical samples (`GetPointerPenInfoHistory`), on X11 it does not
+  compress tablet motion. Tablet events must always be **accepted**, otherwise Qt turns them into
+  mouse events, which may be compressed.
+- **Proximity**: `TabletEnterProximity`/`TabletLeaveProximity` only reach `QApplication`.
+- **X11**: Qt tells pen from eraser by the XInput device **name** ("stylus", "pen", "eraser", ...).
+  With drivers exposing a single device, the eraser may not be distinguishable.
+- **Wayland**: `tablet-unstable-v2` protocol, the eraser type comes from the compositor; no
+  compression on Qt's side, positions in 1/256 px steps. Needs a compositor that supports it
   (GNOME, KDE Plasma, Sway).
 
-Log utili: `QT_LOGGING_RULES="qt.qpa.input*=true" ./mothion` mostra i device rilevati da Qt.
+Useful logs: `QT_LOGGING_RULES="qt.qpa.input*=true" ./mothion` shows the devices Qt detects.
 
-## Come testare la tavoletta
+## Testing a tablet
 
-Avvia Mothion, premi **F12** e verifica:
+Start Mothion, press **F12** and check:
 
-1. **Dispositivo**: tipo `Stylus`, punta `penna`. Se compare `Mouse` mentre usi la penna, il driver
-   è in modalità mouse oppure Qt non riconosce il device.
-2. **Prossimità**: avvicinando la penna senza toccare → "dentro", allontanandola → "fuori";
-   il cerchio del pennello segue la penna in hover.
-3. **Posizione subpixel**: i decimali della posizione cambiano in modo continuo.
-4. **Pressione**: da ~0 a 1.000; il punto arancione si muove sulla curva di pressione e lo spessore
-   del tratto segue. Prova a modificare la curva e a disegnare di nuovo.
-5. **Inclinazione**: X/Y tra −60° e +60° inclinando la penna (se la penna la supporta).
-6. **Rotazione**: diversa da 0 solo con penne che la supportano (es. Wacom Art Pen).
-7. **Gomma**: girando la penna la punta diventa `gomma` e il tratto cancella anche con il pennello
-   selezionato.
-8. **Pulsanti laterali**: compaiono in "pulsanti"; premuti senza toccare la superficie e trascinando
-   spostano la vista.
-9. **Frequenza**: durante un tratto continuo, tipicamente 100–300 Hz secondo modello e driver.
-   Valori molto più bassi (es. ~60 Hz) indicano compressione o fallback al mouse.
+1. **Device**: type `Stylus`, tool `pen`. If `Mouse` shows up while using the pen, the driver
+   is in mouse mode or Qt does not recognize the device.
+2. **Proximity**: bringing the pen close without touching → "in", moving it away → "out";
+   the brush circle follows the pen while hovering.
+3. **Subpixel position**: the position's decimals change continuously.
+4. **Pressure**: from ~0 to 1.000; the orange dot moves along the pressure curve and the stroke
+   width follows. Try editing the curve and drawing again.
+5. **Tilt**: X/Y between −60° and +60° when tilting the pen (if the pen supports it).
+6. **Rotation**: non-zero only with pens that support it (e.g. Wacom Art Pen).
+7. **Eraser**: flipping the pen turns the tool into `eraser`, and the stroke erases even with the
+   brush selected.
+8. **Side buttons**: they show up under "buttons"; pressed without touching the surface and
+   dragged, they move the view.
+9. **Rate**: during a continuous stroke, typically 100–300 Hz depending on model and driver.
+   Much lower values (e.g. ~60 Hz) mean compression or a fallback to the mouse.
 
 ### Wacom
-- **Windows**: driver Wacom ufficiale. Default = Windows Ink: in "Proprietà tavoletta Wacom" →
-  Mappatura deve essere attivo "Usa Windows Ink", altrimenti non arrivano eventi penna.
-  Prova anche `--wintab` e confronta latenza e frequenza.
-- **Linux**: supportata dal kernel (`wacom`). X11: `xinput list` deve mostrare device separati
-  "... Pen stylus" ed "... Pen eraser". Wayland: configurazione in Impostazioni → Tavoletta Wacom
-  (GNOME) o Tavoletta grafica (KDE).
+- **Windows**: official Wacom driver. Default = Windows Ink: in "Wacom Tablet Properties" →
+  Mapping, "Use Windows Ink" must be on, otherwise no pen events arrive.
+  Also try `--wintab` and compare latency and rate.
+- **Linux**: supported by the kernel (`wacom`). X11: `xinput list` should show separate devices
+  "... Pen stylus" and "... Pen eraser". Wayland: set up in Settings → Wacom Tablet
+  (GNOME) or Drawing Tablet (KDE).
 
 ### Huion
-- **Windows**: driver HuionTablet; nelle impostazioni del driver attiva/disattiva "Windows Ink"
-  coerentemente con il backend che stai provando (`--wintab` richiede il driver Huion installato).
-- **Linux**: molti modelli funzionano con il driver di kernel `hid-uclogic` senza installare nulla.
-  Molte penne Huion non hanno la gomma fisica: in quel caso il punto 7 non è applicabile.
+- **Windows**: HuionTablet driver; in the driver settings turn "Windows Ink" on or off to match
+  the backend you are testing (`--wintab` needs the Huion driver installed).
+- **Linux**: many models work with the `hid-uclogic` kernel driver without installing anything.
+  Many Huion pens have no physical eraser: in that case step 7 does not apply.
 
 ### XP-Pen
-- **Windows**: driver "Pentablet" di XP-Pen; anche qui c'è l'opzione Windows Ink nel pannello del
-  driver. Se la pressione non arriva con Windows Ink, prova `--wintab`.
-- **Linux**: i modelli recenti sono supportati da `hid-uclogic`; in alternativa il driver XP-Pen.
-  Su X11, se l'overlay mostra `Mouse`, controlla con `xinput list` il nome del device: Qt lo
-  riconosce come tavoletta solo da certi nomi (vedi note sopra).
+- **Windows**: XP-Pen's "Pentablet" driver; it also has a Windows Ink option in the driver
+  panel. If pressure does not arrive with Windows Ink, try `--wintab`.
+- **Linux**: recent models are supported by `hid-uclogic`; otherwise the XP-Pen driver.
+  On X11, if the overlay shows `Mouse`, check the device name with `xinput list`: Qt only
+  recognizes it as a tablet from certain names (see the notes above).
 
-## Licenze
+## Licenses
 
-Qt è usato sotto LGPL v3 con linking dinamico. Nessuna dipendenza GPL.
-Icone, nomi e grafica sono originali del progetto (le icone sono disegnate in codice in `IconFactory`).
+Qt is used under LGPL v3 with dynamic linking. No GPL dependencies.
+Icons, names and graphics are original to the project (icons are drawn in code in `IconFactory`).

@@ -33,16 +33,16 @@ DockLayout::DockLayout(QMainWindow *window, const WorkspacePanels &panels)
     window->setCorner(Qt::BottomRightCorner, Qt::RightDockWidgetArea);
     window->setTabPosition(Qt::AllDockWidgetAreas, QTabWidget::North);
 
-    m_tools = addDock(QStringLiteral("dock.tools"), tr("Strumenti"), panels.tools);
-    m_subTools = addDock(QStringLiteral("dock.subTools"), tr("Sotto-strumento"), panels.subTools);
-    m_toolProperties = addDock(QStringLiteral("dock.toolProperties"), tr("Proprietà strumento"),
+    m_tools = addDock(QStringLiteral("dock.tools"), tr("Tools"), panels.tools);
+    m_subTools = addDock(QStringLiteral("dock.subTools"), tr("Sub tool"), panels.subTools);
+    m_toolProperties = addDock(QStringLiteral("dock.toolProperties"), tr("Tool properties"),
                                panels.toolProperties);
-    m_brushSliders = addDock(QStringLiteral("dock.brushSliders"), tr("Dimensione e opacità"),
+    m_brushSliders = addDock(QStringLiteral("dock.brushSliders"), tr("Size and opacity"),
                              panels.brushSliders);
-    m_colorWheel = addDock(QStringLiteral("dock.colorWheel"), tr("Ruota colore"), panels.colorWheel);
-    m_colorSet = addDock(QStringLiteral("dock.colorSet"), tr("Set di colori"), panels.colorSet);
-    m_navigator = addDock(QStringLiteral("dock.navigator"), tr("Navigatore"), panels.navigator);
-    m_layers = addDock(QStringLiteral("dock.layers"), tr("Livelli"), panels.layers);
+    m_colorWheel = addDock(QStringLiteral("dock.colorWheel"), tr("Color wheel"), panels.colorWheel);
+    m_colorSet = addDock(QStringLiteral("dock.colorSet"), tr("Color set"), panels.colorSet);
+    m_navigator = addDock(QStringLiteral("dock.navigator"), tr("Navigator"), panels.navigator);
+    m_layers = addDock(QStringLiteral("dock.layers"), tr("Layers"), panels.layers);
     m_timeline = addDock(QStringLiteral("dock.timeline"), tr("Timeline"), panels.timeline);
 
     applyDefault();
