@@ -45,3 +45,6 @@ qrc_*.cpp
 *.swp
 *~
 .DS_Store
+
+# aqtinstall (Qt download by scripts/build-windows.ps1)
+aqtinstall.log

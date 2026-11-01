@@ -27,6 +27,14 @@ To try the X11 path from a Wayland session (through XWayland):
 
 ### Windows (MSVC)
 
+**Quick way:** run `build.bat` (double-click, or from a terminal). It installs what is missing
+(CMake, the Visual Studio 2022 C++ build tools and Qt, through `winget` and `aqtinstall`), builds,
+runs the tests and copies Qt's DLLs next to `build\RelWithDebInfo\mothion.exe`. Options:
+`-Run` starts Mothion at the end, `-SkipTests`, `-DevTools`, `-Config Release`, `-QtVersion`, `-QtRoot`
+(default `C:\Qt`). See `scripts\build-windows.ps1`.
+
+**By hand:**
+
 1. Install Visual Studio 2022 (workload "Desktop development with C++") and, with the
    Qt Online Installer, Qt 6.x for **MSVC 2022 64-bit**.
 2. From an "x64 Native Tools Command Prompt for VS 2022":
