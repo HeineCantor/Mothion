@@ -103,7 +103,9 @@ qt_add_library(mothion_gui STATIC
 qt_add_resources(mothion_gui "mothion_resources"
     PREFIX "/"
     BASE "${PROJECT_SOURCE_DIR}/resources"
-    FILES "${PROJECT_SOURCE_DIR}/resources/theme/dark.qss"
+    FILES
+        "${PROJECT_SOURCE_DIR}/resources/theme/dark.qss"
+        "${PROJECT_SOURCE_DIR}/resources/icon/mothion.png"
 )
 # Tablet backend selection: Wintab needs Qt's private GUI API, Windows only.
 if(WIN32 AND MOTHION_ENABLE_WINTAB)
@@ -125,6 +127,9 @@ mothion_set_warnings(mothion_gui)
 qt_add_executable(mothion WIN32 MACOSX_BUNDLE app/main.cpp)
 target_compile_definitions(mothion PRIVATE MOTHION_VERSION="${PROJECT_VERSION}")
 target_link_libraries(mothion PRIVATE mothion_gui)
+if(WIN32)
+    target_sources(mothion PRIVATE "${PROJECT_SOURCE_DIR}/resources/icon/mothion.rc")
+endif()
 mothion_set_warnings(mothion)
 
 # ---------------------------------------------------------------------------

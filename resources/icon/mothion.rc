@@ -1,0 +1,2 @@
+// Windows: gives mothion.exe its icon in Explorer and on shortcuts.
+IDI_ICON1 ICON "mothion.ico"

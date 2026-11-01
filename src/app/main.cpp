@@ -7,6 +7,7 @@
 
 #include <QApplication>
 #include <QCommandLineParser>
+#include <QIcon>
 
 int main(int argc, char *argv[])
 {
@@ -20,6 +21,7 @@ int main(int argc, char *argv[])
     QApplication::setOrganizationName(QStringLiteral("Mothion"));
     QApplication::setApplicationName(QStringLiteral("Mothion"));
     QApplication::setApplicationVersion(QStringLiteral(MOTHION_VERSION));
+    QApplication::setWindowIcon(QIcon(QStringLiteral(":/icon/mothion.png")));
 
     QCommandLineParser parser;
     parser.addHelpOption();
