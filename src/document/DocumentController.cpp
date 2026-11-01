@@ -131,6 +131,48 @@ void DocumentController::importImage(const QImage &image, const QString &name)
     setCurrentLayer(layerId);
 }
 
+bool DocumentController::canClearCurrentDrawing() const
+{
+    const doc::Layer *layer = m_document->layer(m_currentLayer);
+    if (!layer || !layer->properties().visible || layer->properties().locked)
+        return false;
+    const doc::Drawing *drawing = layer->drawingAt(m_currentFrame);
+    return drawing && !drawing->image.isEmpty();
+}
+
+bool DocumentController::clearCurrentDrawing(QString *reason)
+{
+    auto fail = [reason](const QString &why) {
+        if (reason)
+            *reason = why;
+        return false;
+    };
+    interruptStroke(); // an open edit is applied first, then cleared with the rest
+    doc::Layer *layer = m_document->layer(m_currentLayer);
+    if (!layer)
+        return fail(tr("No layer selected"));
+    const QString name = QString::fromStdString(layer->properties().name);
+    if (!layer->properties().visible)
+        return fail(tr("Layer “%1” is hidden").arg(name));
+    if (layer->properties().locked)
+        return fail(tr("Layer “%1” is locked").arg(name));
+    const doc::DrawingId drawingId = layer->timing().drawingAt(m_currentFrame);
+    doc::Drawing *drawing = layer->drawing(drawingId);
+    if (!drawing || drawing->image.isEmpty())
+        return fail(tr("Nothing to clear on this frame"));
+
+    // The drawing stays (its exposures too), only its pixels go.
+    const doc::TiledImage before = drawing->image;
+    const QRect area = boundsOf(before.tileCoords());
+    drawing->image = doc::TiledImage();
+    std::vector<std::unique_ptr<doc::Command>> steps;
+    steps.push_back(doc::PaintCommand::capture(m_currentLayer, drawingId, before, drawing->image));
+    m_history.pushApplied(std::make_unique<doc::GroupCommand>(doc::CommandKind::ClearDrawing, std::move(steps)));
+    emit pixelsChanged(m_currentLayer, drawingId, area);
+    emit historyChanged();
+    return true;
+}
+
 void DocumentController::setSelection(const QPainterPath &area)
 {
     // Kept inside the document: what lies outside is never drawn.
@@ -187,6 +229,7 @@ QString DocumentController::commandName(doc::CommandKind kind)
     case doc::CommandKind::MoveLayer: return tr("move layer");
     case doc::CommandKind::ChangeLayerProperties: return tr("layer properties");
     case doc::CommandKind::ImportImage: return tr("import image");
+    case doc::CommandKind::ClearDrawing: return tr("clear");
     }
     return {};
 }

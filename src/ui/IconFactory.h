@@ -9,7 +9,7 @@ enum class IconId {
     Brush, Eraser, Hand, Zoom, Move, RectSelect, LassoSelect, Puppet,
     Collapse, Expand, Float, Close,
     ZoomOut, ZoomFit, ZoomActual, RotateLeft, RotateRight, RotateReset,
-    FlipHorizontal, FlipVertical, Eye, Lock, Add, Delete, ArrowUp, ArrowDown,
+    FlipHorizontal, FlipVertical, Eye, Lock, Add, Delete, ArrowUp, ArrowDown, Clear,
 };
 
 // Provisional icons, drawn in code as simple line art on a 24x24 grid.

@@ -3,6 +3,7 @@
 #include "canvas/MoveTool.h"
 #include "canvas/PuppetTool.h"
 #include "canvas/SelectionTool.h"
+#include "core/document/commands/LayerCommands.h"
 #include "document/DocumentController.h"
 #include "io/ProjectFile.h"
 #include "tools/ToolState.h"
@@ -90,6 +91,64 @@ private slots:
         QCOMPARE(QFileInfo(dialog.path()).completeBaseName(), QStringLiteral("walk"));
         QVERIFY(dialog.firstFrame() >= 0 && dialog.firstFrame() <= dialog.lastFrame());
         QVERIFY(!dialog.options().transparent); // JPEG selected: never transparent
+    }
+
+    // Clear empties the drawing at the current layer and frame in one undo
+    // step; the drawing and its exposures stay.
+    void clearEmptiesTheCurrentDrawing()
+    {
+        document::DocumentController controller;
+        QImage image(40, 30, QImage::Format_ARGB32);
+        image.fill(Qt::blue);
+        controller.importImage(image, QStringLiteral("pic"));
+        const doc::Document &d = controller.document();
+        const doc::Layer &layer = *d.layer(controller.currentLayer());
+        const doc::DrawingId drawing = layer.timing().drawingAt(0);
+        QVERIFY(controller.canClearCurrentDrawing());
+
+        QVERIFY(controller.clearCurrentDrawing());
+        QVERIFY(layer.drawing(drawing)->image.isEmpty());
+        QCOMPARE(layer.timing().drawingAt(0), drawing); // still exposed, just empty
+        QVERIFY(!controller.canClearCurrentDrawing());
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo clear"));
+
+        controller.undo();
+        QVERIFY(!layer.drawing(drawing)->image.isEmpty());
+        controller.redo();
+        QVERIFY(layer.drawing(drawing)->image.isEmpty());
+
+        QString reason;
+        QVERIFY(!controller.clearCurrentDrawing(&reason)); // nothing left
+        QVERIFY(!reason.isEmpty());
+    }
+
+    void clearRespectsLockedAndHiddenLayers()
+    {
+        document::DocumentController controller;
+        QImage red(10, 10, QImage::Format_ARGB32);
+        red.fill(Qt::red);
+        controller.importImage(red, QStringLiteral("red"));
+        const doc::LayerId id = controller.currentLayer();
+        doc::LayerProperties props = controller.document().layer(id)->properties();
+
+        for (bool locked : {true, false}) {
+            doc::LayerProperties p = props;
+            p.locked = locked;
+            p.visible = locked; // first locked, then hidden
+            controller.execute(doc::makeSetLayerProperties(controller.document(), id, p));
+            QString reason;
+            QVERIFY(!controller.canClearCurrentDrawing());
+            QVERIFY(!controller.clearCurrentDrawing(&reason));
+            QVERIFY(reason.contains(locked ? QStringLiteral("locked") : QStringLiteral("hidden")));
+        }
+    }
+
+    void clearOnAnEmptyFrameDoesNothing()
+    {
+        document::DocumentController controller; // one layer, no drawings
+        QVERIFY(!controller.canClearCurrentDrawing());
+        QVERIFY(!controller.clearCurrentDrawing());
+        QVERIFY(!controller.canUndo());
     }
 
     void importedImageGetsItsOwnLayer()

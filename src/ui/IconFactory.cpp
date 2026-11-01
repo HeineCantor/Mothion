@@ -233,6 +233,13 @@ void drawGlyph(QPainter &p, IconId id)
         path.moveTo(5, 12);
         path.lineTo(19, 12);
         break;
+    case IconId::Clear: // a sheet crossed out
+        path.addRect(QRectF(4.5, 4.5, 15, 15));
+        path.moveTo(9, 9);
+        path.lineTo(15, 15);
+        path.moveTo(15, 9);
+        path.lineTo(9, 15);
+        break;
     case IconId::Delete: // bin
         path.moveTo(5, 7);
         path.lineTo(19, 7);

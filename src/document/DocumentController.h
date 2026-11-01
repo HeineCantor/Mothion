@@ -61,6 +61,13 @@ public:
     // document if larger. One undo step; the new layer becomes current.
     void importImage(const QImage &image, const QString &name);
 
+    // Erases every pixel of the drawing at the current layer and frame, as one
+    // undo step. Returns false, with `reason` saying why, when there is
+    // nothing to clear or the layer is hidden or locked.
+    bool clearCurrentDrawing(QString *reason = nullptr);
+    // Whether clearCurrentDrawing() would do something.
+    bool canClearCurrentDrawing() const;
+
     // --- selection ------------------------------------------------------------------
     // The selected area in document coordinates; empty = nothing selected
     // (tools then act on the whole drawing). Not part of the undo history.

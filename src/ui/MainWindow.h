@@ -39,6 +39,7 @@ protected:
 
 private:
     void createCommandBar();
+    void createCanvasArea(); // the canvas with its bar of canvas commands above it
     void createMenus();
     void newDocument();
     void open();
@@ -62,6 +63,9 @@ private:
     QList<QAction *> m_fileActions;
     QList<QAction *> m_editActions;
     QAction *m_saveAsAction = nullptr;
+    QList<QAction *> m_zoomActions;
+    QList<QAction *> m_rotateActions;
+    QAction *m_clearAction = nullptr;
     QString m_filePath; // empty until saved or opened
 };
 

@@ -38,6 +38,7 @@
 #include <QSettings>
 #include <QStatusBar>
 #include <QToolBar>
+#include <QVBoxLayout>
 
 namespace mothion::ui {
 
@@ -50,8 +51,6 @@ MainWindow::MainWindow(QWidget *parent)
 {
     setWindowTitle(QStringLiteral("Mothion"));
     resize(1400, 900);
-
-    setCentralWidget(m_canvas);
 
     auto *properties = new ToolPropertiesPanel(m_toolState, this);
     WorkspacePanels panels;
@@ -76,6 +75,7 @@ MainWindow::MainWindow(QWidget *parent)
             });
 
     createCommandBar();
+    createCanvasArea();
     m_dockLayout = new DockLayout(this, panels);
     createMenus();
     statusBar()->showMessage(tr("Ready"));
@@ -137,9 +137,72 @@ void MainWindow::createCommandBar()
     bar->setMovable(false);
     bar->setIconSize(QSize(20, 20));
     bar->addActions(m_fileActions);
-    bar->addSeparator();
-    bar->addActions(m_editActions);
     addToolBar(Qt::TopToolBarArea, bar);
+}
+
+void MainWindow::createCanvasArea()
+{
+    // View commands: on the canvas bar and in the View menu.
+    // Provisional shortcuts; real keymap comes with the UX design.
+    auto view = [this](IconId id, const QString &text, const QList<QKeySequence> &keys, auto slot) {
+        auto *a = new QAction(icon(id), text, this);
+        a->setShortcuts(keys);
+        connect(a, &QAction::triggered, m_canvas, slot);
+        return a;
+    };
+    m_zoomActions << view(IconId::ZoomOut, tr("Zoom out"), {QKeySequence(Qt::CTRL | Qt::Key_Minus)},
+                          &canvas::CanvasView::zoomOut)
+                  << view(IconId::Zoom, tr("Zoom in"),
+                          {QKeySequence(Qt::CTRL | Qt::Key_Plus), QKeySequence(Qt::CTRL | Qt::Key_Equal)},
+                          &canvas::CanvasView::zoomIn)
+                  << view(IconId::ZoomFit, tr("Fit to window"), {QKeySequence(Qt::CTRL | Qt::Key_0)},
+                          &canvas::CanvasView::fitToView)
+                  << view(IconId::ZoomActual, tr("Actual size"), {QKeySequence(Qt::CTRL | Qt::Key_1)},
+                          &canvas::CanvasView::actualSize);
+    m_rotateActions << view(IconId::RotateLeft, tr("Rotate left"), {QKeySequence(Qt::CTRL | Qt::Key_Comma)},
+                            &canvas::CanvasView::rotateLeft)
+                    << view(IconId::RotateRight, tr("Rotate right"), {QKeySequence(Qt::CTRL | Qt::Key_Period)},
+                            &canvas::CanvasView::rotateRight)
+                    << view(IconId::RotateReset, tr("Reset rotation"), {QKeySequence(Qt::CTRL | Qt::Key_Slash)},
+                            &canvas::CanvasView::resetRotation);
+
+    // Clear: enabled only when the current drawing has pixels and may be changed.
+    m_clearAction = new QAction(icon(IconId::Clear), tr("Clear layer"), this);
+    m_clearAction->setToolTip(tr("Clear layer: erase the current layer's drawing on this frame"));
+    connect(m_clearAction, &QAction::triggered, this, [this] {
+        QString reason;
+        if (!m_document->clearCurrentDrawing(&reason))
+            statusBar()->showMessage(reason, 4000);
+    });
+    auto syncClear = [this] { m_clearAction->setEnabled(m_document->canClearCurrentDrawing()); };
+    using document::DocumentController;
+    connect(m_document, &DocumentController::structureChanged, this, syncClear);
+    connect(m_document, &DocumentController::currentLayerChanged, this, syncClear);
+    connect(m_document, &DocumentController::currentFrameChanged, this, syncClear);
+    connect(m_document, &DocumentController::pixelsChanged, this, syncClear);
+    connect(m_document, &DocumentController::historyChanged, this, syncClear);
+    syncClear();
+
+    // The bar sits right above the canvas, inside the central area (not a
+    // movable QMainWindow toolbar): it belongs to the canvas, not the window.
+    auto *bar = new QToolBar(tr("Canvas"), this);
+    bar->setObjectName(QStringLiteral("toolbar.canvas"));
+    bar->setIconSize(QSize(18, 18));
+    bar->addActions(m_editActions);
+    bar->addSeparator();
+    bar->addAction(m_clearAction);
+    bar->addSeparator();
+    bar->addActions(m_zoomActions);
+    bar->addSeparator();
+    bar->addActions(m_rotateActions);
+
+    auto *area = new QWidget(this);
+    auto *layout = new QVBoxLayout(area);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(0);
+    layout->addWidget(bar);
+    layout->addWidget(m_canvas, 1);
+    setCentralWidget(area);
 }
 
 void MainWindow::createMenus()
@@ -159,25 +222,16 @@ void MainWindow::createMenus()
     QMenu *edit = menuBar()->addMenu(tr("&Edit"));
     edit->addActions(m_editActions);
     edit->addSeparator();
+    edit->addAction(m_clearAction);
+    edit->addSeparator();
     edit->addAction(tr("Select all"), QKeySequence::SelectAll, m_document, &document::DocumentController::selectAll);
     edit->addAction(tr("Deselect"), QKeySequence(Qt::CTRL | Qt::Key_D), m_document,
                     &document::DocumentController::clearSelection);
 
     m_viewMenu = menuBar()->addMenu(tr("&View"));
-    // Provisional shortcuts; real keymap comes with the UX design.
-    auto addView = [this](const QString &text, const QList<QKeySequence> &keys, auto slot) {
-        QAction *a = m_viewMenu->addAction(text, m_canvas, slot);
-        a->setShortcuts(keys);
-        return a;
-    };
-    addView(tr("Zoom in"), {QKeySequence(Qt::CTRL | Qt::Key_Plus), QKeySequence(Qt::CTRL | Qt::Key_Equal)},
-            &canvas::CanvasView::zoomIn);
-    addView(tr("Zoom out"), {QKeySequence(Qt::CTRL | Qt::Key_Minus)}, &canvas::CanvasView::zoomOut);
-    addView(tr("Fit to window"), {QKeySequence(Qt::CTRL | Qt::Key_0)}, &canvas::CanvasView::fitToView);
+    m_viewMenu->addActions(m_zoomActions);
     m_viewMenu->addSeparator();
-    addView(tr("Rotate left"), {QKeySequence(Qt::CTRL | Qt::Key_Comma)}, &canvas::CanvasView::rotateLeft);
-    addView(tr("Rotate right"), {QKeySequence(Qt::CTRL | Qt::Key_Period)}, &canvas::CanvasView::rotateRight);
-    addView(tr("Reset rotation"), {QKeySequence(Qt::CTRL | Qt::Key_Slash)}, &canvas::CanvasView::resetRotation);
+    m_viewMenu->addActions(m_rotateActions);
     m_viewMenu->addSeparator();
     QAction *debug = m_viewMenu->addAction(tr("Input debug overlay"));
     debug->setCheckable(true);
