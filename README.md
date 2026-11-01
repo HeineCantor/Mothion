@@ -116,6 +116,7 @@ Dopo `toPenSample()` nessuna parte del programma tocca eventi Qt di input.
 | Livelli | + / cestino / frecce; occhio = visibilità, lucchetto = blocco; doppio clic = rinomina |
 | Navigatore | clic/trascina sulla miniatura per spostare la vista; slider zoom/rotazione; specchia O/V |
 | Layout | Finestra → Ripristina layout predefinito |
+| Tema | Finestra → Tema → Sistema / Chiaro / Scuro |
 
 ## Note su Qt 6 e tavolette (verificate su documentazione e sorgenti Qt 6.10)
 

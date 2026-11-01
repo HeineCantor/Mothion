@@ -140,7 +140,9 @@ void CanvasView::viewWasChanged()
 void CanvasView::paintEvent(QPaintEvent *)
 {
     QPainter p(this);
-    p.fillRect(rect(), QColor(0x3a, 0x3a, 0x3e));
+    // The desk around the sheet: a step away from the window colour, in either theme.
+    const QColor window = palette().color(QPalette::Window);
+    p.fillRect(rect(), window.lightness() < 128 ? window.lighter(135) : window.darker(115));
 
     // Smooth scaling only when zoomed out; nearest-neighbour shows real pixels up close.
     p.setRenderHint(QPainter::SmoothPixmapTransform, m_view.zoom() < 2.0);

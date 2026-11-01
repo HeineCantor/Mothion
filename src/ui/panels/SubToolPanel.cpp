@@ -4,6 +4,7 @@
 #include "canvas/StrokeSession.h"
 #include "canvas/TileQt.h"
 
+#include <QEvent>
 #include <QLabel>
 #include <QListWidget>
 #include <QPainter>
@@ -58,7 +59,14 @@ public:
     {
         const QRect r = option.rect.adjusted(1, 1, -1, -1);
         const bool selected = option.state & QStyle::State_Selected;
-        p->fillRect(r, selected ? option.palette.highlight().color().darker(160) : option.palette.base().color());
+        // Selection: a tint of the highlight over the base, so the stroke and
+        // name keep their contrast in either theme.
+        const QColor base = option.palette.base().color();
+        const QColor highlight = option.palette.highlight().color();
+        auto mix = [](int a, int b) { return (a * 7 + b * 3) / 10; };
+        const QColor tint(mix(base.red(), highlight.red()), mix(base.green(), highlight.green()),
+                          mix(base.blue(), highlight.blue()));
+        p->fillRect(r, selected ? tint : base);
         p->setPen(option.palette.mid().color());
         p->drawLine(r.bottomLeft(), r.bottomRight());
 
@@ -120,6 +128,14 @@ void SubToolPanel::showPresetsFor(tools::ToolId tool)
     m_empty->setVisible(m_presets.isEmpty());
     if (!m_presets.isEmpty())
         m_list->setCurrentRow(m_selected.count(tool) ? m_selected[tool] : 0);
+}
+
+void SubToolPanel::changeEvent(QEvent *event)
+{
+    // The previews are drawn in the text color: redraw them after a theme switch.
+    if (event->type() == QEvent::PaletteChange)
+        showPresetsFor(m_state->activeTool());
+    QWidget::changeEvent(event);
 }
 
 } // namespace mothion::ui

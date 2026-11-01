@@ -7,6 +7,7 @@
 #include "ui/DockLayout.h"
 #include "ui/IconFactory.h"
 #include "ui/PanelDock.h"
+#include "ui/Theme.h"
 #include "ui/panels/BrushSlidersPanel.h"
 #include "ui/panels/ColorSetPanel.h"
 #include "ui/panels/ColorWheelPanel.h"
@@ -19,6 +20,7 @@
 #include "ui/panels/timeline/TimelinePanel.h"
 
 #include <QAction>
+#include <QActionGroup>
 #include <QApplication>
 #include <QCloseEvent>
 #include <QLabel>
@@ -163,6 +165,21 @@ void MainWindow::createMenus()
     QMenu *window = menuBar()->addMenu(tr("&Finestra"));
     for (PanelDock *dock : m_dockLayout->docks())
         window->addAction(dock->toggleViewAction());
+    window->addSeparator();
+    QMenu *theme = window->addMenu(tr("Tema"));
+    auto *themeGroup = new QActionGroup(this);
+    const std::pair<QString, ThemeChoice> themes[] = {
+        {tr("Sistema"), ThemeChoice::System},
+        {tr("Chiaro"), ThemeChoice::Light},
+        {tr("Scuro"), ThemeChoice::Dark},
+    };
+    for (const auto &[text, choice] : themes) {
+        QAction *a = theme->addAction(text);
+        a->setCheckable(true);
+        a->setChecked(choice == themeChoice());
+        themeGroup->addAction(a);
+        connect(a, &QAction::triggered, this, [choice] { setThemeChoice(*qApp, choice); });
+    }
     window->addSeparator();
     window->addAction(tr("Ripristina layout predefinito"), m_dockLayout, &DockLayout::resetToDefault);
 }

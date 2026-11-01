@@ -1,11 +1,12 @@
 #include "ui/IconFactory.h"
 
 #include <QApplication>
-#include <QHash>
+#include <QIconEngine>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPalette>
 #include <QPixmap>
+#include <QPixmapCache>
 
 namespace mothion::ui {
 
@@ -238,27 +239,63 @@ QPixmap render(IconId id, int size, const QColor &color)
     return pm;
 }
 
+// Renders the glyph when Qt asks for a pixmap, in the colors of the current
+// application palette, so icons follow a theme switch without being set again.
+// "On" is drawn over the highlight of checked buttons.
+class GlyphIconEngine : public QIconEngine
+{
+public:
+    explicit GlyphIconEngine(IconId id) : m_id(id) {}
+
+    QIconEngine *clone() const override { return new GlyphIconEngine(m_id); }
+
+    void paint(QPainter *painter, const QRect &rect, QIcon::Mode mode, QIcon::State state) override
+    {
+        const qreal scale = painter->device() ? painter->device()->devicePixelRatioF() : 1.0;
+        painter->drawPixmap(rect, scaledPixmap(rect.size(), mode, state, scale));
+    }
+
+    QPixmap pixmap(const QSize &size, QIcon::Mode mode, QIcon::State state) override
+    {
+        return scaledPixmap(size, mode, state, 1.0);
+    }
+
+    QPixmap scaledPixmap(const QSize &size, QIcon::Mode mode, QIcon::State state, qreal scale) override
+    {
+        const QColor color = colorFor(mode, state);
+        const int px = qMax(1, qRound(qMin(size.width(), size.height()) * scale));
+        const QString key = QStringLiteral("mothion-icon-%1-%2-%3")
+                                .arg(static_cast<int>(m_id))
+                                .arg(px)
+                                .arg(color.rgba(), 8, 16, QLatin1Char('0'));
+        QPixmap pm;
+        if (!QPixmapCache::find(key, &pm)) {
+            pm = render(m_id, px, color);
+            QPixmapCache::insert(key, pm);
+        }
+        pm.setDevicePixelRatio(scale);
+        return pm;
+    }
+
+private:
+    static QColor colorFor(QIcon::Mode mode, QIcon::State state)
+    {
+        const QPalette pal = QApplication::palette();
+        if (mode == QIcon::Disabled)
+            return pal.color(QPalette::Disabled, QPalette::ButtonText);
+        if (state == QIcon::On)
+            return pal.color(QPalette::Normal, QPalette::HighlightedText);
+        return pal.color(QPalette::Normal, QPalette::ButtonText);
+    }
+
+    IconId m_id;
+};
+
 } // namespace
 
 QIcon icon(IconId id)
 {
-    static QHash<int, QIcon> cache;
-    const int key = static_cast<int>(id);
-    if (auto it = cache.constFind(key); it != cache.constEnd())
-        return *it;
-
-    // Colors come from the application palette (set by Theme before any icon
-    // is requested); "On" is drawn over the highlight of checked buttons.
-    const QPalette pal = QApplication::palette();
-    QIcon result;
-    for (int size : {16, 24, 32, 48, 64}) {
-        result.addPixmap(render(id, size, pal.color(QPalette::Normal, QPalette::ButtonText)), QIcon::Normal);
-        result.addPixmap(render(id, size, pal.color(QPalette::Disabled, QPalette::ButtonText)), QIcon::Disabled);
-        result.addPixmap(render(id, size, pal.color(QPalette::Normal, QPalette::HighlightedText)), QIcon::Normal,
-                         QIcon::On);
-    }
-    cache.insert(key, result);
-    return result;
+    return QIcon(new GlyphIconEngine(id));
 }
 
 } // namespace mothion::ui

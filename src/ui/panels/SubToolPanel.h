@@ -20,6 +20,9 @@ class SubToolPanel : public QWidget
 public:
     explicit SubToolPanel(tools::ToolState *state, QWidget *parent = nullptr);
 
+protected:
+    void changeEvent(QEvent *event) override;
+
 private:
     void showPresetsFor(tools::ToolId tool);
 
