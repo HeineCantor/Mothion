@@ -64,13 +64,39 @@ bool isJitter(const BrushInput &a, const BrushInput &b, const BrushInput &c, dou
     return true;
 }
 
-double liveInOut(const InOutStyle &style, double d)
+double inOutFactor(const InOutStyle &style, double d, double total)
 {
     if (style.type == InOutType::Fade)
         return fade(style, d);
-    if (style.type == InOutType::Length && style.in && style.inLength > 0.0 && d < style.inLength)
-        return std::sin(kHalfPi * d / style.inLength);
-    return 1.0;
+    const bool known = total >= 0.0;
+    if (style.type == InOutType::Ratio && !known)
+        return 1.0; // the zones are fractions of a length not known yet
+    const bool ratio = style.type == InOutType::Ratio;
+    double inLen = style.in ? (ratio ? style.inRatio * total : style.inLength) : 0.0;
+    double outLen = style.out && known ? (ratio ? style.outRatio * total : style.outLength) : 0.0;
+    if (known && inLen + outLen > total && inLen + outLen > 0.0) {
+        const double k = total / (inLen + outLen);
+        inLen *= k;
+        outLen *= k;
+    }
+    double f = 1.0;
+    if (inLen > 0.0 && d < inLen)
+        f = std::sin(kHalfPi * std::max(0.0, d) / inLen);
+    if (outLen > 0.0 && total - d < outLen)
+        f = std::min(f, std::sin(kHalfPi * std::max(0.0, total - d) / outLen));
+    return f;
+}
+
+double startTaperFactor(double length, double d)
+{
+    if (length <= 0.0 || d >= length)
+        return 1.0;
+    return std::sin(kHalfPi * std::max(0.0, d) / length);
+}
+
+double strokeLength(const std::vector<BrushInput> &points)
+{
+    return points.empty() ? 0.0 : cumulative(points).back();
 }
 
 bool usesInOut(const BrushStyle &s)
@@ -88,89 +114,16 @@ bool usesInOut(const BrushStyle &s)
 
 bool needsFinalPass(const BrushStyle &s)
 {
-    return (usesInOut(s) && s.inOut.type != InOutType::Fade) || s.correction > 0 || s.revision > 0;
+    const bool endDependent =
+        usesInOut(s) && (s.inOut.type == InOutType::Ratio || (s.inOut.type == InOutType::Length && s.inOut.out));
+    return endDependent || s.revision > 0;
 }
 
 std::vector<BrushInput> finalPoints(const BrushStyle &style, std::vector<BrushInput> points)
 {
     if (style.revision > 0)
         points = simplify(points, style.revision);
-    if (style.correction > 0)
-        applyStartRamp(points, std::max(3, style.correction));
-    if (!usesInOut(style))
-        return points;
-    if (style.inOut.type != InOutType::Fade)
-        return applyInOut(points, style.inOut);
-    const std::vector<double> s = cumulative(points);
-    for (std::size_t i = 0; i < points.size(); ++i)
-        points[i].inOut = fade(style.inOut, s[i]);
     return points;
-}
-
-void applyStartRamp(std::vector<BrushInput> &points, int count)
-{
-    const std::size_t n = std::min(points.size(), std::size_t(std::max(count, 0)));
-    if (n == 0)
-        return;
-    const std::vector<double> s = cumulative(points);
-    const double length = std::max(2.0, s[n - 1]);
-    for (std::size_t i = 0; i < n; ++i)
-        points[i].pressure *= std::sin(kHalfPi * std::min(1.0, s[i] / length));
-}
-
-std::vector<BrushInput> applyInOut(const std::vector<BrushInput> &points, const InOutStyle &style)
-{
-    if (points.size() < 2 || (!style.in && !style.out))
-        return points;
-    const std::vector<double> s = cumulative(points);
-    const double total = s.back();
-    if (total <= 0.0)
-        return points;
-    const bool ratio = style.type == InOutType::Ratio;
-    double inLen = style.in ? (ratio ? style.inRatio * total : style.inLength) : 0.0;
-    double outLen = style.out ? (ratio ? style.outRatio * total : style.outLength) : 0.0;
-    if (inLen + outLen > total) {
-        const double k = total / (inLen + outLen);
-        inLen *= k;
-        outLen *= k;
-    }
-
-    // New points every quarter of each zone.
-    std::vector<double> cuts;
-    for (int k = 1; k <= 4; ++k) {
-        if (inLen > 0.0)
-            cuts.push_back(inLen * k / 4.0);
-        if (outLen > 0.0)
-            cuts.push_back(total - outLen * k / 4.0);
-    }
-    std::sort(cuts.begin(), cuts.end());
-    cuts.erase(std::unique(cuts.begin(), cuts.end(), [](double a, double b) { return b - a < 1e-6; }), cuts.end());
-
-    std::vector<BrushInput> out;
-    std::vector<double> at;
-    out.push_back(points.front());
-    at.push_back(0.0);
-    for (std::size_t i = 0; i + 1 < points.size(); ++i) {
-        const double s0 = s[i], s1 = s[i + 1];
-        if (s1 > s0)
-            for (double c : cuts)
-                if (c > s0 + 1e-6 && c < s1 - 1e-6) {
-                    out.push_back(DabGenerator::interpolate(points[i], points[i + 1], (c - s0) / (s1 - s0)));
-                    at.push_back(c);
-                }
-        out.push_back(points[i + 1]);
-        at.push_back(s1);
-    }
-
-    for (std::size_t i = 0; i < out.size(); ++i) {
-        double f = 1.0;
-        if (inLen > 0.0 && at[i] < inLen)
-            f = std::sin(kHalfPi * at[i] / inLen);
-        if (outLen > 0.0 && total - at[i] < outLen)
-            f = std::min(f, std::sin(kHalfPi * std::max(0.0, total - at[i]) / outLen));
-        out[i].inOut = f;
-    }
-    return out;
 }
 
 std::vector<BrushInput> simplify(const std::vector<BrushInput> &points, int level)

@@ -284,17 +284,14 @@ private slots:
         io.in = io.out = true;
         io.inLength = 20.0;
         io.outLength = 40.0;
-        const auto points = applyInOut({at(0, 0), at(100, 0)}, io);
-        QCOMPARE(points.front().inOut, 0.0);
-        QCOMPARE(points.back().inOut, 0.0);
-        // Split every quarter of each zone: 0 5 10 15 20 ... 60 70 80 90 100.
-        QCOMPARE(points.size(), std::size_t(10));
-        for (const BrushInput &p : points) {
-            if (p.x == 20.0 || p.x == 60.0)
-                QCOMPARE(p.inOut, 1.0); // zone boundaries
-            if (p.x == 10.0)
-                QVERIFY(qAbs(p.inOut - std::sin(std::numbers::pi / 4.0)) < 1e-12); // halfway into the start
-        }
+        QCOMPARE(inOutFactor(io, 0.0, 100.0), 0.0);
+        QVERIFY(qAbs(inOutFactor(io, 10.0, 100.0) - std::sin(std::numbers::pi / 4.0)) < 1e-12);
+        QCOMPARE(inOutFactor(io, 40.0, 100.0), 1.0); // between the zones
+        QVERIFY(qAbs(inOutFactor(io, 80.0, 100.0) - std::sin(std::numbers::pi / 4.0)) < 1e-12);
+        QCOMPARE(inOutFactor(io, 100.0, 100.0), 0.0);
+        // While drawing the end is not known: only the start is shaped.
+        QCOMPARE(inOutFactor(io, 10.0, -1.0), inOutFactor(io, 10.0, 100.0));
+        QCOMPARE(inOutFactor(io, 99.0, -1.0), 1.0);
     }
 
     void ratioZonesFollowTheStrokeAndNeverOverlap()
@@ -303,10 +300,9 @@ private slots:
         io.in = io.out = true;
         io.type = InOutType::Ratio;
         io.inRatio = io.outRatio = 0.8; // 160% together: scaled to fit
-        const auto points = applyInOut({at(0, 0), at(200, 0)}, io);
-        for (const BrushInput &p : points)
-            if (p.x == 100.0)
-                QCOMPARE(p.inOut, 1.0); // where the two zones meet
+        QCOMPARE(inOutFactor(io, 100.0, 200.0), 1.0); // where the two zones meet
+        QVERIFY(inOutFactor(io, 50.0, 200.0) < 1.0);
+        QCOMPARE(inOutFactor(io, 50.0, -1.0), 1.0); // fractions of an unknown length: nothing yet
     }
 
     void fadeRunsOutAlongTheStroke()
@@ -315,12 +311,12 @@ private slots:
         io.out = true;
         io.type = InOutType::Fade;
         io.outLength = 50.0;
-        QCOMPARE(liveInOut(io, 0.0), 1.0);
-        QCOMPARE(liveInOut(io, 25.0), 0.5);
-        QCOMPARE(liveInOut(io, 80.0), 0.0);
+        QCOMPARE(inOutFactor(io, 0.0, -1.0), 1.0);
+        QCOMPARE(inOutFactor(io, 25.0, -1.0), 0.5);
+        QCOMPARE(inOutFactor(io, 80.0, -1.0), 0.0);
     }
 
-    void finalPassOnlyWhenSomethingFollowsIt()
+    void finalPassOnlyWhenTheEndMatters()
     {
         BrushStyle s = constantStyle(5.0, 0.1);
         s.inOut.in = s.inOut.out = true; // switched on, but no parameter follows it
@@ -328,7 +324,13 @@ private slots:
         s.sizeEffector.active |= InputInOut;
         s.sizeEffector.available |= InputInOut;
         QVERIFY(needsFinalPass(s));
+        s.inOut.out = false; // the start alone is drawn live
+        QVERIFY(!needsFinalPass(s));
+        s.inOut.type = InOutType::Ratio; // needs the length
+        QVERIFY(needsFinalPass(s));
         s.inOut.type = InOutType::Fade; // drawn live
+        QVERIFY(!needsFinalPass(s));
+        s.startTaper = 20.0; // drawn live
         QVERIFY(!needsFinalPass(s));
     }
 
@@ -339,27 +341,65 @@ private slots:
         s.inOut.in = s.inOut.out = true;
         s.inOut.inLength = s.inOut.outLength = 30.0;
         DabGenerator gen(s);
-        const auto points = finalPoints(s, {at(0, 0), at(100, 0)});
-        std::vector<BrushDab> dabs = gen.begin(points.front());
-        for (std::size_t i = 1; i < points.size(); ++i)
-            for (const BrushDab &d : gen.continueTo(points[i]))
-                dabs.push_back(d);
+        gen.setStrokeLength(100.0);
+        std::vector<BrushDab> dabs = gen.begin(at(0, 0));
+        for (const BrushDab &d : gen.continueTo(at(100, 0)))
+            dabs.push_back(d);
         QVERIFY(dabs.front().radius < 0.2); // at the start: the minimum size
         double middle = 0.0;
         for (const BrushDab &d : dabs)
             if (std::abs(d.x - 50.0) < 1.0)
                 middle = d.radius;
         QCOMPARE(middle, 5.0);
+        QVERIFY(dabs.back().x > 99.0 || dabs.back().radius < 1.0); // thin again at the end
     }
 
-    void startRampLiftsPressureFromZero()
+    void finalPassMatchesTheLiveStrokeBeforeTheEnd()
     {
-        std::vector<BrushInput> points{at(0, 0), at(5, 0), at(10, 0), at(20, 0)};
-        applyStartRamp(points, 3);
-        QCOMPARE(points[0].pressure, 0.0);
-        QVERIFY(qAbs(points[1].pressure - std::sin(std::numbers::pi / 4.0)) < 1e-12);
-        QCOMPARE(points[2].pressure, 1.0);
-        QCOMPARE(points[3].pressure, 1.0); // past the ramp
+        // Random spacing and tips: the redraw must not reshuffle them.
+        BrushStyle s = constantStyle(5.0, 0.5);
+        s.spacingEffector.available = s.spacingEffector.active = InputRandom;
+        s.sizeEffector.available = s.sizeEffector.active = InputInOut;
+        s.inOut.in = s.inOut.out = true;
+        s.inOut.inLength = 20.0;
+        s.inOut.outLength = 30.0;
+        s.startTaper = 10.0;
+        const std::vector<BrushInput> points{at(0, 0), at(40, 5), at(90, 0), at(150, 10)};
+        auto run = [&](double length) {
+            DabGenerator gen(s, 99);
+            gen.setStrokeLength(length);
+            std::vector<BrushDab> dabs = gen.begin(points[0]);
+            for (std::size_t i = 1; i < points.size(); ++i)
+                for (const BrushDab &d : gen.continueTo(points[i]))
+                    dabs.push_back(d);
+            return dabs;
+        };
+        const auto live = run(-1.0);
+        const auto redrawn = run(strokeLength(points));
+        const double endZone = strokeLength(points) - 30.0;
+        std::size_t compared = 0;
+        for (std::size_t i = 0; i < std::min(live.size(), redrawn.size()) && live[i].x < endZone - 15.0; ++i) {
+            QCOMPARE(redrawn[i].x, live[i].x);
+            QCOMPARE(redrawn[i].radius, live[i].radius);
+            ++compared;
+        }
+        QVERIFY(compared > 10);
+    }
+
+    void startTaperIsLiveAndByDistance()
+    {
+        BrushStyle s = constantStyle(5.0, 0.1); // size follows pressure linearly
+        s.sizeEffector = Effector::pressureOnly();
+        s.startTaper = 20.0;
+        QCOMPARE(startTaperFactor(20.0, 0.0), 0.0);
+        QVERIFY(qAbs(startTaperFactor(20.0, 10.0) - std::sin(std::numbers::pi / 4.0)) < 1e-12);
+        QCOMPARE(startTaperFactor(20.0, 25.0), 1.0);
+        DabGenerator gen(s);
+        std::vector<BrushDab> dabs = gen.begin(at(0, 0));
+        for (const BrushDab &d : gen.continueTo(at(60, 0)))
+            dabs.push_back(d);
+        QVERIFY(dabs.front().radius < 0.2);
+        QCOMPARE(dabs.back().radius, 5.0);
     }
 
     void simplifyStraightensAWobblyLine()

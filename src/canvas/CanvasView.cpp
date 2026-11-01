@@ -364,7 +364,6 @@ void CanvasView::beginStroke(const PenSample &sample)
     m_dabs.emplace(style, m_seed);
     m_points.clear();
     m_drawnPoints = 0;
-    m_drawnLength = 0.0;
 
     m_smoother.setStrength(m_toolState->smoothing());
     m_smoother.reset();
@@ -394,13 +393,7 @@ void CanvasView::drawPendingPoints(bool all)
     const std::size_t end = all ? m_points.size() : m_points.size() - std::min<std::size_t>(1, m_points.size());
     QRect changed;
     for (; m_drawnPoints < end; ++m_drawnPoints) {
-        brush::BrushInput in = m_points[m_drawnPoints];
-        if (m_drawnPoints > 0) {
-            const brush::BrushInput &prev = m_points[m_drawnPoints - 1];
-            m_drawnLength += std::hypot(in.x - prev.x, in.y - prev.y);
-        }
-        // Live start/end: the start ramp or the fade; the rest needs the whole stroke.
-        in.inOut = brush::liveInOut(m_dabs->style().inOut, m_drawnLength);
+        const brush::BrushInput &in = m_points[m_drawnPoints];
         const auto dabs = m_drawnPoints == 0 ? m_dabs->begin(in) : m_dabs->continueTo(in);
         changed |= m_stroke->addDabs(dabs);
     }
@@ -415,10 +408,12 @@ void CanvasView::endStroke()
     drawPendingPoints(true);
     const brush::BrushStyle style = m_dabs->style();
     if (brush::needsFinalPass(style)) {
-        // Redraw the whole stroke as it is drawn for good, with the same random seed.
+        // Redraw the whole stroke as it is drawn for good: same seed, its
+        // length now known. Before the end zone the dabs come out the same.
         QRect changed = m_stroke->restart();
         const std::vector<brush::BrushInput> points = brush::finalPoints(style, m_points);
         brush::DabGenerator generator(style, m_seed);
+        generator.setStrokeLength(brush::strokeLength(points));
         for (std::size_t i = 0; i < points.size(); ++i)
             changed |= m_stroke->addDabs(i == 0 ? generator.begin(points[i]) : generator.continueTo(points[i]));
         m_document->notifyPainted(changed);

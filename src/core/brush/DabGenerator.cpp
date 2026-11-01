@@ -1,5 +1,7 @@
 #include "core/brush/DabGenerator.h"
 
+#include "core/brush/StrokeShaper.h"
+
 #include <algorithm>
 #include <cmath>
 #include <numbers>
@@ -56,10 +58,18 @@ BrushInput DabGenerator::interpolate(const BrushInput &a, const BrushInput &b, d
     return r;
 }
 
+BrushInput DabGenerator::shaped(BrushInput in, double distance) const
+{
+    in.inOut = inOutFactor(m_style.inOut, distance, m_strokeLength);
+    in.pressure *= startTaperFactor(m_style.startTaper, distance);
+    return in;
+}
+
 std::vector<BrushDab> DabGenerator::begin(const BrushInput &first)
 {
     m_last = first;
     m_dabIndex = 0;
+    m_travelled = 0.0;
     const ColorStyle &c = m_style.color;
     if (c.perStroke) {
         // One shift for the whole stroke: either way for H/S/V, towards the secondary color for the blend.
@@ -69,7 +79,7 @@ std::vector<BrushDab> DabGenerator::begin(const BrushInput &first)
         m_strokeColor.subColor = m_rng.next01() * c.strokeSubColor;
     }
     std::vector<BrushDab> dabs;
-    m_remainder = place(first, dabs);
+    m_remainder = place(shaped(first, 0.0), dabs);
     return dabs;
 }
 
@@ -92,8 +102,9 @@ std::vector<BrushDab> DabGenerator::continueTo(const BrushInput &next)
     double d = m_remainder;
     int count = 0;
     while (d < length && count++ < kMaxDabsPerSegment)
-        d += place(interpolate(m_last, target, d / length), dabs);
+        d += place(shaped(interpolate(m_last, target, d / length), m_travelled + d), dabs);
     m_remainder = std::max(0.0, d - length);
+    m_travelled += length;
     m_last = target;
     return dabs;
 }

@@ -214,6 +214,7 @@ QRect StrokeSession::paintStroke(const brush::BrushStyle &style, std::uint32_t s
     setStyle(style);
     points = brush::finalPoints(style, std::move(points));
     brush::DabGenerator generator(style, seed);
+    generator.setStrokeLength(brush::strokeLength(points));
     QRect changed;
     for (std::size_t i = 0; i < points.size(); ++i)
         changed |= addDabs(i == 0 ? generator.begin(points[i]) : generator.continueTo(points[i]));

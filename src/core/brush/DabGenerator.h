@@ -29,6 +29,11 @@ public:
     // Dabs from the previous point up to `next` (may be empty for tiny moves).
     std::vector<BrushDab> continueTo(const BrushInput &next);
 
+    // The whole stroke's length, when it is known (redrawing a finished
+    // stroke): enables the end zone of the start/end factor. Until then
+    // only the start is shaped.
+    void setStrokeLength(double length) { m_strokeLength = length; }
+
     const BrushStyle &style() const { return m_style; }
 
     // One dab at `in` and the distance to the next one, without spray.
@@ -48,6 +53,8 @@ public:
 private:
     // All dabs for one position along the stroke (one, or the spray particles).
     double place(const BrushInput &in, std::vector<BrushDab> &out);
+    // The start/end factor and start taper at `distance` px along the stroke.
+    BrushInput shaped(BrushInput in, double distance) const;
     int chooseTip(bool &mirror, double &extraAngle);
     double spacingFraction(const BrushInput &in, double thickness, bool applyRandom);
 
@@ -55,6 +62,8 @@ private:
     Lcg m_rng;
     BrushInput m_last;
     double m_remainder = 0.0; // distance from the last point to the next dab
+    double m_travelled = 0.0; // stroke length up to the last point
+    double m_strokeLength = -1.0; // whole stroke, < 0 = not known
     int m_dabIndex = 0;       // counts dab positions for the tip order
     DabColor m_strokeColor;   // per-stroke color shift, drawn in begin()
 };

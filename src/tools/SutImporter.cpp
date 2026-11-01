@@ -238,9 +238,10 @@ brush::BrushStyle styleFrom(const Params &p, int tipCount)
     s.inOut.inRatio = number(p, "BrushInRatio") / 100.0;
     s.inOut.outRatio = number(p, "BrushOutRatio") / 100.0;
 
-    // Correction: the level (ID 40) ramps the start pressure; the flag
-    // after it (ID 41) switches on the anti-jitter filter.
-    s.correction = std::max(0, int(number(p, "FlickerReduction")));
+    // Correction level (0..100): Mothion's own start taper, a quarter px
+    // per level (25 px at 100), tuned by eye. The flag after it switches on
+    // the anti-jitter filter.
+    s.startTaper = std::clamp(number(p, "FlickerReduction"), 0.0, 100.0) * 0.25;
     s.flickerFilter = flag(p, "FlickerReductionBySpeed");
     s.revision = flag(p, "BrushUseRevision") ? std::max(1, int(number(p, "BrushRevision", 10.0))) : 0;
 

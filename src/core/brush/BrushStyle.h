@@ -60,9 +60,9 @@ enum class InOutType : std::uint8_t {
     Fade = 2,   // the end only: fades over `outLength` from the start, live
 };
 
-// Start and end of the stroke: near its ends the in/out factor of each
-// point (BrushInput::inOut) goes to 0 along a quarter sine, and parameters
-// whose Effector uses InputInOut follow it.
+// Start and end of the stroke: near its ends the in/out factor of each dab
+// (BrushInput::inOut, from its distance along the stroke) goes to 0 along a
+// quarter sine, and parameters whose Effector uses InputInOut follow it.
 struct InOutStyle
 {
     bool in = false;
@@ -164,9 +164,9 @@ struct BrushStyle
     bool ribbon = false;        // stretch the tip between dabs instead of stamping
 
     InOutStyle inOut;
-    // Stroke correction level (0 = off): the first max(3, n) points get a
-    // quarter-sine pressure ramp when the stroke ends.
-    int correction = 0;
+    // Start taper, px (0 = off): the pressure rises along a quarter sine over
+    // this distance from the start, live and independent of the input rate.
+    double startTaper = 0.0;
     bool flickerFilter = false; // drop small back-and-forth jitter between points
     // Correction after the stroke (0 = off): simplifies the finished stroke
     // into fewer, smoothly joined points.

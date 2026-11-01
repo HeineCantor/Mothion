@@ -126,7 +126,6 @@ private:
     std::optional<brush::DabGenerator> m_dabs;
     std::vector<brush::BrushInput> m_points; // the stroke so far, for the final pass
     std::size_t m_drawnPoints = 0;           // points already given to m_dabs
-    double m_drawnLength = 0.0;              // length of the stroke through them, px
     std::uint32_t m_seed = 0;                // the stroke's random seed, reused by the final pass
     brush::VelocityMeter m_velocity;
     StrokeSmoother m_smoother;
