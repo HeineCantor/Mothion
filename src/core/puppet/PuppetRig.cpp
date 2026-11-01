@@ -36,6 +36,45 @@ std::optional<Vec2> mapPoint(const TriMesh &mesh, const std::vector<Vec2> &from,
     return best;
 }
 
+// The corners of the shape's edge pixels, in document coordinates: what the
+// mesh must contain for every drawn pixel to come along.
+std::vector<Vec2> edgeCorners(const Bitmask &m)
+{
+    std::vector<Vec2> corners;
+    for (int y = 0; y < m.height; ++y)
+        for (int x = 0; x < m.width; ++x) {
+            if (!m.at(x, y) || (m.at(x - 1, y) && m.at(x + 1, y) && m.at(x, y - 1) && m.at(x, y + 1)))
+                continue;
+            const double px = m.originX + x, py = m.originY + y;
+            corners.insert(corners.end(), {{px, py}, {px + 1, py}, {px, py + 1}, {px + 1, py + 1}});
+        }
+    return corners;
+}
+
+bool coversAll(const std::vector<std::vector<Vec2>> &outlines, const std::vector<Vec2> &points)
+{
+    struct Box
+    {
+        double x0, y0, x1, y1;
+    };
+    std::vector<Box> boxes;
+    for (const auto &o : outlines) {
+        Box b{1e300, 1e300, -1e300, -1e300};
+        for (const Vec2 &p : o)
+            b = {std::min(b.x0, p.x), std::min(b.y0, p.y), std::max(b.x1, p.x), std::max(b.y1, p.y)};
+        boxes.push_back(b);
+    }
+    for (const Vec2 &p : points) {
+        bool inside = false;
+        for (std::size_t i = 0; i < outlines.size() && !inside; ++i)
+            inside = p.x >= boxes[i].x0 && p.x <= boxes[i].x1 && p.y >= boxes[i].y0 && p.y <= boxes[i].y1
+                     && pointInPolygon(outlines[i], p);
+        if (!inside)
+            return false;
+    }
+    return true;
+}
+
 } // namespace
 
 std::optional<std::array<double, 3>> barycentric(Vec2 a, Vec2 b, Vec2 c, Vec2 p, double tolerance)
@@ -62,10 +101,26 @@ void PuppetRig::buildMeshes()
     m_meshes.clear();
     // At least 1 px: the outline runs through the centers of the edge pixels,
     // whose outer halves would otherwise fall off the mesh.
-    const Bitmask grown = dilated(m_shape, std::max(1, m_settings.expand));
-    for (const auto &contour : outerContours(grown)) {
+    const int expand = std::max(1, m_settings.expand);
+    const Bitmask grown = dilated(m_shape, expand);
+    const std::vector<std::vector<Vec2>> contours = outerContours(grown);
+
+    // Simplify the outlines as far as the margin allows: they may cut into
+    // the expansion, never into the drawing. If an edge pixel of the drawing
+    // ends up outside, try again with half the tolerance.
+    const std::vector<Vec2> mustCover = edgeCorners(m_shape);
+    std::vector<std::vector<Vec2>> outlines;
+    for (double tolerance = std::max(0.5, expand - 1.0);; tolerance *= 0.5) {
+        outlines.clear();
+        for (const auto &contour : contours)
+            outlines.push_back(simplifyContour(contour, tolerance));
+        if (tolerance < 0.2 || coversAll(outlines, mustCover))
+            break;
+    }
+
+    for (std::vector<Vec2> &outline : outlines) {
         Mesh mesh;
-        mesh.outline = simplifyContour(contour);
+        mesh.outline = std::move(outline);
         if (mesh.outline.size() < 3 || polygonArea(mesh.outline) < kMinTriangleArea)
             continue;
         m_meshes.push_back(std::move(mesh));

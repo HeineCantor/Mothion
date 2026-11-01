@@ -173,7 +173,7 @@ std::vector<std::vector<Vec2>> outerContours(const Bitmask &mask)
     return contours;
 }
 
-std::vector<Vec2> simplifyContour(const std::vector<Vec2> &contour)
+std::vector<Vec2> simplifyContour(const std::vector<Vec2> &contour, double tolerance)
 {
     std::vector<Vec2> points;
     for (const Vec2 &p : contour)
@@ -185,24 +185,45 @@ std::vector<Vec2> simplifyContour(const std::vector<Vec2> &contour)
     if (n < 4)
         return points;
 
-    double perimeter = 0.0;
-    for (std::size_t i = 0; i < n; ++i)
-        perimeter += length(points[(i + 1) % n] - points[i]);
-    const double minLength = std::max(perimeter / 1000.0, std::sqrt(2.0));
-
-    // Greedy pass by distance, remembering which original points are kept.
+    // Douglas–Peucker on the closed outline: split it at the point farthest
+    // from the first, then keep the farthest point of each piece while it
+    // strays more than `tolerance` from the chord.
     std::vector<char> keep(n, 0);
-    keep[0] = 1;
-    Vec2 last = points[0];
+    std::size_t far = 0;
     for (std::size_t i = 1; i < n; ++i)
-        if (length(points[i] - last) >= minLength && length(points[0] - points[i]) >= minLength * 0.5) {
-            keep[i] = 1;
-            last = points[i];
+        if (length2(points[i] - points[0]) > length2(points[far] - points[0]))
+            far = i;
+    keep[0] = keep[far] = 1;
+    auto distanceToChord = [&](std::size_t k, std::size_t i, std::size_t j) {
+        const Vec2 a = points[i % n], b = points[j % n], p = points[k % n];
+        const Vec2 ab = b - a;
+        const double len2 = length2(ab);
+        if (len2 <= 1e-12)
+            return length(p - a);
+        const double t = std::clamp(dot(p - a, ab) / len2, 0.0, 1.0);
+        return length(p - (a + ab * t));
+    };
+    std::vector<std::pair<std::size_t, std::size_t>> pieces{{0, far}, {far, n}};
+    while (!pieces.empty()) {
+        const auto [i, j] = pieces.back();
+        pieces.pop_back();
+        double worst = 0.0;
+        std::size_t at = i;
+        for (std::size_t k = i + 1; k < j; ++k)
+            if (const double d = distanceToChord(k, i, j); d > worst) {
+                worst = d;
+                at = k;
+            }
+        if (worst > tolerance) {
+            keep[at % n] = 1;
+            pieces.emplace_back(i, at);
+            pieces.emplace_back(at, j);
         }
+    }
 
     // Where the simplified outline crosses itself, put the original points
     // of the offending edges back, and check again.
-    const double cell = std::max(8.0, 4.0 * minLength);
+    const double cell = std::max(8.0, 4.0 * tolerance);
     for (int round = 0; round < 32; ++round) {
         std::vector<std::size_t> kept;
         for (std::size_t i = 0; i < n; ++i)

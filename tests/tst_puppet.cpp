@@ -78,17 +78,44 @@ private slots:
     {
         const auto contours = outerContours(disc(400, 180.0));
         QCOMPARE(contours.size(), std::size_t(1));
-        const auto simple = simplifyContour(contours[0]);
-        QVERIFY(simple.size() < contours[0].size() * 3 / 4); // edges of at least √2 px
-        for (std::size_t i = 0; i < simple.size(); ++i)
-            QVERIFY(length(simple[(i + 1) % simple.size()] - simple[i]) >= std::sqrt(2.0) * 0.5);
-        QVERIFY(simple.size() > 100);
-        QVERIFY(std::abs(polygonArea(simple) - std::numbers::pi * 180.0 * 180.0) < 0.02 * std::numbers::pi * 180 * 180);
+        const auto simple = simplifyContour(contours[0], 1.5);
+        QVERIFY(simple.size() < contours[0].size() / 8);
+        // Every original point stays within the tolerance of the simplified outline.
+        for (const Vec2 &p : contours[0]) {
+            double nearest = 1e300;
+            for (std::size_t i = 0; i < simple.size(); ++i) {
+                const Vec2 a = simple[i], b = simple[(i + 1) % simple.size()];
+                const double t = std::clamp(dot(p - a, b - a) / length2(b - a), 0.0, 1.0);
+                nearest = std::min(nearest, length(p - (a + (b - a) * t)));
+            }
+            QVERIFY(nearest <= 1.5 + 1e-9);
+        }
+    }
+
+    void rigMeshKeepsEveryDrawnPixel()
+    {
+        // A jagged shape: the simplified outline must not cut into it.
+        Bitmask m(0, 0, 200, 200);
+        for (int y = 0; y < 200; ++y)
+            for (int x = 0; x < 200; ++x) {
+                const double a = std::atan2(y - 100.0, x - 100.0);
+                const double r = 70 + 20 * std::sin(9 * a) + 6 * std::sin(31 * a);
+                m.set(x, y, std::hypot(x + 0.5 - 100, y + 0.5 - 100) <= r);
+            }
+        for (int expand : {1, 3, 8}) {
+            PuppetRig rig(m, {1, expand});
+            QCOMPARE(rig.meshes().size(), std::size_t(1));
+            const auto &outline = rig.meshes()[0].outline;
+            for (int y = 0; y < 200; ++y)
+                for (int x = 0; x < 200; ++x)
+                    if (m.at(x, y))
+                        QVERIFY(pointInPolygon(outline, {x + 0.5, y + 0.5}));
+        }
     }
 
     void triangulationCoversTheShapeWithGoodTriangles()
     {
-        const auto outline = simplifyContour(outerContours(disc(400, 180.0))[0]);
+        const auto outline = simplifyContour(outerContours(disc(400, 180.0))[0], 1.0);
         RefineOptions options;
         options.maxArea = 0.004 * polygonArea(outline);
         const TriMesh mesh = triangulatePolygon(outline, {}, options);

@@ -38,9 +38,9 @@ Bitmask dilated(const Bitmask &mask, int radius);
 // coordinates, in tracing order, without repeating the first.
 std::vector<std::vector<Vec2>> outerContours(const Bitmask &mask);
 
-// Drops points closer than max(perimeter / 1000, √2) to the previous kept
-// one, unless that would make the outline cross itself. Also drops
-// repeated points, and runs of three collinear points keep their ends.
-std::vector<Vec2> simplifyContour(const std::vector<Vec2> &contour);
+// Fewer points along an outline that stays within `tolerance` px of the
+// original (Douglas–Peucker on the closed outline). Where the result would
+// cross itself, the original points of the offending edges come back.
+std::vector<Vec2> simplifyContour(const std::vector<Vec2> &contour, double tolerance);
 
 } // namespace mothion::puppet
