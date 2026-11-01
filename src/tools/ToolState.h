@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/PressureCurve.h"
+#include "tools/BrushDefinition.h"
 
 #include <QColor>
 #include <QObject>
@@ -33,7 +34,7 @@ public:
     explicit ToolState(QObject *parent = nullptr);
 
     static constexpr double kMinSize = 1.0;   // brush diameter limits, document px
-    static constexpr double kMaxSize = 500.0;
+    static constexpr double kMaxSize = 2000.0;
 
     static bool isPaintTool(ToolId tool) { return tool == ToolId::Brush || tool == ToolId::Eraser; }
     static QString displayName(ToolId tool);
@@ -44,6 +45,10 @@ public:
     BrushSettings settings(ToolId tool) const { return m_settings[index(tool)]; }
     void setSize(ToolId tool, double size);
     void setOpacity(ToolId tool, double opacity);
+
+    // The brush a paint tool draws with (never null; round by default).
+    BrushDefinitionPtr brush(ToolId tool) const { return m_brushes[index(tool)]; }
+    void setBrush(ToolId tool, BrushDefinitionPtr brush);
 
     // Main color (what the brush paints) and secondary color; swapColors() exchanges them.
     QColor color() const { return m_color; }
@@ -72,6 +77,7 @@ private:
 
     ToolId m_activeTool = ToolId::Brush;
     std::array<BrushSettings, kToolCount> m_settings;
+    std::array<BrushDefinitionPtr, kToolCount> m_brushes;
     QColor m_color = QColor(0x20, 0x20, 0x24);
     QColor m_secondaryColor = Qt::white;
     PressureCurve m_pressureCurve;

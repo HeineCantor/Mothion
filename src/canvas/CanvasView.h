@@ -1,12 +1,13 @@
 #pragma once
 
-#include "canvas/DabSpacer.h"
 #include "canvas/FrameRenderer.h"
 #include "canvas/NavigationGesture.h"
 #include "canvas/StrokeSession.h"
 #include "canvas/ViewTransform.h"
 #include "core/PenSample.h"
 #include "core/StrokeSmoother.h"
+#include "core/brush/DabGenerator.h"
+#include "core/brush/VelocityMeter.h"
 
 #include <QWidget>
 
@@ -30,7 +31,8 @@ class DebugOverlay;
 // Input path: Qt tablet/mouse event -> input::toPenSample() -> handleSample().
 // From handleSample() on, only PenSamples are used. A sample either drives a
 // NavigationGesture (hand / zoom / rotate) or a stroke:
-//   sample -> StrokeSmoother -> pressure curve -> DabSpacer -> StrokeSession,
+//   sample -> StrokeSmoother -> brush::BrushInput (pressure curve, velocity, tilt)
+//          -> brush::DabGenerator -> StrokeSession (DabStamper),
 // painting into the drawing the DocumentController picks for the current
 // layer and frame. What is shown is the FrameRenderer's composition of the
 // current frame, refreshed from the controller's change signals.
@@ -97,7 +99,7 @@ private:
     void continueStroke(const PenSample &sample);
     void endStroke();
     void cancelStroke(); // the controller interrupted the stroke (undo, frame change...)
-    DabSpacer::Point strokePoint(const PenSample &smoothed) const;
+    brush::BrushInput brushInput(const PenSample &smoothed);
 
     void renderWholeFrame();                     // frame, layers or timing changed
     void renderDocumentRect(const QRect &docRect); // pixels changed
@@ -113,7 +115,8 @@ private:
     NavigationGesture m_gesture;
     FrameRenderer m_frame;
     std::optional<StrokeSession> m_stroke; // set while a stroke is in progress
-    DabSpacer m_spacer;
+    std::optional<brush::DabGenerator> m_dabs;
+    brush::VelocityMeter m_velocity;
     StrokeSmoother m_smoother;
     bool m_eraseStroke = false; // current stroke erases (eraser tool or eraser end)
     DebugOverlay *m_overlay;

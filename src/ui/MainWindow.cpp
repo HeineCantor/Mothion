@@ -3,6 +3,7 @@
 #include "canvas/CanvasView.h"
 #include "document/DocumentController.h"
 #include "input/ProximityFilter.h"
+#include "tools/BrushLibrary.h"
 #include "tools/ToolState.h"
 #include "ui/DockLayout.h"
 #include "ui/IconFactory.h"
@@ -23,6 +24,9 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QCloseEvent>
+#include <QFileDialog>
+#include <QFileInfo>
+#include <QMessageBox>
 #include <QLabel>
 #include <QMenuBar>
 #include <QStatusBar>
@@ -33,6 +37,7 @@ namespace mothion::ui {
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , m_toolState(new tools::ToolState(this))
+    , m_brushes(new tools::BrushLibrary(this))
     , m_document(new document::DocumentController(this))
     , m_canvas(new canvas::CanvasView(m_toolState, m_document, this))
 {
@@ -44,7 +49,7 @@ MainWindow::MainWindow(QWidget *parent)
     auto *properties = new ToolPropertiesPanel(m_toolState, this);
     WorkspacePanels panels;
     panels.tools = new ToolPalettePanel(m_toolState, this);
-    panels.subTools = new SubToolPanel(m_toolState, this);
+    panels.subTools = new SubToolPanel(m_toolState, m_brushes, this);
     panels.toolProperties = properties;
     panels.brushSliders = new BrushSlidersPanel(m_toolState, this);
     panels.colorWheel = new ColorWheelPanel(m_toolState, this);
@@ -134,6 +139,8 @@ void MainWindow::createMenus()
     QMenu *file = menuBar()->addMenu(tr("&File"));
     file->addActions(m_fileActions);
     file->addSeparator();
+    file->addAction(tr("Importa pennello (.sut)…"), this, &MainWindow::importBrush);
+    file->addSeparator();
     QAction *quit = file->addAction(tr("Esci"), this, &QWidget::close);
     quit->setShortcut(QKeySequence::Quit);
 
@@ -182,6 +189,27 @@ void MainWindow::createMenus()
     }
     window->addSeparator();
     window->addAction(tr("Ripristina layout predefinito"), m_dockLayout, &DockLayout::resetToDefault);
+}
+
+void MainWindow::importBrush()
+{
+    const QStringList files = QFileDialog::getOpenFileNames(this, tr("Importa pennello"), QString(),
+                                                            tr("Sotto-strumenti Clip Studio Paint (*.sut)"));
+    for (const QString &file : files) {
+        QString error;
+        QStringList warnings;
+        if (!m_brushes->importSut(file, &error, &warnings)) {
+            QMessageBox::warning(this, tr("Importa pennello"), error);
+            continue;
+        }
+        if (warnings.isEmpty())
+            statusBar()->showMessage(tr("Pennello importato: %1").arg(QFileInfo(file).completeBaseName()), 4000);
+        else
+            QMessageBox::information(this, tr("Importa pennello"),
+                                     tr("%1 importato. Non ancora riprodotto:\n• %2")
+                                         .arg(QFileInfo(file).completeBaseName(),
+                                              warnings.join(QStringLiteral("\n• "))));
+    }
 }
 
 void MainWindow::notImplemented(const QString &what)

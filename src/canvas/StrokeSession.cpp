@@ -8,48 +8,58 @@
 
 namespace mothion::canvas {
 
-StrokeSession::StrokeSession(doc::TiledImage &target, const QColor &color, double opacity, bool erase,
-                             const QRect &clip)
+StrokeSession::StrokeSession(doc::TiledImage &target, std::shared_ptr<const DabStamper> stamper, double opacity,
+                             bool erase, const QRect &clip)
     : m_target(target)
     , m_before(target) // pointer copy: shares all tiles
-    , m_color(color)
+    , m_stamper(std::move(stamper))
     , m_opacity(opacity)
     , m_erase(erase)
     , m_clip(clip)
 {
-    m_color.setAlpha(255); // stroke opacity is applied when composing
 }
 
-QRect StrokeSession::addDabs(std::span<const Dab> dabs)
+StrokeSession::StrokeSession(doc::TiledImage &target, const QColor &color, double opacity, bool erase,
+                             const QRect &clip)
+    : StrokeSession(target, std::make_shared<DabStamper>(color, 1.0), opacity, erase, clip)
+{
+}
+
+QRect StrokeSession::addDabs(std::span<const brush::BrushDab> dabs)
 {
     if (dabs.empty())
         return {};
+    std::vector<QRectF> dabBounds;
+    dabBounds.reserve(dabs.size());
     QRectF boundsF;
-    for (const Dab &d : dabs) {
-        const double r = std::max(d.radius, 0.5);
-        boundsF |= QRectF(d.center.x() - r, d.center.y() - r, 2 * r, 2 * r);
+    for (const brush::BrushDab &d : dabs) {
+        dabBounds.push_back(m_stamper->bounds(d));
+        boundsF |= dabBounds.back();
     }
-    QRect bounds = boundsF.toAlignedRect().adjusted(-1, -1, 1, 1);
+    QRect bounds = boundsF.toAlignedRect();
     if (!m_clip.isEmpty())
         bounds &= m_clip;
     if (bounds.isEmpty())
         return {};
 
     for (const doc::TileCoord &c : tilesIn(bounds)) {
-        // Stamp the dabs on this tile of the mask, in document coordinates.
+        const QRectF tileArea = tileRect(c);
+        // Stamp the dabs touching this tile on the mask, in document coordinates.
+        bool any = false;
+        for (const QRectF &b : dabBounds)
+            any = any || b.intersects(tileArea);
+        if (!any)
+            continue;
         QImage mask = tileImage(m_mask.writableTile(c));
         {
             QPainter p(&mask);
-            p.setRenderHint(QPainter::Antialiasing);
+            p.setRenderHints(QPainter::Antialiasing | QPainter::SmoothPixmapTransform);
             p.translate(-c.x * doc::kTileSize, -c.y * doc::kTileSize);
             if (!m_clip.isEmpty())
                 p.setClipRect(m_clip);
-            p.setPen(Qt::NoPen);
-            p.setBrush(m_color);
-            for (const Dab &d : dabs) {
-                const double r = std::max(d.radius, 0.5);
-                p.drawEllipse(d.center, r, r);
-            }
+            for (std::size_t i = 0; i < dabs.size(); ++i)
+                if (dabBounds[i].intersects(tileArea))
+                    m_stamper->draw(p, dabs[i]);
         }
         m_touched.insert(c);
         recomposeTile(c);

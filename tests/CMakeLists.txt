@@ -5,10 +5,16 @@ function(mothion_add_test name)
     qt_add_executable(${name} ${name}.cpp)
     target_link_libraries(${name} PRIVATE Qt6::Test ${ARGN})
     add_test(NAME ${name} COMMAND ${name})
-    set_tests_properties(${name} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    # Plugins from the Qt installation: windeployqt puts a partial plugins
+    # folder next to the executables (no offscreen platform) that would win otherwise.
+    set_tests_properties(${name} PROPERTIES ENVIRONMENT
+        "QT_QPA_PLATFORM=offscreen;QT_PLUGIN_PATH=${QT6_INSTALL_PREFIX}/${QT6_INSTALL_PLUGINS}")
 endfunction()
 
 mothion_add_test(tst_core mothion_core)
+mothion_add_test(tst_brush mothion_core)
 mothion_add_test(tst_document mothion_core)
 mothion_add_test(tst_commands mothion_core)
 mothion_add_test(tst_canvas mothion_gui)
+find_package(Qt6 REQUIRED COMPONENTS Sql)
+mothion_add_test(tst_brushimport mothion_gui Qt6::Sql)

@@ -9,16 +9,21 @@
 class QLabel;
 class QListWidget;
 
+namespace mothion::tools {
+class BrushLibrary;
+}
+
 namespace mothion::ui {
 
-// Lists the presets ("sub tools") of the active tool, each with a stroke
-// preview rendered by the real stroke engine. Clicking one applies it.
+// Lists the presets ("sub tools") of the active tool, built-in and imported,
+// each with a stroke preview rendered by the real stroke engine. Clicking
+// one applies it.
 class SubToolPanel : public QWidget
 {
     Q_OBJECT
 
 public:
-    explicit SubToolPanel(tools::ToolState *state, QWidget *parent = nullptr);
+    SubToolPanel(tools::ToolState *state, tools::BrushLibrary *library, QWidget *parent = nullptr);
 
 protected:
     void changeEvent(QEvent *event) override;
@@ -27,6 +32,7 @@ private:
     void showPresetsFor(tools::ToolId tool);
 
     tools::ToolState *m_state;
+    tools::BrushLibrary *m_library;
     QListWidget *m_list;
     QLabel *m_empty;
     QList<tools::BrushPreset> m_presets;     // of the tool currently shown

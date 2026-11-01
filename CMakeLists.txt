@@ -11,6 +11,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(MOTHION_BUILD_TESTS "Build unit tests" ON)
+option(MOTHION_BUILD_DEVTOOLS "Build developer tools (brush test sheet)" OFF)
 # Wintab on Windows needs a *private* Qt API (QNativeInterface::Private::QWindowsApplication).
 # It is isolated in src/input/TabletBackend_wintab.cpp: turn this off if a Qt update breaks it.
 option(MOTHION_ENABLE_WINTAB "Allow switching the Windows tablet backend to Wintab (--wintab)" ON)

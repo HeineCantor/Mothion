@@ -8,6 +8,13 @@ add_library(mothion_core STATIC
     core/StrokeSmoother.h core/StrokeSmoother.cpp
     core/RateMeter.h core/RateMeter.cpp
 
+    core/brush/Random.h
+    core/brush/Effector.h core/brush/Effector.cpp
+    core/brush/BrushStyle.h
+    core/brush/DabGenerator.h core/brush/DabGenerator.cpp
+    core/brush/Hardness.h
+    core/brush/VelocityMeter.h core/brush/VelocityMeter.cpp
+
     core/document/Tile.h
     core/document/TiledImage.h core/document/TiledImage.cpp
     core/document/Ids.h
@@ -36,15 +43,17 @@ qt_add_library(mothion_gui STATIC
     document/DocumentController.h document/DocumentController.cpp
 
     tools/ToolState.h tools/ToolState.cpp
+    tools/BrushDefinition.h
     tools/BrushPreset.h tools/BrushPreset.cpp
+    tools/BrushLibrary.h tools/BrushLibrary.cpp
+    tools/SutImporter.h tools/SutImporter.cpp
 
     input/TabletInputAdapter.h input/TabletInputAdapter.cpp
     input/ProximityFilter.h input/ProximityFilter.cpp
     input/TabletBackend.h input/TabletBackend.cpp
 
     canvas/DebugOverlay.h canvas/DebugOverlay.cpp
-    canvas/Dab.h
-    canvas/DabSpacer.h canvas/DabSpacer.cpp
+    canvas/DabStamper.h canvas/DabStamper.cpp
     canvas/TileQt.h canvas/TileQt.cpp
     canvas/StrokeSession.h canvas/StrokeSession.cpp
     canvas/FrameRenderer.h canvas/FrameRenderer.cpp
@@ -88,7 +97,8 @@ else()
 endif()
 
 target_include_directories(mothion_gui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(mothion_gui PUBLIC mothion_core Qt6::Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Sql) # .sut brushes are SQLite databases
+target_link_libraries(mothion_gui PUBLIC mothion_core Qt6::Widgets PRIVATE Qt6::Sql)
 mothion_set_warnings(mothion_gui)
 
 # ---------------------------------------------------------------------------
@@ -98,3 +108,13 @@ qt_add_executable(mothion WIN32 MACOSX_BUNDLE app/main.cpp)
 target_compile_definitions(mothion PRIVATE MOTHION_VERSION="${PROJECT_VERSION}")
 target_link_libraries(mothion PRIVATE mothion_gui)
 mothion_set_warnings(mothion)
+
+# ---------------------------------------------------------------------------
+# Developer tools, off by default.
+# mothion_brushsheet: renders test strokes of brushes (.sut too) to a PNG.
+# ---------------------------------------------------------------------------
+if(MOTHION_BUILD_DEVTOOLS)
+    qt_add_executable(mothion_brushsheet devtools/brushsheet.cpp)
+    target_link_libraries(mothion_brushsheet PRIVATE mothion_gui)
+    mothion_set_warnings(mothion_brushsheet)
+endif()

@@ -43,6 +43,7 @@ void applyPreset(ToolState &state, const BrushPreset &preset)
     state.setOpacity(preset.tool, preset.opacity);
     state.setPressureCurve(preset.curve);
     state.setSmoothing(preset.smoothing);
+    state.setBrush(preset.tool, preset.brush);
 }
 
 } // namespace mothion::tools

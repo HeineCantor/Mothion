@@ -8,7 +8,8 @@ Non ci sono modello dati, timeline funzionante né salvataggio.
 
 ## Build
 
-Requisiti: CMake ≥ 3.21, compilatore C++20, Qt ≥ 6.5 (Core, Gui, Widgets; Test per i test).
+Requisiti: CMake ≥ 3.21, compilatore C++20, Qt ≥ 6.5 (Core, Gui, Widgets, Sql; Test per i test).
+Sql serve a leggere i pennelli `.sut` (database SQLite, driver `qsqlite` incluso in Qt).
 Qt va linkato **dinamicamente** (LGPL): CMake si ferma con un errore se trova un Qt statico.
 
 ### Linux (Ubuntu / Debian)
@@ -18,11 +19,11 @@ sudo apt install build-essential cmake qt6-base-dev qt6-wayland
 cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build -j
 ctest --test-dir build          # test unitari
-./build/src/mothion
+./build/mothion
 ```
 
 Per provare il percorso X11 da una sessione Wayland (via XWayland):
-`QT_QPA_PLATFORM=xcb ./build/src/mothion`.
+`QT_QPA_PLATFORM=xcb ./build/mothion`.
 
 ### Windows (MSVC)
 
@@ -34,8 +35,8 @@ Per provare il percorso X11 da una sessione Wayland (via XWayland):
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH=C:\Qt\6.10.2\msvc2022_64
 cmake --build build --config RelWithDebInfo
 ctest --test-dir build -C RelWithDebInfo
-C:\Qt\6.10.2\msvc2022_64\bin\windeployqt.exe build\src\RelWithDebInfo\mothion.exe
-build\src\RelWithDebInfo\mothion.exe
+C:\Qt\6.10.2\msvc2022_64\bin\windeployqt.exe build\RelWithDebInfo\mothion.exe
+build\RelWithDebInfo\mothion.exe
 ```
 
 `windeployqt` copia accanto all'eseguibile le DLL e i plugin di Qt (linking dinamico).
@@ -45,6 +46,7 @@ build\src\RelWithDebInfo\mothion.exe
 | Opzione | Default | Effetto |
 |---|---|---|
 | `MOTHION_BUILD_TESTS` | ON | Compila i test (QtTest). |
+| `MOTHION_BUILD_DEVTOOLS` | OFF | Compila `mothion_brushsheet`: `mothion_brushsheet out.png [pennello.sut ...]` disegna tratti di prova dei pennelli in un PNG. |
 | `MOTHION_ENABLE_WINTAB` | ON | Solo Windows: abilita `--wintab`. Usa un'API **privata** di Qt (`Qt6::GuiPrivate`); se un aggiornamento di Qt la rompe, impostala a OFF. |
 
 ### Opzioni da riga di comando
@@ -57,6 +59,10 @@ build\src\RelWithDebInfo\mothion.exe
 src/
 ├─ core/     C++ puro, NESSUNA dipendenza da Qt (lo impone CMake: mothion_core non linka Qt)
 │            PenSample, PressureCurve, StrokeSmoother, RateMeter
+│  ├─ brush/  motore dei pennelli: Effector (dinamiche: pressione, velocità, inclinazione, casuale,
+│  │          curve a spline quadratica), BrushStyle (pennello "compilato"), DabGenerator (spaziatura
+│  │          ricalcolata a ogni timbro con resto tra i segmenti, punte, rotazione, spruzzo; Lcg
+│  │          deterministico per tratto), VelocityMeter, profilo di durezza
 │  └─ document/ modello del progetto: TiledImage (tasselli 64×64 copy-on-write), Drawing,
 │              Timing (esposizioni stile Harmony), Layer, Document, Command + commands/, History
 ├─ document/ DocumentController: possiede Document e History, livello/frame correnti,
@@ -64,11 +70,14 @@ src/
 ├─ input/    unico punto che conosce QTabletEvent/QMouseEvent → PenSample
 │            TabletInputAdapter, ProximityFilter, TabletBackend(_wintab|_nowintab)
 ├─ canvas/   CanvasView (widget), ViewTransform (zoom/pan/rotazione/specchiatura), NavigationGesture,
-│            DabSpacer (dab equidistanti), StrokeSession (tratto dal vivo su un TiledImage),
+│            DabStamper (timbri tondi/sfumati/da immagine, già colorati, con mipmap),
+│            StrokeSession (tratto dal vivo su un TiledImage: flusso che si accumula, opacità come tetto),
 │            FrameRenderer (composizione dei livelli visibili nel frame), TileQt (ponte tasselli↔QImage),
 │            DebugOverlay (F12)
 ├─ tools/    ToolState: strumento attivo, dimensione, opacità, colori, curva, stabilizzazione;
-│            BrushPreset: preset predefiniti ("sotto-strumenti")
+│            BrushPreset: preset ("sotto-strumenti"); BrushDefinition: stile + immagini delle punte;
+│            BrushLibrary: pennelli importati (copie in AppData/brushes, ricaricate all'avvio);
+│            SutImporter: lettura dei .sut di Clip Studio Paint (parametri, dinamiche, punte)
 ├─ ui/       MainWindow, DockLayout (disposizione e persistenza), PanelDock, Theme, IconFactory
 │  └─ panels/ Strumenti, Sotto-strumento (preset con anteprima), Proprietà strumento,
 │             slider verticali Dimensione/Opacità, Ruota colore, Set di colori,
@@ -86,7 +95,8 @@ QTabletEvent / QMouseEvent ──input::toPenSample()──▶ PenSample
    │  (prossimità: solo a QApplication → ProximityFilter)│
    ▼                                                    ▼
 CanvasView::handleSample ──▶ NavigationGesture (mano / zoom / rotazione)
-                         └─▶ StrokeSmoother → PressureCurve → DabSpacer → StrokeSession
+                         └─▶ StrokeSmoother → BrushInput (curva di pressione, velocità, inclinazione)
+                              → brush::DabGenerator → StrokeSession (DabStamper)
                               (sul disegno del livello/frame corrente; a fine tratto
                                PaintCommand → History tramite DocumentController)
 ```
@@ -117,6 +127,7 @@ Dopo `toPenSample()` nessuna parte del programma tocca eventi Qt di input.
 | Navigatore | clic/trascina sulla miniatura per spostare la vista; slider zoom/rotazione; specchia O/V |
 | Layout | Finestra → Ripristina layout predefinito |
 | Tema | Finestra → Tema → Sistema / Chiaro / Scuro |
+| Pennelli | File → Importa pennello (.sut)…: compare in Sotto-strumento |
 
 ## Note su Qt 6 e tavolette (verificate su documentazione e sorgenti Qt 6.10)
 

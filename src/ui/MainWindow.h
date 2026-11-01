@@ -11,6 +11,7 @@ namespace mothion::document {
 class DocumentController;
 }
 namespace mothion::tools {
+class BrushLibrary;
 class ToolState;
 }
 
@@ -37,8 +38,10 @@ private:
     void createCommandBar();
     void createMenus();
     void notImplemented(const QString &what);
+    void importBrush();
 
     tools::ToolState *m_toolState = nullptr;
+    tools::BrushLibrary *m_brushes = nullptr;
     // Declared before m_canvas: the canvas needs the controller at construction.
     document::DocumentController *m_document = nullptr;
     canvas::CanvasView *m_canvas = nullptr;

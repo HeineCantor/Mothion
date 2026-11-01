@@ -1,6 +1,6 @@
-#include "canvas/DabSpacer.h"
 #include "canvas/FrameRenderer.h"
 #include "canvas/StrokeSession.h"
+#include "core/brush/DabGenerator.h"
 #include "canvas/ViewTransform.h"
 #include "core/document/Document.h"
 #include "core/document/commands/DrawingCommands.h"
@@ -119,9 +119,9 @@ private slots:
     {
         doc::TiledImage image;
         canvas::StrokeSession session(image, Qt::black, 1.0, false, QRect(0, 0, 100, 100));
-        DabSpacer spacer;
-        session.addDabs(spacer.begin({{-30, 50}, 10.0}));
-        session.addDabs(spacer.continueTo({{50, 50}, 10.0}));
+        brush::DabGenerator gen(roundStyle(10.0));
+        session.addDabs(gen.begin(point(-30, 50)));
+        session.addDabs(gen.continueTo(point(50, 50)));
         QCOMPARE(image.pixel(-5, 50), doc::Pixel(0));
         QVERIFY(doc::alphaOf(image.pixel(5, 50)) > 200);
     }
@@ -136,9 +136,9 @@ private slots:
         doc::Drawing *drawing = document.layer(addLayer.layerId())->drawing(nd.id);
 
         canvas::StrokeSession session(drawing->image, Qt::black, 1.0, false);
-        DabSpacer spacer;
-        session.addDabs(spacer.begin({{10, 10}, 3.0}));
-        session.addDabs(spacer.continueTo({{150, 10}, 3.0}));
+        brush::DabGenerator gen(roundStyle(3.0));
+        session.addDabs(gen.begin(point(10, 10)));
+        session.addDabs(gen.continueTo(point(150, 10)));
         auto paint = doc::PaintCommand::capture(addLayer.layerId(), nd.id, session.before(), drawing->image);
         QVERIFY(paint);
         QCOMPARE(paint->swaps().size(), std::size_t(3));
@@ -155,7 +155,7 @@ private slots:
         stroke(image, Qt::black, 1.0, false, {10, 10}, {20, 10}, 3.0);
         const doc::TiledImage original = image;
         canvas::StrokeSession session(image, Qt::red, 1.0, false);
-        session.addDabs(DabSpacer().begin({{100, 100}, 5.0}));
+        session.addDabs(brush::DabGenerator(roundStyle(5.0)).begin(point(100, 100)));
         session.cancel();
         QCOMPARE(image.tileCount(), original.tileCount());
         QCOMPARE(image.tile({0, 0}).get(), original.tile({0, 0}).get());
@@ -197,14 +197,31 @@ private slots:
     }
 
 private:
+    // Hard round dabs of a constant radius, densely spaced (the default brush without pressure).
+    static brush::BrushStyle roundStyle(double radius)
+    {
+        brush::BrushStyle s;
+        s.size = radius;
+        s.sizeEffector = {};
+        return s;
+    }
+
+    static brush::BrushInput point(double x, double y)
+    {
+        brush::BrushInput in;
+        in.x = x;
+        in.y = y;
+        return in;
+    }
+
     // One straight stroke into an image.
     static void stroke(doc::TiledImage &image, const QColor &color, double opacity, bool erase, QPointF a,
                        QPointF b, double radius)
     {
         canvas::StrokeSession session(image, color, opacity, erase);
-        DabSpacer spacer;
-        session.addDabs(spacer.begin({a, radius}));
-        session.addDabs(spacer.continueTo({b, radius}));
+        brush::DabGenerator gen(roundStyle(radius));
+        session.addDabs(gen.begin(point(a.x(), a.y())));
+        session.addDabs(gen.continueTo(point(b.x(), b.y())));
     }
 };
 

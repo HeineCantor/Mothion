@@ -8,6 +8,17 @@ ToolState::ToolState(QObject *parent)
     : QObject(parent)
 {
     m_settings[index(ToolId::Eraser)].size = 30.0;
+    m_brushes.fill(roundBrush());
+}
+
+BrushDefinitionPtr roundBrush()
+{
+    static const BrushDefinitionPtr round = [] {
+        auto b = std::make_shared<BrushDefinition>();
+        b->name = QObject::tr("Tondo");
+        return b; // BrushStyle's defaults: hard, radius × pressure, dense spacing
+    }();
+    return round;
 }
 
 QString ToolState::displayName(ToolId tool)
@@ -46,6 +57,17 @@ void ToolState::setOpacity(ToolId tool, double opacity)
     if (qFuzzyCompare(s.opacity, opacity))
         return;
     s.opacity = opacity;
+    emit toolSettingsChanged(tool);
+}
+
+void ToolState::setBrush(ToolId tool, BrushDefinitionPtr brush)
+{
+    if (!brush)
+        brush = roundBrush();
+    auto &current = m_brushes[index(tool)];
+    if (current == brush)
+        return;
+    current = std::move(brush);
     emit toolSettingsChanged(tool);
 }
 

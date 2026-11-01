@@ -9,10 +9,13 @@
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QRandomGenerator>
 #include <QTabletEvent>
 #include <QWheelEvent>
 
+#include <algorithm>
 #include <cmath>
+#include <numbers>
 
 namespace mothion::canvas {
 
@@ -345,19 +348,29 @@ void CanvasView::beginStroke(const PenSample &sample)
             emit statusMessage(reason);
         return;
     }
-    const tools::BrushSettings settings = m_toolState->settings(m_eraseStroke ? ToolId::Eraser : ToolId::Brush);
+    const ToolId tool = m_eraseStroke ? ToolId::Eraser : ToolId::Brush;
+    const tools::BrushSettings settings = m_toolState->settings(tool);
+    const tools::BrushDefinitionPtr definition = m_toolState->brush(tool);
+    brush::BrushStyle style = definition->style;
+    style.size = settings.size / 2.0;
+    auto stamper = std::make_shared<DabStamper>(m_toolState->color(), style.hardness, definition->tips,
+                                                style.verticalThickness);
     const doc::Document &d = m_document->document();
-    m_stroke.emplace(*target->image, m_toolState->color(), settings.opacity, m_eraseStroke,
+    m_stroke.emplace(*target->image, std::move(stamper), settings.opacity, m_eraseStroke,
                      QRect(0, 0, d.width(), d.height()));
+    m_dabs.emplace(style, QRandomGenerator::global()->generate());
 
     m_smoother.setStrength(m_toolState->smoothing());
     m_smoother.reset();
-    m_document->notifyPainted(m_stroke->addDabs(m_spacer.begin(strokePoint(m_smoother.filter(sample)))));
+    m_velocity.reset();
+    const auto dabs = m_dabs->begin(brushInput(m_smoother.filter(sample)));
+    m_document->notifyPainted(m_stroke->addDabs(dabs));
 }
 
 void CanvasView::continueStroke(const PenSample &sample)
 {
-    m_document->notifyPainted(m_stroke->addDabs(m_spacer.continueTo(strokePoint(m_smoother.filter(sample)))));
+    const auto dabs = m_dabs->continueTo(brushInput(m_smoother.filter(sample)));
+    m_document->notifyPainted(m_stroke->addDabs(dabs));
 }
 
 void CanvasView::endStroke()
@@ -367,6 +380,7 @@ void CanvasView::endStroke()
         return;
     m_document->endPaint(m_stroke->before());
     m_stroke.reset();
+    m_dabs.reset();
 }
 
 void CanvasView::cancelStroke()
@@ -376,15 +390,26 @@ void CanvasView::cancelStroke()
     // Restore pixels first: cancelPaint() may remove the drawing they live in.
     m_stroke->cancel();
     m_stroke.reset();
+    m_dabs.reset();
     m_document->cancelPaint();
     renderWholeFrame();
 }
 
-DabSpacer::Point CanvasView::strokePoint(const PenSample &smoothed) const
+brush::BrushInput CanvasView::brushInput(const PenSample &smoothed)
 {
-    const double size = m_toolState->settings(m_eraseStroke ? ToolId::Eraser : ToolId::Brush).size;
-    const float pressure = m_toolState->pressureCurve().map(smoothed.pressure);
-    return {m_view.mapToDocument(QPointF(smoothed.x, smoothed.y)), size / 2.0 * pressure};
+    brush::BrushInput in;
+    const QPointF doc = m_view.mapToDocument(QPointF(smoothed.x, smoothed.y));
+    in.x = doc.x();
+    in.y = doc.y();
+    in.pressure = m_toolState->pressureCurve().map(smoothed.pressure);
+    in.velocity = m_velocity.sample(smoothed.t, smoothed.x, smoothed.y);
+    const double tilt = std::hypot(smoothed.tiltX, smoothed.tiltY);
+    in.tilt = std::clamp(tilt / 60.0, 0.0, 1.0);
+    // Barrel rotation when the pen reports it, else the direction it leans to.
+    in.penAngle = smoothed.rotation != 0.0f || tilt == 0.0
+                      ? double(smoothed.rotation)
+                      : std::atan2(double(smoothed.tiltY), double(smoothed.tiltX)) * 180.0 / std::numbers::pi;
+    return in;
 }
 
 // --- keyboard / wheel navigation --------------------------------------------

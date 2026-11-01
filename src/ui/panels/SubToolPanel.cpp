@@ -1,7 +1,8 @@
 #include "ui/panels/SubToolPanel.h"
 
-#include "canvas/DabSpacer.h"
 #include "canvas/StrokeSession.h"
+#include "core/brush/DabGenerator.h"
+#include "tools/BrushLibrary.h"
 #include "canvas/TileQt.h"
 
 #include <QEvent>
@@ -23,23 +24,31 @@ constexpr QSize kPreviewSize(118, 40); // leaves room for the name on the right
 constexpr int kPreviewRole = Qt::UserRole + 1;
 
 // Draws an S-shaped stroke with a press-and-lift pressure profile using the
-// real DabSpacer + StrokeSession, so the preview shows what the brush does.
+// real brush engine, so the preview shows what the brush does.
 QImage renderPreview(const tools::BrushPreset &preset, const QColor &ink)
 {
     doc::TiledImage image;
     const QRect area(QPoint(0, 0), kPreviewSize);
-    canvas::StrokeSession session(image, ink, preset.opacity, false, area);
-    canvas::DabSpacer spacer;
+    const tools::BrushDefinitionPtr definition = preset.brush ? preset.brush : tools::roundBrush();
+    brush::BrushStyle style = definition->style;
     // Big brushes are scaled down to fit the row, keeping their pressure response.
-    const double maxRadius = std::min(preset.size, 22.0) / 2.0;
+    style.size = std::min(preset.size, definition->tips.isEmpty() ? 22.0 : 36.0) / 2.0;
+    if (style.spray)
+        style.size *= 0.5;
+    canvas::StrokeSession session(
+        image, std::make_shared<canvas::DabStamper>(ink, style.hardness, definition->tips, style.verticalThickness),
+        preset.opacity, false, area);
+    brush::DabGenerator generator(style, 12345); // fixed seed: the preview never changes
     constexpr int kSteps = 60;
     for (int i = 0; i <= kSteps; ++i) {
         const double t = double(i) / kSteps;
-        const QPointF pos(8 + t * (kPreviewSize.width() - 16),
-                          kPreviewSize.height() / 2.0 - std::sin(t * 2 * std::numbers::pi) * 7);
-        const float pressure = float(std::sin(t * std::numbers::pi)); // 0 -> 1 -> 0
-        const canvas::DabSpacer::Point p{pos, std::max(0.4, maxRadius * preset.curve.map(pressure))};
-        session.addDabs(i == 0 ? spacer.begin(p) : spacer.continueTo(p));
+        brush::BrushInput in;
+        in.x = 8 + t * (kPreviewSize.width() - 16);
+        in.y = kPreviewSize.height() / 2.0 - std::sin(t * 2 * std::numbers::pi) * 7;
+        in.pressure = preset.curve.map(float(std::sin(t * std::numbers::pi))); // 0 -> 1 -> 0
+        in.velocity = 0.3;
+        const auto dabs = i == 0 ? generator.begin(in) : generator.continueTo(in);
+        session.addDabs(dabs);
     }
     return canvas::toQImage(image, area);
 }
@@ -82,9 +91,10 @@ public:
 
 } // namespace
 
-SubToolPanel::SubToolPanel(tools::ToolState *state, QWidget *parent)
+SubToolPanel::SubToolPanel(tools::ToolState *state, tools::BrushLibrary *library, QWidget *parent)
     : QWidget(parent)
     , m_state(state)
+    , m_library(library)
     , m_list(new QListWidget(this))
     , m_empty(new QLabel(tr("Nessun sotto-strumento"), this))
 {
@@ -107,6 +117,8 @@ SubToolPanel::SubToolPanel(tools::ToolState *state, QWidget *parent)
         tools::applyPreset(*m_state, m_presets[row]);
     });
     connect(m_state, &tools::ToolState::activeToolChanged, this, &SubToolPanel::showPresetsFor);
+    connect(m_library, &tools::BrushLibrary::presetsChanged, this,
+            [this] { showPresetsFor(m_state->activeTool()); });
 
     // Start with the first brush preset applied, so the defaults are a real sub tool.
     const auto brushPresets = tools::builtInPresets(tools::ToolId::Brush);
@@ -117,7 +129,7 @@ SubToolPanel::SubToolPanel(tools::ToolState *state, QWidget *parent)
 
 void SubToolPanel::showPresetsFor(tools::ToolId tool)
 {
-    m_presets = tools::builtInPresets(tool);
+    m_presets = m_library->presets(tool);
     m_list->clear();
     const QColor ink = palette().text().color();
     for (const tools::BrushPreset &preset : std::as_const(m_presets)) {

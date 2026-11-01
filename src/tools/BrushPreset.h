@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/PressureCurve.h"
+#include "tools/BrushDefinition.h"
 #include "tools/ToolState.h"
 
 #include <QList>
@@ -19,6 +20,7 @@ struct BrushPreset
     double opacity = 1.0;
     PressureCurve curve;
     double smoothing = 0.3;
+    BrushDefinitionPtr brush; // null = round brush
 };
 
 // Built-in presets for a tool (empty for tools without sub tools).

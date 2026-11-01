@@ -1,11 +1,13 @@
 #pragma once
 
-#include "canvas/Dab.h"
+#include "canvas/DabStamper.h"
+#include "core/brush/BrushStyle.h"
 #include "core/document/TiledImage.h"
 
 #include <QColor>
 #include <QRect>
 
+#include <memory>
 #include <span>
 #include <unordered_set>
 
@@ -13,11 +15,12 @@ namespace mothion::canvas {
 
 // Paints one stroke into a TiledImage, live.
 //
-// The stroke is accumulated at full strength in a separate mask, and each
+// The stroke is accumulated in a separate mask, each dab at its own alpha
+// (the brush flow: overlapping dabs build up towards full coverage), and each
 // touched tile of the target is recomposed as
 //     before + mask × opacity      (brush)
 //     before − mask × opacity      (eraser)
-// so overlapping dabs inside one stroke do not build up opacity.
+// so the stroke opacity is a ceiling the dabs never go past.
 //
 // `before` is a snapshot taken at construction: it shares every tile with
 // the target, which makes every touched tile copy-on-write, and it is what
@@ -27,11 +30,14 @@ class StrokeSession
 {
 public:
     // `clip`: area that may be painted (the document bounds); empty = unbounded.
+    StrokeSession(doc::TiledImage &target, std::shared_ptr<const DabStamper> stamper, double opacity, bool erase,
+                  const QRect &clip = {});
+    // Hard round dabs in `color`.
     StrokeSession(doc::TiledImage &target, const QColor &color, double opacity, bool erase,
                   const QRect &clip = {});
 
     // Paints the dabs; returns the changed document rect.
-    QRect addDabs(std::span<const Dab> dabs);
+    QRect addDabs(std::span<const brush::BrushDab> dabs);
 
     // Puts the target back as it was before the stroke.
     void cancel();
@@ -46,7 +52,7 @@ private:
     const doc::TiledImage m_before;
     doc::TiledImage m_mask;
     std::unordered_set<doc::TileCoord, doc::TileCoordHash> m_touched;
-    QColor m_color;
+    std::shared_ptr<const DabStamper> m_stamper;
     double m_opacity;
     bool m_erase;
     QRect m_clip;
