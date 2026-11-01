@@ -19,6 +19,7 @@
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <QScrollArea>
+#include <QSpinBox>
 #include <QScrollBar>
 #include <QStandardPaths>
 #include <QTemporaryDir>
@@ -94,6 +95,31 @@ private slots:
         QCOMPARE(QFileInfo(dialog.path()).completeBaseName(), QStringLiteral("walk"));
         QVERIFY(dialog.firstFrame() >= 0 && dialog.firstFrame() <= dialog.lastFrame());
         QVERIFY(!dialog.options().transparent); // JPEG selected: never transparent
+    }
+
+    // A number field with focus keeps Ctrl+Z for the document, not for its text.
+    void undoWorksFromANumberField()
+    {
+        ui::MainWindow window;
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *controller = window.findChild<document::DocumentController *>();
+        QVERIFY(controller);
+        QImage image(8, 8, QImage::Format_ARGB32);
+        image.fill(Qt::green);
+        controller->importImage(image, QStringLiteral("pic"));
+        QVERIFY(controller->canUndo());
+
+        QSpinBox *spin = window.findChild<ui::ToolPropertiesPanel *>()->findChild<QSpinBox *>();
+        QVERIFY(spin);
+        window.activateWindow();
+        spin->setFocus();
+        QTRY_VERIFY(spin->hasFocus());
+        QTest::keyClick(spin, Qt::Key_Z, Qt::ControlModifier);
+        QVERIFY(!controller->canUndo());
+        QVERIFY(controller->canRedo());
+        QTest::keyClick(spin, Qt::Key_Y, Qt::ControlModifier);
+        QVERIFY(controller->canUndo());
     }
 
     void tiltCheckboxFollowsToolState()

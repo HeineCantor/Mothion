@@ -23,6 +23,7 @@
 #include "ui/panels/ToolPropertiesPanel.h"
 #include "ui/panels/timeline/TimelinePanel.h"
 
+#include <QAbstractSpinBox>
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
@@ -31,6 +32,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QImageReader>
+#include <QKeyEvent>
 #include <QMessageBox>
 #include <QLabel>
 #include <QMenuBar>
@@ -120,6 +122,9 @@ void MainWindow::createCommandBar()
         if (!redoKeys.contains(k))
             redoKeys << k;
     redo->setShortcuts(redoKeys);
+    // Also from floating panels, which are windows of their own.
+    undo->setShortcutContext(Qt::ApplicationShortcut);
+    redo->setShortcutContext(Qt::ApplicationShortcut);
     connect(undo, &QAction::triggered, m_document, &document::DocumentController::undo);
     connect(redo, &QAction::triggered, m_document, &document::DocumentController::redo);
     auto syncHistory = [this, undo, redo] {
@@ -131,6 +136,7 @@ void MainWindow::createCommandBar()
     connect(m_document, &document::DocumentController::historyChanged, this, syncHistory);
     syncHistory();
     m_editActions << undo << redo;
+    qApp->installEventFilter(this);
 
     auto *bar = new QToolBar(tr("Commands"), this);
     bar->setObjectName(QStringLiteral("toolbar.commands")); // needed by saveState()
@@ -461,6 +467,25 @@ void MainWindow::exportFrames()
                                        .arg(QFileInfo(file).absolutePath())
                                  : tr("Exported %1").arg(QFileInfo(file).fileName()),
                              4000);
+}
+
+bool MainWindow::eventFilter(QObject *watched, QEvent *event)
+{
+    // A spin box claims Ctrl+Z for the text typed in it, so the document's
+    // undo would not run while one has focus (after nudging a size, say).
+    // Number fields have nothing worth undoing as text: leave them the keys.
+    if (event->type() == QEvent::ShortcutOverride) {
+        auto *widget = qobject_cast<QWidget *>(watched);
+        const bool inSpinBox = widget && (qobject_cast<QAbstractSpinBox *>(widget)
+                                          || qobject_cast<QAbstractSpinBox *>(widget->parentWidget()));
+        if (inSpinBox) {
+            const QKeySequence key(static_cast<QKeyEvent *>(event)->keyCombination());
+            for (const QAction *action : std::as_const(m_editActions))
+                if (action->shortcuts().contains(key))
+                    return true; // not accepted: the shortcut runs instead
+        }
+    }
+    return QMainWindow::eventFilter(watched, event);
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)

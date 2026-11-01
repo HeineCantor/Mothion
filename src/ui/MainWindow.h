@@ -36,6 +36,8 @@ public:
 
 protected:
     void closeEvent(QCloseEvent *event) override;
+    // Undo/redo keys pressed in a number field go to the document (see the .cpp).
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
     void createCommandBar();
