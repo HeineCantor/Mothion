@@ -1,5 +1,6 @@
 // Tests for the UI layer: panel layouts, document controller actions.
 
+#include "canvas/CanvasView.h"
 #include "canvas/MoveTool.h"
 #include "canvas/PuppetTool.h"
 #include "canvas/SelectionTool.h"
@@ -13,6 +14,7 @@
 #include "ui/panels/ToolPropertiesPanel.h"
 
 #include <QComboBox>
+#include <QLineEdit>
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <QScrollArea>
@@ -91,6 +93,38 @@ private slots:
         QCOMPARE(QFileInfo(dialog.path()).completeBaseName(), QStringLiteral("walk"));
         QVERIFY(dialog.firstFrame() >= 0 && dialog.firstFrame() <= dialog.lastFrame());
         QVERIFY(!dialog.options().transparent); // JPEG selected: never transparent
+    }
+
+    // Holding Tab turns the pen into the hand, like Space; Tab stays on the
+    // canvas instead of moving the focus to the next widget.
+    void holdingTabPans()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        QWidget window;
+        auto *canvas = new canvas::CanvasView(&state, &controller, &window);
+        auto *other = new QLineEdit(&window); // something Tab could move the focus to
+        other->move(0, 400);
+        window.resize(400, 450);
+        canvas->resize(400, 380);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        canvas->setFocus();
+        QTRY_VERIFY(canvas->hasFocus());
+        const Qt::CursorShape drawing = canvas->cursor().shape();
+        QVERIFY(drawing != Qt::OpenHandCursor);
+
+        QTest::keyPress(canvas, Qt::Key_Tab);
+        QVERIFY(canvas->hasFocus());
+        QCOMPARE(canvas->cursor().shape(), Qt::OpenHandCursor);
+        QTest::keyRelease(canvas, Qt::Key_Tab);
+        QCOMPARE(canvas->cursor().shape(), drawing);
+
+        // Released elsewhere: the hand does not stick.
+        QTest::keyPress(canvas, Qt::Key_Tab);
+        other->setFocus();
+        QTRY_VERIFY(!canvas->hasFocus());
+        QCOMPARE(canvas->cursor().shape(), drawing);
     }
 
     // Clear empties the drawing at the current layer and frame in one undo

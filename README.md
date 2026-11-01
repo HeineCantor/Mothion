@@ -158,7 +158,7 @@ After `toPenSample()`, no part of the program touches Qt input events.
 | Move | drag the drawing (or only the selected part); Shift = horizontal or vertical only |
 | Selection | drag a rectangle (Shift = square) or a lasso; a click deselects; Edit → Select all (Ctrl+A), Deselect (Ctrl+D) |
 | Puppet warp | click the drawing (or the selected part) to add pins, drag a pin to deform; Alt+click or Delete removes a pin; Enter applies, Esc cancels; mesh options in Tool properties |
-| Pan | Space + drag, middle button, pen side button, Hand tool |
+| Pan | Space or Tab + drag, middle button, pen side button, Hand tool |
 | Zoom | wheel, Space+Ctrl+drag, Zoom tool, Ctrl + / Ctrl − / Ctrl 0 (fit) |
 | Rotate | Shift + wheel, Space+Shift+drag, Ctrl , / Ctrl . / Ctrl / (reset) |
 | Undo / Redo | Ctrl+Z / Ctrl+Shift+Z or Ctrl+Y (up to 500 steps or 1 GB) |

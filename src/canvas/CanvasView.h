@@ -90,13 +90,16 @@ protected:
     void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
     void leaveEvent(QEvent *event) override;
+    void focusOutEvent(QFocusEvent *event) override;
+    // Tab is a canvas key (held = pan), not focus navigation.
+    bool focusNextPrevChild(bool) override { return false; }
 
 private:
     void handleSample(const PenSample &sample);
     void noteDevice(const QPointingDevice *device);
 
     // Which navigation a press should start, given the active tool, the held
-    // keys (Space + Ctrl/Shift) and the buttons. None means "paint".
+    // keys (Space or Tab + Ctrl/Shift) and the buttons. None means "paint".
     NavigationGesture::Mode navigationModeFor(const PenSample &sample) const;
 
     void beginStroke(const PenSample &sample);
@@ -146,7 +149,11 @@ private:
     QPointF m_pointerPos;      // last pointer position (view coordinates)
     bool m_pointerVisible = false;
     InputTool m_pointerTool = InputTool::Mouse;
+    // Held keys that turn the pen into the hand (Ctrl: zoom, Shift: rotate).
     bool m_spaceHeld = false;
+    bool m_tabHeld = false;
+    bool panKeyHeld() const { return m_spaceHeld || m_tabHeld; }
+    bool *panKeyFlag(int key); // the flag of a pan key, nullptr for other keys
     bool m_fittedOnce = false;
 };
 

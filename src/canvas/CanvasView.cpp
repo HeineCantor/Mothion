@@ -357,7 +357,7 @@ void CanvasView::handleSample(const PenSample &sample)
 
 Mode CanvasView::navigationModeFor(const PenSample &sample) const
 {
-    if (m_spaceHeld) {
+    if (panKeyHeld()) {
         const Qt::KeyboardModifiers mods = QGuiApplication::keyboardModifiers();
         if (mods & Qt::ControlModifier)
             return Mode::Zoom;
@@ -548,9 +548,11 @@ void CanvasView::keyPressEvent(QKeyEvent *event)
         event->accept();
         return;
     }
-    if (event->key() == Qt::Key_Space && !event->isAutoRepeat()) {
-        m_spaceHeld = true;
-        updateCursor();
+    if (bool *held = panKeyFlag(event->key())) {
+        if (!event->isAutoRepeat()) {
+            *held = true;
+            updateCursor();
+        }
         return;
     }
     QWidget::keyPressEvent(event);
@@ -558,17 +560,38 @@ void CanvasView::keyPressEvent(QKeyEvent *event)
 
 void CanvasView::keyReleaseEvent(QKeyEvent *event)
 {
-    if (event->key() == Qt::Key_Space && !event->isAutoRepeat()) {
-        m_spaceHeld = false;
-        updateCursor();
+    if (bool *held = panKeyFlag(event->key())) {
+        if (!event->isAutoRepeat()) {
+            *held = false;
+            updateCursor();
+        }
         return;
     }
     QWidget::keyReleaseEvent(event);
 }
 
+bool *CanvasView::panKeyFlag(int key)
+{
+    switch (key) {
+    case Qt::Key_Space: return &m_spaceHeld;
+    case Qt::Key_Tab: return &m_tabHeld;
+    default: return nullptr;
+    }
+}
+
+void CanvasView::focusOutEvent(QFocusEvent *event)
+{
+    // The release of a key held while focus moves away never reaches us.
+    if (panKeyHeld()) {
+        m_spaceHeld = m_tabHeld = false;
+        updateCursor();
+    }
+    QWidget::focusOutEvent(event);
+}
+
 void CanvasView::updateCursor()
 {
-    if (m_spaceHeld || m_toolState->activeTool() == ToolId::Hand)
+    if (panKeyHeld() || m_toolState->activeTool() == ToolId::Hand)
         setCursor(Qt::OpenHandCursor);
     else if (m_toolState->activeTool() == ToolId::Zoom)
         setCursor(Qt::SizeHorCursor);
