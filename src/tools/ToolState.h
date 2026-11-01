@@ -74,6 +74,11 @@ public:
     double smoothing() const { return m_smoothing; }
     void setSmoothing(double amount);
 
+    // Off: the pen's tilt is ignored (dynamics and pen direction), for pens
+    // that report it badly or brushes that react to it too much.
+    bool usesTilt() const { return m_useTilt; }
+    void setUseTilt(bool use);
+
     PuppetSettings puppetSettings() const { return m_puppet; }
     void setPuppetSettings(const PuppetSettings &settings);
 
@@ -84,6 +89,7 @@ signals:
     void secondaryColorChanged(const QColor &color);
     void pressureCurveChanged();
     void smoothingChanged(double amount);
+    void useTiltChanged(bool use);
     void puppetSettingsChanged();
 
 private:
@@ -96,6 +102,7 @@ private:
     QColor m_secondaryColor = Qt::white;
     PressureCurve m_pressureCurve;
     double m_smoothing = 0.3;
+    bool m_useTilt = true;
     PuppetSettings m_puppet;
 };
 

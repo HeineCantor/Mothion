@@ -16,6 +16,7 @@ struct BrushInput
     double pressure = 1.0;    // 0..1, after the global pressure curve
     double velocity = 0.0;    // 0..1 (see VelocityMeter)
     double tilt = 1.0;        // 0..1, 1 = pen upright, 0 = leaning 60° or more (see tiltInput)
+    bool hasTilt = true;      // false: tilt is ignored, the Tilt input of dynamics has no effect
     double penAngle = 0.0;    // degrees: barrel rotation, or tilt direction
     double inOut = 1.0;       // 0..1 start/end-of-stroke factor, 1 in the middle
     double sizeScale = 1.0;   // multiplies the size

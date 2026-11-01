@@ -115,6 +115,14 @@ void ToolState::setSmoothing(double amount)
     emit smoothingChanged(amount);
 }
 
+void ToolState::setUseTilt(bool use)
+{
+    if (use == m_useTilt)
+        return;
+    m_useTilt = use;
+    emit useTiltChanged(use);
+}
+
 void ToolState::setPuppetSettings(const PuppetSettings &settings)
 {
     if (settings == m_puppet)

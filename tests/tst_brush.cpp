@@ -92,6 +92,28 @@ private slots:
         QVERIFY(e.evaluate(17.0, in, nullptr) < 17.0 && e.evaluate(17.0, in, nullptr) > 1.7);
     }
 
+    // With tilt switched off, the tilt factor is left out altogether, even
+    // where the brush's tilt curve would not give 100 % for an upright pen.
+    void ignoredTiltChangesNothing()
+    {
+        Effector e;
+        e.available = e.active = InputTilt;
+        e.tiltMin = 0.1;
+        e.tilt = EffectorCurve({{0.0, 1.0}, {1.0, 0.2}}); // thinner upright
+        BrushInput in;
+        in.tilt = tiltInput(50, 20);
+        QVERIFY(e.evaluate(17.0, in, nullptr) != 17.0);
+        in.hasTilt = false;
+        QCOMPARE(e.evaluate(17.0, in, nullptr), 17.0);
+
+        // Dabs between two samples keep it off.
+        BrushInput a, b;
+        a.hasTilt = b.hasTilt = false;
+        QVERIFY(!DabGenerator::interpolate(a, b, 0.5).hasTilt);
+        b.hasTilt = true;
+        QVERIFY(!DabGenerator::interpolate(a, b, 0.5).hasTilt);
+    }
+
     void lcgMatchesReferenceSequence()
     {
         Lcg rng(1);

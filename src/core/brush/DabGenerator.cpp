@@ -50,6 +50,7 @@ BrushInput DabGenerator::interpolate(const BrushInput &a, const BrushInput &b, d
     r.pressure = lerp(a.pressure, b.pressure, t);
     r.velocity = lerp(a.velocity, b.velocity, t);
     r.tilt = lerp(a.tilt, b.tilt, t);
+    r.hasTilt = a.hasTilt && b.hasTilt;
     r.penAngle = lerpAngle(a.penAngle, b.penAngle, t);
     r.inOut = lerp(a.inOut, b.inOut, t);
     r.sizeScale = lerp(a.sizeScale, b.sizeScale, t);

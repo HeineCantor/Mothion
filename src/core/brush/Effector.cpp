@@ -171,7 +171,7 @@ double Effector::evaluate(double base, const BrushInput &in, Lcg *rng) const
         v *= pressureMin + (1.0 - pressureMin) * pressure.map(in.pressure);
     if (on & InputVelocity)
         v *= velocityFrom + (velocityTo - velocityFrom) * velocity.map(in.velocity);
-    if (on & InputTilt)
+    if ((on & InputTilt) && in.hasTilt)
         v *= tiltMin + (1.0 - tiltMin) * tilt.map(in.tilt);
     if ((on & InputRandom) && rng)
         v *= randomMin + (1.0 - randomMin) * rng->next01();

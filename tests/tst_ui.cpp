@@ -13,6 +13,7 @@
 #include "ui/PanelDock.h"
 #include "ui/panels/ToolPropertiesPanel.h"
 
+#include <QCheckBox>
 #include <QComboBox>
 #include <QLineEdit>
 #include <QElapsedTimer>
@@ -93,6 +94,24 @@ private slots:
         QCOMPARE(QFileInfo(dialog.path()).completeBaseName(), QStringLiteral("walk"));
         QVERIFY(dialog.firstFrame() >= 0 && dialog.firstFrame() <= dialog.lastFrame());
         QVERIFY(!dialog.options().transparent); // JPEG selected: never transparent
+    }
+
+    void tiltCheckboxFollowsToolState()
+    {
+        tools::ToolState state;
+        ui::ToolPropertiesPanel panel(&state);
+        QCheckBox *tilt = nullptr;
+        for (QCheckBox *box : panel.findChildren<QCheckBox *>())
+            if (box->text() == QStringLiteral("Use pen tilt"))
+                tilt = box;
+        QVERIFY(tilt);
+        QVERIFY(tilt->isChecked());
+        QVERIFY(state.usesTilt());
+
+        tilt->click();
+        QVERIFY(!state.usesTilt());
+        state.setUseTilt(true);
+        QVERIFY(tilt->isChecked());
     }
 
     // Holding Tab turns the pen into the hand, like Space; Tab stays on the

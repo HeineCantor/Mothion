@@ -15,7 +15,7 @@ class PressureCurveEditor;
 class SliderField;
 
 // Properties of the active tool: size and opacity (paint tools only),
-// plus the global smoothing and pressure curve; for the puppet warp, its
+// plus the global smoothing, pen tilt switch and pressure curve; for the puppet warp, its
 // mesh options instead.
 class ToolPropertiesPanel : public QWidget
 {
@@ -36,6 +36,7 @@ private:
     SliderField *m_size;
     SliderField *m_opacity;
     SliderField *m_smoothing;
+    QCheckBox *m_useTilt;
     PressureCurveEditor *m_curveEditor;
 
     QWidget *m_puppetControls;

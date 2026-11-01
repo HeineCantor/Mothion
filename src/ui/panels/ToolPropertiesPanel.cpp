@@ -28,6 +28,7 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
                              m_brushControls))
     , m_opacity(new SliderField(tr("Opacity"), 0, 100, QStringLiteral(" %"), m_brushControls))
     , m_smoothing(new SliderField(tr("Stabilizer"), 0, 95, QStringLiteral(" %"), m_brushControls))
+    , m_useTilt(new QCheckBox(tr("Use pen tilt"), m_brushControls))
     , m_curveEditor(new PressureCurveEditor(m_brushControls))
     , m_puppetControls(new QWidget(this))
     , m_meshDensity(new QComboBox(m_puppetControls))
@@ -43,6 +44,8 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
     brush->addWidget(m_size);
     brush->addWidget(m_opacity);
     brush->addWidget(m_smoothing);
+    m_useTilt->setToolTip(tr("Off: the pen's tilt changes nothing, whatever the brush's tilt dynamics say"));
+    brush->addWidget(m_useTilt);
     brush->addSpacing(6);
     brush->addWidget(new QLabel(tr("Pressure curve"), m_brushControls));
     brush->addWidget(m_curveEditor, 1); // takes the panel's spare height
@@ -78,6 +81,7 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
             [this](int v) { m_state->setOpacity(m_state->activeTool(), v / 100.0); });
     connect(m_smoothing, &SliderField::valueEdited, this,
             [this](int v) { m_state->setSmoothing(v / 100.0); });
+    connect(m_useTilt, &QCheckBox::toggled, m_state, &ToolState::setUseTilt);
     connect(m_curveEditor, &PressureCurveEditor::curveEdited, m_state, &ToolState::setPressureCurve);
     connect(resetCurve, &QPushButton::clicked, this, [this] { m_state->setPressureCurve(PressureCurve()); });
 
@@ -96,6 +100,7 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
     connect(m_state, &ToolState::activeToolChanged, this, &ToolPropertiesPanel::syncFromState);
     connect(m_state, &ToolState::toolSettingsChanged, this, &ToolPropertiesPanel::syncFromState);
     connect(m_state, &ToolState::smoothingChanged, this, &ToolPropertiesPanel::syncFromState);
+    connect(m_state, &ToolState::useTiltChanged, this, &ToolPropertiesPanel::syncFromState);
     connect(m_state, &ToolState::puppetSettingsChanged, this, &ToolPropertiesPanel::syncPuppetFromState);
     connect(m_state, &ToolState::pressureCurveChanged, this,
             [this] { m_curveEditor->setCurve(m_state->pressureCurve()); });
@@ -119,6 +124,8 @@ void ToolPropertiesPanel::syncFromState()
     m_size->setValue(int(std::lround(s.size)));
     m_opacity->setValue(int(std::lround(s.opacity * 100)));
     m_smoothing->setValue(int(std::lround(m_state->smoothing() * 100)));
+    const QSignalBlocker block(m_useTilt);
+    m_useTilt->setChecked(m_state->usesTilt());
 }
 
 void ToolPropertiesPanel::syncPuppetFromState()

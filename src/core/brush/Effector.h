@@ -51,7 +51,7 @@ enum EffectorInput : std::uint32_t {
 //   v = base
 //   × (pMin + (1 − pMin)·pressureCurve(pressure))           if pressure
 //   × (vFrom + (vTo − vFrom)·velocityCurve(velocity))        if velocity (may exceed 1)
-//   × (tMin + (1 − tMin)·tiltCurve(tilt))                    if tilt
+//   × (tMin + (1 − tMin)·tiltCurve(tilt))                    if tilt (and the input has it)
 //   × (rMin + (1 − rMin)·random())                           if random and allowed
 //   × (ioMin + (1 − ioMin)·inOut)                            if in/out
 //
