@@ -11,9 +11,12 @@
 #include "ui/ExportDialog.h"
 #include "ui/MainWindow.h"
 #include "ui/PanelDock.h"
+#include "ui/panels/ToolPalettePanel.h"
 #include "ui/panels/ToolPropertiesPanel.h"
 
 #include <QCheckBox>
+#include <QAbstractButton>
+#include <QButtonGroup>
 #include <QComboBox>
 #include <QPaintEvent>
 #include <QLineEdit>
@@ -174,6 +177,46 @@ private slots:
         for (const QPoint &edge : {at + QPoint(100, 0), at - QPoint(100, 0), at + QPoint(0, 99), at - QPoint(70, 70)})
             QVERIFY2(spy.painted.contains(edge), qPrintable(QStringLiteral("(%1, %2) not repainted")
                                                                 .arg(edge.x()).arg(edge.y())));
+    }
+
+    void toggleToolGoesBackToThePreviousOne()
+    {
+        tools::ToolState state; // starts on the brush
+        state.toggleTool(tools::ToolId::Eraser);
+        QCOMPARE(state.activeTool(), tools::ToolId::Eraser);
+        state.toggleTool(tools::ToolId::Eraser);
+        QCOMPARE(state.activeTool(), tools::ToolId::Brush);
+
+        state.setActiveTool(tools::ToolId::Puppet);
+        state.toggleTool(tools::ToolId::Eraser);
+        state.toggleTool(tools::ToolId::Eraser);
+        QCOMPARE(state.activeTool(), tools::ToolId::Puppet);
+    }
+
+    // E selects the eraser and, pressed again, the tool used before; a click
+    // on the eraser button just keeps the eraser.
+    void eraserShortcutTogglesBack()
+    {
+        tools::ToolState state;
+        ui::ToolPalettePanel palette(&state);
+        palette.show();
+        palette.activateWindow();
+        QVERIFY(QTest::qWaitForWindowActive(&palette));
+        state.setActiveTool(tools::ToolId::Move);
+
+        QTest::keyClick(&palette, Qt::Key_E);
+        QCOMPARE(state.activeTool(), tools::ToolId::Eraser);
+        QTest::keyClick(&palette, Qt::Key_E);
+        QCOMPARE(state.activeTool(), tools::ToolId::Move);
+
+        QTest::keyClick(&palette, Qt::Key_E);
+        QAbstractButton *eraser = palette.findChild<QButtonGroup *>()->button(int(tools::ToolId::Eraser));
+        eraser->click();
+        QCOMPARE(state.activeTool(), tools::ToolId::Eraser);
+
+        QTest::keyClick(&palette, Qt::Key_B); // other tools do not toggle
+        QTest::keyClick(&palette, Qt::Key_B);
+        QCOMPARE(state.activeTool(), tools::ToolId::Brush);
     }
 
     // Holding Tab turns the pen into the hand, like Space; Tab stays on the

@@ -51,6 +51,11 @@ public:
 
     ToolId activeTool() const { return m_activeTool; }
     void setActiveTool(ToolId tool);
+    // The tool active before the current one.
+    ToolId previousTool() const { return m_previousTool; }
+    // Selects `tool`, or, if it is already active, goes back to the previous
+    // tool (the eraser shortcut: E to erase, E again to draw on).
+    void toggleTool(ToolId tool);
 
     BrushSettings settings(ToolId tool) const { return m_settings[index(tool)]; }
     void setSize(ToolId tool, double size);
@@ -96,6 +101,7 @@ private:
     static std::size_t index(ToolId tool) { return static_cast<std::size_t>(tool); }
 
     ToolId m_activeTool = ToolId::Brush;
+    ToolId m_previousTool = ToolId::Brush;
     std::array<BrushSettings, kToolCount> m_settings;
     std::array<BrushDefinitionPtr, kToolCount> m_brushes;
     QColor m_color = QColor(0x20, 0x20, 0x24);

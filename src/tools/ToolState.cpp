@@ -40,8 +40,14 @@ void ToolState::setActiveTool(ToolId tool)
 {
     if (tool == m_activeTool)
         return;
+    m_previousTool = m_activeTool;
     m_activeTool = tool;
     emit activeToolChanged(tool);
+}
+
+void ToolState::toggleTool(ToolId tool)
+{
+    setActiveTool(tool == m_activeTool ? m_previousTool : tool);
 }
 
 void ToolState::setSize(ToolId tool, double size)

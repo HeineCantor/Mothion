@@ -4,6 +4,7 @@
 
 #include <QAbstractButton>
 #include <QButtonGroup>
+#include <QShortcut>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -36,9 +37,19 @@ ToolPalettePanel::ToolPalettePanel(tools::ToolState *state, QWidget *parent)
         button->setIconSize(QSize(24, 24));
         button->setCheckable(true);
         button->setAutoRaise(true);
-        button->setShortcut(e.shortcut);
-        button->setToolTip(QStringLiteral("%1 (%2)").arg(tools::ToolState::displayName(e.tool),
-                                                         e.shortcut.toString()));
+        // The key is a shortcut of its own, not the button's: pressed while the
+        // eraser is active it goes back to the previous tool, a click does not.
+        auto *shortcut = new QShortcut(e.shortcut, this);
+        const bool toggles = e.tool == ToolId::Eraser;
+        connect(shortcut, &QShortcut::activated, state, [state, tool = e.tool, toggles] {
+            if (toggles)
+                state->toggleTool(tool);
+            else
+                state->setActiveTool(tool);
+        });
+        const QString name = tools::ToolState::displayName(e.tool);
+        button->setToolTip(toggles ? tr("%1 (%2; again to go back)").arg(name, e.shortcut.toString())
+                                   : QStringLiteral("%1 (%2)").arg(name, e.shortcut.toString()));
         m_group->addButton(button, static_cast<int>(e.tool));
         layout->addWidget(button, 0, Qt::AlignHCenter);
     }

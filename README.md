@@ -153,7 +153,7 @@ After `toPenSample()`, no part of the program touches Qt input events.
 
 | Action | Control |
 |---|---|
-| Brush / Eraser / Hand / Zoom | B / E / H / Z |
+| Brush / Eraser / Hand / Zoom | B / E / H / Z; E again goes back to the tool used before the eraser |
 | Move / Rectangle selection / Lasso / Puppet warp | V / M / L / P |
 | Move | drag the drawing (or only the selected part); Shift = horizontal or vertical only |
 | Selection | drag a rectangle (Shift = square) or a lasso; a click deselects; Edit → Select all (Ctrl+A), Deselect (Ctrl+D) |
