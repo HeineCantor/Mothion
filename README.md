@@ -33,6 +33,9 @@ runs the tests and copies Qt's DLLs next to `build\RelWithDebInfo\mothion.exe`. 
 `-Run` starts Mothion at the end, `-SkipTests`, `-DevTools`, `-Config Release`, `-QtVersion`, `-QtRoot`
 (default `C:\Qt`). See `scripts\build-windows.ps1`.
 
+`run.bat` starts Mothion, running the build first when the sources changed since the last one
+(it takes the same options).
+
 **By hand:**
 
 1. Install Visual Studio 2022 (workload "Desktop development with C++") and, with the
