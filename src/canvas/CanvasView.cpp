@@ -1,6 +1,8 @@
 #include "canvas/CanvasView.h"
 
 #include "canvas/DebugOverlay.h"
+#include "canvas/MoveTool.h"
+#include "canvas/SelectionTool.h"
 #include "document/DocumentController.h"
 #include "input/TabletInputAdapter.h"
 #include "tools/ToolState.h"
@@ -54,6 +56,12 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
     connect(this, &CanvasView::sampleReceived, m_overlay, &DebugOverlay::addSample);
     connect(this, &CanvasView::deviceChanged, m_overlay, &DebugOverlay::setDevice);
 
+    m_moveTool = std::make_unique<MoveTool>(m_document, [this](const QString &text) { emit statusMessage(text); });
+    m_rectSelectTool = std::make_unique<SelectionTool>(m_document, SelectionTool::Shape::Rectangle);
+    m_lassoSelectTool = std::make_unique<SelectionTool>(m_document, SelectionTool::Shape::Lasso);
+    connect(m_document, &DocumentController::selectionChanged, this, qOverload<>(&QWidget::update));
+
+    connect(m_toolState, &ToolState::activeToolChanged, this, &CanvasView::commitPendingEdits);
     connect(m_toolState, &ToolState::activeToolChanged, this, &CanvasView::updateCursor);
     connect(m_toolState, &ToolState::toolSettingsChanged, this, [this] { updateBrushOutline(m_pointerPos); });
     updateCursor();
@@ -153,6 +161,13 @@ void CanvasView::paintEvent(QPaintEvent *)
     p.setTransform(m_view.documentToView());
     p.drawImage(QPointF(0, 0), m_frame.image()); // paper included
     p.restore();
+
+    paintSelectionOutline(p, m_view, m_document->selection());
+    if (const CanvasTool *tool = canvasTool()) {
+        p.save();
+        tool->paintOverlay(p, m_view);
+        p.restore();
+    }
 
     if (m_pointerVisible && ToolState::isPaintTool(m_toolState->activeTool()) && !m_gesture.isActive()) {
         p.setRenderHint(QPainter::Antialiasing);
@@ -286,16 +301,24 @@ void CanvasView::handleSample(const PenSample &sample)
     m_pointerVisible = true;
     updateBrushOutline(QPointF(sample.x, sample.y));
 
-    const bool busy = m_gesture.isActive() || m_stroke.has_value();
+    const bool busy = m_gesture.isActive() || m_stroke.has_value() || m_editTool;
+    const QPointF docPos = m_view.mapToDocument(QPointF(sample.x, sample.y));
+    const Qt::KeyboardModifiers modifiers = QGuiApplication::keyboardModifiers();
     switch (sample.phase) {
     case SamplePhase::Press:
         if (busy)
             break; // a second button during a drag: keep doing what we do
-        if (const Mode mode = navigationModeFor(sample); mode != Mode::None)
+        if (const Mode mode = navigationModeFor(sample); mode != Mode::None) {
             m_gesture.begin(mode, QPointF(sample.x, sample.y), m_view);
-        else if (sample.tipDown()
-                 && (sample.tool == InputTool::Eraser || ToolState::isPaintTool(m_toolState->activeTool())))
+        } else if (sample.tipDown()
+                   && (sample.tool == InputTool::Eraser || ToolState::isPaintTool(m_toolState->activeTool()))) {
             beginStroke(sample);
+        } else if (CanvasTool *tool = canvasTool(); tool && sample.tipDown()) {
+            tool->setViewZoom(m_view.zoom());
+            tool->press(docPos, modifiers);
+            m_editTool = tool->isActive() ? tool : nullptr;
+            update();
+        }
         break;
     case SamplePhase::Move:
         if (m_gesture.isActive()) {
@@ -303,11 +326,20 @@ void CanvasView::handleSample(const PenSample &sample)
             viewWasChanged();
         } else if (m_stroke) {
             continueStroke(sample);
+        } else if (m_editTool) {
+            m_editTool->move(docPos, modifiers);
+            update();
         }
         break;
     case SamplePhase::Release:
         m_gesture.end();
         endStroke();
+        if (m_editTool) {
+            CanvasTool *tool = m_editTool;
+            m_editTool = nullptr; // cleared first: releasing may interrupt (and cancel) itself
+            tool->release(docPos, modifiers);
+            update();
+        }
         break;
     case SamplePhase::Hover:
         break;
@@ -425,8 +457,39 @@ void CanvasView::endStroke()
     m_points.clear();
 }
 
+CanvasTool *CanvasView::canvasTool() const
+{
+    switch (m_toolState->activeTool()) {
+    case ToolId::Move: return m_moveTool.get();
+    case ToolId::RectSelect: return m_rectSelectTool.get();
+    case ToolId::LassoSelect: return m_lassoSelectTool.get();
+    default: return nullptr;
+    }
+}
+
+void CanvasView::commitPendingEdits()
+{
+    // An edit left open is applied when another tool takes over.
+    for (CanvasTool *tool : {m_moveTool.get(), m_rectSelectTool.get(), m_lassoSelectTool.get()})
+        if (tool != canvasTool() && tool->hasPendingEdit())
+            tool->commit();
+}
+
 void CanvasView::cancelStroke()
 {
+    if (m_editTool) {
+        // A drag cut short is dropped, unless it belongs to a longer edit.
+        CanvasTool *tool = m_editTool;
+        m_editTool = nullptr;
+        if (!tool->hasPendingEdit())
+            tool->cancel();
+        update();
+    }
+    // An open edit is applied: undo then takes it back, a frame or layer
+    // change keeps it.
+    for (CanvasTool *tool : {m_moveTool.get(), m_rectSelectTool.get(), m_lassoSelectTool.get()})
+        if (tool->hasPendingEdit())
+            tool->commit();
     if (!m_stroke)
         return;
     // Restore pixels first: cancelPaint() may remove the drawing they live in.
@@ -471,6 +534,10 @@ void CanvasView::wheelEvent(QWheelEvent *event)
 
 void CanvasView::keyPressEvent(QKeyEvent *event)
 {
+    if (CanvasTool *tool = canvasTool(); tool && !event->isAutoRepeat() && tool->keyPress(event->key())) {
+        event->accept();
+        return;
+    }
     if (event->key() == Qt::Key_Space && !event->isAutoRepeat()) {
         m_spaceHeld = true;
         updateCursor();
@@ -495,6 +562,8 @@ void CanvasView::updateCursor()
         setCursor(Qt::OpenHandCursor);
     else if (m_toolState->activeTool() == ToolId::Zoom)
         setCursor(Qt::SizeHorCursor);
+    else if (const CanvasTool *tool = canvasTool())
+        setCursor(tool->cursor());
     else
         setCursor(Qt::CrossCursor);
     update();

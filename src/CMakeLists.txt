@@ -60,6 +60,10 @@ qt_add_library(mothion_gui STATIC
     canvas/FrameRenderer.h canvas/FrameRenderer.cpp
     canvas/ViewTransform.h canvas/ViewTransform.cpp
     canvas/NavigationGesture.h canvas/NavigationGesture.cpp
+    canvas/CanvasTool.h
+    canvas/MoveTool.h canvas/MoveTool.cpp
+    canvas/SelectionMask.h canvas/SelectionMask.cpp
+    canvas/SelectionTool.h canvas/SelectionTool.cpp
     canvas/CanvasView.h canvas/CanvasView.cpp
 
     ui/MainWindow.h ui/MainWindow.cpp

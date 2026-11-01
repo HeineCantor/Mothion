@@ -38,6 +38,7 @@ private:
     void createCommandBar();
     void createMenus();
     void notImplemented(const QString &what);
+    void importImage();
     void importBrush();
 
     tools::ToolState *m_toolState = nullptr;

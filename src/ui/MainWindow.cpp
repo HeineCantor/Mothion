@@ -26,6 +26,7 @@
 #include <QCloseEvent>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QImageReader>
 #include <QMessageBox>
 #include <QLabel>
 #include <QMenuBar>
@@ -139,6 +140,7 @@ void MainWindow::createMenus()
     QMenu *file = menuBar()->addMenu(tr("&File"));
     file->addActions(m_fileActions);
     file->addSeparator();
+    file->addAction(tr("Import image…"), this, &MainWindow::importImage);
     file->addAction(tr("Import brush (.sut)…"), this, &MainWindow::importBrush);
     file->addSeparator();
     QAction *quit = file->addAction(tr("Quit"), this, &QWidget::close);
@@ -146,6 +148,10 @@ void MainWindow::createMenus()
 
     QMenu *edit = menuBar()->addMenu(tr("&Edit"));
     edit->addActions(m_editActions);
+    edit->addSeparator();
+    edit->addAction(tr("Select all"), QKeySequence::SelectAll, m_document, &document::DocumentController::selectAll);
+    edit->addAction(tr("Deselect"), QKeySequence(Qt::CTRL | Qt::Key_D), m_document,
+                    &document::DocumentController::clearSelection);
 
     m_viewMenu = menuBar()->addMenu(tr("&View"));
     // Provisional shortcuts; real keymap comes with the UX design.
@@ -189,6 +195,27 @@ void MainWindow::createMenus()
     }
     window->addSeparator();
     window->addAction(tr("Reset default layout"), m_dockLayout, &DockLayout::resetToDefault);
+}
+
+void MainWindow::importImage()
+{
+    QStringList patterns;
+    for (const QByteArray &format : QImageReader::supportedImageFormats())
+        patterns << QStringLiteral("*.") + QString::fromLatin1(format);
+    const QString file = QFileDialog::getOpenFileName(this, tr("Import image"), QString(),
+                                                      tr("Images (%1)").arg(patterns.join(QLatin1Char(' '))));
+    if (file.isEmpty())
+        return;
+    QImageReader reader(file);
+    reader.setAutoTransform(true); // photos: apply their EXIF orientation
+    const QImage image = reader.read();
+    if (image.isNull()) {
+        QMessageBox::warning(this, tr("Import image"),
+                             tr("Cannot read %1: %2").arg(QFileInfo(file).fileName(), reader.errorString()));
+        return;
+    }
+    m_document->importImage(image, QFileInfo(file).completeBaseName());
+    statusBar()->showMessage(tr("Image imported: %1").arg(QFileInfo(file).fileName()), 4000);
 }
 
 void MainWindow::importBrush()

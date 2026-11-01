@@ -1,5 +1,6 @@
 #pragma once
 
+#include "canvas/CanvasTool.h"
 #include "canvas/FrameRenderer.h"
 #include "canvas/NavigationGesture.h"
 #include "canvas/StrokeSession.h"
@@ -12,6 +13,7 @@
 
 #include <QWidget>
 
+#include <memory>
 #include <optional>
 #include <vector>
 
@@ -32,7 +34,7 @@ class DebugOverlay;
 //
 // Input path: Qt tablet/mouse event -> input::toPenSample() -> handleSample().
 // From handleSample() on, only PenSamples are used. A sample either drives a
-// NavigationGesture (hand / zoom / rotate) or a stroke:
+// NavigationGesture (hand / zoom / rotate), a CanvasTool (move...) or a stroke:
 //   sample -> StrokeSmoother -> brush::BrushInput (pressure curve, velocity, tilt)
 //          -> brush::DabGenerator -> StrokeSession (DabStamper),
 // painting into the drawing the DocumentController picks for the current
@@ -100,7 +102,10 @@ private:
     void beginStroke(const PenSample &sample);
     void continueStroke(const PenSample &sample);
     void endStroke();
-    void cancelStroke(); // the controller interrupted the stroke (undo, frame change...)
+    void cancelStroke(); // the controller interrupted the stroke or edit (undo, frame change...)
+    // The canvas tool behind the active palette tool, if it is one (move...).
+    CanvasTool *canvasTool() const;
+    void commitPendingEdits(); // of the canvas tools that are no longer active
     brush::BrushInput brushInput(const PenSample &smoothed);
     // Records a stroke point (the anti-jitter filter may replace the last
     // one instead) and draws the points that are settled.
@@ -123,6 +128,10 @@ private:
     NavigationGesture m_gesture;
     FrameRenderer m_frame;
     std::optional<StrokeSession> m_stroke; // set while a stroke is in progress
+    std::unique_ptr<CanvasTool> m_moveTool;
+    std::unique_ptr<CanvasTool> m_rectSelectTool;
+    std::unique_ptr<CanvasTool> m_lassoSelectTool;
+    CanvasTool *m_editTool = nullptr; // the canvas tool between its press and release
     std::optional<brush::DabGenerator> m_dabs;
     std::vector<brush::BrushInput> m_points; // the stroke so far, for the final pass
     std::size_t m_drawnPoints = 0;           // points already given to m_dabs

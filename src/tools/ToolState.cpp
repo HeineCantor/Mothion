@@ -28,6 +28,9 @@ QString ToolState::displayName(ToolId tool)
     case ToolId::Eraser: return tr("Eraser");
     case ToolId::Hand: return tr("Hand");
     case ToolId::Zoom: return tr("Zoom");
+    case ToolId::Move: return tr("Move");
+    case ToolId::RectSelect: return tr("Rectangle selection");
+    case ToolId::LassoSelect: return tr("Lasso selection");
     }
     return {};
 }

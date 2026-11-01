@@ -32,6 +32,9 @@ QList<BrushPreset> builtInPresets(ToolId tool)
         };
     case ToolId::Hand:
     case ToolId::Zoom:
+    case ToolId::Move:
+    case ToolId::RectSelect:
+    case ToolId::LassoSelect:
         return {};
     }
     return {};

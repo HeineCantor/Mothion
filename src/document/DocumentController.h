@@ -3,7 +3,9 @@
 #include "core/document/Document.h"
 #include "core/document/History.h"
 
+#include <QImage>
 #include <QObject>
+#include <QPainterPath>
 #include <QRect>
 #include <QString>
 
@@ -40,6 +42,20 @@ public:
 
     bool canUndo() const { return m_history.canUndo(); }
     bool canRedo() const { return m_history.canRedo(); }
+    // Puts `image` on a new layer above the current one, named `name`, as one
+    // drawing held for the whole scene: centered, scaled down to fit the
+    // document if larger. One undo step; the new layer becomes current.
+    void importImage(const QImage &image, const QString &name);
+
+    // --- selection ------------------------------------------------------------------
+    // The selected area in document coordinates; empty = nothing selected
+    // (tools then act on the whole drawing). Not part of the undo history.
+    const QPainterPath &selection() const { return m_selection; }
+    bool hasSelection() const { return !m_selection.isEmpty(); }
+    void setSelection(const QPainterPath &area);
+    void selectAll();
+    void clearSelection();
+
     QString undoText() const; // "Undo stroke", or plain "Undo"
     QString redoText() const;
     static QString commandName(doc::CommandKind kind);
@@ -80,6 +96,7 @@ signals:
     void currentLayerChanged(doc::LayerId layer);
     // Undo/redo availability or labels changed.
     void historyChanged();
+    void selectionChanged();
     // Emitted before anything that must not happen mid-stroke (undo, frame
     // change...): whoever is painting should cancel its stroke now.
     void strokeInterrupted();
@@ -93,6 +110,7 @@ private:
     doc::History m_history;
     doc::LayerId m_currentLayer = doc::kNoId;
     int m_currentFrame = 0;
+    QPainterPath m_selection;
 
     struct PaintState
     {

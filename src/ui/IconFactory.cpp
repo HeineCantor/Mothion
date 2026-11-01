@@ -7,6 +7,9 @@
 #include <QPalette>
 #include <QPixmap>
 #include <QPixmapCache>
+#include <QTransform>
+
+#include <algorithm>
 
 namespace mothion::ui {
 
@@ -95,6 +98,33 @@ void drawGlyph(QPainter &p, IconId id)
         path.lineTo(13, 10);
         path.moveTo(10, 7);
         path.lineTo(10, 13);
+        break;
+    case IconId::Move: // four arrows
+        path.moveTo(12, 3);
+        path.lineTo(12, 21);
+        path.moveTo(3, 12);
+        path.lineTo(21, 12);
+        for (int k = 0; k < 4; ++k) {
+            const QTransform t = QTransform().translate(12, 12).rotate(90 * k).translate(-12, -12);
+            path.moveTo(t.map(QPointF(9, 6)));
+            path.lineTo(t.map(QPointF(12, 3)));
+            path.lineTo(t.map(QPointF(15, 6)));
+        }
+        break;
+    case IconId::RectSelect: // dashed square
+        for (int k = 0; k < 4; ++k) {
+            const QTransform t = QTransform().translate(12, 12).rotate(90 * k).translate(-12, -12);
+            for (double x : {5.0, 10.5, 16.0}) {
+                path.moveTo(t.map(QPointF(x, 5)));
+                path.lineTo(t.map(QPointF(std::min(x + 3.0, 19.0), 5)));
+            }
+        }
+        break;
+    case IconId::LassoSelect: // loop with a tail
+        path.moveTo(9, 17);
+        path.cubicTo(1, 15, 3, 4, 13, 4);
+        path.cubicTo(22, 4, 22, 15, 13, 16);
+        path.cubicTo(10, 16.5, 8, 17, 9, 20);
         break;
     case IconId::Collapse:
         path.moveTo(6, 15);

@@ -52,6 +52,71 @@ void DocumentController::execute(std::unique_ptr<doc::Command> command)
     emit historyChanged();
 }
 
+void DocumentController::importImage(const QImage &image, const QString &name)
+{
+    if (image.isNull())
+        return;
+    interruptStroke();
+    doc::Document &d = *m_document;
+
+    // The pixels: scaled down to fit the document if larger, centered.
+    QImage pixels = image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    if (pixels.width() > d.width() || pixels.height() > d.height())
+        pixels = pixels.scaled(d.width(), d.height(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    const QPoint at((d.width() - pixels.width()) / 2, (d.height() - pixels.height()) / 2);
+
+    // New layer above the current one, one drawing held for the whole scene,
+    // then the pixels: each step applied now, recorded together.
+    std::vector<std::unique_ptr<doc::Command>> steps;
+    auto layer = std::make_unique<doc::AddLayerCommand>(d, d.indexOf(m_currentLayer) + 1,
+                                                        doc::LayerProperties{name.toStdString()});
+    const doc::LayerId layerId = layer->layerId();
+    publish(layer->apply(d));
+    steps.push_back(std::move(layer));
+
+    doc::NewDrawing drawing = doc::makeNewDrawing(d, layerId, 0, d.frameCount());
+    publish(drawing.command->apply(d));
+    steps.push_back(std::move(drawing.command));
+
+    doc::TiledImage &target = d.layer(layerId)->drawing(drawing.id)->image;
+    const doc::TiledImage before = target;
+    target.write(at.x(), at.y(), pixels.width(), pixels.height(),
+                 reinterpret_cast<const doc::Pixel *>(pixels.constBits()), pixels.bytesPerLine() / 4);
+    if (auto paint = doc::PaintCommand::capture(layerId, drawing.id, before, target))
+        steps.push_back(std::move(paint));
+    emit pixelsChanged(layerId, drawing.id, QRect(at, pixels.size()));
+
+    m_history.pushApplied(std::make_unique<doc::GroupCommand>(doc::CommandKind::ImportImage, std::move(steps)));
+    emit historyChanged();
+    setCurrentLayer(layerId);
+}
+
+void DocumentController::setSelection(const QPainterPath &area)
+{
+    // Kept inside the document: what lies outside is never drawn.
+    QPainterPath page;
+    page.addRect(0, 0, m_document->width(), m_document->height());
+    QPainterPath clipped = area.isEmpty() ? QPainterPath() : area.intersected(page);
+    if (clipped.boundingRect().isEmpty())
+        clipped = QPainterPath();
+    if (clipped == m_selection)
+        return;
+    m_selection = clipped;
+    emit selectionChanged();
+}
+
+void DocumentController::selectAll()
+{
+    QPainterPath all;
+    all.addRect(0, 0, m_document->width(), m_document->height());
+    setSelection(all);
+}
+
+void DocumentController::clearSelection()
+{
+    setSelection({});
+}
+
 void DocumentController::undo()
 {
     interruptStroke();
@@ -81,6 +146,7 @@ QString DocumentController::commandName(doc::CommandKind kind)
     case doc::CommandKind::RemoveLayer: return tr("delete layer");
     case doc::CommandKind::MoveLayer: return tr("move layer");
     case doc::CommandKind::ChangeLayerProperties: return tr("layer properties");
+    case doc::CommandKind::ImportImage: return tr("import image");
     }
     return {};
 }

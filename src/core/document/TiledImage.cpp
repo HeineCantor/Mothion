@@ -124,4 +124,17 @@ void TiledImage::removeTransparentTiles()
     std::erase_if(m_tiles, [](const auto &entry) { return entry.second->isTransparent(); });
 }
 
+TiledImage TiledImage::translated(int dx, int dy) const
+{
+    TiledImage out;
+    if (dx % kTileSize == 0 && dy % kTileSize == 0) {
+        for (const auto &[c, tile] : m_tiles)
+            out.m_tiles.emplace(TileCoord{c.x + dx / kTileSize, c.y + dy / kTileSize}, tile);
+        return out;
+    }
+    for (const auto &[c, tile] : m_tiles)
+        out.write(c.x * kTileSize + dx, c.y * kTileSize + dy, kTileSize, kTileSize, tile->pixels.data(), kTileSize);
+    return out;
+}
+
 } // namespace mothion::doc

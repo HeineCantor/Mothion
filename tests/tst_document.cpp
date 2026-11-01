@@ -87,6 +87,20 @@ private slots:
         QCOMPARE(img.pixel(0, 0), kRed);
     }
 
+    void translatedMovesPixelsAndSharesWholeTiles()
+    {
+        TiledImage image;
+        image.setPixel(10, 20, 0xff112233);
+        const TiledImage moved = image.translated(5, -30);
+        QCOMPARE(moved.pixel(15, -10), Pixel(0xff112233));
+        QCOMPARE(moved.pixel(10, 20), Pixel(0));
+        QCOMPARE(moved.tileCount(), std::size_t(1));
+
+        const TiledImage byTiles = image.translated(kTileSize, 2 * kTileSize);
+        QCOMPARE(byTiles.pixel(10 + kTileSize, 20 + 2 * kTileSize), Pixel(0xff112233));
+        QCOMPARE(byTiles.tile({1, 2}).get(), image.tile({0, 0}).get()); // shared, not copied
+    }
+
     void rectReadWriteAcrossTiles()
     {
         // 100×90 block at negative x: columns -1, 0, 1 × rows 0, 1 = six tiles.

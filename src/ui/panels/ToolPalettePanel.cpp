@@ -17,6 +17,9 @@ ToolPalettePanel::ToolPalettePanel(tools::ToolState *state, QWidget *parent)
 {
     struct Entry { ToolId tool; IconId icon; QKeySequence shortcut; };
     const Entry entries[] = {
+        {ToolId::Move, IconId::Move, QKeySequence(Qt::Key_V)},
+        {ToolId::RectSelect, IconId::RectSelect, QKeySequence(Qt::Key_M)},
+        {ToolId::LassoSelect, IconId::LassoSelect, QKeySequence(Qt::Key_L)},
         {ToolId::Brush, IconId::Brush, QKeySequence(Qt::Key_B)},
         {ToolId::Eraser, IconId::Eraser, QKeySequence(Qt::Key_E)},
         {ToolId::Hand, IconId::Hand, QKeySequence(Qt::Key_H)},

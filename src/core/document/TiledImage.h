@@ -47,6 +47,9 @@ public:
 
     void removeTransparentTiles();
 
+    // A copy moved by whole pixels. Moves by whole tiles share the tiles.
+    TiledImage translated(int dx, int dy) const;
+
     // Bytes held by the tiles (counted fully even when shared with others).
     std::size_t memoryBytes() const { return m_tiles.size() * sizeof(Tile); }
 

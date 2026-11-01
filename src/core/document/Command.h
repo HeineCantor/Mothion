@@ -42,6 +42,7 @@ enum class CommandKind {
     RemoveLayer,
     MoveLayer,
     ChangeLayerProperties,
+    ImportImage,
 };
 
 // An undoable change to a Document.
