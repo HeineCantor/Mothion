@@ -15,6 +15,7 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QPaintEvent>
 #include <QLineEdit>
 #include <QElapsedTimer>
 #include <QFileInfo>
@@ -138,6 +139,41 @@ private slots:
         QVERIFY(!state.usesTilt());
         state.setUseTilt(true);
         QVERIFY(tilt->isChecked());
+    }
+
+    // Shrinking the brush repaints where the old, larger outline was drawn,
+    // so it leaves no ring behind on the canvas.
+    void shrinkingTheBrushErasesTheOldOutline()
+    {
+        struct PaintSpy : QObject
+        {
+            QRegion painted;
+            bool eventFilter(QObject *, QEvent *e) override
+            {
+                if (e->type() == QEvent::Paint)
+                    painted += static_cast<QPaintEvent *>(e)->region();
+                return false;
+            }
+        } spy;
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(600, 600);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        canvas.setZoom(1.0);
+        const QPoint at(300, 300);
+        state.setSize(tools::ToolId::Brush, 200); // outline radius 100 view px
+        QTest::mouseMove(&canvas, at);
+        QTest::qWait(50);
+
+        canvas.installEventFilter(&spy);
+        state.setSize(tools::ToolId::Brush, 10);
+        QTRY_VERIFY(!spy.painted.isEmpty());
+        // Points on the old ring, far outside the new 5 px outline.
+        for (const QPoint &edge : {at + QPoint(100, 0), at - QPoint(100, 0), at + QPoint(0, 99), at - QPoint(70, 70)})
+            QVERIFY2(spy.painted.contains(edge), qPrintable(QStringLiteral("(%1, %2) not repainted")
+                                                                .arg(edge.x()).arg(edge.y())));
     }
 
     // Holding Tab turns the pen into the hand, like Space; Tab stays on the

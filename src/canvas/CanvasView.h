@@ -121,7 +121,7 @@ private:
     void renderDocumentRect(const QRect &docRect); // pixels changed
     void updateDocumentRect(const QRect &docRect);
     void updateBrushOutline(const QPointF &newPos);
-    QRectF brushOutlineRect() const; // view coordinates
+    QRectF brushOutlineRect() const; // view coordinates, at the current size and zoom
     void updateCursor();
     void viewWasChanged();
 
@@ -148,6 +148,9 @@ private:
     const QPointingDevice *m_lastDevice = nullptr;
     QPointF m_pointerPos;      // last pointer position (view coordinates)
     bool m_pointerVisible = false;
+    // Area of the brush outline as last painted: what to repaint to erase it,
+    // whatever changed since (size, zoom, eraser end).
+    QRect m_paintedOutline;
     InputTool m_pointerTool = InputTool::Mouse;
     // Held keys that turn the pen into the hand (Ctrl: zoom, Shift: rotate).
     bool m_spaceHeld = false;

@@ -178,10 +178,12 @@ void CanvasView::paintEvent(QPaintEvent *)
         p.restore();
     }
 
+    m_paintedOutline = QRect();
     if (m_pointerVisible && ToolState::isPaintTool(m_toolState->activeTool()) && !m_gesture.isActive()) {
         p.setRenderHint(QPainter::Antialiasing);
         p.setBrush(Qt::NoBrush);
         const QRectF outline = brushOutlineRect();
+        m_paintedOutline = outline.toAlignedRect().adjusted(-2, -2, 2, 2);
         p.setPen(QPen(QColor(0, 0, 0, 160), 1.0));
         p.drawEllipse(outline);
         p.setPen(QPen(QColor(255, 255, 255, 160), 1.0));
@@ -199,7 +201,9 @@ QRectF CanvasView::brushOutlineRect() const
 
 void CanvasView::updateBrushOutline(const QPointF &newPos)
 {
-    update(brushOutlineRect().toAlignedRect().adjusted(-2, -2, 2, 2));
+    // The old outline from where it was painted: its size may have changed
+    // since, so brushOutlineRect() would no longer cover it.
+    update(m_paintedOutline);
     m_pointerPos = newPos;
     update(brushOutlineRect().toAlignedRect().adjusted(-2, -2, 2, 2));
 }
