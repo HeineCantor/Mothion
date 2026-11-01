@@ -15,18 +15,29 @@ Qt must be linked **dynamically** (LGPL): CMake stops with an error if it finds 
 [Eigen](https://eigen.tuxfamily.org) 3.4 (MPL-2.0, header only) does the puppet warp's linear
 algebra: CMake uses a system copy if there is one, otherwise it downloads it at configure time.
 
-### Linux (Ubuntu / Debian)
+### Linux
+
+**Quick way:** run `./build.sh`. It installs the missing packages with the distribution's package
+manager (apt, dnf, pacman or zypper, through `sudo`), builds and runs the tests. Options:
+`--run` starts Mothion at the end, `--skip-tests`, `--dev-tools`, `--config Release`,
+`--qt-dir <dir>` (a Qt not from the distribution, for those that ship one older than 6.5),
+`--no-install`. See `scripts/build-linux.sh`.
+
+`./run.sh` starts Mothion, running the build first when the sources changed since the last one
+(it takes the same options).
+
+**By hand (Ubuntu / Debian):**
 
 ```sh
-sudo apt install build-essential cmake qt6-base-dev qt6-wayland libeigen3-dev
+sudo apt install build-essential cmake qt6-base-dev libqt6sql6-sqlite qt6-wayland libeigen3-dev
 cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build -j
 ctest --test-dir build          # unit tests
-./build/mothion
+./build/src/mothion
 ```
 
 To try the X11 path from a Wayland session (through XWayland):
-`QT_QPA_PLATFORM=xcb ./build/mothion`.
+`QT_QPA_PLATFORM=xcb ./build/src/mothion`.
 
 ### Windows (MSVC)
 
