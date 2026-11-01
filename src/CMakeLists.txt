@@ -16,6 +16,13 @@ add_library(mothion_core STATIC
     core/brush/StrokeShaper.h core/brush/StrokeShaper.cpp
     core/brush/VelocityMeter.h core/brush/VelocityMeter.cpp
 
+    core/puppet/Geometry.h
+    core/puppet/Contour.h core/puppet/Contour.cpp
+    core/puppet/Triangulation.h core/puppet/Triangulation.cpp
+    core/puppet/ArapDeformer.h core/puppet/ArapDeformer.cpp
+    core/puppet/PuppetRig.h core/puppet/PuppetRig.cpp
+    core/puppet/WarpRaster.h core/puppet/WarpRaster.cpp
+
     core/document/Tile.h
     core/document/TiledImage.h core/document/TiledImage.cpp
     core/document/Ids.h
@@ -34,6 +41,7 @@ add_library(mothion_core STATIC
 set_target_properties(mothion_core PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
 target_include_directories(mothion_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(mothion_core PUBLIC cxx_std_20) # our headers need C++20
+target_link_libraries(mothion_core PRIVATE Eigen3::Eigen) # puppet warp solver (.cpp only)
 mothion_set_warnings(mothion_core)
 
 # ---------------------------------------------------------------------------
@@ -64,6 +72,7 @@ qt_add_library(mothion_gui STATIC
     canvas/MoveTool.h canvas/MoveTool.cpp
     canvas/SelectionMask.h canvas/SelectionMask.cpp
     canvas/SelectionTool.h canvas/SelectionTool.cpp
+    canvas/PuppetTool.h canvas/PuppetTool.cpp
     canvas/CanvasView.h canvas/CanvasView.cpp
 
     ui/MainWindow.h ui/MainWindow.cpp

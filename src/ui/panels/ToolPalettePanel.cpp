@@ -20,6 +20,7 @@ ToolPalettePanel::ToolPalettePanel(tools::ToolState *state, QWidget *parent)
         {ToolId::Move, IconId::Move, QKeySequence(Qt::Key_V)},
         {ToolId::RectSelect, IconId::RectSelect, QKeySequence(Qt::Key_M)},
         {ToolId::LassoSelect, IconId::LassoSelect, QKeySequence(Qt::Key_L)},
+        {ToolId::Puppet, IconId::Puppet, QKeySequence(Qt::Key_P)},
         {ToolId::Brush, IconId::Brush, QKeySequence(Qt::Key_B)},
         {ToolId::Eraser, IconId::Eraser, QKeySequence(Qt::Key_E)},
         {ToolId::Hand, IconId::Hand, QKeySequence(Qt::Key_H)},

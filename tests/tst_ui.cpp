@@ -1,12 +1,14 @@
 // Tests for the UI layer: panel layouts, document controller actions.
 
 #include "canvas/MoveTool.h"
+#include "canvas/PuppetTool.h"
 #include "canvas/SelectionTool.h"
 #include "document/DocumentController.h"
 #include "tools/ToolState.h"
 #include "ui/PanelDock.h"
 #include "ui/panels/ToolPropertiesPanel.h"
 
+#include <QElapsedTimer>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QTest>
@@ -166,6 +168,54 @@ private slots:
         QCOMPARE(pixels.pixel(990, 540), doc::Pixel(0xff00ff00)); // right half stayed
         QCOMPARE(qAlpha(pixels.pixel(990, 640)), 0);
         QCOMPARE(controller.selection().boundingRect(), QRectF(900, 600, 60, 100)); // followed
+    }
+
+    void puppetWarpBendsTheDrawingInOneStep()
+    {
+        document::DocumentController controller;
+        tools::ToolState state;
+        QImage image(400, 40, QImage::Format_ARGB32);
+        image.fill(Qt::darkCyan);
+        controller.importImage(image, QStringLiteral("bar")); // x 760..1159, y 520..559
+        const doc::Layer &layer = controller.document().layerAt(1);
+        const doc::TiledImage &pixels = layer.drawing(layer.timing().drawingAt(0))->image;
+        const doc::Pixel ink = pixels.pixel(960, 540);
+
+        canvas::PuppetTool tool(&controller, &state, [](const QString &) {}, [] {});
+        tool.press({780, 540}, Qt::NoModifier); // anchor at the left end
+        tool.release({780, 540}, Qt::NoModifier);
+        QVERIFY(tool.hasPendingEdit());
+        tool.press({1140, 540}, Qt::NoModifier); // handle at the right end
+        QVERIFY(tool.isActive());
+        QElapsedTimer timer;
+        timer.start();
+        for (int step = 1; step <= 10; ++step)
+            tool.move({1140, 540.0 + 12 * step}, Qt::NoModifier); // lift it down by 120 px
+        const qint64 perMove = timer.elapsed() / 10;
+        tool.release({1140, 660}, Qt::NoModifier);
+        qInfo("puppet drag update: %lld ms", perMove);
+
+        QCOMPARE(pixels.pixel(780, 540), ink);           // the anchored end stays
+        QCOMPARE(qAlpha(pixels.pixel(1140, 540)), 0);    // the free end left its place...
+        QVERIFY(qAlpha(pixels.pixel(1130, 655)) > 0);     // ...for where it was dragged
+        QVERIFY(!controller.canRedo());
+
+        tool.commit();
+        QVERIFY(!tool.hasPendingEdit());
+        QVERIFY(!controller.isPainting());
+        controller.undo(); // the whole warp at once
+        QCOMPARE(pixels.pixel(1140, 540), ink);
+        QCOMPARE(qAlpha(pixels.pixel(1130, 655)), 0);
+
+        // Esc drops a warp in progress.
+        tool.press({780, 540}, Qt::NoModifier);
+        tool.release({780, 540}, Qt::NoModifier);
+        tool.press({1140, 540}, Qt::NoModifier);
+        tool.move({1140, 600}, Qt::NoModifier);
+        tool.release({1140, 600}, Qt::NoModifier);
+        QVERIFY(tool.keyPress(Qt::Key_Escape));
+        QCOMPARE(pixels.pixel(1140, 540), ink);
+        QVERIFY(!controller.isPainting());
     }
 
     void largeImagesAreScaledToFit()

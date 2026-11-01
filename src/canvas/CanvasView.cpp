@@ -2,6 +2,7 @@
 
 #include "canvas/DebugOverlay.h"
 #include "canvas/MoveTool.h"
+#include "canvas/PuppetTool.h"
 #include "canvas/SelectionTool.h"
 #include "document/DocumentController.h"
 #include "input/TabletInputAdapter.h"
@@ -59,6 +60,8 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
     m_moveTool = std::make_unique<MoveTool>(m_document, [this](const QString &text) { emit statusMessage(text); });
     m_rectSelectTool = std::make_unique<SelectionTool>(m_document, SelectionTool::Shape::Rectangle);
     m_lassoSelectTool = std::make_unique<SelectionTool>(m_document, SelectionTool::Shape::Lasso);
+    m_puppetTool = std::make_unique<PuppetTool>(
+        m_document, m_toolState, [this](const QString &text) { emit statusMessage(text); }, [this] { update(); });
     connect(m_document, &DocumentController::selectionChanged, this, qOverload<>(&QWidget::update));
 
     connect(m_toolState, &ToolState::activeToolChanged, this, &CanvasView::commitPendingEdits);
@@ -463,14 +466,15 @@ CanvasTool *CanvasView::canvasTool() const
     case ToolId::Move: return m_moveTool.get();
     case ToolId::RectSelect: return m_rectSelectTool.get();
     case ToolId::LassoSelect: return m_lassoSelectTool.get();
+    case ToolId::Puppet: return m_puppetTool.get();
     default: return nullptr;
     }
 }
 
 void CanvasView::commitPendingEdits()
 {
-    // An edit left open is applied when another tool takes over.
-    for (CanvasTool *tool : {m_moveTool.get(), m_rectSelectTool.get(), m_lassoSelectTool.get()})
+    // An edit left open (a puppet warp) is applied when another tool takes over.
+    for (CanvasTool *tool : {m_moveTool.get(), m_rectSelectTool.get(), m_lassoSelectTool.get(), m_puppetTool.get()})
         if (tool != canvasTool() && tool->hasPendingEdit())
             tool->commit();
 }
@@ -487,7 +491,7 @@ void CanvasView::cancelStroke()
     }
     // An open edit is applied: undo then takes it back, a frame or layer
     // change keeps it.
-    for (CanvasTool *tool : {m_moveTool.get(), m_rectSelectTool.get(), m_lassoSelectTool.get()})
+    for (CanvasTool *tool : {m_moveTool.get(), m_rectSelectTool.get(), m_lassoSelectTool.get(), m_puppetTool.get()})
         if (tool->hasPendingEdit())
             tool->commit();
     if (!m_stroke)

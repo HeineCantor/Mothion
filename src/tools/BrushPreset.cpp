@@ -35,6 +35,7 @@ QList<BrushPreset> builtInPresets(ToolId tool)
     case ToolId::Move:
     case ToolId::RectSelect:
     case ToolId::LassoSelect:
+    case ToolId::Puppet:
         return {};
     }
     return {};

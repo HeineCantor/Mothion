@@ -13,8 +13,18 @@ namespace mothion::tools {
 
 // The tools in the tool palette. Not to be confused with mothion::InputTool,
 // which is the *physical* end of the pen (tip / eraser / mouse).
-enum class ToolId { Brush, Eraser, Hand, Zoom, Move, RectSelect, LassoSelect };
-inline constexpr int kToolCount = 7;
+enum class ToolId { Brush, Eraser, Hand, Zoom, Move, RectSelect, LassoSelect, Puppet };
+inline constexpr int kToolCount = 8;
+
+// Puppet warp options (see puppet::PuppetRig).
+struct PuppetSettings
+{
+    int density = 1;      // mesh: 0 coarse, 1 normal, 2 fine
+    int expand = 3;       // px of mesh around the drawing
+    bool showMesh = true; // draw the mesh over the canvas
+
+    bool operator==(const PuppetSettings &) const = default;
+};
 
 struct BrushSettings
 {
@@ -64,6 +74,9 @@ public:
     double smoothing() const { return m_smoothing; }
     void setSmoothing(double amount);
 
+    PuppetSettings puppetSettings() const { return m_puppet; }
+    void setPuppetSettings(const PuppetSettings &settings);
+
 signals:
     void activeToolChanged(mothion::tools::ToolId tool);
     void toolSettingsChanged(mothion::tools::ToolId tool);
@@ -71,6 +84,7 @@ signals:
     void secondaryColorChanged(const QColor &color);
     void pressureCurveChanged();
     void smoothingChanged(double amount);
+    void puppetSettingsChanged();
 
 private:
     static std::size_t index(ToolId tool) { return static_cast<std::size_t>(tool); }
@@ -82,6 +96,7 @@ private:
     QColor m_secondaryColor = Qt::white;
     PressureCurve m_pressureCurve;
     double m_smoothing = 0.3;
+    PuppetSettings m_puppet;
 };
 
 } // namespace mothion::tools

@@ -3,19 +3,22 @@
 Frame-by-frame 2D animation software for solo animators and small studios.
 
 **Status: prototype.** There is a document model (layers, drawings, Harmony-style
-exposure timing) with undo, a timeline and a layers panel, tablet input, and a brush
-engine that can import Clip Studio Paint brushes. There is no saving yet.
+exposure timing) with undo, a timeline and a layers panel, tablet input, a brush
+engine that can import Clip Studio Paint brushes, image import, move and selection
+tools and a puppet warp. There is no saving yet.
 
 ## Build
 
 Requirements: CMake ≥ 3.21, a C++20 compiler, Qt ≥ 6.5 (Core, Gui, Widgets, Sql; Test for the tests).
 Sql reads `.sut` brushes (SQLite databases, through the `qsqlite` driver shipped with Qt).
 Qt must be linked **dynamically** (LGPL): CMake stops with an error if it finds a static Qt.
+[Eigen](https://eigen.tuxfamily.org) 3.4 (MPL-2.0, header only) does the puppet warp's linear
+algebra: CMake uses a system copy if there is one, otherwise it downloads it at configure time.
 
 ### Linux (Ubuntu / Debian)
 
 ```sh
-sudo apt install build-essential cmake qt6-base-dev qt6-wayland
+sudo apt install build-essential cmake qt6-base-dev qt6-wayland libeigen3-dev
 cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build -j
 ctest --test-dir build          # unit tests
@@ -75,6 +78,10 @@ src/
 │  │          at every dab with the remainder carried across segments, tips, rotation, spray,
 │  │          color variation; deterministic Lcg per stroke), StrokeShaper (stroke start/end,
 │  │          anti-jitter filter, correction), VelocityMeter, hardness profile
+│  ├─ puppet/ puppet warp: Contour (shape mask → outer outlines, Moore tracing; simplification),
+│  │          Triangulation (constrained Delaunay + Ruppert refinement), ArapDeformer
+│  │          (as-rigid-as-possible solve with pins, Eigen), PuppetRig (meshes, pins, remeshing),
+│  │          WarpRaster (affine per triangle, bilinear, parallel bands)
 │  └─ document/ project model: TiledImage (64×64 copy-on-write tiles), Drawing,
 │              Timing (Harmony-style exposures), Layer, Document, Command + commands/, History
 ├─ document/ DocumentController: owns Document and History, current layer/frame,
@@ -86,7 +93,9 @@ src/
 │            StrokeSession (live stroke on a TiledImage: flow builds up, opacity is a ceiling,
 │            watercolor mixing, ribbon, water edge),
 │            FrameRenderer (composes the visible layers at a frame), TileQt (tiles↔QImage),
-│            DebugOverlay (F12)
+│            DebugOverlay (F12);
+│            CanvasTool: tools that press and drag on the document, an edit that may stay open:
+│            MoveTool, SelectionTool (rectangle, lasso), PuppetTool; SelectionMask (split/composite)
 ├─ tools/    ToolState: active tool, size, opacity, colors, curve, stabilizer;
 │            BrushPreset: presets ("sub tools"); BrushDefinition: style + tip images;
 │            BrushLibrary: imported brushes (copies in AppData/brushes, reloaded at startup);
@@ -130,6 +139,10 @@ After `toPenSample()`, no part of the program touches Qt input events.
 | Action | Control |
 |---|---|
 | Brush / Eraser / Hand / Zoom | B / E / H / Z |
+| Move / Rectangle selection / Lasso / Puppet warp | V / M / L / P |
+| Move | drag the drawing (or only the selected part); Shift = horizontal or vertical only |
+| Selection | drag a rectangle (Shift = square) or a lasso; a click deselects; Edit → Select all (Ctrl+A), Deselect (Ctrl+D) |
+| Puppet warp | click the drawing (or the selected part) to add pins, drag a pin to deform; Alt+click or Delete removes a pin; Enter applies, Esc cancels; mesh options in Tool properties |
 | Pan | Space + drag, middle button, pen side button, Hand tool |
 | Zoom | wheel, Space+Ctrl+drag, Zoom tool, Ctrl + / Ctrl − / Ctrl 0 (fit) |
 | Rotate | Shift + wheel, Space+Shift+drag, Ctrl , / Ctrl . / Ctrl / (reset) |
@@ -143,6 +156,7 @@ After `toPenSample()`, no part of the program touches Qt input events.
 | Layout | Window → Reset default layout |
 | Theme | Window → Theme → System / Light / Dark |
 | Brushes | File → Import brush (.sut)…: it appears in Sub tool |
+| Images | File → Import image…: a new layer above the current one, one drawing for the whole scene |
 
 ## Notes on Qt 6 and tablets (checked against Qt 6.10 docs and sources)
 

@@ -31,6 +31,7 @@ QString ToolState::displayName(ToolId tool)
     case ToolId::Move: return tr("Move");
     case ToolId::RectSelect: return tr("Rectangle selection");
     case ToolId::LassoSelect: return tr("Lasso selection");
+    case ToolId::Puppet: return tr("Puppet warp");
     }
     return {};
 }
@@ -112,6 +113,14 @@ void ToolState::setSmoothing(double amount)
         return;
     m_smoothing = amount;
     emit smoothingChanged(amount);
+}
+
+void ToolState::setPuppetSettings(const PuppetSettings &settings)
+{
+    if (settings == m_puppet)
+        return;
+    m_puppet = settings;
+    emit puppetSettingsChanged();
 }
 
 } // namespace mothion::tools

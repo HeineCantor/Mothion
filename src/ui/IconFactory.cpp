@@ -126,6 +126,16 @@ void drawGlyph(QPainter &p, IconId id)
         path.cubicTo(22, 4, 22, 15, 13, 16);
         path.cubicTo(10, 16.5, 8, 17, 9, 20);
         break;
+    case IconId::Puppet: // a pin in a mesh
+        path.moveTo(4, 20);
+        path.lineTo(12, 13);
+        path.lineTo(20, 20);
+        path.moveTo(4, 20);
+        path.lineTo(20, 20);
+        path.moveTo(12, 13);
+        path.lineTo(12, 9);
+        path.addEllipse(QPointF(12, 6.5), 2.5, 2.5);
+        break;
     case IconId::Collapse:
         path.moveTo(6, 15);
         path.lineTo(12, 9);

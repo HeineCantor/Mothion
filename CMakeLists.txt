@@ -26,6 +26,7 @@ if(_mothion_qt_type STREQUAL "STATIC_LIBRARY")
 endif()
 
 include(cmake/CompilerWarnings.cmake)
+include(cmake/Dependencies.cmake)
 
 add_subdirectory(src)
 

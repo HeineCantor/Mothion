@@ -131,6 +131,7 @@ private:
     std::unique_ptr<CanvasTool> m_moveTool;
     std::unique_ptr<CanvasTool> m_rectSelectTool;
     std::unique_ptr<CanvasTool> m_lassoSelectTool;
+    std::unique_ptr<CanvasTool> m_puppetTool;
     CanvasTool *m_editTool = nullptr; // the canvas tool between its press and release
     std::optional<brush::DabGenerator> m_dabs;
     std::vector<brush::BrushInput> m_points; // the stroke so far, for the final pass
