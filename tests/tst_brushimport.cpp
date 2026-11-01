@@ -19,6 +19,8 @@
 #include <QTest>
 #include <QUuid>
 
+#include <algorithm>
+
 using namespace mothion;
 
 namespace {

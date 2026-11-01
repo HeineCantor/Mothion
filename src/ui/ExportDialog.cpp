@@ -18,6 +18,8 @@
 #include <QSpinBox>
 #include <QStandardPaths>
 
+#include <algorithm>
+
 namespace mothion::ui {
 
 namespace {

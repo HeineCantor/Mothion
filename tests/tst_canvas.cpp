@@ -9,6 +9,8 @@
 
 #include <QTest>
 
+#include <algorithm>
+
 using namespace mothion;
 using namespace mothion::canvas;
 

@@ -12,6 +12,7 @@
 #include <QStyledItemDelegate>
 #include <QVBoxLayout>
 
+#include <algorithm>
 #include <cmath>
 #include <numbers>
 

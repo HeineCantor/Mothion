@@ -5,6 +5,7 @@
 
 #include <QPainter>
 
+#include <algorithm>
 #include <cmath>
 
 namespace mothion::canvas {

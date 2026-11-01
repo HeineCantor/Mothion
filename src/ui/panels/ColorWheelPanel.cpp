@@ -10,6 +10,8 @@
 #include <QPainter>
 #include <QVBoxLayout>
 
+#include <algorithm>
+
 namespace mothion::ui {
 
 // --- ColorSwatchPair ----------------------------------------------------------

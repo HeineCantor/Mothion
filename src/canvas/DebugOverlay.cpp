@@ -5,6 +5,8 @@
 #include <QGuiApplication>
 #include <QPainter>
 
+#include <algorithm>
+
 namespace mothion::canvas {
 
 namespace {
