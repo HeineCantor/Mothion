@@ -122,7 +122,9 @@ void MainWindow::createCommandBar()
     connect(m_saveAsAction, &QAction::triggered, this, &MainWindow::saveAs);
 
     // Undo/redo run on the document's History; labels ("Undo stroke") and
-    // enabled state follow DocumentController::historyChanged.
+    // enabled state follow DocumentController::historyChanged. An edit left
+    // open on the canvas (puppet warp, transform) goes back through its own
+    // steps first.
     QAction *undo = new QAction(icon(IconId::Undo), tr("Undo"), this);
     undo->setShortcuts(QKeySequence::Undo); // Ctrl+Z
     QAction *redo = new QAction(icon(IconId::Redo), tr("Redo"), this);
@@ -135,15 +137,23 @@ void MainWindow::createCommandBar()
     // Also from floating panels, which are windows of their own.
     undo->setShortcutContext(Qt::ApplicationShortcut);
     redo->setShortcutContext(Qt::ApplicationShortcut);
-    connect(undo, &QAction::triggered, m_document, &document::DocumentController::undo);
-    connect(redo, &QAction::triggered, m_document, &document::DocumentController::redo);
+    connect(undo, &QAction::triggered, this, [this] {
+        if (!m_canvas->undoInEdit())
+            m_document->undo();
+    });
+    connect(redo, &QAction::triggered, this, [this] {
+        if (!m_canvas->redoInEdit())
+            m_document->redo();
+    });
     auto syncHistory = [this, undo, redo] {
-        undo->setEnabled(m_document->canUndo());
-        undo->setText(m_document->undoText());
-        redo->setEnabled(m_document->canRedo());
-        redo->setText(m_document->redoText());
+        const bool inEditUndo = m_canvas->canUndoInEdit(), inEditRedo = m_canvas->canRedoInEdit();
+        undo->setEnabled(inEditUndo || m_document->canUndo());
+        undo->setText(inEditUndo ? tr("Undo step") : m_document->undoText());
+        redo->setEnabled(inEditRedo || m_document->canRedo());
+        redo->setText(inEditRedo ? tr("Redo step") : m_document->redoText());
     };
     connect(m_document, &document::DocumentController::historyChanged, this, syncHistory);
+    connect(m_canvas, &canvas::CanvasView::editStepsChanged, this, syncHistory);
     syncHistory();
     m_editActions << undo << redo;
     qApp->installEventFilter(this);

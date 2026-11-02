@@ -28,9 +28,10 @@ namespace mothion::canvas {
 // places pins, dragging a pin deforms the mesh around the others
 // (puppet::PuppetRig), and the pixels follow (puppet::warp).
 //
-// The warp stays open across clicks; Enter, another tool, undo or a frame
-// or layer change applies it as one undo step, Esc drops it. Alt+click or
-// Delete removes a pin.
+// The warp stays open across clicks; Enter, another tool, a frame or layer
+// change, or undo once there is nothing left to undo in it applies it as one
+// undo step, Esc drops it. While it is open undo and redo go through its own
+// steps (each drag, pin added or removed). Alt+click or Delete removes a pin.
 //
 // In local mode (PuppetSettings::local) there are no pins to place: all of
 // the shape is held, a drag moves the point under the pen and bends what
@@ -54,6 +55,12 @@ public:
     void setViewZoom(double zoom) override { m_zoom = zoom; }
     void activated() override;
     bool hover(const QPointF &docPos) override;
+    // Pins placed in the open warp.
+    std::size_t pinCount() const { return m_session ? m_session->rig->pins().size() : 0; }
+    bool undoStep() override;
+    bool redoStep() override;
+    bool canUndoStep() const override { return m_session && !m_session->undo.empty() && !isActive(); }
+    bool canRedoStep() const override { return m_session && !m_session->redo.empty() && !isActive(); }
     bool wheel(double steps, Qt::KeyboardModifiers modifiers) override;
     void paintOverlay(QPainter &painter, const ViewTransform &view) const override;
 
@@ -85,7 +92,18 @@ private:
         std::unique_ptr<puppet::PuppetRig> rig;
         QRect shown;                      // area last drawn by the warp
         bool changed = false;
+        // The warp's own steps: the rig as it was before each, and those undone.
+        std::vector<puppet::PuppetRig::State> undo;
+        std::vector<puppet::PuppetRig::State> redo;
+        std::optional<puppet::PuppetRig::State> stepStart; // at the press, until the step is known
+        bool stepChanged = false;
     };
+    // A step starts at the press; it is kept if something changed.
+    void beginStep();
+    void endStep();
+    void pushStep(puppet::PuppetRig::State before);
+    // Draws the rig, or the drawing as it was when the rig is undeformed.
+    void show();
     std::unique_ptr<Session> m_session;
     std::optional<int> m_dragPin;
     bool m_dragMoved = false;

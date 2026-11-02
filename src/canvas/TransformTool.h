@@ -12,6 +12,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <vector>
 
 namespace mothion::document {
 class DocumentController;
@@ -30,8 +31,9 @@ namespace mothion::canvas {
 //
 // The box comes up as soon as the tool is chosen and stays open across
 // drags; Enter applies it as one undo step, Esc drops it, and either goes
-// back to the tool used before. Another tool, undo or a frame or layer
-// change applies it too.
+// back to the tool used before. Another tool, a frame or layer change, or
+// undo once there is nothing left to undo in it applies it too: while it is
+// open undo and redo go through its drags.
 class TransformTool : public CanvasTool
 {
 public:
@@ -48,6 +50,10 @@ public:
     bool hasPendingEdit() const override { return m_session != nullptr; }
     void commit() override;
     bool keyPress(int key) override;
+    bool undoStep() override;
+    bool redoStep() override;
+    bool canUndoStep() const override { return m_session && !m_session->undo.empty() && !m_drag; }
+    bool canRedoStep() const override { return m_session && !m_session->redo.empty() && !m_drag; }
     void setViewZoom(double zoom) override { m_zoom = zoom; }
     void paintOverlay(QPainter &painter, const ViewTransform &view) const override;
     Qt::CursorShape cursor() const override { return Qt::SizeAllCursor; }
@@ -71,6 +77,8 @@ private:
 
     bool start();
     void render();
+    // Draws the transform, or the drawing as it was when back at the start.
+    void show();
     void finish(bool apply);
     // The eight handles in box coordinates: corners 0..3, then side middles.
     QPointF handlePoint(int index) const;
@@ -92,6 +100,8 @@ private:
         QTransform transform;
         QRect shown; // area last drawn by the transform
         bool changed = false;
+        std::vector<QTransform> undo; // the transform before each drag
+        std::vector<QTransform> redo; // those undone
     };
     std::unique_ptr<Session> m_session;
     std::optional<Drag> m_drag;

@@ -222,7 +222,51 @@ void TransformTool::release(const QPointF &docPos, Qt::KeyboardModifiers modifie
     if (!m_drag)
         return;
     move(docPos, modifiers);
+    if (m_session && m_session->transform != m_drag->start) {
+        m_session->undo.push_back(m_drag->start);
+        m_session->redo.clear();
+    }
     m_drag.reset();
+}
+
+void TransformTool::show()
+{
+    Session &s = *m_session;
+    if (!s.undo.empty()) {
+        render();
+        return;
+    }
+    // Back at the start: the drawing and selection as they were, exactly.
+    *s.image = s.before;
+    if (!s.selection.isEmpty())
+        m_document->setSelection(s.selection);
+    m_document->notifyPainted(s.shown | s.box);
+    s.changed = false;
+    m_repaint();
+}
+
+bool TransformTool::undoStep()
+{
+    if (!canUndoStep())
+        return false;
+    Session &s = *m_session;
+    s.redo.push_back(s.transform);
+    s.transform = s.undo.back();
+    s.undo.pop_back();
+    show();
+    return true;
+}
+
+bool TransformTool::redoStep()
+{
+    if (!canRedoStep())
+        return false;
+    Session &s = *m_session;
+    s.undo.push_back(s.transform);
+    s.transform = s.redo.back();
+    s.redo.pop_back();
+    show();
+    return true;
 }
 
 void TransformTool::render()

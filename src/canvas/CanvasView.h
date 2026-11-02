@@ -55,6 +55,14 @@ public:
     // regular intervals while there is a selection. 0 or 1.
     int selectionAntsPhase() const { return m_antsPhase; }
 
+    // Undo and redo inside an edit left open by the active tool (the drags
+    // of a puppet warp or a transform); false if there is no step to take,
+    // and the document's history should go on.
+    bool undoInEdit();
+    bool redoInEdit();
+    bool canUndoInEdit() const;
+    bool canRedoInEdit() const;
+
 public slots:
     void zoomIn();
     void zoomOut();
@@ -82,6 +90,8 @@ signals:
     void deviceChanged(const mothion::InputDeviceInfo &device);
     // Something worth telling the user (e.g. why a stroke was refused).
     void statusMessage(const QString &text);
+    // The steps of an open edit may have changed (see undoInEdit()).
+    void editStepsChanged();
 
 protected:
     void paintEvent(QPaintEvent *event) override;

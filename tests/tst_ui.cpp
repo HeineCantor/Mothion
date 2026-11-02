@@ -1155,6 +1155,119 @@ private slots:
         QVERIFY(state.puppetSettings().radius < radius / 1.3);
     }
 
+    // Undo inside an open warp takes back one drag (or pin) at a time; back
+    // at the start the drawing is as it was, and the warp is still open.
+    void puppetUndoGoesThroughItsSteps()
+    {
+        document::DocumentController controller;
+        tools::ToolState state;
+        QImage image(400, 40, QImage::Format_ARGB32);
+        image.fill(Qt::darkCyan);
+        controller.importImage(image, QStringLiteral("bar")); // x 760..1159, y 520..559
+        const doc::Layer &layer = controller.document().layerAt(1);
+        const doc::TiledImage &pixels = layer.drawing(layer.timing().drawingAt(0))->image;
+        const doc::TiledImage original = pixels;
+        auto snapshot = [&] {
+            std::vector<doc::Pixel> out(500 * 300);
+            pixels.read(710, 400, 500, 300, out.data(), 500);
+            return out;
+        };
+        canvas::PuppetTool tool(&controller, &state, [](const QString &) {}, [] {});
+        QVERIFY(!tool.canUndoStep());
+
+        tool.press({780, 540}, Qt::NoModifier); // 1: an anchor pin
+        tool.release({780, 540}, Qt::NoModifier);
+        const auto afterPin = snapshot();
+        tool.press({1140, 540}, Qt::NoModifier); // 2: a handle, dragged down
+        tool.move({1140, 600}, Qt::NoModifier);
+        tool.release({1140, 600}, Qt::NoModifier);
+        const auto afterFirstDrag = snapshot();
+        tool.press({1140, 600}, Qt::NoModifier); // 3: dragged further
+        tool.move({1140, 660}, Qt::NoModifier);
+        tool.release({1140, 660}, Qt::NoModifier);
+        QVERIFY(snapshot() != afterFirstDrag);
+        QCOMPARE(tool.pinCount(), std::size_t(2));
+
+        QVERIFY(tool.undoStep());
+        QVERIFY(snapshot() == afterFirstDrag);
+        QVERIFY(tool.undoStep());
+        QCOMPARE(tool.pinCount(), std::size_t(1)); // the handle pin is gone too
+        QVERIFY(snapshot() == afterPin);
+        QVERIFY(tool.undoStep());
+        QCOMPARE(tool.pinCount(), std::size_t(0));
+        QVERIFY(!tool.canUndoStep());
+        QVERIFY(pixels.tileCoords() == original.tileCoords()); // exactly as it was
+        QVERIFY(snapshot() == afterPin);                       // (the pin changed no pixel)
+        QVERIFY(tool.hasPendingEdit());                        // still open
+
+        QVERIFY(tool.redoStep());
+        QVERIFY(tool.redoStep());
+        QVERIFY(snapshot() == afterFirstDrag);
+        tool.press({1140, 600}, Qt::NoModifier); // a new drag drops what was undone
+        tool.move({1100, 620}, Qt::NoModifier);
+        tool.release({1100, 620}, Qt::NoModifier);
+        QVERIFY(!tool.canRedoStep());
+        tool.commit();
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo stroke")); // the warp, once
+        controller.undo();
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo import image"));
+
+        tools::PuppetSettings settings = state.puppetSettings(); // radius mode: each drag a step
+        settings.local = true;
+        state.setPuppetSettings(settings);
+        tool.press({1130, 540}, Qt::NoModifier);
+        tool.move({1130, 600}, Qt::NoModifier);
+        tool.release({1130, 600}, Qt::NoModifier);
+        tool.press({800, 540}, Qt::NoModifier);
+        tool.move({800, 480}, Qt::NoModifier);
+        tool.release({800, 480}, Qt::NoModifier);
+        QVERIFY(qAlpha(pixels.pixel(800, 480)) != 0); // the left end lifted
+        QVERIFY(tool.undoStep());
+        QCOMPARE(qAlpha(pixels.pixel(800, 480)), 0);   // back down
+        QVERIFY(qAlpha(pixels.pixel(1130, 540)) == 0); // the first drag stays
+        QVERIFY(tool.undoStep());
+        QVERIFY(qAlpha(pixels.pixel(1130, 540)) != 0);
+        QVERIFY(!tool.undoStep());
+    }
+
+    // The same for a transform; and Ctrl+Z in the window goes there first.
+    void transformUndoGoesThroughItsDrags()
+    {
+        ui::MainWindow window;
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *controller = window.findChild<document::DocumentController *>();
+        auto *state = window.findChild<tools::ToolState *>();
+        auto *canvas = window.findChild<canvas::CanvasView *>();
+        QImage image(100, 100, QImage::Format_ARGB32);
+        image.fill(Qt::red);
+        controller->importImage(image, QStringLiteral("square")); // 910..1009, 490..589
+        state->setActiveTool(tools::ToolId::Transform);
+        auto at = [&](QPointF doc) { return canvas->view().documentToView().map(doc).toPoint(); };
+        auto drag = [&](QPointF from, QPointF to) {
+            QTest::mousePress(canvas, Qt::LeftButton, {}, at(from));
+            QTest::mouseMove(canvas, at(to));
+            QTest::mouseRelease(canvas, Qt::LeftButton, {}, at(to));
+        };
+        drag({960, 540}, {1060, 540});
+        drag({1060, 540}, {1060, 640});
+        QAction *undo = nullptr;
+        for (QAction *a : window.findChildren<QAction *>())
+            if (a->shortcuts().contains(QKeySequence::keyBindings(QKeySequence::Undo).value(0)))
+                undo = a;
+        QVERIFY(undo);
+        QCOMPARE(undo->text(), QStringLiteral("Undo step"));
+        undo->trigger();
+        QCOMPARE(state->activeTool(), tools::ToolId::Transform); // still transforming
+        const doc::Layer &layer = *controller->document().layer(controller->currentLayer());
+        const doc::TiledImage &pixels = layer.drawingAt(0)->image;
+        QCOMPARE(pixels.pixel(1060, 540), doc::Pixel(0xffff0000)); // back after the first drag
+        QCOMPARE(qAlpha(pixels.pixel(1060, 640)), 0);
+        undo->trigger();
+        QCOMPARE(pixels.pixel(960, 540), doc::Pixel(0xffff0000)); // as it was
+        QCOMPARE(undo->text(), QStringLiteral("Undo import image"));
+    }
+
     // In radius mode the mesh is there as soon as the tool is chosen, so the
     // point a drag would take shows before the first drag.
     void puppetRadiusModeMeshesAtOnce()

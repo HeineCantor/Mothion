@@ -332,6 +332,45 @@ std::optional<int> PuppetRig::pinAt(Vec2 at, double radius) const
     return best;
 }
 
+bool PuppetRig::isDeformed() const
+{
+    for (const Mesh &m : m_meshes)
+        for (std::size_t v = 0; v < m.deformed.size(); ++v)
+            if (length2(m.deformed[v] - m.rest.vertices[v]) > 1e-6) // remeshing leaves rounding noise
+                return true;
+    return false;
+}
+
+PuppetRig::State PuppetRig::state() const
+{
+    State s;
+    for (const Mesh &m : m_meshes)
+        s.meshes.push_back({m.outline, m.rest, m.deformed});
+    s.pins = m_pins;
+    return s;
+}
+
+void PuppetRig::restore(const State &state)
+{
+    m_local.reset();
+    m_meshes.clear();
+    m_pins = state.pins;
+    for (const State::MeshState &saved : state.meshes) {
+        Mesh m;
+        m.outline = saved.outline;
+        m.rest = saved.rest;
+        m.deformed = saved.deformed;
+        m.deformer = std::make_unique<ArapDeformer>(m.rest);
+        m_meshes.push_back(std::move(m));
+    }
+    for (std::size_t i = 0; i < m_meshes.size(); ++i) {
+        std::vector<int> handles;
+        std::vector<Vec2> targets;
+        pinHandles(int(i), handles, targets);
+        m_meshes[i].deformer->setHandles(handles);
+    }
+}
+
 void PuppetRig::setSettings(RigSettings settings)
 {
     if (settings.density == m_settings.density && settings.expand == m_settings.expand)

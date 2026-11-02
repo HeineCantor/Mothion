@@ -47,6 +47,8 @@ public:
     const std::vector<Mesh> &meshes() const { return m_meshes; }
     const std::vector<Pin> &pins() const { return m_pins; }
     bool isEmpty() const { return m_meshes.empty(); }
+    // Whether any vertex is away from its rest position (by more than 1/1000 px).
+    bool isDeformed() const;
 
     // Adds a pin where the deformed shape is at `at`; nothing if no mesh is there.
     std::optional<int> addPin(Vec2 at);
@@ -72,6 +74,23 @@ public:
 
     // Rebuilds the meshes with other settings, keeping pins and deformation.
     void setSettings(RigSettings settings);
+
+    // Everything a warp step changes (meshes, deformation, pins), to go back
+    // to it: the undo steps inside an open warp.
+    struct State
+    {
+        struct MeshState
+        {
+            std::vector<Vec2> outline;
+            TriMesh rest;
+            std::vector<Vec2> deformed;
+        };
+        std::vector<MeshState> meshes;
+        std::vector<Pin> pins;
+    };
+    State state() const;
+    // Back to `state` (a local drag in progress ends).
+    void restore(const State &state);
 
 private:
     void buildMeshes();

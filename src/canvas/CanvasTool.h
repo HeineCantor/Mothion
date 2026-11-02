@@ -30,6 +30,13 @@ public:
     // Between press and release.
     virtual bool isActive() const = 0;
 
+    // Steps of an open edit (the drags of a puppet warp...), undone and
+    // redone inside it before the document's own history. True if done.
+    virtual bool undoStep() { return false; }
+    virtual bool redoStep() { return false; }
+    virtual bool canUndoStep() const { return false; }
+    virtual bool canRedoStep() const { return false; }
+
     // The tool was just chosen (a tool that shows something at once).
     virtual void activated() {}
 

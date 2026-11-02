@@ -104,6 +104,36 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
     updateCursor();
 }
 
+// --- steps of an open edit -------------------------------------------------
+
+bool CanvasView::undoInEdit()
+{
+    CanvasTool *tool = canvasTool();
+    const bool done = tool && !m_editTool && tool->undoStep();
+    emit editStepsChanged();
+    return done;
+}
+
+bool CanvasView::redoInEdit()
+{
+    CanvasTool *tool = canvasTool();
+    const bool done = tool && !m_editTool && tool->redoStep();
+    emit editStepsChanged();
+    return done;
+}
+
+bool CanvasView::canUndoInEdit() const
+{
+    const CanvasTool *tool = canvasTool();
+    return tool && tool->canUndoStep();
+}
+
+bool CanvasView::canRedoInEdit() const
+{
+    const CanvasTool *tool = canvasTool();
+    return tool && tool->canRedoStep();
+}
+
 // --- view commands ---------------------------------------------------------
 
 void CanvasView::zoomIn()
@@ -390,6 +420,7 @@ void CanvasView::handleSample(const PenSample &sample)
             m_editTool = nullptr; // cleared first: releasing may interrupt (and cancel) itself
             tool->release(docPos, modifiers);
             update();
+            emit editStepsChanged();
         }
         break;
     case SamplePhase::Hover:
@@ -531,6 +562,7 @@ void CanvasView::commitPendingEdits()
                               m_transformTool.get()})
         if (tool != canvasTool() && tool->hasPendingEdit())
             tool->commit();
+    emit editStepsChanged();
 }
 
 void CanvasView::cancelStroke()
@@ -549,6 +581,7 @@ void CanvasView::cancelStroke()
                               m_transformTool.get()})
         if (tool->hasPendingEdit())
             tool->commit();
+    emit editStepsChanged();
     if (!m_stroke)
         return;
     // Restore pixels first: cancelPaint() may remove the drawing they live in.
@@ -602,6 +635,7 @@ void CanvasView::keyPressEvent(QKeyEvent *event)
     // Repeats too: a held key may keep stepping (the puppet radius).
     if (CanvasTool *tool = canvasTool(); tool && tool->keyPress(event->key())) {
         event->accept();
+        emit editStepsChanged();
         return;
     }
     if (bool *held = panKeyFlag(event->key())) {

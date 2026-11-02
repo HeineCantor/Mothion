@@ -123,6 +123,68 @@ void PuppetTool::render()
     s.changed = true;
 }
 
+void PuppetTool::beginStep()
+{
+    m_session->stepStart = m_session->rig->state();
+    m_session->stepChanged = false;
+}
+
+void PuppetTool::endStep()
+{
+    if (m_session && m_session->stepStart && m_session->stepChanged)
+        pushStep(std::move(*m_session->stepStart));
+    if (m_session)
+        m_session->stepStart.reset();
+}
+
+void PuppetTool::pushStep(puppet::PuppetRig::State before)
+{
+    m_session->undo.push_back(std::move(before));
+    m_session->redo.clear();
+}
+
+void PuppetTool::show()
+{
+    Session &s = *m_session;
+    if (s.rig->isDeformed()) {
+        render();
+        return;
+    }
+    // Undeformed (back at the start, or pins only): the drawing as it was,
+    // exactly, not warped again.
+    *s.image = s.before;
+    m_document->notifyPainted(s.shown | boundsOf(s.before));
+    s.changed = false;
+}
+
+bool PuppetTool::undoStep()
+{
+    if (!canUndoStep())
+        return false;
+    Session &s = *m_session;
+    s.redo.push_back(s.rig->state());
+    s.rig->restore(s.undo.back());
+    s.undo.pop_back();
+    m_selectedPin.reset();
+    show();
+    m_repaint();
+    return true;
+}
+
+bool PuppetTool::redoStep()
+{
+    if (!canRedoStep())
+        return false;
+    Session &s = *m_session;
+    s.undo.push_back(s.rig->state());
+    s.rig->restore(s.redo.back());
+    s.redo.pop_back();
+    m_selectedPin.reset();
+    show();
+    m_repaint();
+    return true;
+}
+
 void PuppetTool::press(const QPointF &docPos, Qt::KeyboardModifiers modifiers)
 {
     m_pointer = docPos;
@@ -130,19 +192,24 @@ void PuppetTool::press(const QPointF &docPos, Qt::KeyboardModifiers modifiers)
     m_previewFailed = false;
     if (!m_session && !start())
         return;
+    beginStep();
     puppet::PuppetRig &rig = *m_session->rig;
     const puppet::Vec2 at{docPos.x(), docPos.y()};
     const tools::PuppetSettings settings = m_toolState->puppetSettings();
     if (settings.local) {
         m_selectedPin.reset();
         m_localDrag = rig.beginLocalDrag(at, settings.radius);
-        if (!m_localDrag)
+        if (!m_localDrag) {
+            m_session->stepStart.reset();
             m_status(QObject::tr("Drag on the drawing to bend it"));
+        }
         m_repaint();
         return;
     }
     if (const auto pin = rig.pinAt(at, kGrabRadius / m_zoom)) {
         if (modifiers & Qt::AltModifier) {
+            m_session->stepChanged = true;
+            endStep();
             rig.removePin(*pin);
             m_selectedPin.reset();
             if (m_session->changed)
@@ -155,7 +222,9 @@ void PuppetTool::press(const QPointF &docPos, Qt::KeyboardModifiers modifiers)
     } else if (const auto added = rig.addPin(at)) {
         m_dragPin = m_selectedPin = *added;
         m_grabOffset = {};
+        m_session->stepChanged = true; // a new pin is a step, even unmoved
     } else {
+        m_session->stepStart.reset();
         m_status(QObject::tr("Click on the drawing to place a pin"));
     }
     m_repaint();
@@ -166,6 +235,7 @@ void PuppetTool::move(const QPointF &docPos, Qt::KeyboardModifiers)
     m_pointer = docPos;
     if (m_session && m_localDrag) {
         m_session->rig->localDragTo({docPos.x(), docPos.y()}, kDragIterations);
+        m_session->stepChanged = true;
         render();
         return;
     }
@@ -173,6 +243,7 @@ void PuppetTool::move(const QPointF &docPos, Qt::KeyboardModifiers)
         return;
     m_session->rig->movePin(*m_dragPin, puppet::Vec2{docPos.x(), docPos.y()} + m_grabOffset, kDragIterations);
     m_dragMoved = true;
+    m_session->stepChanged = true;
     render();
 }
 
@@ -184,6 +255,7 @@ void PuppetTool::release(const QPointF &docPos, Qt::KeyboardModifiers)
         m_session->rig->endLocalDrag();
         m_localDrag = false;
         render();
+        endStep();
         return;
     }
     if (!m_session || !m_dragPin)
@@ -194,6 +266,7 @@ void PuppetTool::release(const QPointF &docPos, Qt::KeyboardModifiers)
     }
     m_dragPin.reset();
     m_dragMoved = false;
+    endStep();
 }
 
 void PuppetTool::commit()
@@ -244,6 +317,7 @@ bool PuppetTool::keyPress(int key)
     case Qt::Key_Delete:
     case Qt::Key_Backspace:
         if (m_selectedPin && !m_dragPin) {
+            pushStep(m_session->rig->state());
             m_session->rig->removePin(*m_selectedPin);
             m_selectedPin.reset();
             if (m_session->changed)
