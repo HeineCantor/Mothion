@@ -206,6 +206,43 @@ private slots:
         QCOMPARE(doc->cel(celId)->timing().drawingAt(0), a.id);
     }
 
+    // A move or a paste only goes onto free frames.
+    void framesGoOnlyOntoFreeFrames()
+    {
+        auto [doc, celId] = docWithCel();
+        History history;
+        NewDrawing a = makeNewDrawing(*doc, celId, 0, 2);
+        history.execute(*doc, std::move(a.command));
+        NewDrawing b = makeNewDrawing(*doc, celId, 4, 1);
+        history.execute(*doc, std::move(b.command));
+        const Timing &t = doc->cel(celId)->timing();
+        QVERIFY(!exposuresFit(t, {0}, 3));     // onto b
+        QVERIFY(exposuresFit(t, {0}, 2));      // just before it
+        QVERIFY(exposuresFit(t, {0, 4}, 3));   // b moves out of the way too
+        QVERIFY(exposuresFit(t, {0}, 1));      // over its own old frames
+        QVERIFY(!exposuresFit(t, {4}, -5));    // before frame 0
+        QVERIFY(!makeMoveExposures(*doc, {{celId, 0}}, 3));
+
+        // Pasted as the same drawing, then as an independent copy.
+        doc->cel(celId)->drawing(a.id)->layers.front().image.setPixel(1, 1, kInk);
+        const std::vector<ExposureCopy> copied{{celId, a.id, 0, 2}};
+        QVERIFY(!makePasteExposures(*doc, copied, 3, false)); // onto b
+        history.execute(*doc, makePasteExposures(*doc, copied, 6, false));
+        QCOMPARE(t.drawingAt(6), a.id);
+        QCOMPARE(t.exposureAt(6)->length, 2);
+        QCOMPARE(doc->cel(celId)->drawings().size(), std::size_t(2));
+        history.execute(*doc, makePasteExposures(*doc, copied, 9, true));
+        const DrawingId clone = t.drawingAt(9);
+        QVERIFY(clone != a.id && clone != kNoId);
+        QCOMPARE(doc->cel(celId)->drawing(clone)->name, std::string("3"));
+        QCOMPARE(doc->cel(celId)->drawing(clone)->layers.front().image.pixel(1, 1), kInk);
+        QVERIFY(doc->cel(celId)->drawing(clone)->layers.front().id
+                != doc->cel(celId)->drawing(a.id)->layers.front().id);
+        history.undo(*doc);
+        QVERIFY(!doc->cel(celId)->drawing(clone));
+        QCOMPARE(t.drawingAt(9), kNoId);
+    }
+
     void timingFactories()
     {
         auto [doc, celId] = docWithCel();

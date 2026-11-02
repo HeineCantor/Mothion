@@ -62,6 +62,23 @@ NewDrawing makeNewDrawing(Document &doc, CelId cel, int frame, int length = 1, s
 // side is painted). No command when `frame` is empty or starts its hold.
 NewDrawing makeSplitDrawing(Document &doc, CelId cel, int frame);
 
+// A frame copied from the timeline: a drawing of a cel, shown for `length`
+// frames from `start`, counted from the first copied one.
+struct ExposureCopy
+{
+    CelId cel = kNoId;
+    DrawingId drawing = kNoId;
+    int start = 0;
+    int length = 1;
+};
+
+// The copied frames shown again on their cels from `frame` on, keeping their
+// distances: the same drawings (a change to one shows on both), or with
+// `clone` independent copies of them (one per drawing copied). nullptr when
+// some would land on a frame already shown, or nothing is left to paste.
+std::unique_ptr<Command> makePasteExposures(Document &doc, const std::vector<ExposureCopy> &copies, int frame,
+                                            bool clone);
+
 // A drawing put in: the cel's frames from `frame` on move one place to the
 // right (a hold crossing it is cut around the gap) and a new drawing with
 // one empty layer is shown at `frame`. `kind` names the undo step.

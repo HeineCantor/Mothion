@@ -1631,7 +1631,8 @@ private slots:
     }
 
     // Blocks on the timeline are selected with clicks (Ctrl adds, Shift a
-    // range of the row) and dragged along the time together, in one step.
+    // range of the row) and dragged along the time together, in one step,
+    // only onto free frames; copied, they are pasted as they are or as copies.
     void timelineDragsTheSelectedFrames()
     {
         document::DocumentController controller;
@@ -1696,6 +1697,31 @@ private slots:
         QCOMPARE(view.selectedFrames(), (std::vector<doc::ExposureRef>{{bottom, 6}}));
         QTest::mouseClick(vp, Qt::LeftButton, {}, cell(1, 12));
         QVERIFY(view.selectedFrames().empty());
+
+        // Onto another block: nothing moves.
+        QTest::mouseClick(vp, Qt::LeftButton, {}, cell(1, 6));
+        QTest::mousePress(vp, Qt::LeftButton, {}, cell(1, 6));
+        QTest::mouseMove(vp, cell(1, 4));
+        QTest::mouseMove(vp, cell(1, 2)); // onto b
+        QTest::mouseRelease(vp, Qt::LeftButton, {}, cell(1, 2));
+        QCOMPARE(low.drawingAt(6), c.id);
+        QCOMPARE(low.drawingAt(2), b.id);
+
+        // Copied, then pasted at the cursor: the same drawing, then a copy.
+        view.setFocus();
+        QTest::keyClick(&view, Qt::Key_C, Qt::ControlModifier);
+        controller.setCurrentFrame(10);
+        QTest::keyClick(&view, Qt::Key_V, Qt::ControlModifier);
+        QCOMPARE(low.drawingAt(10), c.id);
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo paste frames"));
+        QCOMPARE(view.selectedFrames(), (std::vector<doc::ExposureRef>{{bottom, 10}}));
+        controller.setCurrentFrame(12);
+        QTest::keyClick(&view, Qt::Key_V, Qt::ControlModifier | Qt::ShiftModifier);
+        QVERIFY(low.drawingAt(12) != doc::kNoId && low.drawingAt(12) != c.id);
+        const std::size_t drawings = d.cel(bottom)->drawings().size();
+        controller.setCurrentFrame(12); // no room: nothing
+        QTest::keyClick(&view, Qt::Key_V, Qt::ControlModifier | Qt::ShiftModifier);
+        QCOMPARE(d.cel(bottom)->drawings().size(), drawings);
     }
 
     // The cel bar adds, moves and deletes cels and sets the current one's

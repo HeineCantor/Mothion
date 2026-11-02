@@ -6,6 +6,7 @@
 #include "document/DocumentController.h"
 #include "ui/IconFactory.h"
 
+#include <QApplication>
 #include <QContextMenuEvent>
 #include <QInputDialog>
 #include <QKeyEvent>
@@ -285,16 +286,23 @@ void TimelineView::paintCells(QPainter &p) const
             const doc::Drawing *drawing = cel.drawing(e.drawing);
             const QString name = drawing ? QString::fromStdString(drawing->name) : QStringLiteral("?");
             const bool selected = isSelected(cel.id(), e.start - shift);
-            paintExposure(p, e, name, colorForCel(celIndex), m.rowY(row), selected);
+            paintExposure(p, e, name, colorForCel(celIndex), m.rowY(row), selected,
+                          selected && m_frameDrag && m_frameDrag->blocked);
         }
     }
 }
 
 void TimelineView::paintExposure(QPainter &p, const doc::Exposure &e, const QString &name, const QColor &color,
-                                 int y, bool selected) const
+                                 int y, bool selected, bool blocked) const
 {
     const TimelineMetrics &m = m_metrics;
     const QRect block(m.frameX(e.start) + 1, y + 2, e.length * m.frameWidth - 2, m.rowHeight - 4);
+    if (blocked) { // where it cannot go: over a block it would cover
+        p.fillRect(block, QColor(200, 50, 50, 170));
+        p.setPen(QColor(240, 90, 90));
+        p.drawRect(block.adjusted(0, 0, -1, -1));
+        return;
+    }
 
     p.fillRect(block, selected ? color.darker(115) : color.darker(170));
     p.fillRect(QRect(block.left(), block.top(), 3, block.height()), color); // exposure start mark
@@ -489,9 +497,16 @@ void TimelineView::dragFrames(int x)
     for (const doc::ExposureRef &ref : m_selected)
         byCel[ref.cel].push_back(ref.start);
     m_movePreview.clear();
+    drag.blocked = false;
     for (const auto &[cel, starts] : byCel)
-        if (const int index = d.indexOf(cel); index >= 0)
-            m_movePreview[index] = doc::movedExposures(d.celAt(index).timing(), starts, offset);
+        if (const int index = d.indexOf(cel); index >= 0) {
+            drag.blocked = drag.blocked || !doc::exposuresFit(d.celAt(index).timing(), starts, offset);
+            // Where they would go; blocked, the others stay as they are underneath.
+            doc::Timing preview = d.celAt(index).timing();
+            if (doc::exposuresFit(preview, starts, offset))
+                preview = doc::movedExposures(preview, starts, offset);
+            m_movePreview[index] = std::move(preview);
+        }
     updateScrollBars();
     viewport()->update();
 }
@@ -512,7 +527,7 @@ void TimelineView::dropFrames()
     }
     if (!isSelected(drag.grabbed.cel, drag.grabbed.start))
         return; // Ctrl took it out of the selection: nothing was dragged
-    if (drag.offset != 0) {
+    if (drag.offset != 0 && !drag.blocked) {
         const std::vector<doc::ExposureRef> moving = m_selected;
         for (doc::ExposureRef &ref : m_selected) // where they will be
             ref.start += drag.offset;
@@ -594,6 +609,63 @@ void TimelineView::renameCel(int celIndex)
     m_document->execute(doc::makeSetCelProperties(m_document->document(), id, props));
 }
 
+void TimelineView::copyFrames()
+{
+    // Each selected block, from the first of them.
+    const doc::Document &d = m_document->document();
+    int first = std::numeric_limits<int>::max();
+    for (const doc::ExposureRef &ref : m_selected)
+        first = std::min(first, ref.start);
+    std::vector<doc::ExposureCopy> copied;
+    for (const doc::ExposureRef &ref : m_selected) {
+        const doc::Cel *cel = d.cel(ref.cel);
+        const doc::Exposure *e = cel ? cel->timing().exposureAt(ref.start) : nullptr;
+        if (e && e->start == ref.start)
+            copied.push_back({ref.cel, e->drawing, e->start - first, e->length});
+    }
+    if (!copied.empty())
+        m_copied = std::move(copied);
+}
+
+bool TimelineView::canPasteFrames() const
+{
+    // The same drawings again: a try that allocates nothing.
+    return !m_copied.empty()
+           && doc::makePasteExposures(m_document->documentForCommands(), m_copied, m_document->currentFrame(),
+                                      false);
+}
+
+bool TimelineView::pasteFrames(bool asCopies)
+{
+    const int frame = m_document->currentFrame();
+    auto command = doc::makePasteExposures(m_document->documentForCommands(), m_copied, frame, asCopies);
+    if (!command)
+        return false;
+    m_document->execute(std::move(command));
+    m_selected.clear(); // the pasted ones
+    for (const doc::ExposureCopy &c : m_copied)
+        m_selected.push_back({c.cel, frame + c.start});
+    pruneSelection();
+    viewport()->update();
+    return true;
+}
+
+bool TimelineView::event(QEvent *event)
+{
+    if (event->type() == QEvent::ShortcutOverride) {
+        const auto *key = static_cast<QKeyEvent *>(event);
+        const auto mods = key->modifiers() & ~Qt::KeypadModifier;
+        const bool copy = key->key() == Qt::Key_C && mods == Qt::ControlModifier;
+        const bool paste = key->key() == Qt::Key_V
+                           && (mods == Qt::ControlModifier || mods == (Qt::ControlModifier | Qt::ShiftModifier));
+        if (copy || paste) {
+            event->accept();
+            return true;
+        }
+    }
+    return QAbstractScrollArea::event(event);
+}
+
 void TimelineView::contextMenuEvent(QContextMenuEvent *event)
 {
     const int row = rowAt(event->pos().y());
@@ -604,6 +676,11 @@ void TimelineView::contextMenuEvent(QContextMenuEvent *event)
     const doc::CelId celId = cel.id();
     m_document->setCurrentCel(celId);
     m_document->setCurrentFrame(frame);
+    // A block not selected yet: it alone, as the menu's copy acts on it.
+    if (const doc::Exposure *e = cel.timing().exposureAt(frame); e && !isSelected(celId, e->start)) {
+        m_selected = {{celId, e->start}};
+        viewport()->update();
+    }
 
     QMenu menu(this);
     // A new frame here or just after, the ones after it moved on.
@@ -635,6 +712,19 @@ void TimelineView::contextMenuEvent(QContextMenuEvent *event)
                            m_document->execute(std::make_unique<doc::RemoveDrawingCommand>(celId, id));
                        });
     }
+    menu.addSeparator();
+    QAction *copy = menu.addAction(tr("Copy frames"), this, &TimelineView::copyFrames);
+    copy->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_C));
+    copy->setEnabled(!m_selected.empty());
+    const bool fits = canPasteFrames();
+    QAction *paste = menu.addAction(tr("Paste frames"), this, [this] { pasteFrames(false); });
+    paste->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_V));
+    paste->setToolTip(tr("The same drawings again: a change to one shows on both"));
+    paste->setEnabled(fits);
+    QAction *pasteCopies = menu.addAction(tr("Paste frames as copies"), this, [this] { pasteFrames(true); });
+    pasteCopies->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_V));
+    pasteCopies->setEnabled(fits);
+    menu.setToolTipsVisible(true);
     menu.exec(event->globalPos());
 }
 
@@ -666,6 +756,17 @@ void TimelineView::keyPressEvent(QKeyEvent *event)
     case Qt::Key_Down:
         if (celIndex > 0)
             m_document->setCurrentCel(d.celAt(celIndex - 1).id());
+        break;
+    case Qt::Key_C:
+    case Qt::Key_V:
+        if (!(event->modifiers() & Qt::ControlModifier)) {
+            QAbstractScrollArea::keyPressEvent(event);
+            return;
+        }
+        if (event->key() == Qt::Key_C)
+            copyFrames();
+        else if (!pasteFrames(event->modifiers() & Qt::ShiftModifier))
+            QApplication::beep(); // no room here
         break;
     case Qt::Key_Escape: // a drag dropped, else the selection cleared
         if (m_frameDrag) {

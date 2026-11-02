@@ -90,6 +90,26 @@ Timing movedExposures(const Timing &timing, const std::vector<int> &starts, int 
     return after;
 }
 
+bool exposuresFit(const Timing &timing, const std::vector<int> &starts, int offset)
+{
+    Timing rest = timing; // without the ones that move
+    std::vector<Exposure> moving;
+    for (int start : starts)
+        if (const Exposure *e = timing.exposureAt(start); e && e->start == start)
+            moving.push_back(*e);
+    for (const Exposure &e : moving)
+        rest.clear(e.start, e.length);
+    for (const Exposure &e : moving) {
+        const int start = e.start + offset;
+        if (start < 0)
+            return false;
+        for (const Exposure &other : rest.exposures())
+            if (other.start < start + e.length && start < other.end())
+                return false;
+    }
+    return true;
+}
+
 std::unique_ptr<Command> makeMoveExposures(const Document &doc, const std::vector<ExposureRef> &exposures, int offset)
 {
     if (offset == 0)
@@ -102,6 +122,8 @@ std::unique_ptr<Command> makeMoveExposures(const Document &doc, const std::vecto
         const Cel *cel = doc.cel(celId);
         if (!cel)
             continue;
+        if (!exposuresFit(cel->timing(), starts, offset))
+            return nullptr;
         Timing after = movedExposures(cel->timing(), starts, offset);
         if (after != cel->timing())
             steps.push_back(std::make_unique<SetTimingCommand>(celId, cel->timing(), std::move(after)));

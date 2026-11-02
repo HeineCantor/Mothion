@@ -59,6 +59,7 @@ enum class CommandKind {
     SplitFrame,
     InsertInbetween,
     MoveFrames,
+    PasteFrames,
 };
 
 // An undoable change to a Document.

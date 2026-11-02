@@ -38,6 +38,9 @@ std::unique_ptr<Command> makeRemoveFrames(const Document &doc, CelId cel, int fr
 // first, then put back there over whatever is shown there (to frame 0 at
 // the earliest).
 Timing movedExposures(const Timing &timing, const std::vector<int> &starts, int offset);
+// True if those exposures, moved so, land on frames that are free (or that
+// they leave free themselves), none before frame 0.
+bool exposuresFit(const Timing &timing, const std::vector<int> &starts, int offset);
 
 // An exposure of a cel, by the frame it starts at.
 struct ExposureRef
@@ -47,7 +50,7 @@ struct ExposureRef
     bool operator==(const ExposureRef &) const = default;
 };
 // movedExposures() on each cel the exposures belong to, as one step;
-// nullptr when nothing moves.
+// nullptr when nothing moves or some exposure would not fit (exposuresFit()).
 std::unique_ptr<Command> makeMoveExposures(const Document &doc, const std::vector<ExposureRef> &exposures,
                                            int offset);
 
