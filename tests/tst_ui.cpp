@@ -843,6 +843,12 @@ private slots:
         click(2, Qt::ControlModifier); // and 2 out again
         QCOMPARE(panel.selectedLayers(), QList<doc::LayerId>({id(0), id(1), id(3)}));
 
+        // The drag preview: the three rows as they look, stacked.
+        const QPixmap preview = panel.dragPreview();
+        const int rowHeight = list->visualItemRect(list->item(0)).height();
+        QCOMPARE(preview.deviceIndependentSize().toSize().height(), 3 * rowHeight);
+        QVERIFY(preview.toImage().pixelColor(preview.width() / 2, 2).alpha() < 255); // see-through
+
         panel.findChild<QSpinBox *>()->setValue(40); // opacity for all three
         for (int i : {0, 1, 3})
             QCOMPARE(d.layerAt(i).properties().opacity, 0.4f);
@@ -866,6 +872,26 @@ private slots:
         QCOMPARE(d.indexOf(mid), 0);
         QCOMPARE(d.indexOf(e), 3);
         QCOMPARE(panel.selectedLayers().size(), 3); // still selected after the rebuild
+
+        // Dragged to the top (row 0): the three keep their order, above the rest.
+        panel.moveSelectedToRow(0);
+        QCoreApplication::processEvents();
+        QCOMPARE(d.indexOf(c), 4);
+        QCOMPARE(d.indexOf(b), 3);
+        QCOMPARE(d.indexOf(a), 2);
+        QCOMPARE(d.indexOf(e), 1);
+        QCOMPARE(d.indexOf(mid), 0);
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo move layer"));
+        controller.undo(); // one step
+        QCoreApplication::processEvents();
+        QCOMPARE(d.indexOf(a), 1);
+        QCOMPARE(d.indexOf(c), 4);
+        panel.moveSelectedToRow(list->count() - 1); // onto the paper's row: to the bottom
+        QCoreApplication::processEvents();
+        QCOMPARE(d.indexOf(a), 0);
+        QCOMPARE(d.indexOf(b), 1);
+        QCOMPARE(d.indexOf(c), 2);
+        QCOMPARE(panel.selectedLayers().size(), 3);
 
         QTest::mouseClick(button(QStringLiteral("Delete the selected layers")), Qt::LeftButton);
         QCoreApplication::processEvents();

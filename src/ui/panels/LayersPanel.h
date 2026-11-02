@@ -21,6 +21,7 @@ namespace mothion::ui {
 // The layer stack of the document, top layer first, with the paper at the
 // bottom. Selecting a row makes it the current layer; Ctrl+click adds or
 // takes away a layer, Shift+click selects a range, as in a file manager.
+// Dragging rows moves the selected layers to where they are dropped.
 // The header edits the blend mode and opacity of the selected layers,
 // delete and the arrows act on all of them; each row toggles visibility
 // and lock; double-click renames. Every edit is one undoable command.
@@ -33,6 +34,15 @@ public:
 
     // The selected layers, bottom first; at least the current one.
     QList<doc::LayerId> selectedLayers() const;
+    // Moves the selected layers, in their order, before list row `row`
+    // (rows are top first; the paper's row = to the bottom). One undo step.
+    void moveSelectedToRow(int row);
+    // What follows the pen while rows are dragged: the selected rows as they
+    // look, a little transparent.
+    QPixmap dragPreview() const;
+
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
     void rebuildList();      // structure changed: recreate the rows

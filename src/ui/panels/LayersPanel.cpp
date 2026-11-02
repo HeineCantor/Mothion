@@ -7,11 +7,15 @@
 #include "ui/IconFactory.h"
 
 #include <QComboBox>
+#include <QDrag>
+#include <QDropEvent>
+#include <QGraphicsOpacityEffect>
 #include <QHBoxLayout>
 #include <QInputDialog>
 #include <QLabel>
 #include <QListWidget>
 #include <QPainter>
+#include <QPointer>
 #include <QSignalBlocker>
 #include <QSlider>
 #include <QSpinBox>
@@ -20,6 +24,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 
 namespace mothion::ui {
 
@@ -94,6 +99,59 @@ QToolButton *actionButton(IconId id, const QString &tip, QWidget *parent)
     return b;
 }
 
+constexpr double kDragPreviewOpacity = 0.75; // the rows following the pen
+constexpr double kDraggedRowOpacity = 0.4;   // the rows left in the list meanwhile
+
+// The rows are widgets laid over empty items, which Qt's own drag preview
+// would draw (blank): the drag starts here instead, with a picture of them.
+class LayerList : public QListWidget
+{
+public:
+    LayerList(std::function<QPixmap()> preview, QWidget *parent)
+        : QListWidget(parent)
+        , m_preview(std::move(preview))
+    {
+    }
+
+protected:
+    void startDrag(Qt::DropActions actions) override
+    {
+        const QModelIndexList indexes = selectedIndexes();
+        if (indexes.isEmpty())
+            return;
+        auto *drag = new QDrag(this);
+        drag->setMimeData(model()->mimeData(indexes)); // what the view accepts as a drop
+        const QPixmap preview = m_preview();
+        drag->setPixmap(preview);
+        // Held where the pen is, from the top of the topmost row.
+        int top = visualRect(indexes.first()).top();
+        for (const QModelIndex &i : indexes)
+            top = std::min(top, visualRect(i).top());
+        const QPoint grab = viewport()->mapFromGlobal(QCursor::pos()) - QPoint(0, top);
+        const QSize size = preview.deviceIndependentSize().toSize();
+        drag->setHotSpot(QPoint(std::clamp(grab.x(), 0, size.width() - 1), std::clamp(grab.y(), 0, size.height() - 1)));
+
+        // The rows that go are faded where they were until the drop. A drop
+        // rebuilds the rows (maybe before exec() returns): only those still there.
+        QList<QPointer<QWidget>> faded;
+        for (const QModelIndex &i : indexes) {
+            if (QWidget *row = indexWidget(i)) {
+                auto *effect = new QGraphicsOpacityEffect(row);
+                effect->setOpacity(kDraggedRowOpacity);
+                row->setGraphicsEffect(effect);
+                faded << row;
+            }
+        }
+        drag->exec(actions, Qt::MoveAction);
+        for (const QPointer<QWidget> &row : faded)
+            if (row)
+                row->setGraphicsEffect(nullptr);
+    }
+
+private:
+    std::function<QPixmap()> m_preview;
+};
+
 } // namespace
 
 LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
@@ -102,7 +160,7 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     , m_blend(new QComboBox(this))
     , m_opacity(new QSlider(Qt::Horizontal, this))
     , m_opacityValue(new QSpinBox(this))
-    , m_list(new QListWidget(this))
+    , m_list(new LayerList([this] { return dragPreview(); }, this))
     , m_add(actionButton(IconId::Add, tr("New layer"), this))
     , m_remove(actionButton(IconId::Delete, tr("Delete layer"), this))
     , m_up(actionButton(IconId::ArrowUp, tr("Move up"), this))
@@ -117,6 +175,12 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     m_opacityValue->setKeyboardTracking(false);
     m_list->setFrameShape(QFrame::NoFrame);
     m_list->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    // Rows are dragged with Qt's drag and drop, but the drop is ours (see
+    // eventFilter): the layers move in the document and the rows are rebuilt.
+    m_list->setDragDropMode(QAbstractItemView::InternalMove);
+    m_list->setDefaultDropAction(Qt::MoveAction);
+    m_list->setDropIndicatorShown(true);
+    m_list->viewport()->installEventFilter(this);
     m_remove->setToolTip(tr("Delete the selected layers"));
     m_up->setToolTip(tr("Move the selected layers up"));
     m_down->setToolTip(tr("Move the selected layers down"));
@@ -222,6 +286,37 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     rebuildList();
 }
 
+QPixmap LayersPanel::dragPreview() const
+{
+    // The selected rows as shown, top first, stacked, on the selection color.
+    QList<QPixmap> rows;
+    int width = 0, height = 0;
+    for (int r = 0; r < m_list->count(); ++r) {
+        QListWidgetItem *item = m_list->item(r);
+        QWidget *row = m_list->itemWidget(item);
+        if (!item->isSelected() || !row)
+            continue;
+        rows << row->grab();
+        width = std::max(width, row->width());
+        height += row->height();
+    }
+    if (rows.isEmpty())
+        return {};
+    const qreal ratio = devicePixelRatioF();
+    QPixmap preview(QSize(width, height) * ratio);
+    preview.setDevicePixelRatio(ratio);
+    preview.fill(Qt::transparent);
+    QPainter p(&preview);
+    p.setOpacity(kDragPreviewOpacity);
+    p.fillRect(QRect(0, 0, width, height), palette().color(QPalette::Highlight));
+    int y = 0;
+    for (const QPixmap &row : rows) {
+        p.drawPixmap(0, y, row);
+        y += row.deviceIndependentSize().toSize().height();
+    }
+    return preview;
+}
+
 QList<doc::LayerId> LayersPanel::selectedLayers() const
 {
     const doc::Document &d = m_document->document();
@@ -267,6 +362,65 @@ void LayersPanel::removeSelected()
         steps.push_back(std::make_unique<doc::RemoveLayerCommand>(id));
     m_selected.clear();
     m_document->execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::RemoveLayer, std::move(steps)));
+}
+
+bool LayersPanel::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched == m_list->viewport() && event->type() == QEvent::Drop) {
+        auto *drop = static_cast<QDropEvent *>(event);
+        if (drop->source() == m_list) {
+            const QPoint at = drop->position().toPoint();
+            const QModelIndex index = m_list->indexAt(at);
+            // Before the row under the pen, or after it in its lower half.
+            int row = index.isValid() ? index.row() : m_list->count();
+            if (index.isValid() && at.y() > m_list->visualRect(index).center().y())
+                ++row;
+            // Ignored for Qt, so the view itself neither moves nor removes rows.
+            drop->setDropAction(Qt::IgnoreAction);
+            drop->accept();
+            moveSelectedToRow(row);
+            return true;
+        }
+    }
+    return QWidget::eventFilter(watched, event);
+}
+
+void LayersPanel::moveSelectedToRow(int row)
+{
+    const doc::Document &d = m_document->document();
+    const int n = d.layerCount();
+    const QList<doc::LayerId> moving = selectedLayers();
+    // The new stack, top first as the rows: the others, then the moving ones
+    // put in before `row` (counted without themselves).
+    std::vector<doc::LayerId> rows;
+    int insertAt = std::clamp(row, 0, n);
+    for (int r = 0; r < n; ++r) {
+        const doc::LayerId id = d.layerAt(n - 1 - r).id();
+        if (moving.contains(id)) {
+            if (r < row)
+                --insertAt;
+        } else {
+            rows.push_back(id);
+        }
+    }
+    std::vector<doc::LayerId> top(moving.rbegin(), moving.rend()); // top first too
+    rows.insert(rows.begin() + std::clamp(insertAt, 0, int(rows.size())), top.begin(), top.end());
+
+    // Moves that turn the stack into it, bottom up.
+    std::vector<doc::LayerId> order;
+    for (int i = 0; i < n; ++i)
+        order.push_back(d.layerAt(i).id());
+    std::vector<std::unique_ptr<doc::Command>> steps;
+    for (int i = 0; i < n; ++i) {
+        const doc::LayerId want = rows[std::size_t(n - 1 - i)];
+        if (order[std::size_t(i)] == want)
+            continue;
+        steps.push_back(std::make_unique<doc::MoveLayerCommand>(want, i));
+        order.erase(std::find(order.begin(), order.end(), want));
+        order.insert(order.begin() + i, want);
+    }
+    if (!steps.empty())
+        m_document->execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::MoveLayer, std::move(steps)));
 }
 
 void LayersPanel::moveSelected(int direction)
