@@ -256,6 +256,33 @@ private slots:
         QVERIFY(std::abs(bent.deformed[std::size_t(pinned.pins()[std::size_t(c)].vertex)].y - 50.0) < 1e-6);
     }
 
+    // A local drag bends the shape as it is now, not back from its rest:
+    // a tiny move after an earlier bend moves nothing much.
+    void localDragIsRelativeToTheCurrentShape()
+    {
+        Bitmask m(0, 0, 220, 60);
+        for (int y = 20; y < 40; ++y)
+            for (int x = 10; x < 210; ++x)
+                m.set(x, y, true); // a long bar
+        PuppetRig rig(m, {2, 3});
+        QVERIFY(rig.beginLocalDrag({180, 30}, 60)); // bend the right end down
+        rig.localDragTo({180, 70}, 40);
+        rig.endLocalDrag();
+
+        const auto &mesh = rig.meshes()[0];
+        const std::vector<Vec2> bent = mesh.deformed;
+        const auto grabbed = rig.vertexAt({150, 40});
+        QVERIFY(grabbed);
+        const Vec2 at = rig.position(*grabbed);
+        QVERIFY(rig.beginLocalDrag({*grabbed}, at, 80)); // a disc over the bent part
+        rig.localDragTo(at + Vec2{0.5, 0}, 40);
+        rig.endLocalDrag();
+        double most = 0.0;
+        for (std::size_t v = 0; v < bent.size(); ++v)
+            most = std::max(most, length(mesh.deformed[v] - bent[v]));
+        QVERIFY2(most < 1.0, qPrintable(QStringLiteral("jumped by %1 px").arg(most)));
+    }
+
     void warpDrawsTheShapeWhereItMoved()
     {
         Bitmask m(0, 0, 40, 40);

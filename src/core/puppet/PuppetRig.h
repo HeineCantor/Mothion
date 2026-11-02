@@ -74,7 +74,9 @@ public:
 
     // Local warp: the whole shape held except a disc of `radius` around each
     // grabbed vertex; they follow the pen together, the discs bend with them
-    // (ARAP), pins stay put unless grabbed. Starts a drag with the pen at `at`.
+    // (ARAP) from the shape as it is now, not from its rest (a small move
+    // bends a little, whatever was done before); pins stay put unless
+    // grabbed. Starts a drag with the pen at `at`.
     bool beginLocalDrag(const std::vector<VertexRef> &grabbed, Vec2 at, double radius);
     // The same with the vertex under `at`; false if no mesh is there.
     bool beginLocalDrag(Vec2 at, double radius);
@@ -133,6 +135,8 @@ private:
         struct Part // one mesh with grabbed vertices
         {
             int mesh = -1;
+            // Solves from the shape at the start of the drag, as its rest.
+            std::unique_ptr<ArapDeformer> deformer;
             std::vector<Vec2> targets; // of the mesh's handles, set at the start
             std::vector<Grabbed> grabbed;
         };

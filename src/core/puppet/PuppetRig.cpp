@@ -269,7 +269,11 @@ bool PuppetRig::beginLocalDrag(const std::vector<VertexRef> &grabbed, Vec2 at, d
             }
             part.grabbed.push_back({g, std::size_t(slot - handles.begin()), mesh.deformed[std::size_t(g)]});
         }
-        mesh.deformer->setHandles(handles);
+        TriMesh now; // the shape as it is: what the drag bends from
+        now.vertices = mesh.deformed;
+        now.triangles = mesh.rest.triangles;
+        part.deformer = std::make_unique<ArapDeformer>(now);
+        part.deformer->setHandles(handles);
         drag.parts.push_back(std::move(part));
     }
     if (drag.parts.empty())
@@ -292,22 +296,13 @@ void PuppetRig::localDragTo(Vec2 to, int iterations)
                     p.position = target;
         }
         Mesh &mesh = m_meshes[std::size_t(part.mesh)];
-        mesh.deformer->solve(mesh.deformed, part.targets, iterations);
+        part.deformer->solve(mesh.deformed, part.targets, iterations);
     }
 }
 
 void PuppetRig::endLocalDrag()
 {
-    if (!m_local)
-        return;
-    const LocalDrag drag = std::move(*m_local);
-    m_local.reset();
-    for (const LocalDrag::Part &part : drag.parts) {
-        std::vector<int> handles;
-        std::vector<Vec2> targets;
-        pinHandles(part.mesh, handles, targets);
-        m_meshes[std::size_t(part.mesh)].deformer->setHandles(handles);
-    }
+    m_local.reset(); // its own deformers go; the meshes' kept their pin handles
 }
 
 std::optional<std::pair<int, Vec2>> PuppetRig::restPointUnder(Vec2 at) const
