@@ -197,6 +197,19 @@ bool DocumentController::addLayer(bool onTop)
     return true;
 }
 
+void DocumentController::insertFrame(doc::CelId cel, int frame, bool after)
+{
+    if (!m_document->cel(cel))
+        return;
+    const int at = std::max(0, frame + (after ? 1 : 0));
+    const std::string layerName = m_currentLayerName.empty() ? tr("Layer 1").toStdString() : m_currentLayerName;
+    doc::NewDrawing made = doc::makeInbetween(*m_document, cel, at, layerName,
+                                              after ? doc::CommandKind::InsertInbetween : doc::CommandKind::AddDrawing);
+    execute(std::move(made.command));
+    setCurrentCel(cel);
+    setCurrentFrame(at);
+}
+
 bool DocumentController::changeCurrentHold(int delta)
 {
     const doc::Cel *cel = m_document->cel(m_currentCel);

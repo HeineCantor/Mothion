@@ -475,11 +475,8 @@ void TimelineView::contextMenuEvent(QContextMenuEvent *event)
     m_document->setCurrentFrame(frame);
 
     QMenu menu(this);
-    menu.addAction(tr("New frame"), this, [this, celId, frame] {
-        m_document->execute(
-            doc::makeNewDrawing(m_document->documentForCommands(), celId, frame, 1, tr("Layer 1").toStdString())
-                .command);
-    });
+    // A new frame here or just after, the ones after it moved on.
+    menu.addAction(tr("New frame"), this, [this, celId, frame] { m_document->insertFrame(celId, frame, false); });
     const doc::Drawing *drawing = cel.drawingAt(frame);
     QAction *clear = menu.addAction(tr("Clear frame"), this, [this, celId, frame] {
         m_document->execute(doc::makeSetExposure(m_document->document(), celId, frame, 1, doc::kNoId));
@@ -491,11 +488,7 @@ void TimelineView::contextMenuEvent(QContextMenuEvent *event)
         m_document->execute(doc::makeSplitDrawing(m_document->documentForCommands(), celId, frame).command);
     });
     split->setEnabled(hold && hold->start < frame);
-    menu.addAction(tr("Insert inbetween"), this, [this, celId, frame] {
-        m_document->execute(
-            doc::makeInbetween(m_document->documentForCommands(), celId, frame, tr("Layer 1").toStdString())
-                .command);
-    });
+    menu.addAction(tr("Insert inbetween"), this, [this, celId, frame] { m_document->insertFrame(celId, frame, true); });
     menu.addSeparator();
     menu.addAction(tr("Insert empty frame"), this, [this, celId, frame] {
         m_document->execute(doc::makeInsertEmptyFrames(m_document->document(), celId, frame, 1));

@@ -1,7 +1,6 @@
 #include "ui/panels/timeline/TimelinePanel.h"
 
 #include "core/document/commands/CelCommands.h"
-#include "core/document/commands/DrawingCommands.h"
 #include "document/DocumentController.h"
 #include "tools/ToolState.h"
 #include "ui/IconFactory.h"
@@ -135,7 +134,7 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
     frameLabel->setMinimumWidth(150);
 
     auto *newDrawing = new QPushButton(tr("New frame"), this);
-    newDrawing->setToolTip(tr("Create an empty frame at this point of the current cel"));
+    newDrawing->setToolTip(tr("Put an empty frame at this point of the current cel; the frames after it move one place on"));
 
     // Onion skin: the button turns it on, its arrow opens the settings.
     auto *onion = new QToolButton(this);
@@ -198,9 +197,7 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
     connect(next, &QToolButton::clicked, m_document,
             [this] { m_document->setCurrentFrame(m_document->currentFrame() + 1); });
     connect(newDrawing, &QPushButton::clicked, m_document, [this] {
-        m_document->execute(doc::makeNewDrawing(m_document->documentForCommands(), m_document->currentCel(),
-                                                m_document->currentFrame(), 1, tr("Layer 1").toStdString())
-                                .command);
+        m_document->insertFrame(m_document->currentCel(), m_document->currentFrame(), false);
     });
     connect(zoom, &QSlider::valueChanged, m_view, &TimelineView::setFrameWidth);
     connect(m_view, &TimelineView::frameWidthChanged, zoom, &QSlider::setValue);

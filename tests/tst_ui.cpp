@@ -1450,8 +1450,9 @@ private slots:
         QCOMPARE(t.lastFrame(), 4);
     }
 
-    // Split frame cuts a hold in two independent frames; insert inbetween
-    // moves the cel's frames from a point one place on and puts a new one there.
+    // Split frame cuts a hold in two independent frames; new frame and
+    // insert inbetween move the cel's frames from a point one place on and
+    // put a new one there.
     void splitFrameAndInsertInbetween()
     {
         document::DocumentController controller;
@@ -1491,6 +1492,27 @@ private slots:
         controller.undo();
         QCOMPARE(t.lastFrame(), 4);
         QCOMPARE(t.drawingAt(1), a.id);
+
+        // New frame puts one at the point, Insert inbetween right after it;
+        // either way the ones after move on and the new one is current.
+        controller.setCurrentFrame(2);
+        controller.insertFrame(cel, 2, false);
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo new frame"));
+        const doc::DrawingId made = t.drawingAt(2);
+        QVERIFY(made != a.id && made != split.id);
+        QCOMPARE(t.drawingAt(3), split.id); // moved on
+        QCOMPARE(t.lastFrame(), 5);
+        QCOMPARE(controller.currentFrame(), 2);
+        QCOMPARE(controller.currentDrawingId(), made);
+        controller.insertFrame(cel, 0, true);
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo insert inbetween"));
+        QCOMPARE(t.drawingAt(0), a.id);
+        const doc::DrawingId after = t.drawingAt(1);
+        QVERIFY(after != a.id);
+        QCOMPARE(t.drawingAt(2), a.id); // the rest of the hold, cut around it
+        QCOMPARE(t.drawingAt(3), made);
+        QCOMPARE(controller.currentFrame(), 1);
+        QCOMPARE(controller.currentDrawingId(), after);
     }
 
     // Frames selected in the Layers panel, of any cel, go together.

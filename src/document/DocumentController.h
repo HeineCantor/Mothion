@@ -70,6 +70,11 @@ public:
     // (on top if `onTop`), named "Layer N" with the first free N; it becomes
     // current. One undo step; false on an empty frame.
     bool addLayer(bool onTop = false);
+    // Puts a new frame (a drawing with one empty layer, named like the layer
+    // worked on) at `frame` of `cel`, the frames from there on moving one
+    // place to the right, and makes it current. "New frame" puts it at the
+    // current point, "Insert inbetween" right after it (`after`).
+    void insertFrame(doc::CelId cel, int frame, bool after);
     // Lengthens (delta > 0) or shortens the hold of the frame shown at the
     // current point of the current cel, by `delta` frames and to at least
     // one; the frames after it move along. The current point stays on that

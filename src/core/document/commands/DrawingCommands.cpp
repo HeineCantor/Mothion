@@ -127,7 +127,7 @@ NewDrawing makeSplitDrawing(Document &doc, CelId celId, int frame)
     return {std::make_unique<GroupCommand>(CommandKind::SplitFrame, std::move(steps)), id, top};
 }
 
-NewDrawing makeInbetween(Document &doc, CelId celId, int frame, std::string layerName)
+NewDrawing makeInbetween(Document &doc, CelId celId, int frame, std::string layerName, CommandKind kind)
 {
     const Cel *cel = doc.cel(celId);
     if (!cel || frame < 0)
@@ -142,7 +142,7 @@ NewDrawing makeInbetween(Document &doc, CelId celId, int frame, std::string laye
     steps.push_back(std::make_unique<AddDrawingCommand>(
         celId, Drawing{id, cel->nextDrawingName(), {Layer{layer, {std::move(layerName)}, {}}}}));
     steps.push_back(std::make_unique<SetTimingCommand>(celId, cel->timing(), std::move(after)));
-    return {std::make_unique<GroupCommand>(CommandKind::InsertInbetween, std::move(steps)), id, layer};
+    return {std::make_unique<GroupCommand>(kind, std::move(steps)), id, layer};
 }
 
 } // namespace mothion::doc
