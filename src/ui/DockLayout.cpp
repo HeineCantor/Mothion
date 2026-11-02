@@ -11,7 +11,7 @@ namespace mothion::ui {
 namespace {
 
 // Bump when panels are added/renamed so stale saved layouts are ignored.
-constexpr int kLayoutVersion = 2;
+constexpr int kLayoutVersion = 3;
 
 const char *kGeometryKey = "layout/geometry";
 const char *kStateKey = "layout/state";
@@ -39,6 +39,7 @@ DockLayout::DockLayout(QMainWindow *window, const WorkspacePanels &panels)
                                panels.toolProperties);
     m_brushSliders = addDock(QStringLiteral("dock.brushSliders"), tr("Size and opacity"),
                              panels.brushSliders);
+    m_brushSize = addDock(QStringLiteral("dock.brushSize"), tr("Brush size"), panels.brushSize);
     m_colorWheel = addDock(QStringLiteral("dock.colorWheel"), tr("Color wheel"), panels.colorWheel);
     m_colorSet = addDock(QStringLiteral("dock.colorSet"), tr("Color set"), panels.colorSet);
     m_navigator = addDock(QStringLiteral("dock.navigator"), tr("Navigator"), panels.navigator);
@@ -63,15 +64,17 @@ void DockLayout::applyDefault()
         m_window->removeDockWidget(dock); // also un-tabifies
     }
 
-    // Left, three columns:  tools | sub tool+properties / color wheel / color set | sliders.
+    // Left, three columns:  tools | sub tool+properties / color wheel / brush size+color set | sliders.
     // Order matters: the columns are split first, then only the middle one is
     // split vertically, so the tool palette and the sliders keep the full height.
     m_window->addDockWidget(Qt::LeftDockWidgetArea, m_tools);
     m_window->splitDockWidget(m_tools, m_subTools, Qt::Horizontal);
     m_window->splitDockWidget(m_subTools, m_brushSliders, Qt::Horizontal);
     m_window->splitDockWidget(m_subTools, m_colorWheel, Qt::Vertical);
-    m_window->splitDockWidget(m_colorWheel, m_colorSet, Qt::Vertical);
+    m_window->splitDockWidget(m_colorWheel, m_brushSize, Qt::Vertical);
+    // The first dock of a tab group is its front tab.
     m_window->tabifyDockWidget(m_subTools, m_toolProperties);
+    m_window->tabifyDockWidget(m_brushSize, m_colorSet);
     // Right: navigator on top, layers below.
     m_window->addDockWidget(Qt::RightDockWidgetArea, m_navigator);
     m_window->splitDockWidget(m_navigator, m_layers, Qt::Vertical);
@@ -91,7 +94,7 @@ void DockLayout::applyDefault()
         m_defaultSizesPending = false;
         m_window->resizeDocks({m_tools, m_subTools, m_brushSliders, m_navigator}, {48, 240, 52, 280},
                               Qt::Horizontal);
-        m_window->resizeDocks({m_subTools, m_colorWheel, m_colorSet}, {330, 270, 150}, Qt::Vertical);
+        m_window->resizeDocks({m_subTools, m_colorWheel, m_brushSize}, {330, 270, 150}, Qt::Vertical);
         m_window->resizeDocks({m_navigator, m_layers, m_timeline}, {300, 400, 210}, Qt::Vertical);
     });
 }

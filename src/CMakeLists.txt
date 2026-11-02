@@ -92,6 +92,7 @@ qt_add_library(mothion_gui STATIC
     ui/panels/SubToolPanel.h ui/panels/SubToolPanel.cpp
     ui/panels/VerticalValueSlider.h ui/panels/VerticalValueSlider.cpp
     ui/panels/BrushSlidersPanel.h ui/panels/BrushSlidersPanel.cpp
+    ui/panels/BrushSizePanel.h ui/panels/BrushSizePanel.cpp
     ui/panels/ColorWheel.h ui/panels/ColorWheel.cpp
     ui/panels/ColorWheelPanel.h ui/panels/ColorWheelPanel.cpp
     ui/panels/ColorSetPanel.h ui/panels/ColorSetPanel.cpp

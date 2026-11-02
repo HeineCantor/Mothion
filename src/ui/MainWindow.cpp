@@ -12,6 +12,7 @@
 #include "ui/IconFactory.h"
 #include "ui/PanelDock.h"
 #include "ui/Theme.h"
+#include "ui/panels/BrushSizePanel.h"
 #include "ui/panels/BrushSlidersPanel.h"
 #include "ui/panels/ColorSetPanel.h"
 #include "ui/panels/ColorWheelPanel.h"
@@ -64,6 +65,7 @@ MainWindow::MainWindow(QWidget *parent)
     panels.subTools = new SubToolPanel(m_toolState, m_brushes, this);
     panels.toolProperties = properties;
     panels.brushSliders = new BrushSlidersPanel(m_toolState, this);
+    panels.brushSize = new BrushSizePanel(m_toolState, this);
     panels.colorWheel = new ColorWheelPanel(m_toolState, this);
     panels.colorSet = new ColorSetPanel(m_toolState, this);
     panels.navigator = new NavigatorPanel(m_canvas, this);

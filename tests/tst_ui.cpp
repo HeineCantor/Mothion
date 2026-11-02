@@ -11,6 +11,7 @@
 #include "ui/ExportDialog.h"
 #include "ui/MainWindow.h"
 #include "ui/PanelDock.h"
+#include "ui/panels/BrushSizePanel.h"
 #include "ui/SplashScreen.h"
 #include "ui/panels/ToolPalettePanel.h"
 #include "ui/panels/SubToolPanel.h"
@@ -155,6 +156,52 @@ private slots:
         QTRY_VERIFY(spin->hasFocus());
         QTest::keyClick(spin, Qt::Key_Tab);
         QVERIFY(!canvas->hasFocus());
+    }
+
+    // A click on a size of the palette sets the active tool's size; the grid
+    // wraps to the panel's width and scrolls when the panel is short.
+    void brushSizePaletteSetsTheSize()
+    {
+        tools::ToolState state;
+        ui::BrushSizePanel panel(&state);
+        panel.resize(250, 120);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        ui::BrushSizeGrid *grid = panel.grid();
+        QCOMPARE(grid->width(), grid->parentWidget()->width()); // the viewport: the width less the scroll bar
+        QVERIFY(grid->height() > panel.height()); // the rest scrolls
+        QCOMPARE(grid->cellRect(grid->width() / 40).top(), grid->cellRect(0).bottom() + 1); // 40 px cells
+
+        state.setActiveTool(tools::ToolId::Brush);
+        const int index = int(ui::BrushSizeGrid::presets().indexOf(25));
+        QTest::mouseClick(grid, Qt::LeftButton, {}, grid->cellRect(index).center());
+        QCOMPARE(state.settings(tools::ToolId::Brush).size, 25.0);
+        QCOMPARE(grid->presetAt(grid->cellRect(index).center()), index);
+
+        // Only the chosen cell is highlighted, also among the big dots
+        // (whose numbers have a backing drawn in the cell's color).
+        const int big = int(ui::BrushSizeGrid::presets().indexOf(60));
+        QTest::mouseClick(grid, Qt::LeftButton, {}, grid->cellRect(big).center());
+        const QImage image = grid->grab().toImage();
+        const QRgb highlight = grid->palette().color(QPalette::Highlight).rgb();
+        QCOMPARE(image.pixel(grid->cellRect(big).topLeft() + QPoint(2, 2)), highlight);
+        QVERIFY(image.pixel(grid->cellRect(big + 1).topLeft() + QPoint(2, 2)) != highlight);
+
+        state.setActiveTool(tools::ToolId::Move); // not a paint tool: no size to set
+        QTest::mouseClick(grid, Qt::LeftButton, {}, grid->cellRect(0).center());
+        QCOMPARE(state.settings(tools::ToolId::Brush).size, 60.0);
+    }
+
+    // The palette is a dock of the workspace, the front tab of its group.
+    void brushSizePaletteIsInTheWorkspace()
+    {
+        ui::MainWindow window;
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *dock = window.findChild<ui::PanelDock *>(QStringLiteral("dock.brushSize"));
+        QVERIFY(dock);
+        QTRY_VERIFY(!dock->visibleRegion().isEmpty());
+        QVERIFY(window.findChild<ui::PanelDock *>(QStringLiteral("dock.colorSet"))->visibleRegion().isEmpty());
     }
 
     void tiltCheckboxFollowsToolState()

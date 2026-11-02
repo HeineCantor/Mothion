@@ -17,6 +17,7 @@ struct WorkspacePanels
     QWidget *subTools = nullptr;
     QWidget *toolProperties = nullptr;
     QWidget *brushSliders = nullptr;
+    QWidget *brushSize = nullptr;
     QWidget *colorWheel = nullptr;
     QWidget *colorSet = nullptr;
     QWidget *navigator = nullptr;
@@ -57,6 +58,7 @@ private:
     PanelDock *m_subTools = nullptr;
     PanelDock *m_toolProperties = nullptr;
     PanelDock *m_brushSliders = nullptr;
+    PanelDock *m_brushSize = nullptr;
     PanelDock *m_colorWheel = nullptr;
     PanelDock *m_colorSet = nullptr;
     PanelDock *m_navigator = nullptr;
