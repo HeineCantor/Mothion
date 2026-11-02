@@ -1314,9 +1314,10 @@ private slots:
         QTRY_COMPARE(window.frameCount(), 4);
     }
 
-    // , and - step the timeline one frame back and on, from the canvas or a
-    // panel; in the puppet's radius mode - stays the radius's on the canvas.
-    void commaAndMinusStepTheFrames()
+    // , and . step the timeline one frame back and on, from the canvas or a
+    // panel; + and - change the current frame's hold, but in the puppet's
+    // radius mode they stay the radius's on the canvas.
+    void commaAndPeriodStepTheFrames()
     {
         ui::MainWindow window;
         window.show();
@@ -1327,8 +1328,8 @@ private slots:
         auto *state = window.findChild<tools::ToolState *>();
         canvas->setFocus();
         QCOMPARE(controller->currentFrame(), 0);
-        QTest::keyClick(canvas, Qt::Key_Minus);
-        QTest::keyClick(canvas, Qt::Key_Minus);
+        QTest::keyClick(canvas, Qt::Key_Period);
+        QTest::keyClick(canvas, Qt::Key_Period);
         QCOMPARE(controller->currentFrame(), 2);
         QTest::keyClick(canvas, Qt::Key_Comma);
         QCOMPARE(controller->currentFrame(), 1);
@@ -1337,10 +1338,10 @@ private slots:
         QCOMPARE(controller->currentFrame(), 0);
         auto *layers = window.findChild<ui::LayersPanel *>()->findChild<QTreeWidget *>();
         layers->setFocus(); // from a panel too
-        QTest::keyClick(layers, Qt::Key_Minus);
+        QTest::keyClick(layers, Qt::Key_Period);
         QCOMPARE(controller->currentFrame(), 1);
         controller->setCurrentFrame(controller->document().frameCount() - 1);
-        QTest::keyClick(layers, Qt::Key_Minus); // and at the end
+        QTest::keyClick(layers, Qt::Key_Period); // and at the end
         QCOMPARE(controller->currentFrame(), controller->document().frameCount() - 1);
 
         controller->setCurrentFrame(3);
@@ -1355,6 +1356,33 @@ private slots:
         QCOMPARE(controller->currentFrame(), 3);          // not the frame
         QTest::keyClick(canvas, Qt::Key_Comma);
         QCOMPARE(controller->currentFrame(), 2); // , still steps
+
+        // + and - lengthen and shorten the frame shown at the current point,
+        // the ones after it moving along; the point stays on that frame.
+        state->setActiveTool(tools::ToolId::Brush);
+        doc::Document &d = controller->documentForCommands();
+        const doc::CelId cel = controller->currentCel();
+        doc::NewDrawing a = doc::makeNewDrawing(d, cel, 2, 2, "Line");
+        controller->execute(std::move(a.command));
+        doc::NewDrawing b = doc::makeNewDrawing(d, cel, 4, 1, "Line");
+        controller->execute(std::move(b.command));
+        controller->setCurrentFrame(3);
+        canvas->setFocus();
+        QTest::keyClick(canvas, Qt::Key_Plus);
+        const doc::Timing &t = d.cel(cel)->timing();
+        QCOMPARE(t.exposureAt(2)->length, 3);
+        QCOMPARE(t.exposureAt(5)->drawing, b.id); // moved along
+        QTest::keyClick(canvas, Qt::Key_Minus);
+        QTest::keyClick(canvas, Qt::Key_Minus);
+        QCOMPARE(t.exposureAt(2)->length, 1);
+        QCOMPARE(t.exposureAt(3)->drawing, b.id);
+        QCOMPARE(controller->currentFrame(), 2); // still on the shortened frame
+        QCOMPARE(controller->undoText(), QStringLiteral("Undo timing change"));
+        QTest::keyClick(canvas, Qt::Key_Minus); // one frame long already
+        QCOMPARE(t.exposureAt(2)->length, 1);
+        controller->setCurrentFrame(20); // nothing there
+        QTest::keyClick(canvas, Qt::Key_Plus);
+        QCOMPARE(t.lastFrame(), 4);
     }
 
     // The onion skin shows the current layer's drawings of the frames around

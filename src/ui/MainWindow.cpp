@@ -299,7 +299,14 @@ void MainWindow::createMenus()
             std::clamp(m_document->currentFrame() + by, 0, m_document->document().frameCount() - 1));
     };
     animation->addAction(tr("Previous frame"), QKeySequence(Qt::Key_Comma), this, [step] { step(-1); });
-    animation->addAction(tr("Next frame"), QKeySequence(Qt::Key_Minus), this, [step] { step(+1); });
+    animation->addAction(tr("Next frame"), QKeySequence(Qt::Key_Period), this, [step] { step(+1); });
+    animation->addSeparator();
+    // The hold of the frame at the current point, one frame longer or shorter;
+    // the frames after it move along.
+    QAction *longer = animation->addAction(tr("Lengthen frame"), this, [this] { m_document->changeCurrentHold(+1); });
+    longer->setShortcuts({QKeySequence(Qt::Key_Plus), QKeySequence(Qt::KeypadModifier | Qt::Key_Plus)});
+    QAction *shorter = animation->addAction(tr("Shorten frame"), this, [this] { m_document->changeCurrentHold(-1); });
+    shorter->setShortcuts({QKeySequence(Qt::Key_Minus), QKeySequence(Qt::KeypadModifier | Qt::Key_Minus)});
 
     QMenu *window = menuBar()->addMenu(tr("&Window"));
     for (PanelDock *dock : m_dockLayout->docks())

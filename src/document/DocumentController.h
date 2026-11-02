@@ -70,6 +70,11 @@ public:
     // (on top if `onTop`), named "Layer N" with the first free N; it becomes
     // current. One undo step; false on an empty frame.
     bool addLayer(bool onTop = false);
+    // Lengthens (delta > 0) or shortens the hold of the frame shown at the
+    // current point of the current cel, by `delta` frames and to at least
+    // one; the frames after it move along. The current point stays on that
+    // frame. One undo step; false on an empty point or when nothing changes.
+    bool changeCurrentHold(int delta);
     // Puts `image` on a new cel above the current one, named `name`, as one
     // drawing held for the whole scene: centered, scaled down to fit the
     // document if larger. One undo step; the new cel becomes current.

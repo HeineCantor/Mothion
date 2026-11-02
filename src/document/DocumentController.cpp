@@ -7,6 +7,7 @@
 #include "core/document/commands/CelCommands.h"
 #include "core/document/commands/LayerCommands.h"
 #include "core/document/commands/PaintCommand.h"
+#include "core/document/commands/TimingCommands.h"
 
 #include <algorithm>
 #include <functional>
@@ -192,6 +193,23 @@ bool DocumentController::addLayer(bool onTop)
     const doc::LayerId id = command->layerId();
     execute(std::move(command));
     setCurrentLayer(id);
+    return true;
+}
+
+bool DocumentController::changeCurrentHold(int delta)
+{
+    const doc::Cel *cel = m_document->cel(m_currentCel);
+    const doc::Exposure *hold = cel ? cel->timing().exposureAt(m_currentFrame) : nullptr;
+    if (!hold)
+        return false;
+    const doc::Exposure before = *hold;
+    auto command = doc::makeResizeExposure(*m_document, m_currentCel, before.start, std::max(1, before.length + delta));
+    if (!command)
+        return false;
+    execute(std::move(command));
+    const doc::Exposure *after = m_document->cel(m_currentCel)->timing().exposureAt(before.start);
+    if (after && m_currentFrame >= after->end())
+        setCurrentFrame(after->end() - 1);
     return true;
 }
 
