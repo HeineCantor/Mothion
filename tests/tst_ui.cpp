@@ -27,6 +27,7 @@
 #include <QSpinBox>
 #include <QScrollBar>
 #include <QStandardPaths>
+#include <QTabletEvent>
 #include <QTemporaryDir>
 #include <QTest>
 
@@ -261,6 +262,41 @@ private slots:
         other->setFocus();
         QTRY_VERIFY(!canvas->hasFocus());
         QCOMPARE(canvas->cursor().shape(), drawing);
+    }
+
+    // After a click on a panel (say, a brush in the sub tool list), touching
+    // the canvas with the pen brings the keys back to it.
+    void penPressTakesTheFocus()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        QWidget window;
+        auto *canvas = new canvas::CanvasView(&state, &controller, &window);
+        auto *panel = new QLineEdit(&window);
+        panel->move(0, 400);
+        window.resize(400, 450);
+        canvas->resize(400, 380);
+        window.show();
+        window.activateWindow();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+        panel->setFocus();
+        QTRY_VERIFY(panel->hasFocus());
+
+        static const QPointingDevice pen(QStringLiteral("test pen"), 1, QInputDevice::DeviceType::Stylus,
+                                         QPointingDevice::PointerType::Pen,
+                                         QInputDevice::Capability::Position | QInputDevice::Capability::Pressure, 1, 3);
+        const QPointF at(200, 190);
+        QTabletEvent press(QEvent::TabletPress, &pen, at, canvas->mapToGlobal(at), 0.5, 0, 0, 0, 0, 0, Qt::NoModifier,
+                           Qt::LeftButton, Qt::LeftButton);
+        QApplication::sendEvent(canvas, &press);
+        QTabletEvent release(QEvent::TabletRelease, &pen, at, canvas->mapToGlobal(at), 0, 0, 0, 0, 0, 0,
+                             Qt::NoModifier, Qt::LeftButton, Qt::NoButton);
+        QApplication::sendEvent(canvas, &release);
+        QTRY_VERIFY(canvas->hasFocus());
+
+        QTest::keyPress(canvas, Qt::Key_Tab);
+        QCOMPARE(canvas->cursor().shape(), Qt::OpenHandCursor);
+        QTest::keyRelease(canvas, Qt::Key_Tab);
     }
 
     // Clear empties the drawing at the current layer and frame in one undo

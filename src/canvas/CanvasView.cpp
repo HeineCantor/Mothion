@@ -249,6 +249,10 @@ void CanvasView::tabletEvent(QTabletEvent *event)
     // Accepting is what stops Qt from also synthesizing a mouse event
     // (and those synthesized mouse events may be compressed).
     event->accept();
+    // An accepted pen press is not a click to Qt: take the focus ourselves,
+    // or keys like Space and Tab keep going to the panel clicked last.
+    if (event->type() == QEvent::TabletPress && !hasFocus())
+        setFocus(Qt::MouseFocusReason);
     noteDevice(event->pointingDevice());
     handleSample(input::toPenSample(*event));
 }
