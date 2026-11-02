@@ -279,30 +279,30 @@ void TimelineView::paintCells(QPainter &p) const
     for (int row = 0; row < rowCount(); ++row) {
         const int celIndex = celIndexForRow(row);
         const doc::Cel &cel = d.celAt(celIndex);
-        const int shift = m_frameDrag && m_frameDrag->moved ? m_frameDrag->offset : 0;
+        const bool dragging = m_frameDrag && m_frameDrag->moved;
+        const int shift = dragging && !m_frameDrag->blocked ? m_frameDrag->offset : 0;
         for (const doc::Exposure &e : timingForPainting(celIndex).exposures()) {
             if (e.end() < first || e.start > last)
                 continue;
             const doc::Drawing *drawing = cel.drawing(e.drawing);
             const QString name = drawing ? QString::fromStdString(drawing->name) : QStringLiteral("?");
             const bool selected = isSelected(cel.id(), e.start - shift);
-            paintExposure(p, e, name, colorForCel(celIndex), m.rowY(row), selected,
-                          selected && m_frameDrag && m_frameDrag->blocked);
+            paintExposure(p, e, name, colorForCel(celIndex), m.rowY(row), selected);
         }
+        // A drop refused: the selected blocks still where they are, and
+        // striped where the pen would put them.
+        if (dragging && m_frameDrag->blocked)
+            for (const doc::Exposure &e : cel.timing().exposures())
+                if (isSelected(cel.id(), e.start))
+                    paintBlockedExposure(p, {e.start + m_frameDrag->offset, e.length, e.drawing}, m.rowY(row));
     }
 }
 
 void TimelineView::paintExposure(QPainter &p, const doc::Exposure &e, const QString &name, const QColor &color,
-                                 int y, bool selected, bool blocked) const
+                                 int y, bool selected) const
 {
     const TimelineMetrics &m = m_metrics;
     const QRect block(m.frameX(e.start) + 1, y + 2, e.length * m.frameWidth - 2, m.rowHeight - 4);
-    if (blocked) { // where it cannot go: over a block it would cover
-        p.fillRect(block, QColor(200, 50, 50, 170));
-        p.setPen(QColor(240, 90, 90));
-        p.drawRect(block.adjusted(0, 0, -1, -1));
-        return;
-    }
 
     p.fillRect(block, selected ? color.darker(115) : color.darker(170));
     p.fillRect(QRect(block.left(), block.top(), 3, block.height()), color); // exposure start mark
@@ -320,6 +320,20 @@ void TimelineView::paintExposure(QPainter &p, const doc::Exposure &e, const QStr
         const int cy = block.center().y();
         p.drawLine(lineStart, cy, block.right() - 4, cy);
     }
+}
+
+void TimelineView::paintBlockedExposure(QPainter &p, const doc::Exposure &e, int y) const
+{
+    const TimelineMetrics &m = m_metrics;
+    const QRect block(m.frameX(e.start) + 1, y + 2, e.length * m.frameWidth - 2, m.rowHeight - 4);
+    const QColor red(220, 60, 60);
+    p.save();
+    p.fillRect(block, QColor(red.red(), red.green(), red.blue(), 60));
+    p.fillRect(block, QBrush(red, Qt::BDiagPattern)); // zebra stripes
+    p.setPen(QPen(red, 1, Qt::DashLine));
+    p.setBrush(Qt::NoBrush);
+    p.drawRect(block.adjusted(0, 0, -1, -1));
+    p.restore();
 }
 
 void TimelineView::paintRuler(QPainter &p) const
@@ -501,12 +515,10 @@ void TimelineView::dragFrames(int x)
     for (const auto &[cel, starts] : byCel)
         if (const int index = d.indexOf(cel); index >= 0) {
             drag.blocked = drag.blocked || !doc::exposuresFit(d.celAt(index).timing(), starts, offset);
-            // Where they would go; blocked, the others stay as they are underneath.
-            doc::Timing preview = d.celAt(index).timing();
-            if (doc::exposuresFit(preview, starts, offset))
-                preview = doc::movedExposures(preview, starts, offset);
-            m_movePreview[index] = std::move(preview);
+            m_movePreview[index] = doc::movedExposures(d.celAt(index).timing(), starts, offset);
         }
+    if (drag.blocked)
+        m_movePreview.clear(); // the timing as it is, the blocks striped where they would go
     updateScrollBars();
     viewport()->update();
 }

@@ -30,8 +30,8 @@ namespace mothion::ui {
 //    the blocks of the row from the last one clicked); click an empty cell:
 //    none selected;
 //  - drag a selected block: moves all the selected ones by as many frames,
-//    one undo step on release; only onto free frames (shown in red, and
-//    dropped back, when some would land on another frame);
+//    one undo step on release; only onto free frames (where they would land
+//    on another frame they are shown there striped, and the drop is refused);
 //  - copy (right click, or Ctrl+C here) the selected blocks; paste them on
 //    their cels from the current frame, keeping their distances, as the same
 //    drawings (Ctrl+V) or as independent copies (Ctrl+Shift+V), onto free
@@ -117,7 +117,9 @@ private:
 
     void paintCells(QPainter &p) const;
     void paintExposure(QPainter &p, const doc::Exposure &e, const QString &name, const QColor &color, int y,
-                       bool selected, bool blocked = false) const;
+                       bool selected) const;
+    // A dragged block where it cannot be dropped: striped, over what is there.
+    void paintBlockedExposure(QPainter &p, const doc::Exposure &e, int y) const;
     void paintRuler(QPainter &p) const;
     void paintHeaders(QPainter &p) const;
     void paintCursor(QPainter &p) const;
