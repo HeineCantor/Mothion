@@ -313,6 +313,24 @@ void drawGlyph(QPainter &p, IconId id)
         path.arcTo(QRectF(8.5, 4.5, 7, 7), 180, -180);
         path.lineTo(15.5, 11);
         break;
+    case IconId::Folder: // a cel: a folder with a tab
+        path.moveTo(3.5, 7);
+        path.lineTo(3.5, 18.5);
+        path.lineTo(20.5, 18.5);
+        path.lineTo(20.5, 8.5);
+        path.lineTo(11, 8.5);
+        path.lineTo(9, 5.5);
+        path.lineTo(3.5, 5.5);
+        path.closeSubpath();
+        break;
+    case IconId::Frame: // a frame of film: the picture between sprocket holes
+        path.addRect(QRectF(4.5, 3.5, 15, 17));
+        path.addRect(QRectF(8, 7, 8, 10));
+        for (double y : {5.5, 12.0, 18.5}) {
+            path.addRect(QRectF(5.5, y - 1, 1, 2));
+            path.addRect(QRectF(17.5, y - 1, 1, 2));
+        }
+        break;
     case IconId::Add:
         path.moveTo(12, 5);
         path.lineTo(12, 19);

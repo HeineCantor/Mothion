@@ -249,23 +249,7 @@ QLayout *TimelinePanel::celBar()
         change(p);
         m_document->execute(doc::makeSetCelProperties(m_document->document(), cel->id(), p));
     };
-    connect(add, &QToolButton::clicked, this, [this] {
-        doc::Document &d = m_document->documentForCommands();
-        QString name; // the first free number
-        for (int n = d.celCount() + 1;; ++n) {
-            name = tr("Cel %1").arg(n);
-            bool used = false;
-            for (int i = 0; i < d.celCount(); ++i)
-                used = used || d.celAt(i).properties().name == name.toStdString();
-            if (!used)
-                break;
-        }
-        auto command = std::make_unique<doc::AddCelCommand>(d, d.indexOf(m_document->currentCel()) + 1,
-                                                            doc::CelProperties{name.toStdString()});
-        const doc::CelId id = command->celId();
-        m_document->execute(std::move(command));
-        m_document->setCurrentCel(id);
-    });
+    connect(add, &QToolButton::clicked, m_document, &DocumentController::addCel);
     connect(remove, &QToolButton::clicked, this, [this] {
         if (m_document->document().celCount() > 1) // keep at least one
             m_document->execute(std::make_unique<doc::RemoveCelCommand>(m_document->currentCel()));

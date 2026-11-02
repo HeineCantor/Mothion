@@ -40,7 +40,9 @@
 #include <QPaintEvent>
 #include <QPainter>
 #include <QLineEdit>
+#include <QLabel>
 #include <QListWidget>
+#include <QTreeWidget>
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <QScrollArea>
@@ -915,47 +917,113 @@ private slots:
         QCOMPARE(controller.undoText(), QStringLiteral("Undo transform"));
     }
 
-    // Ctrl+click adds a layer to the selection, Shift+click a range; the
-    // header and the buttons then act on all of them, as one undo step.
-    // The panel shows the layers of the frame at the current point of the
-    // current cel: none on an empty frame, where a layer cannot be added.
+    // The panel shows each cel as a folder holding all its frames, and each
+    // frame its layers; the one shown now is current, and on an empty point
+    // no layer can be added. Choosing another frame goes to where it is shown.
     void layersPanelFollowsTheFrame()
     {
         document::DocumentController controller;
         ui::LayersPanel panel(&controller);
+        panel.resize(320, 500);
         panel.show();
         QVERIFY(QTest::qWaitForWindowExposed(&panel));
-        auto *list = panel.findChild<QListWidget *>();
-        auto *add = [&] {
+        auto *tree = panel.findChild<QTreeWidget *>();
+        auto button = [&](const QString &tip) {
             for (QToolButton *b : panel.findChildren<QToolButton *>())
-                if (b->toolTip() == QStringLiteral("New layer"))
+                if (b->toolTip() == tip)
                     return b;
             return static_cast<QToolButton *>(nullptr);
-        }();
+        };
+        auto *add = button(QStringLiteral("New layer"));
         QVERIFY(add);
-        QCOMPARE(list->count(), 2); // "empty frame" and the paper
+        const doc::CelId cel = controller.currentCel();
+        QCOMPARE(tree->topLevelItemCount(), 2); // the cel and the paper
+        QVERIFY(panel.celItem(cel));
+        QCOMPARE(panel.celItem(cel)->childCount(), 0); // no frames yet
+        QCOMPARE(tree->currentItem(), panel.celItem(cel));
         QVERIFY(!add->isEnabled());
         QVERIFY(panel.selectedLayers().isEmpty());
 
         doc::Document &d = controller.documentForCommands();
-        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 2, "Line").command);
+        doc::NewDrawing nd = doc::makeNewDrawing(d, cel, 0, 2, "Line");
+        controller.execute(std::move(nd.command));
         QCoreApplication::processEvents(); // the queued rebuild
-        QCOMPARE(list->count(), 2); // the layer and the paper
+        QCOMPARE(panel.frameItem(nd.id)->childCount(), 1);
+        QCOMPARE(tree->currentItem(), panel.layerItem(nd.layer));
         QVERIFY(add->isEnabled());
         add->click();
         QCoreApplication::processEvents();
         QCOMPARE(controller.currentDrawing()->layers.size(), std::size_t(2));
         QCOMPARE(controller.currentDrawing()->layers[1].properties.name, std::string("Layer 2"));
         QCOMPARE(panel.selectedLayers(), QList<doc::LayerId>({controller.currentLayer()}));
-        QCOMPARE(list->count(), 3);
 
         controller.setCurrentFrame(1); // the same frame, held
-        QCOMPARE(list->count(), 3);
+        QCOMPARE(tree->currentItem(), panel.layerItem(controller.currentLayer()));
         controller.setCurrentFrame(2); // nothing there
-        QCOMPARE(list->count(), 2);
+        QCOMPARE(tree->currentItem(), panel.celItem(cel));
         QVERIFY(!add->isEnabled());
+
+        // Every frame is listed, in timeline order; the one shown now in bold.
+        doc::NewDrawing later = doc::makeNewDrawing(d, cel, 6, 1, "Line");
+        controller.execute(std::move(later.command));
+        QCoreApplication::processEvents();
+        QCOMPARE(panel.celItem(cel)->childCount(), 2);
+        QCOMPARE(panel.celItem(cel)->child(0), panel.frameItem(nd.id));
+        QCOMPARE(panel.celItem(cel)->child(1), panel.frameItem(later.id));
+        auto bold = [&](doc::DrawingId id) {
+            QWidget *row = tree->itemWidget(panel.frameItem(id), 0);
+            return row->findChild<QLabel *>(QStringLiteral("frameText"))->font().bold();
+        };
+        QVERIFY(!bold(nd.id) && !bold(later.id)); // at frame 3, nothing
+        controller.setCurrentFrame(6);
+        QVERIFY(!bold(nd.id) && bold(later.id));
+        // A layer of a frame not shown here: to the first point it is shown at.
+        tree->setCurrentItem(panel.layerItem(nd.layer));
+        QCOMPARE(controller.currentFrame(), 0);
+        QCOMPARE(controller.currentLayer(), nd.layer);
+        QVERIFY(bold(nd.id) && !bold(later.id));
+
+        // The frame's row: a new layer on top of it.
+        tree->setCurrentItem(panel.frameItem(nd.id));
+        QCOMPARE(panel.focus(), ui::LayersPanel::Focus::Frame);
+        controller.setCurrentLayer(controller.currentDrawing()->layers[0].id);
+        button(QStringLiteral("New layer on top of the frame"))->click();
+        QCoreApplication::processEvents();
+        QCOMPARE(controller.currentDrawing()->layers.size(), std::size_t(3));
+        QCOMPARE(controller.currentLayer(), controller.currentDrawing()->layers.back().id);
+        QCOMPARE(panel.focus(), ui::LayersPanel::Focus::Layer);
+
+        // The cel's row: the header and the buttons act on the cel.
+        tree->setCurrentItem(panel.celItem(cel));
+        QCOMPARE(panel.focus(), ui::LayersPanel::Focus::Cel);
+        panel.findChild<QSpinBox *>()->setValue(30);
+        QCOMPARE(d.cel(cel)->properties().opacity, 0.3f);
+        QCOMPARE(controller.currentDrawing()->layers[0].properties.opacity, 1.0f);
+        button(QStringLiteral("New cel"))->click();
+        QCoreApplication::processEvents();
+        QCOMPARE(d.celCount(), 2);
+        const doc::CelId second = controller.currentCel();
+        QCOMPARE(tree->currentItem(), panel.celItem(second));
+        QCOMPARE(tree->indexOfTopLevelItem(panel.celItem(second)), 0); // the top one
+        button(QStringLiteral("Move the cel down"))->click();
+        QCoreApplication::processEvents();
+        QCOMPARE(d.indexOf(second), 0);
+
+        // A cel's row clicked makes it current; a layer's row of another cel too.
+        tree->setCurrentItem(panel.layerItem(nd.layer));
+        QCOMPARE(controller.currentCel(), cel);
+        QCOMPARE(controller.currentLayer(), nd.layer);
+
+        // Folders closed by hand stay closed through rebuilds.
+        panel.celItem(cel)->setExpanded(false);
+        controller.execute(doc::makeSetCelProperties(d, second, doc::CelProperties{"Renamed"}));
+        QCoreApplication::processEvents();
+        QVERIFY(!panel.celItem(cel)->isExpanded());
+        QVERIFY(panel.celItem(second)->isExpanded());
     }
 
+    // Ctrl+click adds a layer to the selection, Shift+click a range; the
+    // header and the buttons then act on all of them, as one undo step.
     void layersSelectWithCtrlAndShift()
     {
         document::DocumentController controller;
@@ -971,13 +1039,13 @@ private slots:
         panel.show();
         QVERIFY(QTest::qWaitForWindowExposed(&panel));
         QCoreApplication::processEvents(); // the queued rebuild
-        auto *list = panel.findChild<QListWidget *>();
+        auto *tree = panel.findChild<QTreeWidget *>();
         const doc::Drawing &d = *controller.currentDrawing();
         auto count = [&] { return int(d.layers.size()); };
         auto id = [&](int index) { return d.layers[std::size_t(index)].id; };
         auto click = [&](int index, Qt::KeyboardModifiers mods) { // by layer index; rows are top first
-            const QRect r = list->visualItemRect(list->item(count() - 1 - index));
-            QTest::mouseClick(list->viewport(), Qt::LeftButton, mods, r.center());
+            const QRect r = tree->visualItemRect(panel.layerItem(id(index)));
+            QTest::mouseClick(tree->viewport(), Qt::LeftButton, mods, r.center());
         };
 
         click(1, {});
@@ -993,7 +1061,7 @@ private slots:
 
         // The drag preview: the three rows as they look, stacked.
         const QPixmap preview = panel.dragPreview();
-        const int rowHeight = list->visualItemRect(list->item(0)).height();
+        const int rowHeight = tree->visualItemRect(panel.layerItem(id(0))).height();
         QCOMPARE(preview.deviceIndependentSize().toSize().height(), 3 * rowHeight);
         QVERIFY(preview.toImage().pixelColor(preview.width() / 2, 2).alpha() < 255); // see-through
 
@@ -1034,7 +1102,7 @@ private slots:
         QCoreApplication::processEvents();
         QCOMPARE(d.indexOf(a), 1);
         QCOMPARE(d.indexOf(c), 4);
-        panel.moveSelectedToRow(list->count() - 1); // onto the paper's row: to the bottom
+        panel.moveSelectedToRow(count()); // to the bottom
         QCoreApplication::processEvents();
         QCOMPARE(d.indexOf(a), 0);
         QCOMPARE(d.indexOf(b), 1);
@@ -1267,7 +1335,7 @@ private slots:
         QTest::keyClick(canvas, Qt::Key_Comma);
         QTest::keyClick(canvas, Qt::Key_Comma); // stops at the start
         QCOMPARE(controller->currentFrame(), 0);
-        auto *layers = window.findChild<ui::LayersPanel *>()->findChild<QListWidget *>();
+        auto *layers = window.findChild<ui::LayersPanel *>()->findChild<QTreeWidget *>();
         layers->setFocus(); // from a panel too
         QTest::keyClick(layers, Qt::Key_Minus);
         QCOMPARE(controller->currentFrame(), 1);

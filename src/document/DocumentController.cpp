@@ -155,6 +155,46 @@ void DocumentController::execute(std::unique_ptr<doc::Command> command)
     emit historyChanged();
 }
 
+void DocumentController::addCel()
+{
+    doc::Document &d = *m_document;
+    QString name; // the first free number
+    for (int n = d.celCount() + 1;; ++n) {
+        name = tr("Cel %1").arg(n);
+        bool used = false;
+        for (int i = 0; i < d.celCount() && !used; ++i)
+            used = d.celAt(i).properties().name == name.toStdString();
+        if (!used)
+            break;
+    }
+    auto command =
+        std::make_unique<doc::AddCelCommand>(d, d.indexOf(m_currentCel) + 1, doc::CelProperties{name.toStdString()});
+    const doc::CelId id = command->celId();
+    execute(std::move(command));
+    setCurrentCel(id);
+}
+
+bool DocumentController::addLayer(bool onTop)
+{
+    const doc::Drawing *drawing = currentDrawing();
+    if (!drawing)
+        return false;
+    QString name; // the first free number
+    for (int n = int(drawing->layers.size()) + 1;; ++n) {
+        name = tr("Layer %1").arg(n);
+        if (std::none_of(drawing->layers.begin(), drawing->layers.end(),
+                         [&](const doc::Layer &l) { return l.properties.name == name.toStdString(); }))
+            break;
+    }
+    const int index = onTop ? int(drawing->layers.size()) : drawing->indexOf(m_currentLayer) + 1;
+    auto command = std::make_unique<doc::AddLayerCommand>(*m_document, m_currentCel, drawing->id, index,
+                                                          doc::LayerProperties{name.toStdString()});
+    const doc::LayerId id = command->layerId();
+    execute(std::move(command));
+    setCurrentLayer(id);
+    return true;
+}
+
 void DocumentController::importImage(const QImage &image, const QString &name)
 {
     if (image.isNull())

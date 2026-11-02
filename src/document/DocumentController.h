@@ -63,6 +63,13 @@ public:
 
     bool canUndo() const { return m_history.canUndo(); }
     bool canRedo() const { return m_history.canRedo(); }
+    // Adds an empty cel above the current one, named "Cel N" with the first
+    // free N; it becomes current. One undo step.
+    void addCel();
+    // Adds an empty layer to the current drawing, above the current layer
+    // (on top if `onTop`), named "Layer N" with the first free N; it becomes
+    // current. One undo step; false on an empty frame.
+    bool addLayer(bool onTop = false);
     // Puts `image` on a new cel above the current one, named `name`, as one
     // drawing held for the whole scene: centered, scaled down to fit the
     // document if larger. One undo step; the new cel becomes current.
