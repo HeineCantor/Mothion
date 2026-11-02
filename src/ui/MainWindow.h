@@ -54,6 +54,11 @@ private:
     void updateTitle();
     void exportFrames();
     void importImage();
+    // The clipboard: the selected pixels (as an image other apps take too,
+    // with where they were for pasting back in place), and pasting them or
+    // any image into a new layer.
+    void copyPixels(bool cut);
+    void pastePixels();
     void importBrush();
 
     tools::ToolState *m_toolState = nullptr;

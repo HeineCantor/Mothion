@@ -50,6 +50,7 @@ enum class CommandKind {
     CopyToLayer,
     Fill,
     Transform,
+    Paste,
 };
 
 // An undoable change to a Document.

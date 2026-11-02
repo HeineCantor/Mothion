@@ -29,8 +29,10 @@
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
+#include <QClipboard>
 #include <QCloseEvent>
 #include <QDialog>
+#include <QDataStream>
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -40,6 +42,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenuBar>
+#include <QMimeData>
 #include <QPlainTextEdit>
 #include <QProgressDialog>
 #include <QSettings>
@@ -256,6 +259,10 @@ void MainWindow::createMenus()
     edit->addAction(tr("Invert selection"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_I), m_document,
                     &document::DocumentController::invertSelection);
     edit->addSeparator();
+    edit->addAction(tr("Cut"), QKeySequence::Cut, this, [this] { copyPixels(true); });
+    edit->addAction(tr("Copy"), QKeySequence::Copy, this, [this] { copyPixels(false); });
+    edit->addAction(tr("Paste"), QKeySequence::Paste, this, &MainWindow::pastePixels);
+    edit->addSeparator();
     edit->addAction(icon(IconId::Transform), tr("Transform"), QKeySequence(Qt::CTRL | Qt::Key_T), this,
                     [this] { m_toolState->setActiveTool(tools::ToolId::Transform); });
 
@@ -290,6 +297,56 @@ void MainWindow::createMenus()
     }
     window->addSeparator();
     window->addAction(tr("Reset default layout"), m_dockLayout, &DockLayout::resetToDefault);
+}
+
+namespace {
+
+// Our own copies also say where the pixels were, to paste them in place.
+const QString kPixelsMime = QStringLiteral("application/x-mothion-pixels");
+
+} // namespace
+
+void MainWindow::copyPixels(bool cut)
+{
+    QString reason;
+    QPoint origin;
+    const QImage image = m_document->copyPixels(&origin, &reason);
+    if (image.isNull()) {
+        statusBar()->showMessage(reason, 4000);
+        return;
+    }
+    auto *mime = new QMimeData;
+    mime->setImageData(image);
+    QByteArray ours;
+    QDataStream out(&ours, QIODevice::WriteOnly);
+    out << origin << image;
+    mime->setData(kPixelsMime, ours);
+    QGuiApplication::clipboard()->setMimeData(mime);
+    if (!cut)
+        return;
+    const bool erased = m_document->hasSelection() ? m_document->eraseSelection(&reason)
+                                                   : m_document->clearCurrentDrawing(&reason);
+    if (!erased)
+        statusBar()->showMessage(tr("Copied, not cut: %1").arg(reason), 4000);
+}
+
+void MainWindow::pastePixels()
+{
+    const QMimeData *mime = QGuiApplication::clipboard()->mimeData();
+    QImage image;
+    std::optional<QPoint> origin;
+    if (mime && mime->hasFormat(kPixelsMime)) {
+        QDataStream in(mime->data(kPixelsMime));
+        QPoint at;
+        in >> at >> image;
+        if (in.status() == QDataStream::Ok)
+            origin = at;
+    }
+    if (image.isNull() && mime && mime->hasImage())
+        image = qvariant_cast<QImage>(mime->imageData()); // from another app: centered
+    QString reason;
+    if (!m_document->pasteImage(image, origin, &reason))
+        statusBar()->showMessage(reason.isEmpty() ? tr("Nothing to paste") : reason, 4000);
 }
 
 void MainWindow::importImage()

@@ -28,6 +28,24 @@ QRect boundsOf(const std::vector<doc::TileCoord> &tiles)
     return r;
 }
 
+// The smallest rect holding the image's visible pixels, in its own coordinates.
+QRect opaqueBounds(const QImage &image)
+{
+    int left = image.width(), top = image.height(), right = -1, bottom = -1;
+    for (int y = 0; y < image.height(); ++y) {
+        const auto *line = reinterpret_cast<const doc::Pixel *>(image.constScanLine(y));
+        for (int x = 0; x < image.width(); ++x) {
+            if (doc::alphaOf(line[x]) == 0)
+                continue;
+            left = std::min(left, x);
+            right = std::max(right, x);
+            top = std::min(top, y);
+            bottom = std::max(bottom, y);
+        }
+    }
+    return right < left ? QRect() : QRect(QPoint(left, top), QPoint(right, bottom));
+}
+
 // The selection as it was before and after a step: made, cleared, or carried
 // by a move. The selection lives in the controller, not in the document, so
 // the command sets it there through `assign`; it changes no pixels.
@@ -367,6 +385,98 @@ bool DocumentController::selectionToLayer(bool cut, QString *reason)
     return true;
 }
 
+QImage DocumentController::copyPixels(QPoint *origin, QString *reason)
+{
+    auto fail = [reason](const QString &why) {
+        if (reason)
+            *reason = why;
+        return QImage();
+    };
+    interruptStroke(); // an open edit is part of what is copied
+    const doc::Layer *layer = m_document->layer(m_currentLayer);
+    if (!layer)
+        return fail(tr("No layer selected"));
+    if (!layer->properties().visible)
+        return fail(tr("Layer “%1” is hidden").arg(QString::fromStdString(layer->properties().name)));
+    const doc::Drawing *drawing = layer->drawingAt(m_currentFrame);
+    if (!drawing || drawing->image.isEmpty())
+        return fail(tr("Nothing to copy on this frame"));
+
+    doc::TiledImage copied = drawing->image;
+    if (hasSelection()) {
+        doc::TiledImage outside;
+        canvas::splitByMask(drawing->image, canvas::SelectionMask::fromPath(m_selection), copied, outside);
+    }
+    const QRect tiles = boundsOf(copied.tileCoords());
+    QRect crop;
+    QImage area;
+    if (!tiles.isEmpty()) {
+        area = QImage(tiles.size(), QImage::Format_ARGB32_Premultiplied);
+        copied.read(tiles.x(), tiles.y(), tiles.width(), tiles.height(), reinterpret_cast<doc::Pixel *>(area.bits()),
+                    area.bytesPerLine() / 4);
+        crop = opaqueBounds(area);
+    }
+    if (crop.isEmpty())
+        return fail(tr("Nothing in the selection on this frame"));
+    if (origin)
+        *origin = tiles.topLeft() + crop.topLeft();
+    return area.copy(crop);
+}
+
+bool DocumentController::pasteImage(const QImage &image, std::optional<QPoint> origin, QString *reason)
+{
+    if (image.isNull()) {
+        if (reason)
+            *reason = tr("Nothing to paste");
+        return false;
+    }
+    interruptStroke();
+    doc::Document &d = *m_document;
+    const QImage pixels = image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    const QPoint at = origin.value_or(QPoint((d.width() - pixels.width()) / 2, (d.height() - pixels.height()) / 2));
+    const QRect area = QRect(at, pixels.size()) & QRect(0, 0, d.width(), d.height());
+    if (area.isEmpty()) {
+        if (reason)
+            *reason = tr("The pasted image is outside the sheet");
+        return false;
+    }
+
+    // New layer above the current one, a drawing on this frame, the pixels
+    // (what lies in the sheet), the selection around them: applied now,
+    // recorded together.
+    std::vector<std::unique_ptr<doc::Command>> steps;
+    auto layer = std::make_unique<doc::AddLayerCommand>(d, d.indexOf(m_currentLayer) + 1,
+                                                        doc::LayerProperties{tr("Pasted").toStdString()});
+    const doc::LayerId layerId = layer->layerId();
+    publish(layer->apply(d));
+    steps.push_back(std::move(layer));
+    doc::NewDrawing drawing = doc::makeNewDrawing(d, layerId, m_currentFrame, 1);
+    publish(drawing.command->apply(d));
+    steps.push_back(std::move(drawing.command));
+    doc::TiledImage &target = d.layer(layerId)->drawing(drawing.id)->image;
+    const doc::TiledImage empty = target;
+    const QPoint from = area.topLeft() - at;
+    target.write(area.x(), area.y(), area.width(), area.height(),
+                 reinterpret_cast<const doc::Pixel *>(pixels.constScanLine(from.y())) + from.x(),
+                 pixels.bytesPerLine() / 4);
+    if (auto paint = doc::PaintCommand::capture(layerId, drawing.id, empty, target))
+        steps.push_back(std::move(paint));
+    emit pixelsChanged(layerId, drawing.id, area);
+
+    QPainterPath selected;
+    selected.addRect(area);
+    if (selected != m_selection) {
+        auto select = std::make_unique<SelectionCommand>(
+            doc::CommandKind::Select, [this](const QPainterPath &a) { assignSelection(a); }, m_selection, selected);
+        select->apply(d);
+        steps.push_back(std::move(select));
+    }
+    m_history.pushApplied(std::make_unique<doc::GroupCommand>(doc::CommandKind::Paste, std::move(steps)));
+    emit historyChanged();
+    setCurrentLayer(layerId);
+    return true;
+}
+
 void DocumentController::undo()
 {
     interruptStroke();
@@ -404,6 +514,7 @@ QString DocumentController::commandName(doc::CommandKind kind)
     case doc::CommandKind::CopyToLayer: return tr("copy to layer");
     case doc::CommandKind::Fill: return tr("fill");
     case doc::CommandKind::Transform: return tr("transform");
+    case doc::CommandKind::Paste: return tr("paste");
     }
     return {};
 }
