@@ -38,6 +38,7 @@ private:
     SliderField *m_opacity;
     SliderField *m_smoothing;
     QCheckBox *m_useTilt;
+    QCheckBox *m_correctStart;
     PressureCurveEditor *m_curveEditor;
 
     QWidget *m_puppetControls;

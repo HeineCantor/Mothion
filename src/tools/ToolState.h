@@ -116,6 +116,12 @@ public:
     bool usesTilt() const { return m_useTilt; }
     void setUseTilt(bool use);
 
+    // On: a brush's start correction is applied when the pen lifts, over its
+    // first points (the stroke is drawn again), as Clip Studio does; off:
+    // the start tapers live, by distance (BrushStyle::startTaper).
+    bool correctsStartAfterStroke() const { return m_correctStartAfterStroke; }
+    void setCorrectStartAfterStroke(bool on);
+
     static constexpr double kMinPuppetRadius = 5.0;
     static constexpr double kMaxPuppetRadius = 1000.0;
     PuppetSettings puppetSettings() const { return m_puppet; }
@@ -136,6 +142,7 @@ signals:
     void pressureCurveChanged();
     void smoothingChanged(double amount);
     void useTiltChanged(bool use);
+    void correctStartAfterStrokeChanged(bool on);
     void puppetSettingsChanged();
     void fillSettingsChanged();
     void onionSkinChanged();
@@ -152,6 +159,7 @@ private:
     PressureCurve m_pressureCurve;
     double m_smoothing = 0.3;
     bool m_useTilt = true;
+    bool m_correctStartAfterStroke = false;
     PuppetSettings m_puppet;
     FillSettings m_fill;
     OnionSkinSettings m_onion;

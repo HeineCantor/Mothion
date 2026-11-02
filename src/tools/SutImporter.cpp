@@ -241,7 +241,10 @@ brush::BrushStyle styleFrom(const Params &p, int tipCount)
     // Correction level (0..100): Mothion's own start taper, a quarter px
     // per level (25 px at 100), tuned by eye. The flag after it switches on
     // the anti-jitter filter.
+    // Correction (ID 40): the start rises, live by distance or after the
+    // stroke over that many points (the canvas picks one).
     s.startTaper = std::clamp(number(p, "FlickerReduction"), 0.0, 100.0) * 0.25;
+    s.startCorrection = std::max(0, int(number(p, "FlickerReduction")));
     s.flickerFilter = flag(p, "FlickerReductionBySpeed");
     s.revision = flag(p, "BrushUseRevision") ? std::max(1, int(number(p, "BrushRevision", 10.0))) : 0;
 

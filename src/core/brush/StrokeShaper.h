@@ -38,6 +38,10 @@ std::vector<BrushInput> finalPoints(const BrushStyle &style, std::vector<BrushIn
 
 double strokeLength(const std::vector<BrushInput> &points);
 
+// Pressure × sin(90°·d/len) over the first `count` points, len = their
+// length (at least 2 px): the start correction after the stroke.
+void applyStartRamp(std::vector<BrushInput> &points, int count);
+
 // Drops points while the stroke stays within a tolerance growing with
 // `level`, then joins the rest with a smooth (Catmull-Rom) curve.
 std::vector<BrushInput> simplify(const std::vector<BrushInput> &points, int level);

@@ -116,14 +116,27 @@ bool needsFinalPass(const BrushStyle &s)
 {
     const bool endDependent =
         usesInOut(s) && (s.inOut.type == InOutType::Ratio || (s.inOut.type == InOutType::Length && s.inOut.out));
-    return endDependent || s.revision > 0;
+    return endDependent || s.revision > 0 || s.startCorrection > 0;
 }
 
 std::vector<BrushInput> finalPoints(const BrushStyle &style, std::vector<BrushInput> points)
 {
     if (style.revision > 0)
         points = simplify(points, style.revision);
+    if (style.startCorrection > 0)
+        applyStartRamp(points, std::max(3, style.startCorrection));
     return points;
+}
+
+void applyStartRamp(std::vector<BrushInput> &points, int count)
+{
+    const std::size_t n = std::min(points.size(), std::size_t(std::max(count, 0)));
+    if (n == 0)
+        return;
+    const std::vector<double> s = cumulative(points);
+    const double length = std::max(2.0, s[n - 1]);
+    for (std::size_t i = 0; i < n; ++i)
+        points[i].pressure *= std::sin(kHalfPi * std::min(1.0, s[i] / length));
 }
 
 std::vector<BrushInput> simplify(const std::vector<BrushInput> &points, int level)

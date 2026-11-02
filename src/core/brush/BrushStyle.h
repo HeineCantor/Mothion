@@ -186,6 +186,11 @@ struct BrushStyle
     // Start taper, px (0 = off): the pressure rises along a quarter sine over
     // this distance from the start, live and independent of the input rate.
     double startTaper = 0.0;
+    // Start correction after the stroke, points (0 = off): when the pen
+    // lifts, the pressure of the first max(3, n) points rises along a
+    // quarter sine and the stroke is drawn again so. The canvas uses either
+    // this or the live start taper (ToolState::correctsStartAfterStroke()).
+    int startCorrection = 0;
     bool flickerFilter = false; // drop small back-and-forth jitter between points
     // Correction after the stroke (0 = off): simplifies the finished stroke
     // into fewer, smoothly joined points.

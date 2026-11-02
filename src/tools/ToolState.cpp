@@ -132,6 +132,14 @@ void ToolState::setUseTilt(bool use)
     emit useTiltChanged(use);
 }
 
+void ToolState::setCorrectStartAfterStroke(bool on)
+{
+    if (on == m_correctStartAfterStroke)
+        return;
+    m_correctStartAfterStroke = on;
+    emit correctStartAfterStrokeChanged(on);
+}
+
 void ToolState::setPuppetSettings(const PuppetSettings &settings)
 {
     PuppetSettings s = settings;

@@ -555,6 +555,11 @@ void CanvasView::beginStroke(const PenSample &sample)
     const tools::BrushDefinitionPtr definition = m_toolState->brush(tool);
     brush::BrushStyle style = definition->style;
     style.size = settings.size / 2.0;
+    // The start rises live or once the stroke is done, not both.
+    if (m_toolState->correctsStartAfterStroke())
+        style.startTaper = 0.0;
+    else
+        style.startCorrection = 0;
     auto stamper = std::make_shared<DabStamper>(m_toolState->color(), style.hardness, definition->tips,
                                                 style.verticalThickness);
     stamper->setSecondaryColor(m_toolState->secondaryColor());

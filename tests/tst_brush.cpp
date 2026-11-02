@@ -455,6 +455,29 @@ private slots:
         QCOMPARE(dabs.back().radius, 5.0);
     }
 
+    // The start correction after the stroke: the finished stroke's first
+    // points get a rising pressure, and the stroke is drawn again for it.
+    void startCorrectionRampsTheFirstPoints()
+    {
+        BrushStyle s = constantStyle(5.0, 0.1);
+        QVERIFY(!needsFinalPass(s));
+        s.startCorrection = 4;
+        QVERIFY(needsFinalPass(s));
+        std::vector<BrushInput> points;
+        for (int i = 0; i < 10; ++i)
+            points.push_back(at(i * 10.0, 0));
+        const auto corrected = finalPoints(s, points);
+        QCOMPARE(corrected.size(), points.size());
+        QCOMPARE(corrected[0].pressure, 0.0); // over the first 4 points, 30 px
+        QVERIFY(qAbs(corrected[1].pressure - std::sin(std::numbers::pi / 6.0)) < 1e-9);
+        QVERIFY(corrected[2].pressure < corrected[3].pressure);
+        QCOMPARE(corrected[3].pressure, 1.0);
+        for (std::size_t i = 4; i < corrected.size(); ++i)
+            QCOMPARE(corrected[i].pressure, 1.0);
+        s.startCorrection = 1; // at least 3 points
+        QVERIFY(finalPoints(s, points)[1].pressure < 1.0);
+    }
+
     void simplifyStraightensAWobblyLine()
     {
         std::vector<BrushInput> points;
