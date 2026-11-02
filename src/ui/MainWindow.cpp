@@ -28,6 +28,7 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QCloseEvent>
+#include <QDialog>
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -35,10 +36,13 @@
 #include <QKeyEvent>
 #include <QMessageBox>
 #include <QLabel>
+#include <QLineEdit>
 #include <QMenuBar>
+#include <QPlainTextEdit>
 #include <QProgressDialog>
 #include <QSettings>
 #include <QStatusBar>
+#include <QTextEdit>
 #include <QToolBar>
 #include <QVBoxLayout>
 
@@ -469,8 +473,47 @@ void MainWindow::exportFrames()
                              4000);
 }
 
+namespace {
+
+// Where a typed space or tab belongs to the text, not to the canvas.
+bool isTextEntry(const QWidget *widget)
+{
+    for (; widget; widget = widget->parentWidget())
+        if (qobject_cast<const QLineEdit *>(widget) || qobject_cast<const QAbstractSpinBox *>(widget)
+            || qobject_cast<const QTextEdit *>(widget) || qobject_cast<const QPlainTextEdit *>(widget))
+            return true;
+    return false;
+}
+
+// In this window or one of its panels (docked or floating), not in a dialog.
+bool isPartOf(const QWidget *widget, const QWidget *window)
+{
+    for (; widget; widget = widget->parentWidget()) {
+        if (widget == window)
+            return true;
+        if (qobject_cast<const QDialog *>(widget))
+            return false;
+    }
+    return false;
+}
+
+} // namespace
+
 bool MainWindow::eventFilter(QObject *watched, QEvent *event)
 {
+    // The pan keys (Space, Tab) are for the canvas wherever the focus is,
+    // unless typing: after picking a brush from a list, say, holding Tab
+    // must pan at the first touch, not move the focus around the panel.
+    if (event->type() == QEvent::KeyPress && watched != m_canvas && !QApplication::activePopupWidget()) {
+        const int key = static_cast<QKeyEvent *>(event)->key();
+        auto *widget = qobject_cast<QWidget *>(watched);
+        if ((key == Qt::Key_Space || key == Qt::Key_Tab) && widget && isPartOf(widget, this) && !isTextEntry(widget)) {
+            m_canvas->setFocus(Qt::OtherFocusReason);
+            QApplication::sendEvent(m_canvas, event);
+            return true;
+        }
+    }
+
     // A spin box claims Ctrl+Z for the text typed in it, so the document's
     // undo would not run while one has focus (after nudging a size, say).
     // Number fields have nothing worth undoing as text: leave them the keys.

@@ -13,6 +13,7 @@
 #include "ui/PanelDock.h"
 #include "ui/SplashScreen.h"
 #include "ui/panels/ToolPalettePanel.h"
+#include "ui/panels/SubToolPanel.h"
 #include "ui/panels/ToolPropertiesPanel.h"
 
 #include <QCheckBox>
@@ -21,6 +22,7 @@
 #include <QComboBox>
 #include <QPaintEvent>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <QScrollArea>
@@ -126,6 +128,33 @@ private slots:
         QVERIFY(controller->canRedo());
         QTest::keyClick(spin, Qt::Key_Y, Qt::ControlModifier);
         QVERIFY(controller->canUndo());
+    }
+
+    // Tab held right after picking a brush from the list pans at the first
+    // touch; in a number field it still moves to the next field.
+    void panKeysReachTheCanvasFromPanels()
+    {
+        ui::MainWindow window;
+        window.show();
+        window.activateWindow();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+        auto *canvas = window.findChild<canvas::CanvasView *>();
+        QListWidget *brushes = window.findChild<ui::SubToolPanel *>()->findChild<QListWidget *>();
+        QVERIFY(canvas && brushes);
+        brushes->setFocus();
+        QTRY_VERIFY(brushes->hasFocus());
+
+        QTest::keyPress(brushes, Qt::Key_Tab);
+        QVERIFY(canvas->hasFocus());
+        QCOMPARE(canvas->cursor().shape(), Qt::OpenHandCursor);
+        QTest::keyRelease(canvas, Qt::Key_Tab);
+        QVERIFY(canvas->cursor().shape() != Qt::OpenHandCursor);
+
+        QSpinBox *spin = window.findChild<ui::ToolPropertiesPanel *>()->findChild<QSpinBox *>();
+        spin->setFocus();
+        QTRY_VERIFY(spin->hasFocus());
+        QTest::keyClick(spin, Qt::Key_Tab);
+        QVERIFY(!canvas->hasFocus());
     }
 
     void tiltCheckboxFollowsToolState()
