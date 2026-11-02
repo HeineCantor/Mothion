@@ -12,6 +12,7 @@
 #include "ui/ExportDialog.h"
 #include "ui/MainWindow.h"
 #include "ui/PanelDock.h"
+#include "ui/SelectionBar.h"
 #include "ui/panels/BrushSizePanel.h"
 #include "ui/SplashScreen.h"
 #include "ui/panels/ToolPalettePanel.h"
@@ -672,6 +673,125 @@ private slots:
     }
 
     // Making, changing and clearing a selection are undo steps.
+    // Erase, cut and copy work on what is selected, each as one undo step.
+    void selectionCommandsWorkOnTheSelectedPixels()
+    {
+        document::DocumentController controller;
+        QImage image(100, 10, QImage::Format_ARGB32);
+        image.fill(Qt::green);
+        controller.importImage(image, QStringLiteral("bar")); // x 910..1009, y 535..544
+        const doc::LayerId bar = controller.currentLayer();
+        auto pixel = [&](doc::LayerId id, int x, int y) {
+            const doc::Layer &layer = *controller.document().layer(id);
+            const doc::Drawing *drawing = layer.drawingAt(0);
+            return drawing ? drawing->image.pixel(x, y) : doc::Pixel(0);
+        };
+        const doc::Pixel green = pixel(bar, 930, 540);
+        QString reason;
+        QVERIFY(!controller.eraseSelection(&reason)); // nothing selected
+        QVERIFY(!reason.isEmpty());
+
+        QPainterPath left;
+        left.addRect(900, 500, 60, 100); // the bar's left half
+        controller.setSelection(left);
+        QVERIFY(controller.eraseSelection());
+        QCOMPARE(qAlpha(pixel(bar, 930, 540)), 0);
+        QCOMPARE(pixel(bar, 990, 540), green);
+        QVERIFY(controller.hasSelection());
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo clear"));
+        controller.undo();
+        QCOMPARE(pixel(bar, 930, 540), green);
+
+        const int layers = controller.document().layerCount();
+        QVERIFY(controller.copySelectionToLayer());
+        QCOMPARE(controller.document().layerCount(), layers + 1);
+        const doc::LayerId copy = controller.currentLayer();
+        QVERIFY(copy != bar);
+        QCOMPARE(controller.document().indexOf(copy), controller.document().indexOf(bar) + 1);
+        QCOMPARE(pixel(copy, 930, 540), green);
+        QCOMPARE(qAlpha(pixel(copy, 990, 540)), 0);
+        QCOMPARE(pixel(bar, 930, 540), green); // the source keeps it
+        QVERIFY(controller.document().layer(copy)->drawingAt(controller.document().frameCount() - 1));
+        controller.undo();
+        QCOMPARE(controller.document().layerCount(), layers);
+
+        controller.setCurrentLayer(bar);
+        QVERIFY(controller.cutSelectionToLayer());
+        const doc::LayerId cut = controller.currentLayer();
+        QCOMPARE(pixel(cut, 930, 540), green);
+        QCOMPARE(qAlpha(pixel(bar, 930, 540)), 0); // the source loses it
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo cut to layer"));
+        controller.undo();
+        QCOMPARE(controller.document().layerCount(), layers);
+        QCOMPARE(pixel(bar, 930, 540), green);
+
+        QPainterPath empty; // nothing under the selection
+        empty.addRect(100, 100, 50, 50);
+        controller.setSelection(empty);
+        QVERIFY(!controller.cutSelectionToLayer(&reason));
+        QCOMPARE(controller.document().layerCount(), layers);
+    }
+
+    void invertSelectionSelectsTheRest()
+    {
+        document::DocumentController controller;
+        controller.invertSelection(); // nothing selected: all
+        QVERIFY(controller.selection().contains(QPointF(5, 5)));
+        QPainterPath box;
+        box.addRect(100, 100, 50, 50);
+        controller.setSelection(box);
+        controller.invertSelection();
+        QVERIFY(!controller.selection().contains(QPointF(120, 120)));
+        QVERIFY(controller.selection().contains(QPointF(5, 5)));
+        controller.undo();
+        QVERIFY(controller.selection().contains(QPointF(120, 120)));
+    }
+
+    // The bar shows with a selection, just under it, and its buttons act.
+    void selectionBarFollowsTheSelection()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(600, 400);
+        ui::SelectionBar bar(&canvas, &controller);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        QVERIFY(!bar.isVisible());
+
+        QPainterPath box;
+        box.addRect(800, 400, 300, 200);
+        controller.setSelection(box);
+        QVERIFY(bar.isVisible());
+        const QRect area = canvas.view().documentToView().mapRect(box.boundingRect()).toAlignedRect();
+        QVERIFY(bar.geometry().top() > area.bottom());
+        QVERIFY(bar.geometry().top() - area.bottom() < 20);
+        QVERIFY(canvas.rect().contains(bar.geometry()));
+
+        canvas.zoomIn(); // follows the view
+        const QRect zoomed = canvas.view().documentToView().mapRect(box.boundingRect()).toAlignedRect();
+        QVERIFY(bar.geometry().top() > zoomed.bottom() || bar.geometry().bottom() < zoomed.top()
+                || bar.geometry().bottom() == canvas.height() - 4);
+
+        auto *invert = bar.findChild<QAbstractButton *>(QStringLiteral("invert"));
+        QVERIFY(invert);
+        // A pen on a button stays with the bar: the brush must not paint under it.
+        state.setActiveTool(tools::ToolId::Brush);
+        const QPointF at = QPointF(invert->rect().center());
+        for (QEvent::Type type : {QEvent::TabletPress, QEvent::TabletMove, QEvent::TabletRelease}) {
+            QTabletEvent pen(type, QPointingDevice::primaryPointingDevice(), at, invert->mapToGlobal(at), 0.8, 0, 0,
+                             0, 0, 0, Qt::NoModifier, Qt::LeftButton,
+                             type == QEvent::TabletRelease ? Qt::NoButton : Qt::LeftButton);
+            QApplication::sendEvent(invert, &pen);
+        }
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo selection")); // no stroke
+        invert->click();
+        QVERIFY(!controller.selection().contains(QPointF(900, 500)));
+        bar.findChild<QAbstractButton *>(QStringLiteral("deselect"))->click();
+        QVERIFY(!controller.hasSelection());
+        QVERIFY(!bar.isVisible());
+    }
+
     void selectionChangesAreUndoable()
     {
         document::DocumentController controller;

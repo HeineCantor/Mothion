@@ -46,6 +46,8 @@ enum class CommandKind {
     ClearDrawing,
     Move,
     Select,
+    CutToLayer,
+    CopyToLayer,
 };
 
 // An undoable change to a Document.

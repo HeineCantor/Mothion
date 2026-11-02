@@ -11,6 +11,7 @@
 #include "ui/ExportDialog.h"
 #include "ui/IconFactory.h"
 #include "ui/PanelDock.h"
+#include "ui/SelectionBar.h"
 #include "ui/Theme.h"
 #include "ui/panels/BrushSizePanel.h"
 #include "ui/panels/BrushSlidersPanel.h"
@@ -88,6 +89,9 @@ MainWindow::MainWindow(QWidget *parent)
     createMenus();
     statusBar()->showMessage(tr("Ready"));
     connect(m_canvas, &canvas::CanvasView::statusMessage, this,
+            [this](const QString &text) { statusBar()->showMessage(text, 4000); });
+    auto *selectionBar = new SelectionBar(m_canvas, m_document);
+    connect(selectionBar, &SelectionBar::statusMessage, this,
             [this](const QString &text) { statusBar()->showMessage(text, 4000); });
     auto *viewInfo = new QLabel(this);
     statusBar()->addPermanentWidget(viewInfo);
@@ -239,6 +243,8 @@ void MainWindow::createMenus()
     edit->addAction(tr("Select all"), QKeySequence::SelectAll, m_document, &document::DocumentController::selectAll);
     edit->addAction(tr("Deselect"), QKeySequence(Qt::CTRL | Qt::Key_D), m_document,
                     &document::DocumentController::clearSelection);
+    edit->addAction(tr("Invert selection"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_I), m_document,
+                    &document::DocumentController::invertSelection);
 
     m_viewMenu = menuBar()->addMenu(tr("&View"));
     m_viewMenu->addActions(m_zoomActions);

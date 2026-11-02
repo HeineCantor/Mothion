@@ -15,6 +15,26 @@ namespace mothion::ui {
 
 namespace {
 
+// The selection frame: a dashed square, inset by `inset` from the 24x24 edge.
+void addDashedSquare(QPainterPath &path, double inset = 5)
+{
+    const double side = 24 - 2 * inset, dash = 3, gap = (side - 3 * dash) / 2;
+    for (int k = 0; k < 4; ++k) {
+        const QTransform t = QTransform().translate(12, 12).rotate(90 * k).translate(-12, -12);
+        for (int i = 0; i < 3; ++i) {
+            const double x = inset + i * (dash + gap);
+            path.moveTo(t.map(QPointF(x, inset)));
+            path.lineTo(t.map(QPointF(x + dash, inset)));
+        }
+    }
+}
+
+// A small sheet in the bottom-right corner: "onto a new layer".
+void addLayerSheet(QPainterPath &path)
+{
+    path.addRect(QRectF(14.5, 14.5, 6, 6));
+}
+
 // Draws one icon in a 24x24 logical coordinate system.
 void drawGlyph(QPainter &p, IconId id)
 {
@@ -112,13 +132,46 @@ void drawGlyph(QPainter &p, IconId id)
         }
         break;
     case IconId::RectSelect: // dashed square
-        for (int k = 0; k < 4; ++k) {
-            const QTransform t = QTransform().translate(12, 12).rotate(90 * k).translate(-12, -12);
-            for (double x : {5.0, 10.5, 16.0}) {
-                path.moveTo(t.map(QPointF(x, 5)));
-                path.lineTo(t.map(QPointF(std::min(x + 3.0, 19.0), 5)));
-            }
+        addDashedSquare(path);
+        break;
+    case IconId::Deselect: // dashed square struck through
+        addDashedSquare(path);
+        path.moveTo(3, 3);
+        path.lineTo(21, 21);
+        break;
+    case IconId::InvertSelection: // dashed square, its other half solid
+        addDashedSquare(path);
+        path.moveTo(19, 9);
+        path.lineTo(19, 19);
+        path.lineTo(9, 19);
+        path.closeSubpath();
+        path.moveTo(19, 14);
+        path.lineTo(14, 19);
+        break;
+    case IconId::EraseSelection: // a burst: what was there is gone
+        for (int k = 0; k < 8; ++k) {
+            const QTransform t = QTransform().translate(12, 12).rotate(45 * k);
+            path.moveTo(t.map(QPointF(0, -4)));
+            path.lineTo(t.map(QPointF(0, -8.5)));
         }
+        break;
+    case IconId::CutToLayer: // scissors over a sheet
+        path.addEllipse(QPointF(5.5, 17.5), 2.3, 2.3);
+        path.addEllipse(QPointF(11.5, 17.5), 2.3, 2.3);
+        path.moveTo(6.8, 15.6);
+        path.lineTo(12.5, 3.5);
+        path.moveTo(10.2, 15.6);
+        path.lineTo(4.5, 3.5);
+        addLayerSheet(path);
+        break;
+    case IconId::CopyToLayer: // two sheets, and the layer
+        path.addRect(QRectF(3.5, 3.5, 7, 9));
+        path.moveTo(6.5, 12.5);
+        path.lineTo(6.5, 15.5);
+        path.lineTo(13.5, 15.5);
+        path.lineTo(13.5, 6.5);
+        path.lineTo(10.5, 6.5);
+        addLayerSheet(path);
         break;
     case IconId::LassoSelect: // loop with a tail
         path.moveTo(9, 17);

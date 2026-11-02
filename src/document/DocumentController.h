@@ -78,6 +78,20 @@ public:
     void setSelection(const QPainterPath &area);
     void selectAll();
     void clearSelection();
+    // Selects what was not selected (all if nothing was).
+    void invertSelection();
+
+    // Work on the pixels under the selection in the drawing at the current
+    // layer and frame; each is one undo step and keeps the selection. They
+    // return false, with `reason` saying why, when there is no selection,
+    // nothing under it, or the layer is hidden (or locked, for the ones that
+    // change it).
+    // Erases what is selected.
+    bool eraseSelection(QString *reason = nullptr);
+    // Moves (cut) or copies what is selected to a new layer above, exposed
+    // like the drawing it came from; the new layer becomes current.
+    bool cutSelectionToLayer(QString *reason = nullptr);
+    bool copySelectionToLayer(QString *reason = nullptr);
 
     QString undoText() const; // "Undo stroke", or plain "Undo"
     QString redoText() const;
@@ -131,6 +145,9 @@ signals:
 
 private:
     void interruptStroke();
+    // The drawing under the selection operations, or nullptr with `reason` set.
+    doc::Drawing *selectedDrawing(bool changesIt, QString *reason);
+    bool selectionToLayer(bool cut, QString *reason);
     // Sets the selection as is, recording nothing.
     void assignSelection(const QPainterPath &area);
     void publish(const doc::ChangeSet &changes);

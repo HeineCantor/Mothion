@@ -10,6 +10,7 @@ enum class IconId {
     Collapse, Expand, Float, Close,
     ZoomOut, ZoomFit, ZoomActual, RotateLeft, RotateRight, RotateReset,
     FlipHorizontal, FlipVertical, Eye, Lock, Add, Delete, ArrowUp, ArrowDown, Clear,
+    Deselect, InvertSelection, EraseSelection, CutToLayer, CopyToLayer,
 };
 
 // Provisional icons, drawn in code as simple line art on a 24x24 grid.

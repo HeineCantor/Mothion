@@ -1,5 +1,6 @@
 #include "document/DocumentController.h"
 
+#include "canvas/SelectionMask.h"
 #include "canvas/TileQt.h"
 #include "core/document/commands/DrawingCommands.h"
 #include "core/document/commands/GroupCommand.h"
@@ -249,6 +250,123 @@ void DocumentController::clearSelection()
     setSelection({});
 }
 
+void DocumentController::invertSelection()
+{
+    QPainterPath page;
+    page.addRect(0, 0, m_document->width(), m_document->height());
+    setSelection(page.subtracted(m_selection));
+}
+
+doc::Drawing *DocumentController::selectedDrawing(bool changesIt, QString *reason)
+{
+    auto fail = [reason](const QString &why) -> doc::Drawing * {
+        if (reason)
+            *reason = why;
+        return nullptr;
+    };
+    if (!hasSelection())
+        return fail(tr("Nothing is selected"));
+    doc::Layer *layer = m_document->layer(m_currentLayer);
+    if (!layer)
+        return fail(tr("No layer selected"));
+    const QString name = QString::fromStdString(layer->properties().name);
+    if (!layer->properties().visible)
+        return fail(tr("Layer “%1” is hidden").arg(name));
+    if (changesIt && layer->properties().locked)
+        return fail(tr("Layer “%1” is locked").arg(name));
+    doc::Drawing *drawing = layer->drawing(layer->timing().drawingAt(m_currentFrame));
+    if (!drawing || drawing->image.isEmpty())
+        return fail(tr("Nothing in the selection on this frame"));
+    return drawing;
+}
+
+bool DocumentController::eraseSelection(QString *reason)
+{
+    interruptStroke();
+    doc::Drawing *drawing = selectedDrawing(true, reason);
+    if (!drawing)
+        return false;
+    const canvas::SelectionMask mask = canvas::SelectionMask::fromPath(m_selection);
+    doc::TiledImage inside, outside;
+    canvas::splitByMask(drawing->image, mask, inside, outside);
+    if (inside.isEmpty()) {
+        if (reason)
+            *reason = tr("Nothing in the selection on this frame");
+        return false;
+    }
+    const doc::DrawingId drawingId = m_document->layer(m_currentLayer)->timing().drawingAt(m_currentFrame);
+    const doc::TiledImage before = drawing->image;
+    drawing->image = std::move(outside);
+    std::vector<std::unique_ptr<doc::Command>> steps;
+    steps.push_back(doc::PaintCommand::capture(m_currentLayer, drawingId, before, drawing->image));
+    m_history.pushApplied(std::make_unique<doc::GroupCommand>(doc::CommandKind::ClearDrawing, std::move(steps)));
+    emit pixelsChanged(m_currentLayer, drawingId, mask.bounds);
+    emit historyChanged();
+    return true;
+}
+
+bool DocumentController::cutSelectionToLayer(QString *reason)
+{
+    return selectionToLayer(true, reason);
+}
+
+bool DocumentController::copySelectionToLayer(QString *reason)
+{
+    return selectionToLayer(false, reason);
+}
+
+bool DocumentController::selectionToLayer(bool cut, QString *reason)
+{
+    interruptStroke();
+    doc::Drawing *drawing = selectedDrawing(cut, reason);
+    if (!drawing)
+        return false;
+    doc::Document &d = *m_document;
+    const doc::Layer &source = *d.layer(m_currentLayer);
+    const doc::DrawingId sourceDrawing = source.timing().drawingAt(m_currentFrame);
+    const doc::Exposure exposure = *source.timing().exposureAt(m_currentFrame);
+    const canvas::SelectionMask mask = canvas::SelectionMask::fromPath(m_selection);
+    doc::TiledImage inside, outside;
+    canvas::splitByMask(drawing->image, mask, inside, outside);
+    if (inside.isEmpty()) {
+        if (reason)
+            *reason = tr("Nothing in the selection on this frame");
+        return false;
+    }
+
+    // The source loses its part (cut), then a new layer above it gets the
+    // part in a drawing exposed on the same frames: applied now, recorded together.
+    std::vector<std::unique_ptr<doc::Command>> steps;
+    if (cut) {
+        const doc::TiledImage before = drawing->image;
+        drawing->image = std::move(outside);
+        steps.push_back(doc::PaintCommand::capture(m_currentLayer, sourceDrawing, before, drawing->image));
+        emit pixelsChanged(m_currentLayer, sourceDrawing, mask.bounds);
+    }
+    const QString name = QString::fromStdString(source.properties().name);
+    auto layer = std::make_unique<doc::AddLayerCommand>(
+        d, d.indexOf(m_currentLayer) + 1,
+        doc::LayerProperties{(cut ? tr("%1 (cut)") : tr("%1 (copy)")).arg(name).toStdString()});
+    const doc::LayerId layerId = layer->layerId();
+    publish(layer->apply(d));
+    steps.push_back(std::move(layer));
+
+    doc::NewDrawing copy = doc::makeNewDrawing(d, layerId, exposure.start, exposure.length);
+    publish(copy.command->apply(d));
+    steps.push_back(std::move(copy.command));
+    doc::TiledImage &target = d.layer(layerId)->drawing(copy.id)->image;
+    const doc::TiledImage empty = target;
+    target = std::move(inside);
+    steps.push_back(doc::PaintCommand::capture(layerId, copy.id, empty, target));
+    emit pixelsChanged(layerId, copy.id, mask.bounds);
+
+    m_history.pushApplied(std::make_unique<doc::GroupCommand>(
+        cut ? doc::CommandKind::CutToLayer : doc::CommandKind::CopyToLayer, std::move(steps)));
+    emit historyChanged();
+    setCurrentLayer(layerId);
+    return true;
+}
+
 void DocumentController::undo()
 {
     interruptStroke();
@@ -282,6 +400,8 @@ QString DocumentController::commandName(doc::CommandKind kind)
     case doc::CommandKind::ClearDrawing: return tr("clear");
     case doc::CommandKind::Move: return tr("move");
     case doc::CommandKind::Select: return tr("selection");
+    case doc::CommandKind::CutToLayer: return tr("cut to layer");
+    case doc::CommandKind::CopyToLayer: return tr("copy to layer");
     }
     return {};
 }
