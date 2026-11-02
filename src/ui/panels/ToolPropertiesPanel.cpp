@@ -34,6 +34,11 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
     , m_meshDensity(new QComboBox(m_puppetControls))
     , m_meshExpand(new QSpinBox(m_puppetControls))
     , m_showMesh(new QCheckBox(tr("Show mesh"), m_puppetControls))
+    , m_fillControls(new QWidget(this))
+    , m_fillOpacity(new SliderField(tr("Opacity"), 0, 100, QStringLiteral(" %"), m_fillControls))
+    , m_tolerance(new SliderField(tr("Tolerance"), 0, 100, QStringLiteral(" %"), m_fillControls))
+    , m_fillExpand(new QSpinBox(m_fillControls))
+    , m_fillSource(new QComboBox(m_fillControls))
 {
     m_toolName->setObjectName(QStringLiteral("PanelTitle"));
     auto *resetCurve = new QPushButton(tr("Linear curve"), m_brushControls);
@@ -67,12 +72,26 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
     puppet->addRow(m_showMesh);
     puppet->addRow(help);
 
+    m_fillExpand->setRange(0, 20);
+    m_fillExpand->setSuffix(QStringLiteral(" px"));
+    m_fillExpand->setToolTip(tr("How far the fill grows under the lines around it"));
+    m_fillSource->addItems({tr("All layers"), tr("This layer")});
+    m_fillSource->setToolTip(tr("Where the lines that stop the fill are looked for"));
+    m_tolerance->setToolTip(tr("How different a color may be from the clicked one and still be filled"));
+    auto *fill = new QFormLayout(m_fillControls);
+    fill->setContentsMargins(0, 0, 0, 0);
+    fill->addRow(m_fillOpacity);
+    fill->addRow(m_tolerance);
+    fill->addRow(tr("Expand"), m_fillExpand);
+    fill->addRow(tr("Refer to"), m_fillSource);
+
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(6, 6, 6, 6);
     layout->setSpacing(4);
     layout->addWidget(m_toolName);
     layout->addWidget(m_brushControls, 1);
     layout->addWidget(m_puppetControls);
+    layout->addWidget(m_fillControls);
     layout->addStretch(0);
 
     connect(m_size, &SliderField::valueEdited, this,
@@ -97,6 +116,25 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
     connect(m_showMesh, &QCheckBox::toggled, this,
             [editPuppet](bool on) { editPuppet([on](tools::PuppetSettings &s) { s.showMesh = on; }); });
 
+    auto editFill = [this](auto change) {
+        tools::FillSettings s = m_state->fillSettings();
+        change(s);
+        m_state->setFillSettings(s);
+    };
+    connect(m_fillOpacity, &SliderField::valueEdited, this,
+            [this](int v) { m_state->setOpacity(ToolId::Fill, v / 100.0); });
+    // The tolerance is shown in % of the 0..255 channel range.
+    connect(m_tolerance, &SliderField::valueEdited, this, [editFill](int v) {
+        editFill([v](tools::FillSettings &s) { s.tolerance = int(std::lround(v * 2.55)); });
+    });
+    connect(m_fillExpand, &QSpinBox::valueChanged, this,
+            [editFill](int v) { editFill([v](tools::FillSettings &s) { s.expand = v; }); });
+    connect(m_fillSource, &QComboBox::currentIndexChanged, this,
+            [editFill](int i) { editFill([i](tools::FillSettings &s) { s.allLayers = i == 0; }); });
+    connect(m_state, &ToolState::fillSettingsChanged, this, &ToolPropertiesPanel::syncFillFromState);
+    connect(m_state, &ToolState::toolSettingsChanged, this, &ToolPropertiesPanel::syncFillFromState);
+    syncFillFromState();
+
     connect(m_state, &ToolState::activeToolChanged, this, &ToolPropertiesPanel::syncFromState);
     connect(m_state, &ToolState::toolSettingsChanged, this, &ToolPropertiesPanel::syncFromState);
     connect(m_state, &ToolState::smoothingChanged, this, &ToolPropertiesPanel::syncFromState);
@@ -114,9 +152,11 @@ void ToolPropertiesPanel::syncFromState()
     const ToolId tool = m_state->activeTool();
     const bool paint = ToolState::isPaintTool(tool);
     const bool puppet = tool == ToolId::Puppet;
+    const bool fill = tool == ToolId::Fill;
     m_toolName->setText(ToolState::displayName(tool));
-    m_brushControls->setVisible(!puppet);
+    m_brushControls->setVisible(!puppet && !fill);
     m_puppetControls->setVisible(puppet);
+    m_fillControls->setVisible(fill);
     m_size->setEnabled(paint);
     m_opacity->setEnabled(paint);
 
@@ -135,6 +175,16 @@ void ToolPropertiesPanel::syncPuppetFromState()
     m_meshDensity->setCurrentIndex(s.density);
     m_meshExpand->setValue(s.expand);
     m_showMesh->setChecked(s.showMesh);
+}
+
+void ToolPropertiesPanel::syncFillFromState()
+{
+    const tools::FillSettings s = m_state->fillSettings();
+    const QSignalBlocker b1(m_fillExpand), b2(m_fillSource);
+    m_fillOpacity->setValue(int(std::lround(m_state->settings(ToolId::Fill).opacity * 100)));
+    m_tolerance->setValue(int(std::lround(s.tolerance / 2.55)));
+    m_fillExpand->setValue(s.expand);
+    m_fillSource->setCurrentIndex(s.allLayers ? 0 : 1);
 }
 
 } // namespace mothion::ui

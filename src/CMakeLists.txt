@@ -16,6 +16,8 @@ add_library(mothion_core STATIC
     core/brush/StrokeShaper.h core/brush/StrokeShaper.cpp
     core/brush/VelocityMeter.h core/brush/VelocityMeter.cpp
 
+    core/fill/FloodFill.h core/fill/FloodFill.cpp
+
     core/puppet/Geometry.h
     core/puppet/Contour.h core/puppet/Contour.cpp
     core/puppet/Triangulation.h core/puppet/Triangulation.cpp
@@ -74,6 +76,7 @@ qt_add_library(mothion_gui STATIC
     canvas/CanvasTool.h
     canvas/MoveTool.h canvas/MoveTool.cpp
     canvas/EyedropperTool.h canvas/EyedropperTool.cpp
+    canvas/FillTool.h canvas/FillTool.cpp
     canvas/SelectionMask.h canvas/SelectionMask.cpp
     canvas/SelectionTool.h canvas/SelectionTool.cpp
     canvas/PuppetTool.h canvas/PuppetTool.cpp

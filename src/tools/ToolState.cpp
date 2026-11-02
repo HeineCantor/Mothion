@@ -33,6 +33,7 @@ QString ToolState::displayName(ToolId tool)
     case ToolId::LassoSelect: return tr("Lasso selection");
     case ToolId::Puppet: return tr("Puppet warp");
     case ToolId::Eyedropper: return tr("Eyedropper");
+    case ToolId::Fill: return tr("Fill");
     }
     return {};
 }
@@ -136,6 +137,14 @@ void ToolState::setPuppetSettings(const PuppetSettings &settings)
         return;
     m_puppet = settings;
     emit puppetSettingsChanged();
+}
+
+void ToolState::setFillSettings(const FillSettings &settings)
+{
+    if (settings == m_fill)
+        return;
+    m_fill = settings;
+    emit fillSettingsChanged();
 }
 
 } // namespace mothion::tools

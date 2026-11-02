@@ -134,6 +134,18 @@ void drawGlyph(QPainter &p, IconId id)
         path.quadTo(21, 6, 19, 7);
         path.lineTo(16, 10);
         break;
+    case IconId::Fill: // a tipped bucket and a drop
+        path.moveTo(11, 3);
+        path.lineTo(19, 11);
+        path.lineTo(12, 18);
+        path.lineTo(4, 10);
+        path.closeSubpath();
+        path.moveTo(4, 10);
+        path.lineTo(19, 11);
+        path.moveTo(20, 15);
+        path.quadTo(22.5, 18.5, 20, 20);
+        path.quadTo(17.5, 18.5, 20, 15);
+        break;
     case IconId::Move: // four arrows
         path.moveTo(12, 3);
         path.lineTo(12, 21);

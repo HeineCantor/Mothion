@@ -2,6 +2,7 @@
 
 #include "canvas/DebugOverlay.h"
 #include "canvas/EyedropperTool.h"
+#include "canvas/FillTool.h"
 #include "canvas/MoveTool.h"
 #include "canvas/PuppetTool.h"
 #include "canvas/SelectionTool.h"
@@ -76,6 +77,9 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
         m_document, m_toolState, [this](const QString &text) { emit statusMessage(text); }, [this] { update(); });
     m_eyedropperTool =
         std::make_unique<EyedropperTool>(m_toolState, [this](const QPointF &docPos) { return colorAt(docPos); });
+    m_fillTool = std::make_unique<FillTool>(
+        m_document, m_toolState, [this]() -> const QImage & { return m_frame.image(); },
+        [this](const QString &text) { emit statusMessage(text); });
     m_antsTimer = new QTimer(this);
     m_antsTimer->setInterval(kAntsIntervalMs);
     connect(m_antsTimer, &QTimer::timeout, this, [this] {
@@ -501,6 +505,7 @@ CanvasTool *CanvasView::canvasTool() const
     case ToolId::LassoSelect: return m_lassoSelectTool.get();
     case ToolId::Puppet: return m_puppetTool.get();
     case ToolId::Eyedropper: return m_eyedropperTool.get();
+    case ToolId::Fill: return m_fillTool.get();
     default: return nullptr;
     }
 }
@@ -621,7 +626,8 @@ bool CanvasView::picksColor() const
     // The key flag for the cursor; the modifier too, for an Alt pressed
     // while the focus was elsewhere.
     const bool alt = m_altHeld || (QGuiApplication::keyboardModifiers() & Qt::AltModifier);
-    return alt && ToolState::isPaintTool(m_toolState->activeTool());
+    const ToolId tool = m_toolState->activeTool();
+    return alt && (ToolState::isPaintTool(tool) || tool == ToolId::Fill);
 }
 
 QColor CanvasView::colorAt(const QPointF &docPos) const

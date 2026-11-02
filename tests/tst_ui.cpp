@@ -1,6 +1,8 @@
 // Tests for the UI layer: panel layouts, document controller actions.
 
 #include "canvas/CanvasView.h"
+#include "canvas/FillTool.h"
+#include "canvas/FrameRenderer.h"
 #include "canvas/MoveTool.h"
 #include "canvas/PuppetTool.h"
 #include "canvas/SelectionTool.h"
@@ -664,6 +666,50 @@ private slots:
         QTest::keyRelease(&canvas, Qt::Key_Alt);
         QCOMPARE(state.color(), QColor(200, 40, 30)); // live, to where it was let go
         QCOMPARE(controller.undoText(), QStringLiteral("Undo import image")); // no stroke
+    }
+
+    // The bucket fills inside the lines, under their edge, within the
+    // selection, as one undo step.
+    void fillToolFillsInsideTheLines()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        QImage ring(100, 100, QImage::Format_ARGB32);
+        ring.fill(Qt::transparent);
+        {
+            QPainter p(&ring);
+            p.setPen(QPen(Qt::black, 4));
+            p.drawRect(10, 10, 80, 80);
+        }
+        controller.importImage(ring, QStringLiteral("lines")); // at 910..1009, 490..589
+        const doc::Layer &layer = *controller.document().layer(controller.currentLayer());
+        auto pixel = [&](int x, int y) { return layer.drawingAt(0)->image.pixel(x, y); };
+        canvas::FrameRenderer frame;
+        QStringList messages;
+        canvas::FillTool tool(&controller, &state, [&]() -> const QImage & {
+            frame.renderAll(controller.document(), controller.currentFrame());
+            return frame.image();
+        }, [&](const QString &text) { messages << text; });
+
+        state.setColor(QColor(255, 0, 0));
+        tool.press({960, 540}, Qt::NoModifier); // inside
+        QCOMPARE(pixel(960, 540), doc::Pixel(0xffff0000));
+        QCOMPARE(qAlpha(pixel(900, 540)), 0);       // outside stays empty
+        QCOMPARE(pixel(920, 540), doc::Pixel(0xff000000)); // the line stays on top
+        QCOMPARE(pixel(923, 540), doc::Pixel(0xffff0000)); // up to it
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo fill"));
+        controller.undo();
+        QCOMPARE(qAlpha(pixel(960, 540)), 0);
+
+        QPainterPath left; // kept inside the selection
+        left.addRect(900, 480, 60, 120);
+        controller.setSelection(left);
+        tool.press({950, 540}, Qt::NoModifier);
+        QCOMPARE(pixel(950, 540), doc::Pixel(0xffff0000));
+        QCOMPARE(qAlpha(pixel(980, 540)), 0);
+        tool.press({980, 540}, Qt::NoModifier); // outside it: refused
+        QCOMPARE(qAlpha(pixel(980, 540)), 0);
+        QVERIFY(!messages.isEmpty());
     }
 
     // The ants march while there is a selection: the dashes swap in turns.

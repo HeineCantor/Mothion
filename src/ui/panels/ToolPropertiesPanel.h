@@ -16,7 +16,7 @@ class SliderField;
 
 // Properties of the active tool: size and opacity (paint tools only),
 // plus the global smoothing, pen tilt switch and pressure curve; for the puppet warp, its
-// mesh options instead.
+// mesh options instead; for the fill, its area options.
 class ToolPropertiesPanel : public QWidget
 {
     Q_OBJECT
@@ -29,6 +29,7 @@ public:
 private:
     void syncFromState();
     void syncPuppetFromState();
+    void syncFillFromState();
 
     tools::ToolState *m_state;
     QLabel *m_toolName;
@@ -43,6 +44,12 @@ private:
     QComboBox *m_meshDensity;
     QSpinBox *m_meshExpand;
     QCheckBox *m_showMesh;
+
+    QWidget *m_fillControls;
+    SliderField *m_fillOpacity;
+    SliderField *m_tolerance;
+    QSpinBox *m_fillExpand;
+    QComboBox *m_fillSource;
 };
 
 } // namespace mothion::ui

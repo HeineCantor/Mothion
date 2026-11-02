@@ -48,6 +48,7 @@ enum class CommandKind {
     Select,
     CutToLayer,
     CopyToLayer,
+    Fill,
 };
 
 // An undoable change to a Document.

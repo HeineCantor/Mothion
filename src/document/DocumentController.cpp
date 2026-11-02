@@ -402,6 +402,7 @@ QString DocumentController::commandName(doc::CommandKind kind)
     case doc::CommandKind::Select: return tr("selection");
     case doc::CommandKind::CutToLayer: return tr("cut to layer");
     case doc::CommandKind::CopyToLayer: return tr("copy to layer");
+    case doc::CommandKind::Fill: return tr("fill");
     }
     return {};
 }

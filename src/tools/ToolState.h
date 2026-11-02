@@ -13,8 +13,8 @@ namespace mothion::tools {
 
 // The tools in the tool palette. Not to be confused with mothion::InputTool,
 // which is the *physical* end of the pen (tip / eraser / mouse).
-enum class ToolId { Brush, Eraser, Hand, Zoom, Move, RectSelect, LassoSelect, Puppet, Eyedropper };
-inline constexpr int kToolCount = 9;
+enum class ToolId { Brush, Eraser, Hand, Zoom, Move, RectSelect, LassoSelect, Puppet, Eyedropper, Fill };
+inline constexpr int kToolCount = 10;
 
 // Puppet warp options (see puppet::PuppetRig).
 struct PuppetSettings
@@ -24,6 +24,16 @@ struct PuppetSettings
     bool showMesh = true; // draw the mesh over the canvas
 
     bool operator==(const PuppetSettings &) const = default;
+};
+
+// Paint bucket options.
+struct FillSettings
+{
+    int tolerance = 10;    // 0..255: how far a color may be from the clicked one
+    int expand = 2;        // px the fill grows under the lines around it
+    bool allLayers = true; // the area is found in everything shown, else in this layer
+
+    bool operator==(const FillSettings &) const = default;
 };
 
 struct BrushSettings
@@ -87,6 +97,9 @@ public:
     PuppetSettings puppetSettings() const { return m_puppet; }
     void setPuppetSettings(const PuppetSettings &settings);
 
+    FillSettings fillSettings() const { return m_fill; }
+    void setFillSettings(const FillSettings &settings);
+
 signals:
     void activeToolChanged(mothion::tools::ToolId tool);
     void toolSettingsChanged(mothion::tools::ToolId tool);
@@ -96,6 +109,7 @@ signals:
     void smoothingChanged(double amount);
     void useTiltChanged(bool use);
     void puppetSettingsChanged();
+    void fillSettingsChanged();
 
 private:
     static std::size_t index(ToolId tool) { return static_cast<std::size_t>(tool); }
@@ -110,6 +124,7 @@ private:
     double m_smoothing = 0.3;
     bool m_useTilt = true;
     PuppetSettings m_puppet;
+    FillSettings m_fill;
 };
 
 } // namespace mothion::tools

@@ -3,6 +3,7 @@
 #include "core/PressureCurve.h"
 #include "core/RateMeter.h"
 #include "core/StrokeSmoother.h"
+#include "core/fill/FloodFill.h"
 
 #include <QTest>
 
@@ -13,6 +14,36 @@ class TestCore : public QObject
     Q_OBJECT
 
 private slots:
+    // A closed outline stops the fill; growing slips it under the line.
+    void floodFillStopsAtLinesAndGrows()
+    {
+        constexpr int w = 20, h = 20;
+        std::vector<mothion::doc::Pixel> px(w * h, 0);
+        for (int i = 5; i <= 14; ++i) { // a square outline, 5..14
+            px[5 * w + i] = px[14 * w + i] = 0xff000000;
+            px[i * w + 5] = px[i * w + 14] = 0xff000000;
+        }
+        auto inside = mothion::fill::floodRegion(px.data(), w, h, 10, 10, 10);
+        QCOMPARE(inside.at(10, 10), 255);
+        QCOMPARE(inside.at(6, 6), 255);
+        QCOMPARE(inside.at(5, 10), 0); // the line
+        QCOMPARE(inside.at(2, 2), 0);  // outside
+        QCOMPARE(inside.left, 6);
+        QCOMPARE(inside.bottom, 13);
+        mothion::fill::grow(inside, 1);
+        QCOMPARE(inside.at(5, 10), 255);
+        QCOMPARE(inside.at(4, 10), 0);
+
+        auto outside = mothion::fill::floodRegion(px.data(), w, h, 0, 0, 10);
+        QCOMPARE(outside.at(19, 19), 255);
+        QCOMPARE(outside.at(10, 10), 0);
+
+        px[5 * w + 10] = 0x40000000; // a faint gap: within tolerance it leaks
+        QCOMPARE(mothion::fill::floodRegion(px.data(), w, h, 10, 10, 0x40).at(0, 0), 255);
+        QCOMPARE(mothion::fill::floodRegion(px.data(), w, h, 10, 10, 0x3f).at(0, 0), 0);
+        QVERIFY(mothion::fill::floodRegion(px.data(), w, h, -1, 0, 10).isEmpty());
+    }
+
     void linearCurveIsIdentity()
     {
         const PressureCurve curve;

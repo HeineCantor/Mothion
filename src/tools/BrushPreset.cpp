@@ -37,6 +37,7 @@ QList<BrushPreset> builtInPresets(ToolId tool)
     case ToolId::LassoSelect:
     case ToolId::Puppet:
     case ToolId::Eyedropper:
+    case ToolId::Fill:
         return {};
     }
     return {};
