@@ -635,6 +635,71 @@ private slots:
         QVERIFY(messages.isEmpty());
     }
 
+    // The move takes what the Layers panel has chosen: several layers, a
+    // frame (all its layers), a cel (all the layers of all its frames); one
+    // undo step, locked layers left as they are.
+    void moveToolMovesTheChosenLayers()
+    {
+        document::DocumentController controller;
+        ui::LayersPanel panel(&controller);
+        panel.resize(320, 700);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        doc::Document &d = controller.documentForCommands();
+        const doc::CelId cel = controller.currentCel();
+        struct Made { doc::DrawingId drawing; doc::LayerId line, color; };
+        std::vector<Made> frames;
+        for (int f : {0, 1}) {
+            doc::NewDrawing nd = doc::makeNewDrawing(d, cel, f, 1, "Line");
+            controller.execute(std::move(nd.command));
+            auto color = std::make_unique<doc::AddLayerCommand>(d, cel, nd.id, 1, doc::LayerProperties{"Color"});
+            const doc::LayerId colorId = color->layerId();
+            controller.execute(std::move(color));
+            frames.push_back({nd.id, nd.layer, colorId});
+            d.layer(cel, nd.id, nd.layer)->image.setPixel(100, 100, 0xff000000);
+            d.layer(cel, nd.id, colorId)->image.setPixel(100, 100, 0xff000000);
+        }
+        QCoreApplication::processEvents();
+        auto *tree = panel.findChild<QTreeWidget *>();
+        auto moved = [&](const Made &m, doc::LayerId layer) {
+            return d.layer(cel, m.drawing, layer)->image.pixel(110, 100) == doc::Pixel(0xff000000);
+        };
+        canvas::MoveTool tool(&controller, [](const QString &) {});
+        auto drag = [&] {
+            tool.press({0, 0}, Qt::NoModifier);
+            tool.move({10, 0}, Qt::NoModifier);
+            tool.release({10, 0}, Qt::NoModifier);
+        };
+
+        tree->setCurrentItem(panel.celItem(cel)); // the whole cel
+        drag();
+        for (const Made &m : frames)
+            QVERIFY(moved(m, m.line) && moved(m, m.color));
+        controller.undo(); // all at once
+        QCoreApplication::processEvents();
+        for (const Made &m : frames)
+            QVERIFY(!moved(m, m.line) && !moved(m, m.color));
+
+        tree->setCurrentItem(panel.frameItem(frames[1].drawing)); // one frame: both its layers
+        drag();
+        QVERIFY(moved(frames[1], frames[1].line) && moved(frames[1], frames[1].color));
+        QVERIFY(!moved(frames[0], frames[0].line) && !moved(frames[0], frames[0].color));
+        controller.undo();
+        QCoreApplication::processEvents();
+
+        // Two layers of a frame; one of them locked stays.
+        tree->setCurrentItem(panel.layerItem(frames[1].line));
+        panel.layerItem(frames[1].color)->setSelected(true);
+        doc::LayerProperties locked = d.layer(cel, frames[1].drawing, frames[1].color)->properties;
+        locked.locked = true;
+        controller.execute(doc::makeSetLayerProperties(d, cel, frames[1].drawing, frames[1].color, locked));
+        QCoreApplication::processEvents();
+        QCOMPARE(controller.layerSelection().size(), std::size_t(2));
+        drag();
+        QVERIFY(moved(frames[1], frames[1].line));
+        QVERIFY(!moved(frames[1], frames[1].color));
+    }
+
     void moveToolShiftKeepsOneAxisAndCancelRestores()
     {
         document::DocumentController controller;

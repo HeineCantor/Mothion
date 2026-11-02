@@ -142,10 +142,31 @@ public:
     std::optional<PaintTarget> beginPaint(bool createIfEmpty, QString *reason = nullptr);
     // Live pixel updates during the stroke.
     void notifyPainted(const QRect &docRect);
+    // A layer of a drawing of a cel.
+    struct LayerRef
+    {
+        doc::CelId cel = doc::kNoId;
+        doc::DrawingId drawing = doc::kNoId;
+        doc::LayerId layer = doc::kNoId;
+        bool operator==(const LayerRef &) const = default;
+    };
+    // The layers chosen in the Layers panel, for the edits that act on several
+    // at once (a move): every layer of a chosen frame or cel is in it. Empty
+    // when that is just the current layer.
+    void setLayerSelection(std::vector<LayerRef> layers);
+    const std::vector<LayerRef> &layerSelection() const { return m_layerSelection; }
+    // Like beginPaint(false), for every layer of layerSelection() (or the
+    // current layer when it is empty) that can be painted: hidden and locked
+    // ones, or in hidden or locked cels, are left out. Empty, with `reason`,
+    // when none is left. The first target is the current layer if it is in.
+    std::vector<PaintTarget> beginPaintLayers(QString *reason = nullptr);
     // Records the stroke; `before` is the layer image as it was at beginPaint().
     // If the selection changed meanwhile, that change is part of the same
     // undo step. `kind` names the step ("Undo move").
     void endPaint(const doc::TiledImage &before, doc::CommandKind kind = doc::CommandKind::Paint);
+    // The same after beginPaintLayers(): `before` holds each target's image
+    // as it was, in the order of the targets.
+    void endPaint(const std::vector<doc::TiledImage> &before, doc::CommandKind kind);
     // Abandons the stroke (the caller has already restored the pixels).
     void cancelPaint();
     bool isPainting() const { return m_paint.has_value(); }
@@ -198,10 +219,12 @@ private:
     doc::LayerId m_currentLayer = doc::kNoId;
     std::string m_currentLayerName; // looked for when the drawing changes
     QPainterPath m_selection;
+    std::vector<LayerRef> m_layerSelection;
 
     struct PaintState
     {
         PaintTarget target;
+        std::vector<PaintTarget> others; // painted along with `target` (beginPaintLayers)
         std::unique_ptr<doc::Command> createdDrawing; // applied, not yet recorded
         QPainterPath selectionBefore;
     };

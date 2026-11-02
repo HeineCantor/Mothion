@@ -1004,8 +1004,35 @@ bool LayersPanel::dropAt(const QPoint &pos)
 
 // --- header ------------------------------------------------------------------------------
 
+void LayersPanel::publishSelection()
+{
+    const doc::Document &d = m_document->document();
+    std::vector<DocumentController::LayerRef> layers;
+    auto add = [&layers](doc::CelId cel, const doc::Drawing &drawing, doc::LayerId only) {
+        for (const doc::Layer &layer : drawing.layers) {
+            const DocumentController::LayerRef ref{cel, drawing.id, layer.id};
+            const bool wanted = only == doc::kNoId || layer.id == only;
+            if (wanted && std::find(layers.begin(), layers.end(), ref) == layers.end())
+                layers.push_back(ref);
+        }
+    };
+    for (const QTreeWidgetItem *item : m_tree->selectedItems()) {
+        const doc::Cel *cel = d.cel(celOf(item));
+        if (!cel)
+            continue;
+        if (kindOf(item) == Row::Cel) {
+            for (const auto &[id, drawing] : cel->drawings())
+                add(cel->id(), drawing, doc::kNoId);
+        } else if (const doc::Drawing *drawing = cel->drawing(drawingOf(item))) {
+            add(cel->id(), *drawing, kindOf(item) == Row::Layer ? layerOf(item) : doc::kNoId);
+        }
+    }
+    m_document->setLayerSelection(std::move(layers));
+}
+
 void LayersPanel::syncHeader()
 {
+    publishSelection();
     const doc::Document &d = m_document->document();
     const doc::Cel *cel = d.cel(m_document->currentCel());
     // A frame's or a layer's row stands for the frame shown now, or for none.

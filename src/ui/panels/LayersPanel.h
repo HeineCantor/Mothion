@@ -34,6 +34,9 @@ namespace mothion::ui {
 //  - a layer: the blend mode and opacity of the selected layers (of that
 //    frame: Ctrl+click adds or takes away one, Shift+click a range); new
 //    layer above, delete, up and down.
+// The tools that act on several layers at once (the move) take every layer
+// of the selected rows: a frame stands for its layers, a cel for all the
+// layers of its frames.
 // Dragging rows moves the selected layers within their frame, or a cel
 // among the cels. Each cel and layer row toggles visibility and lock;
 // double-click renames. Every edit is one undoable command.
@@ -68,7 +71,8 @@ protected:
 
 private:
     void rebuildTree();       // structure changed: recreate the rows
-    void syncHeader();        // current row changed: blend / opacity / buttons
+    void syncHeader();        // current row changed: blend / opacity / buttons, publishSelection()
+    void publishSelection();  // the chosen rows' layers, for the tools (a move)
     void refreshThumbnails(); // throttled: pixels or the current frame changed
     void markCurrentFrames(); // the frames shown now, in bold
     void selectCurrentRow();  // the current cel / layer chosen elsewhere

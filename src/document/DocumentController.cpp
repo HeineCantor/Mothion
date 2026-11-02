@@ -124,6 +124,7 @@ void DocumentController::replaceDocument(std::unique_ptr<doc::Document> document
     m_currentFrame = 0;
     m_currentLayer = doc::kNoId;
     m_currentLayerName.clear();
+    m_layerSelection.clear();
     m_selection = QPainterPath();
     if (const doc::Drawing *drawing = currentDrawing(); drawing && !drawing->layers.empty()) {
         m_currentLayer = drawing->layers.back().id;
@@ -720,27 +721,82 @@ std::optional<DocumentController::PaintTarget> DocumentController::beginPaint(bo
     return m_paint->target;
 }
 
+void DocumentController::setLayerSelection(std::vector<LayerRef> layers)
+{
+    if (layers.size() == 1 && layers.front().layer == m_currentLayer)
+        layers.clear(); // just the current one
+    m_layerSelection = std::move(layers);
+}
+
+std::vector<DocumentController::PaintTarget> DocumentController::beginPaintLayers(QString *reason)
+{
+    if (m_layerSelection.empty()) {
+        const auto target = beginPaint(false, reason);
+        return target ? std::vector<PaintTarget>{*target} : std::vector<PaintTarget>{};
+    }
+    interruptStroke(); // a previous stroke left open
+    std::vector<PaintTarget> targets;
+    for (const LayerRef &ref : m_layerSelection) {
+        const doc::Cel *cel = m_document->cel(ref.cel);
+        doc::Layer *layer = m_document->layer(ref.cel, ref.drawing, ref.layer);
+        if (!layer || !cel->properties().visible || cel->properties().locked || !layer->properties.visible
+            || layer->properties.locked)
+            continue;
+        const PaintTarget target{ref.cel, ref.drawing, ref.layer, &layer->image};
+        if (ref.layer == m_currentLayer)
+            targets.insert(targets.begin(), target);
+        else
+            targets.push_back(target);
+    }
+    if (targets.empty()) {
+        if (reason)
+            *reason = tr("The selected layers are hidden or locked");
+        return targets;
+    }
+    PaintState state;
+    state.target = targets.front();
+    state.others.assign(targets.begin() + 1, targets.end());
+    state.selectionBefore = m_selection;
+    m_paint = std::move(state);
+    return targets;
+}
+
 void DocumentController::notifyPainted(const QRect &docRect)
 {
-    if (m_paint && !docRect.isEmpty())
-        emit pixelsChanged(m_paint->target.cel, m_paint->target.drawing, docRect);
+    if (!m_paint || docRect.isEmpty())
+        return;
+    emit pixelsChanged(m_paint->target.cel, m_paint->target.drawing, docRect);
+    std::vector<std::pair<doc::CelId, doc::DrawingId>> told{{m_paint->target.cel, m_paint->target.drawing}};
+    for (const PaintTarget &t : m_paint->others)
+        if (std::find(told.begin(), told.end(), std::pair{t.cel, t.drawing}) == told.end()) {
+            told.emplace_back(t.cel, t.drawing);
+            emit pixelsChanged(t.cel, t.drawing, docRect);
+        }
 }
 
 void DocumentController::endPaint(const doc::TiledImage &before, doc::CommandKind kind)
+{
+    endPaint(std::vector<doc::TiledImage>{before}, kind);
+}
+
+void DocumentController::endPaint(const std::vector<doc::TiledImage> &before, doc::CommandKind kind)
 {
     if (!m_paint)
         return;
     PaintState state = std::move(*m_paint);
     m_paint.reset();
 
-    // New drawing + stroke + selection change: one undo step.
+    // New drawing + stroke(s) + selection change: one undo step.
     std::vector<std::unique_ptr<doc::Command>> steps;
-    auto paint = doc::PaintCommand::capture(state.target.cel, state.target.drawing, state.target.layer, before,
-                                            *state.target.image);
-    if (paint) {
+    std::vector<PaintTarget> targets{state.target};
+    targets.insert(targets.end(), state.others.begin(), state.others.end());
+    for (std::size_t i = 0; i < targets.size() && i < before.size(); ++i)
+        if (auto paint = doc::PaintCommand::capture(targets[i].cel, targets[i].drawing, targets[i].layer, before[i],
+                                                    *targets[i].image))
+            steps.push_back(std::move(paint));
+    if (!steps.empty()) {
         if (state.createdDrawing)
-            steps.push_back(std::move(state.createdDrawing));
-        steps.push_back(std::move(paint));
+            steps.insert(steps.begin(), std::move(state.createdDrawing));
     } else if (state.createdDrawing) { // nothing drawn: the drawing we created is not wanted
         publish(state.createdDrawing->revert(*m_document));
     }
