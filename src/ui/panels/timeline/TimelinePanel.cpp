@@ -125,11 +125,16 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
     auto *prev = new QToolButton(this);
     prev->setArrowType(Qt::LeftArrow);
     prev->setAutoRaise(true);
-    prev->setToolTip(tr("Previous frame"));
+    prev->setToolTip(tr("Previous time slot (,)"));
     auto *next = new QToolButton(this);
     next->setArrowType(Qt::RightArrow);
     next->setAutoRaise(true);
-    next->setToolTip(tr("Next frame"));
+    next->setToolTip(tr("Next time slot (.)"));
+    // Over holds and empty slots, to where the current cel's frames start.
+    auto *prevFrame = celButton(IconId::PreviousFrame, QStringLiteral("previousFrame"),
+                                tr("Previous frame of the cel (Shift+,)"), this);
+    auto *nextFrame = celButton(IconId::NextFrame, QStringLiteral("nextFrame"), tr("Next frame of the cel (Shift+.)"),
+                                this);
     auto *frameLabel = new QLabel(this);
     frameLabel->setMinimumWidth(150);
 
@@ -166,8 +171,10 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
     auto *bar = new QHBoxLayout;
     bar->setContentsMargins(4, 2, 4, 2);
     bar->setSpacing(4);
+    bar->addWidget(prevFrame);
     bar->addWidget(prev);
     bar->addWidget(next);
+    bar->addWidget(nextFrame);
     bar->addWidget(frameLabel);
     bar->addWidget(newDrawing);
     bar->addWidget(onion);
@@ -196,6 +203,8 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
             [this] { m_document->setCurrentFrame(m_document->currentFrame() - 1); });
     connect(next, &QToolButton::clicked, m_document,
             [this] { m_document->setCurrentFrame(m_document->currentFrame() + 1); });
+    connect(prevFrame, &QToolButton::clicked, m_document, [this] { m_document->stepToFrame(-1); });
+    connect(nextFrame, &QToolButton::clicked, m_document, [this] { m_document->stepToFrame(+1); });
     connect(newDrawing, &QPushButton::clicked, m_document, [this] {
         m_document->insertFrame(m_document->currentCel(), m_document->currentFrame(), false);
     });

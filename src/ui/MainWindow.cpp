@@ -298,8 +298,13 @@ void MainWindow::createMenus()
         m_document->setCurrentFrame(
             std::clamp(m_document->currentFrame() + by, 0, m_document->document().frameCount() - 1));
     };
-    animation->addAction(tr("Previous frame"), QKeySequence(Qt::Key_Comma), this, [step] { step(-1); });
-    animation->addAction(tr("Next frame"), QKeySequence(Qt::Key_Period), this, [step] { step(+1); });
+    animation->addAction(tr("Previous time slot"), QKeySequence(Qt::Key_Comma), this, [step] { step(-1); });
+    animation->addAction(tr("Next time slot"), QKeySequence(Qt::Key_Period), this, [step] { step(+1); });
+    // Over holds and empty slots, to where the current cel's frames start.
+    animation->addAction(tr("Previous frame"), QKeySequence(Qt::SHIFT | Qt::Key_Comma), this,
+                         [this] { m_document->stepToFrame(-1); });
+    animation->addAction(tr("Next frame"), QKeySequence(Qt::SHIFT | Qt::Key_Period), this,
+                         [this] { m_document->stepToFrame(+1); });
     animation->addSeparator();
     // The hold of the frame at the current point, one frame longer or shorter;
     // the frames after it move along.

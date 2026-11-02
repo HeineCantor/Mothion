@@ -1379,9 +1379,10 @@ private slots:
         QTRY_COMPARE(window.frameCount(), 4);
     }
 
-    // , and . step the timeline one frame back and on, from the canvas or a
-    // panel; + and - change the current frame's hold, but in the puppet's
-    // radius mode they stay the radius's on the canvas.
+    // , and . step the timeline one time slot back and on, from the canvas or
+    // a panel, Shift+, and Shift+. one frame of the cel; + and - change the
+    // current frame's hold, but in the puppet's radius mode they stay the
+    // radius's on the canvas.
     void commaAndPeriodStepTheFrames()
     {
         ui::MainWindow window;
@@ -1448,6 +1449,28 @@ private slots:
         controller->setCurrentFrame(20); // nothing there
         QTest::keyClick(canvas, Qt::Key_Plus);
         QCOMPARE(t.lastFrame(), 4);
+
+        // Shift+, and Shift+. go to the cel's previous and next frame, over
+        // holds and empty slots: a at 2, b at 3; nothing after b.
+        controller->setCurrentFrame(0);
+        QTest::keyClick(canvas, Qt::Key_Period, Qt::ShiftModifier);
+        QCOMPARE(controller->currentFrame(), 2);
+        QTest::keyClick(canvas, Qt::Key_Period, Qt::ShiftModifier);
+        QCOMPARE(controller->currentFrame(), 3);
+        QTest::keyClick(canvas, Qt::Key_Period, Qt::ShiftModifier); // none after it
+        QCOMPARE(controller->currentFrame(), 3);
+        controller->setCurrentFrame(9); // past them, on an empty slot
+        QTest::keyClick(canvas, Qt::Key_Comma, Qt::ShiftModifier);
+        QCOMPARE(controller->currentFrame(), 3);
+        QTest::keyClick(canvas, Qt::Key_Comma, Qt::ShiftModifier);
+        QCOMPARE(controller->currentFrame(), 2);
+        QTest::keyClick(canvas, Qt::Key_Comma, Qt::ShiftModifier); // none before it
+        QCOMPARE(controller->currentFrame(), 2);
+        // And from the buttons of the timeline's bar.
+        auto *nextFrame = window.findChild<QToolButton *>(QStringLiteral("nextFrame"));
+        QVERIFY(nextFrame && window.findChild<QToolButton *>(QStringLiteral("previousFrame")));
+        nextFrame->click();
+        QCOMPARE(controller->currentFrame(), 3);
     }
 
     // Split frame cuts a hold in two independent frames; new frame and

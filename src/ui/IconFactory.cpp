@@ -331,6 +331,19 @@ void drawGlyph(QPainter &p, IconId id)
             path.addRect(QRectF(17.5, y - 1, 1, 2));
         }
         break;
+    case IconId::PreviousFrame:
+    case IconId::NextFrame: // a step to a bar: the next (or previous) frame's start
+        if (id == IconId::PreviousFrame) {
+            p.translate(24, 0);
+            p.scale(-1, 1);
+        }
+        path.moveTo(7, 6);
+        path.lineTo(14, 12);
+        path.lineTo(7, 18);
+        path.closeSubpath();
+        path.moveTo(17, 6);
+        path.lineTo(17, 18);
+        break;
     case IconId::Add:
         path.moveTo(12, 5);
         path.lineTo(12, 19);

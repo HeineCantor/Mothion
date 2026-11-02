@@ -210,6 +210,35 @@ void DocumentController::insertFrame(doc::CelId cel, int frame, bool after)
     setCurrentFrame(at);
 }
 
+bool DocumentController::stepToFrame(int direction)
+{
+    const doc::Cel *cel = m_document->cel(m_currentCel);
+    if (!cel)
+        return false;
+    const auto &exposures = cel->timing().exposures();
+    std::optional<int> to;
+    if (direction > 0) {
+        for (const doc::Exposure &e : exposures)
+            if (e.start > m_currentFrame) {
+                to = e.start;
+                break;
+            }
+    } else {
+        // Before the start of the frame shown now (or of the point, when empty).
+        const doc::Exposure *here = cel->timing().exposureAt(m_currentFrame);
+        const int from = here ? here->start : m_currentFrame;
+        for (auto it = exposures.rbegin(); it != exposures.rend(); ++it)
+            if (it->start < from) {
+                to = it->start;
+                break;
+            }
+    }
+    if (!to)
+        return false;
+    setCurrentFrame(*to);
+    return true;
+}
+
 bool DocumentController::changeCurrentHold(int delta)
 {
     const doc::Cel *cel = m_document->cel(m_currentCel);
