@@ -47,7 +47,7 @@ int main(int argc, char *argv[])
     mothion::ui::applySavedTheme(app);
 
     // The splash stays up at least this long, so a fast start does not just flash it.
-    constexpr int kSplashMinimumMs = 1500;
+    constexpr int kSplashMinimumMs = 2500;
     QSplashScreen splash(mothion::ui::splashPixmap(QApplication::applicationVersion(),
                                                    QGuiApplication::primaryScreen()->devicePixelRatio()));
     splash.show();
