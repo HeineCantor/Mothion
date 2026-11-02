@@ -1,11 +1,11 @@
 #include "ui/panels/LayersPanel.h"
 
-#include "canvas/FrameRenderer.h"
 #include "canvas/TileQt.h"
 #include "core/document/commands/GroupCommand.h"
-#include "core/document/commands/CelCommands.h"
+#include "core/document/commands/LayerCommands.h"
 #include "document/DocumentController.h"
 #include "ui/IconFactory.h"
+#include "ui/panels/BlendModes.h"
 
 #include <QComboBox>
 #include <QDrag>
@@ -34,26 +34,11 @@ using document::DocumentController;
 namespace {
 
 constexpr QSize kThumbSize(40, 24);
-constexpr int kCelIdRole = Qt::UserRole + 1;
+constexpr int kLayerIdRole = Qt::UserRole + 1;
 
-const doc::BlendMode kBlendModes[] = {doc::BlendMode::Normal, doc::BlendMode::Multiply, doc::BlendMode::Screen,
-                                      doc::BlendMode::Overlay, doc::BlendMode::Add};
-
-QString blendName(doc::BlendMode mode)
-{
-    switch (mode) {
-    case doc::BlendMode::Normal: return LayersPanel::tr("Normal");
-    case doc::BlendMode::Multiply: return LayersPanel::tr("Multiply");
-    case doc::BlendMode::Screen: return LayersPanel::tr("Screen");
-    case doc::BlendMode::Overlay: return LayersPanel::tr("Overlay");
-    case doc::BlendMode::Add: return LayersPanel::tr("Add");
-    }
-    return {};
-}
-
-// Thumbnail of the drawing shown at the current frame: checkerboard (or
-// paper color) background, tiles scaled down without building a full image.
-QPixmap thumbnail(const doc::Drawing *drawing, const QSize &docSize, const QColor *paper)
+// Thumbnail of a layer's pixels: checkerboard (or paper color) background,
+// tiles scaled down without building a full image.
+QPixmap thumbnail(const doc::TiledImage *image, const QSize &docSize, const QColor *paper)
 {
     QImage img(kThumbSize, QImage::Format_ARGB32_Premultiplied);
     QPainter p(&img);
@@ -64,12 +49,12 @@ QPixmap thumbnail(const doc::Drawing *drawing, const QSize &docSize, const QColo
             for (int x = 0; x < img.width(); x += 6)
                 p.fillRect(x, y, 6, 6, ((x + y) / 6) % 2 ? QColor(0xcc, 0xcc, 0xcc) : Qt::white);
     }
-    if (drawing) {
+    if (image) {
         p.save();
         p.setRenderHint(QPainter::SmoothPixmapTransform);
         p.scale(double(kThumbSize.width()) / docSize.width(), double(kThumbSize.height()) / docSize.height());
-        const QRect bounds = canvas::drawingBounds(*drawing);
-        p.drawImage(bounds.topLeft(), canvas::composeDrawing(*drawing, bounds));
+        for (const doc::TileCoord &c : image->tileCoords())
+            p.drawImage(canvas::tileRect(c).topLeft(), canvas::tileImage(*image->tile(c)));
         p.restore();
     }
     p.setPen(QColor(0x18, 0x18, 0x1a));
@@ -162,13 +147,13 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     , m_opacity(new QSlider(Qt::Horizontal, this))
     , m_opacityValue(new QSpinBox(this))
     , m_list(new LayerList([this] { return dragPreview(); }, this))
-    , m_add(actionButton(IconId::Add, tr("New cel"), this))
-    , m_remove(actionButton(IconId::Delete, tr("Delete cel"), this))
+    , m_add(actionButton(IconId::Add, tr("New layer"), this))
+    , m_remove(actionButton(IconId::Delete, tr("Delete layer"), this))
     , m_up(actionButton(IconId::ArrowUp, tr("Move up"), this))
     , m_down(actionButton(IconId::ArrowDown, tr("Move down"), this))
 {
     for (doc::BlendMode mode : kBlendModes)
-        m_blend->addItem(blendName(mode));
+        m_blend->addItem(blendModeName(mode));
     m_opacity->setRange(0, 100);
     m_opacityValue->setRange(0, 100);
     m_opacityValue->setSuffix(QStringLiteral(" %"));
@@ -177,14 +162,14 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     m_list->setFrameShape(QFrame::NoFrame);
     m_list->setSelectionMode(QAbstractItemView::ExtendedSelection);
     // Rows are dragged with Qt's drag and drop, but the drop is ours (see
-    // eventFilter): the layers move in the document and the rows are rebuilt.
+    // eventFilter): the layers move in the drawing and the rows are rebuilt.
     m_list->setDragDropMode(QAbstractItemView::InternalMove);
     m_list->setDefaultDropAction(Qt::MoveAction);
     m_list->setDropIndicatorShown(true);
     m_list->viewport()->installEventFilter(this);
-    m_remove->setToolTip(tr("Delete the selected cels"));
-    m_up->setToolTip(tr("Move the selected cels up"));
-    m_down->setToolTip(tr("Move the selected cels down"));
+    m_remove->setToolTip(tr("Delete the selected layers"));
+    m_up->setToolTip(tr("Move the selected layers up"));
+    m_down->setToolTip(tr("Move the selected layers down"));
 
     auto *header = new QHBoxLayout;
     header->setSpacing(4);
@@ -209,7 +194,7 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
 
     // Header edits.
     connect(m_blend, &QComboBox::activated, this, [this](int index) {
-        editSelectedCels([index](doc::CelProperties &p) { p.blend = kBlendModes[index]; });
+        editSelectedLayers([index](doc::LayerProperties &p) { p.blend = kBlendModes[std::size_t(index)]; });
     });
     // Opacity: the slider previews in the spin box while dragged and is
     // committed once, on release, so a drag is a single undo step.
@@ -228,13 +213,23 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
 
     // Stack edits.
     connect(m_add, &QToolButton::clicked, this, [this] {
-        doc::Document &d = m_document->documentForCommands();
-        const int index = d.indexOf(m_document->currentCel()) + 1; // above the current one
-        auto add = std::make_unique<doc::AddCelCommand>(
-            d, index, doc::CelProperties{tr("Cel %1").arg(d.celCount() + 1).toStdString()});
-        const doc::CelId id = add->celId();
+        const doc::Drawing *drawing = m_document->currentDrawing();
+        if (!drawing)
+            return;
+        // Above the current one, named with the first free number.
+        QString name;
+        for (int n = int(drawing->layers.size()) + 1;; ++n) {
+            name = tr("Layer %1").arg(n);
+            if (std::none_of(drawing->layers.begin(), drawing->layers.end(),
+                             [&](const doc::Layer &l) { return l.properties.name == name.toStdString(); }))
+                break;
+        }
+        auto add = std::make_unique<doc::AddLayerCommand>(
+            m_document->documentForCommands(), m_document->currentCel(), drawing->id,
+            drawing->indexOf(m_document->currentLayer()) + 1, doc::LayerProperties{name.toStdString()});
+        const doc::LayerId id = add->layerId();
         m_document->execute(std::move(add));
-        m_document->setCurrentCel(id);
+        m_document->setCurrentLayer(id);
     });
     connect(m_remove, &QToolButton::clicked, this, &LayersPanel::removeSelected);
     connect(m_up, &QToolButton::clicked, this, [this] { moveSelected(+1); });
@@ -242,14 +237,15 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
 
     // Selection and renaming.
     connect(m_list, &QListWidget::currentItemChanged, this, [this](QListWidgetItem *item) {
-        if (item && item->data(kCelIdRole).isValid())
-            m_document->setCurrentCel(item->data(kCelIdRole).value<doc::CelId>());
+        if (item && item->data(kLayerIdRole).isValid())
+            m_document->setCurrentLayer(item->data(kLayerIdRole).value<doc::LayerId>());
     });
     connect(m_list, &QListWidget::itemSelectionChanged, this, [this] {
         m_selected.clear();
         const QList<QListWidgetItem *> selected = m_list->selectedItems();
         for (QListWidgetItem *item : selected)
-            m_selected << item->data(kCelIdRole).value<doc::CelId>();
+            if (item->data(kLayerIdRole).isValid())
+                m_selected << item->data(kLayerIdRole).value<doc::LayerId>();
         // Ctrl+click took the current layer out: another selected one takes its place.
         QListWidgetItem *current = m_list->currentItem();
         if (current && !current->isSelected() && !selected.isEmpty()) {
@@ -257,13 +253,13 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
                 const QSignalBlocker block(m_list);
                 m_list->setCurrentItem(selected.last(), QItemSelectionModel::NoUpdate);
             }
-            m_document->setCurrentCel(selected.last()->data(kCelIdRole).value<doc::CelId>());
+            m_document->setCurrentLayer(selected.last()->data(kLayerIdRole).value<doc::LayerId>());
         }
         syncHeader();
     });
     connect(m_list, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem *item) {
-        if (item->data(kCelIdRole).isValid())
-            renameCel(item->data(kCelIdRole).value<doc::CelId>());
+        if (item->data(kLayerIdRole).isValid())
+            renameLayer(item->data(kLayerIdRole).value<doc::LayerId>());
     });
 
     // Model -> view.
@@ -278,12 +274,19 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     // destroyed while its click is still being delivered.
     connect(m_document, &DocumentController::structureChanged, this, &LayersPanel::rebuildList,
             Qt::QueuedConnection);
-    connect(m_document, &DocumentController::currentCelChanged, this, [this] {
+    connect(m_document, &DocumentController::currentLayerChanged, this, [this] {
         selectCurrentRow();
         syncHeader();
     });
+    // Another cel or frame may show another drawing: its layers.
+    auto drawingMayChange = [this] {
+        if (shownDrawing() != m_shown)
+            rebuildList();
+    };
+    connect(m_document, &DocumentController::currentCelChanged, this, drawingMayChange);
+    connect(m_document, &DocumentController::currentFrameChanged, this, drawingMayChange);
+    connect(m_document, &DocumentController::documentReplaced, this, &LayersPanel::rebuildList);
     connect(m_document, &DocumentController::pixelsChanged, this, scheduleThumbnails);
-    connect(m_document, &DocumentController::currentFrameChanged, this, scheduleThumbnails);
     rebuildList();
 }
 
@@ -318,51 +321,61 @@ QPixmap LayersPanel::dragPreview() const
     return preview;
 }
 
-QList<doc::CelId> LayersPanel::selectedCels() const
+LayersPanel::Shown LayersPanel::shownDrawing() const
 {
-    const doc::Document &d = m_document->document();
-    QList<doc::CelId> cels;
-    for (int i = 0; i < d.celCount(); ++i) {
-        const doc::CelId id = d.celAt(i).id();
-        if (m_selected.contains(id) || id == m_document->currentCel())
-            cels << id;
-    }
-    return cels;
+    return {m_document->currentCel(), m_document->currentDrawingId()};
+}
+
+QList<doc::LayerId> LayersPanel::selectedLayers() const
+{
+    QList<doc::LayerId> layers;
+    const doc::Drawing *drawing = m_document->currentDrawing();
+    if (!drawing)
+        return layers;
+    for (const doc::Layer &layer : drawing->layers)
+        if (m_selected.contains(layer.id) || layer.id == m_document->currentLayer())
+            layers << layer.id;
+    return layers;
 }
 
 template<typename Edit>
-void LayersPanel::editSelectedCels(Edit edit)
+void LayersPanel::editSelectedLayers(Edit edit)
 {
+    const doc::Drawing *drawing = m_document->currentDrawing();
+    if (!drawing)
+        return;
+    const doc::CelId cel = m_document->currentCel();
     std::vector<std::unique_ptr<doc::Command>> steps;
-    for (doc::CelId id : selectedCels()) {
-        doc::CelProperties props = m_document->document().cel(id)->properties();
+    for (doc::LayerId id : selectedLayers()) {
+        doc::LayerProperties props = drawing->layer(id)->properties;
         edit(props);
-        if (auto step = doc::makeSetCelProperties(m_document->document(), id, props))
+        if (auto step = doc::makeSetLayerProperties(m_document->document(), cel, drawing->id, id, props))
             steps.push_back(std::move(step));
     }
     if (steps.size() == 1)
         m_document->execute(std::move(steps.front()));
     else if (!steps.empty())
         m_document->execute(
-            std::make_unique<doc::GroupCommand>(doc::CommandKind::ChangeCelProperties, std::move(steps)));
+            std::make_unique<doc::GroupCommand>(doc::CommandKind::ChangeLayerProperties, std::move(steps)));
 }
 
 void LayersPanel::commitOpacity()
 {
     const float opacity = float(m_opacity->value()) / 100.0f;
-    editSelectedCels([opacity](doc::CelProperties &p) { p.opacity = opacity; });
+    editSelectedLayers([opacity](doc::LayerProperties &p) { p.opacity = opacity; });
 }
 
 void LayersPanel::removeSelected()
 {
-    const QList<doc::CelId> cels = selectedCels();
-    if (cels.isEmpty() || cels.size() >= m_document->document().celCount())
+    const doc::Drawing *drawing = m_document->currentDrawing();
+    const QList<doc::LayerId> layers = selectedLayers();
+    if (!drawing || layers.isEmpty() || layers.size() >= int(drawing->layers.size()))
         return; // keep at least one layer
     std::vector<std::unique_ptr<doc::Command>> steps;
-    for (doc::CelId id : cels)
-        steps.push_back(std::make_unique<doc::RemoveCelCommand>(id));
+    for (doc::LayerId id : layers)
+        steps.push_back(std::make_unique<doc::RemoveLayerCommand>(m_document->currentCel(), drawing->id, id));
     m_selected.clear();
-    m_document->execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::RemoveCel, std::move(steps)));
+    m_document->execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::RemoveLayer, std::move(steps)));
 }
 
 bool LayersPanel::eventFilter(QObject *watched, QEvent *event)
@@ -388,15 +401,18 @@ bool LayersPanel::eventFilter(QObject *watched, QEvent *event)
 
 void LayersPanel::moveSelectedToRow(int row)
 {
-    const doc::Document &d = m_document->document();
-    const int n = d.celCount();
-    const QList<doc::CelId> moving = selectedCels();
+    const doc::Drawing *drawing = m_document->currentDrawing();
+    if (!drawing)
+        return;
+    const int n = int(drawing->layers.size());
+    const QList<doc::LayerId> moving = selectedLayers();
+    auto idAt = [drawing](int i) { return drawing->layers[std::size_t(i)].id; };
     // The new stack, top first as the rows: the others, then the moving ones
     // put in before `row` (counted without themselves).
-    std::vector<doc::CelId> rows;
+    std::vector<doc::LayerId> rows;
     int insertAt = std::clamp(row, 0, n);
     for (int r = 0; r < n; ++r) {
-        const doc::CelId id = d.celAt(n - 1 - r).id();
+        const doc::LayerId id = idAt(n - 1 - r);
         if (moving.contains(id)) {
             if (r < row)
                 --insertAt;
@@ -404,24 +420,24 @@ void LayersPanel::moveSelectedToRow(int row)
             rows.push_back(id);
         }
     }
-    std::vector<doc::CelId> top(moving.rbegin(), moving.rend()); // top first too
+    std::vector<doc::LayerId> top(moving.rbegin(), moving.rend()); // top first too
     rows.insert(rows.begin() + std::clamp(insertAt, 0, int(rows.size())), top.begin(), top.end());
 
     // Moves that turn the stack into it, bottom up.
-    std::vector<doc::CelId> order;
+    std::vector<doc::LayerId> order;
     for (int i = 0; i < n; ++i)
-        order.push_back(d.celAt(i).id());
+        order.push_back(idAt(i));
     std::vector<std::unique_ptr<doc::Command>> steps;
     for (int i = 0; i < n; ++i) {
-        const doc::CelId want = rows[std::size_t(n - 1 - i)];
+        const doc::LayerId want = rows[std::size_t(n - 1 - i)];
         if (order[std::size_t(i)] == want)
             continue;
-        steps.push_back(std::make_unique<doc::MoveCelCommand>(want, i));
+        steps.push_back(std::make_unique<doc::MoveLayerCommand>(m_document->currentCel(), drawing->id, want, i));
         order.erase(std::find(order.begin(), order.end(), want));
         order.insert(order.begin() + i, want);
     }
     if (!steps.empty())
-        m_document->execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::MoveCel, std::move(steps)));
+        m_document->execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::MoveLayer, std::move(steps)));
 }
 
 void LayersPanel::moveSelected(int direction)
@@ -429,11 +445,13 @@ void LayersPanel::moveSelected(int direction)
     // The stack as it will be, step by step: a selected layer swaps with an
     // unselected neighbour; one that would bump into the end, or into a
     // selected layer that cannot move, stays (the block keeps its gaps).
-    const doc::Document &d = m_document->document();
-    const QList<doc::CelId> selected = selectedCels();
-    std::vector<doc::CelId> order;
-    for (int i = 0; i < d.celCount(); ++i)
-        order.push_back(d.celAt(i).id());
+    const doc::Drawing *drawing = m_document->currentDrawing();
+    if (!drawing)
+        return;
+    const QList<doc::LayerId> selected = selectedLayers();
+    std::vector<doc::LayerId> order;
+    for (const doc::Layer &layer : drawing->layers)
+        order.push_back(layer.id);
     std::vector<std::unique_ptr<doc::Command>> steps;
     const int n = int(order.size());
     for (int k = 0; k < n; ++k) {
@@ -441,26 +459,29 @@ void LayersPanel::moveSelected(int direction)
         const int to = i + direction;
         if (to < 0 || to >= n || !selected.contains(order[std::size_t(i)]) || selected.contains(order[std::size_t(to)]))
             continue;
-        steps.push_back(std::make_unique<doc::MoveCelCommand>(order[std::size_t(i)], to));
+        steps.push_back(
+            std::make_unique<doc::MoveLayerCommand>(m_document->currentCel(), drawing->id, order[std::size_t(i)], to));
         std::swap(order[std::size_t(i)], order[std::size_t(to)]);
     }
     if (!steps.empty())
-        m_document->execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::MoveCel, std::move(steps)));
+        m_document->execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::MoveLayer, std::move(steps)));
 }
 
-void LayersPanel::renameCel(doc::CelId id)
+void LayersPanel::renameLayer(doc::LayerId id)
 {
-    const doc::Cel *cel = m_document->document().cel(id);
-    if (!cel)
+    const doc::Drawing *drawing = m_document->currentDrawing();
+    const doc::Layer *layer = drawing ? drawing->layer(id) : nullptr;
+    if (!layer)
         return;
     bool ok = false;
-    const QString name = QInputDialog::getText(this, tr("Rename cel"), tr("Name:"), QLineEdit::Normal,
-                                               QString::fromStdString(cel->properties().name), &ok);
+    const QString name = QInputDialog::getText(this, tr("Rename layer"), tr("Name:"), QLineEdit::Normal,
+                                               QString::fromStdString(layer->properties.name), &ok);
     if (!ok || name.trimmed().isEmpty())
         return;
-    doc::CelProperties props = cel->properties();
+    doc::LayerProperties props = layer->properties;
     props.name = name.trimmed().toStdString();
-    m_document->execute(doc::makeSetCelProperties(m_document->document(), id, props));
+    m_document->execute(
+        doc::makeSetLayerProperties(m_document->document(), m_document->currentCel(), drawing->id, id, props));
 }
 
 void LayersPanel::rebuildList()
@@ -469,12 +490,21 @@ void LayersPanel::rebuildList()
     m_list->clear();
     const doc::Document &d = m_document->document();
     const QSize docSize(d.width(), d.height());
-    const int frame = m_document->currentFrame();
+    const doc::Drawing *drawing = m_document->currentDrawing();
+    m_shown = shownDrawing();
 
-    for (int i = d.celCount() - 1; i >= 0; --i) { // top layer first
-        const doc::Cel &cel = d.celAt(i);
-        const doc::CelProperties &props = cel.properties();
-        const doc::CelId id = cel.id();
+    if (!drawing) {
+        auto *empty = new QListWidgetItem(tr("Empty frame: draw on it, or make a new frame"), m_list);
+        empty->setFlags(Qt::NoItemFlags);
+        empty->setTextAlignment(Qt::AlignCenter);
+    }
+    const doc::CelId cel = m_document->currentCel();
+    const int count = drawing ? int(drawing->layers.size()) : 0;
+    for (int i = count - 1; i >= 0; --i) { // top layer first
+        const doc::Layer &layer = drawing->layers[std::size_t(i)];
+        const doc::LayerProperties &props = layer.properties;
+        const doc::LayerId id = layer.id;
+        const doc::DrawingId drawingId = drawing->id;
 
         auto *row = new QWidget(m_list);
         auto *eye = toggleButton(IconId::Eye, tr("Show / hide"), row);
@@ -485,10 +515,10 @@ void LayersPanel::rebuildList()
         lock->setChecked(props.locked);
         auto *thumb = new QLabel(row);
         thumb->setObjectName(QStringLiteral("thumbnail"));
-        thumb->setPixmap(thumbnail(cel.drawingAt(frame), docSize, nullptr));
+        thumb->setPixmap(thumbnail(&layer.image, docSize, nullptr));
         auto *text = new QLabel(QStringLiteral("%1 % %2\n%3")
                                     .arg(std::lround(props.opacity * 100))
-                                    .arg(blendName(props.blend), QString::fromStdString(props.name)),
+                                    .arg(blendModeName(props.blend), QString::fromStdString(props.name)),
                                 row);
         auto *h = new QHBoxLayout(row);
         h->setContentsMargins(2, 2, 2, 2);
@@ -498,26 +528,26 @@ void LayersPanel::rebuildList()
         h->addWidget(thumb);
         h->addWidget(text, 1);
 
-        connect(eye, &QToolButton::clicked, this, [this, id](bool visible) {
-            const doc::Cel *l = m_document->document().cel(id);
-            doc::CelProperties p = l->properties();
-            p.visible = visible;
-            m_document->execute(doc::makeSetCelProperties(m_document->document(), id, p));
-        });
-        connect(lock, &QToolButton::clicked, this, [this, id](bool locked) {
-            const doc::Cel *l = m_document->document().cel(id);
-            doc::CelProperties p = l->properties();
-            p.locked = locked;
-            m_document->execute(doc::makeSetCelProperties(m_document->document(), id, p));
-        });
+        auto toggle = [this, cel, drawingId, id](auto change) {
+            const doc::Layer *l = m_document->document().layer(cel, drawingId, id);
+            if (!l)
+                return;
+            doc::LayerProperties p = l->properties;
+            change(p);
+            m_document->execute(doc::makeSetLayerProperties(m_document->document(), cel, drawingId, id, p));
+        };
+        connect(eye, &QToolButton::clicked, this,
+                [toggle](bool visible) { toggle([visible](doc::LayerProperties &p) { p.visible = visible; }); });
+        connect(lock, &QToolButton::clicked, this,
+                [toggle](bool locked) { toggle([locked](doc::LayerProperties &p) { p.locked = locked; }); });
 
         auto *item = new QListWidgetItem(m_list);
-        item->setData(kCelIdRole, QVariant::fromValue(id));
+        item->setData(kLayerIdRole, QVariant::fromValue(id));
         item->setSizeHint(row->sizeHint());
         m_list->setItemWidget(item, row);
     }
 
-    // The paper: always at the bottom, not a layer of the model, not selectable.
+    // The paper: always at the bottom, not a layer of the drawing, not selectable.
     auto *paperRow = new QWidget(m_list);
     const QColor paper = QColor::fromRgba(d.paperColor());
     auto *paperThumb = new QLabel(paperRow);
@@ -540,14 +570,15 @@ void LayersPanel::refreshThumbnails()
 {
     const doc::Document &d = m_document->document();
     const QSize docSize(d.width(), d.height());
-    for (int row = 0; row < m_list->count(); ++row) {
+    const doc::Drawing *drawing = m_document->currentDrawing();
+    for (int row = 0; drawing && row < m_list->count(); ++row) {
         QListWidgetItem *item = m_list->item(row);
-        if (!item->data(kCelIdRole).isValid())
+        if (!item->data(kLayerIdRole).isValid())
             continue;
-        const doc::Cel *cel = d.cel(item->data(kCelIdRole).value<doc::CelId>());
+        const doc::Layer *layer = drawing->layer(item->data(kLayerIdRole).value<doc::LayerId>());
         auto *thumb = m_list->itemWidget(item)->findChild<QLabel *>(QStringLiteral("thumbnail"));
-        if (cel && thumb)
-            thumb->setPixmap(thumbnail(cel->drawingAt(m_document->currentFrame()), docSize, nullptr));
+        if (layer && thumb)
+            thumb->setPixmap(thumbnail(&layer->image, docSize, nullptr));
     }
 }
 
@@ -556,16 +587,16 @@ void LayersPanel::selectCurrentRow()
     // The current layer chosen here (a click) keeps the selection made with
     // it; chosen elsewhere it becomes the only one selected.
     const QListWidgetItem *current = m_list->currentItem();
-    if (current && current->data(kCelIdRole).isValid()
-        && current->data(kCelIdRole).value<doc::CelId>() == m_document->currentCel())
+    if (current && current->data(kLayerIdRole).isValid()
+        && current->data(kLayerIdRole).value<doc::LayerId>() == m_document->currentLayer())
         return;
     const QSignalBlocker block(m_list);
     m_selected.clear();
     for (int row = 0; row < m_list->count(); ++row) {
-        const QVariant id = m_list->item(row)->data(kCelIdRole);
-        if (id.isValid() && id.value<doc::CelId>() == m_document->currentCel()) {
+        const QVariant id = m_list->item(row)->data(kLayerIdRole);
+        if (id.isValid() && id.value<doc::LayerId>() == m_document->currentLayer()) {
             m_list->setCurrentRow(row); // and only it selected
-            m_selected << id.value<doc::CelId>();
+            m_selected << id.value<doc::LayerId>();
             return;
         }
     }
@@ -576,19 +607,19 @@ void LayersPanel::restoreSelection()
     // After a rebuild: the layers selected before that still exist, and the
     // current one (as current, without touching the rest).
     const QSignalBlocker block(m_list);
-    QList<doc::CelId> kept;
+    QList<doc::LayerId> kept;
     for (int row = 0; row < m_list->count(); ++row) {
         QListWidgetItem *item = m_list->item(row);
-        const QVariant id = item->data(kCelIdRole);
+        const QVariant id = item->data(kLayerIdRole);
         if (!id.isValid())
             continue;
-        const doc::CelId cel = id.value<doc::CelId>();
-        const bool current = cel == m_document->currentCel();
+        const doc::LayerId layer = id.value<doc::LayerId>();
+        const bool current = layer == m_document->currentLayer();
         if (current)
             m_list->setCurrentItem(item, QItemSelectionModel::NoUpdate);
-        if (current || m_selected.contains(cel)) {
+        if (current || m_selected.contains(layer)) {
             item->setSelected(true);
-            kept << cel;
+            kept << layer;
         }
     }
     m_selected = kept;
@@ -596,29 +627,30 @@ void LayersPanel::restoreSelection()
 
 void LayersPanel::syncHeader()
 {
-    const doc::Document &d = m_document->document();
-    const doc::Cel *cel = d.cel(m_document->currentCel());
+    const doc::Drawing *drawing = m_document->currentDrawing();
+    const doc::Layer *layer = drawing ? drawing->layer(m_document->currentLayer()) : nullptr;
 
     for (QWidget *w : std::initializer_list<QWidget *>{m_blend, m_opacity, m_opacityValue})
-        w->setEnabled(cel != nullptr);
+        w->setEnabled(layer != nullptr);
     // Up and down while some selected layer can still go that way.
-    const QList<doc::CelId> selected = selectedCels();
+    const QList<doc::LayerId> selected = selectedLayers();
+    const int n = drawing ? int(drawing->layers.size()) : 0;
     bool canUp = false, canDown = false;
-    for (doc::CelId id : selected) {
-        const int i = d.indexOf(id);
-        canUp = canUp || (i + 1 < d.celCount() && !selected.contains(d.celAt(i + 1).id()));
-        canDown = canDown || (i > 0 && !selected.contains(d.celAt(i - 1).id()));
+    for (doc::LayerId id : selected) {
+        const int i = drawing->indexOf(id);
+        canUp = canUp || (i + 1 < n && !selected.contains(drawing->layers[std::size_t(i + 1)].id));
+        canDown = canDown || (i > 0 && !selected.contains(drawing->layers[std::size_t(i - 1)].id));
     }
-    m_remove->setEnabled(cel && selected.size() < d.celCount()); // keep at least one layer
-    m_up->setEnabled(cel && canUp);
-    m_down->setEnabled(cel && canDown);
-    if (!cel)
+    m_add->setEnabled(drawing != nullptr);
+    m_remove->setEnabled(layer && selected.size() < n); // keep at least one layer
+    m_up->setEnabled(layer && canUp);
+    m_down->setEnabled(layer && canDown);
+    if (!layer)
         return;
 
     const QSignalBlocker b1(m_blend), b2(m_opacity), b3(m_opacityValue);
-    const doc::CelProperties &props = cel->properties();
-    m_blend->setCurrentIndex(int(std::find(std::begin(kBlendModes), std::end(kBlendModes), props.blend)
-                                 - std::begin(kBlendModes)));
+    const doc::LayerProperties &props = layer->properties;
+    m_blend->setCurrentIndex(blendModeIndex(props.blend));
     const int opacity = int(std::lround(props.opacity * 100));
     m_opacity->setValue(opacity);
     m_opacityValue->setValue(opacity);

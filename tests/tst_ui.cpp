@@ -21,6 +21,7 @@
 #include "ui/MainWindow.h"
 #include "ui/PanelDock.h"
 #include "ui/SelectionBar.h"
+#include "ui/panels/BlendModes.h"
 #include "ui/panels/BrushSizePanel.h"
 #include "ui/panels/LayersPanel.h"
 #include "ui/SplashScreen.h"
@@ -28,6 +29,7 @@
 #include "ui/panels/SubToolPanel.h"
 #include "ui/panels/ToolPropertiesPanel.h"
 #include "ui/panels/timeline/TimelinePanel.h"
+#include "ui/panels/timeline/TimelineView.h"
 
 #include <QCheckBox>
 #include <QClipboard>
@@ -915,37 +917,79 @@ private slots:
 
     // Ctrl+click adds a layer to the selection, Shift+click a range; the
     // header and the buttons then act on all of them, as one undo step.
+    // The panel shows the layers of the frame at the current point of the
+    // current cel: none on an empty frame, where a layer cannot be added.
+    void layersPanelFollowsTheFrame()
+    {
+        document::DocumentController controller;
+        ui::LayersPanel panel(&controller);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        auto *list = panel.findChild<QListWidget *>();
+        auto *add = [&] {
+            for (QToolButton *b : panel.findChildren<QToolButton *>())
+                if (b->toolTip() == QStringLiteral("New layer"))
+                    return b;
+            return static_cast<QToolButton *>(nullptr);
+        }();
+        QVERIFY(add);
+        QCOMPARE(list->count(), 2); // "empty frame" and the paper
+        QVERIFY(!add->isEnabled());
+        QVERIFY(panel.selectedLayers().isEmpty());
+
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 2, "Line").command);
+        QCoreApplication::processEvents(); // the queued rebuild
+        QCOMPARE(list->count(), 2); // the layer and the paper
+        QVERIFY(add->isEnabled());
+        add->click();
+        QCoreApplication::processEvents();
+        QCOMPARE(controller.currentDrawing()->layers.size(), std::size_t(2));
+        QCOMPARE(controller.currentDrawing()->layers[1].properties.name, std::string("Layer 2"));
+        QCOMPARE(panel.selectedLayers(), QList<doc::LayerId>({controller.currentLayer()}));
+        QCOMPARE(list->count(), 3);
+
+        controller.setCurrentFrame(1); // the same frame, held
+        QCOMPARE(list->count(), 3);
+        controller.setCurrentFrame(2); // nothing there
+        QCOMPARE(list->count(), 2);
+        QVERIFY(!add->isEnabled());
+    }
+
     void layersSelectWithCtrlAndShift()
     {
         document::DocumentController controller;
-        for (int i = 2; i <= 5; ++i) { // Layer 1..5, bottom to top
-            doc::Document &d = controller.documentForCommands();
-            controller.execute(std::make_unique<doc::AddCelCommand>(
-                d, d.celCount(), doc::CelProperties{QStringLiteral("Layer %1").arg(i).toStdString()}));
-        }
+        doc::Document &doc = controller.documentForCommands();
+        const doc::CelId cel = controller.currentCel();
+        doc::NewDrawing nd = doc::makeNewDrawing(doc, cel, 0, 1, "Layer 1");
+        controller.execute(std::move(nd.command));
+        for (int i = 2; i <= 5; ++i) // Layer 1..5, bottom to top
+            controller.execute(std::make_unique<doc::AddLayerCommand>(
+                doc, cel, nd.id, i - 1, doc::LayerProperties{QStringLiteral("Layer %1").arg(i).toStdString()}));
         ui::LayersPanel panel(&controller);
         panel.resize(300, 500);
         panel.show();
         QVERIFY(QTest::qWaitForWindowExposed(&panel));
         QCoreApplication::processEvents(); // the queued rebuild
         auto *list = panel.findChild<QListWidget *>();
-        const doc::Document &d = controller.document();
-        auto id = [&](int index) { return d.celAt(index).id(); };
+        const doc::Drawing &d = *controller.currentDrawing();
+        auto count = [&] { return int(d.layers.size()); };
+        auto id = [&](int index) { return d.layers[std::size_t(index)].id; };
         auto click = [&](int index, Qt::KeyboardModifiers mods) { // by layer index; rows are top first
-            const QRect r = list->visualItemRect(list->item(d.celCount() - 1 - index));
+            const QRect r = list->visualItemRect(list->item(count() - 1 - index));
             QTest::mouseClick(list->viewport(), Qt::LeftButton, mods, r.center());
         };
 
         click(1, {});
-        QCOMPARE(controller.currentCel(), id(1));
-        QCOMPARE(panel.selectedCels(), QList<doc::CelId>({id(1)}));
+        QCOMPARE(controller.currentLayer(), id(1));
+        QCOMPARE(panel.selectedLayers(), QList<doc::LayerId>({id(1)}));
         click(3, Qt::ControlModifier);
-        QCOMPARE(controller.currentCel(), id(3));
-        QCOMPARE(panel.selectedCels(), QList<doc::CelId>({id(1), id(3)}));
+        QCOMPARE(controller.currentLayer(), id(3));
+        QCOMPARE(panel.selectedLayers(), QList<doc::LayerId>({id(1), id(3)}));
         click(0, Qt::ShiftModifier); // from the anchor (3) down to 0
-        QCOMPARE(panel.selectedCels(), QList<doc::CelId>({id(0), id(1), id(2), id(3)}));
+        QCOMPARE(panel.selectedLayers(), QList<doc::LayerId>({id(0), id(1), id(2), id(3)}));
         click(2, Qt::ControlModifier); // and 2 out again
-        QCOMPARE(panel.selectedCels(), QList<doc::CelId>({id(0), id(1), id(3)}));
+        QCOMPARE(panel.selectedLayers(), QList<doc::LayerId>({id(0), id(1), id(3)}));
 
         // The drag preview: the three rows as they look, stacked.
         const QPixmap preview = panel.dragPreview();
@@ -955,27 +999,27 @@ private slots:
 
         panel.findChild<QSpinBox *>()->setValue(40); // opacity for all three
         for (int i : {0, 1, 3})
-            QCOMPARE(d.celAt(i).properties().opacity, 0.4f);
-        QCOMPARE(d.celAt(2).properties().opacity, 1.0f);
+            QCOMPARE(d.layers[std::size_t(i)].properties.opacity, 0.4f);
+        QCOMPARE(d.layers[2].properties.opacity, 1.0f);
         controller.undo();
-        QCOMPARE(d.celAt(0).properties().opacity, 1.0f);
+        QCOMPARE(d.layers[0].properties.opacity, 1.0f);
         QCoreApplication::processEvents();
 
-        const doc::CelId a = id(0), b = id(1), c = id(3), e = id(4), mid = id(2);
+        const doc::LayerId a = id(0), b = id(1), c = id(3), e = id(4), mid = id(2);
         auto button = [&](const QString &tip) {
             for (QToolButton *b : panel.findChildren<QToolButton *>())
                 if (b->toolTip() == tip)
                     return b;
             return static_cast<QToolButton *>(nullptr);
         };
-        QTest::mouseClick(button(QStringLiteral("Move the selected cels up")), Qt::LeftButton);
+        QTest::mouseClick(button(QStringLiteral("Move the selected layers up")), Qt::LeftButton);
         QCoreApplication::processEvents();
         QCOMPARE(d.indexOf(a), 1); // each one place up
         QCOMPARE(d.indexOf(b), 2);
         QCOMPARE(d.indexOf(c), 4);
         QCOMPARE(d.indexOf(mid), 0);
         QCOMPARE(d.indexOf(e), 3);
-        QCOMPARE(panel.selectedCels().size(), 3); // still selected after the rebuild
+        QCOMPARE(panel.selectedLayers().size(), 3); // still selected after the rebuild
 
         // Dragged to the top (row 0): the three keep their order, above the rest.
         panel.moveSelectedToRow(0);
@@ -985,7 +1029,7 @@ private slots:
         QCOMPARE(d.indexOf(a), 2);
         QCOMPARE(d.indexOf(e), 1);
         QCOMPARE(d.indexOf(mid), 0);
-        QCOMPARE(controller.undoText(), QStringLiteral("Undo move cel"));
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo move layer"));
         controller.undo(); // one step
         QCoreApplication::processEvents();
         QCOMPARE(d.indexOf(a), 1);
@@ -995,13 +1039,13 @@ private slots:
         QCOMPARE(d.indexOf(a), 0);
         QCOMPARE(d.indexOf(b), 1);
         QCOMPARE(d.indexOf(c), 2);
-        QCOMPARE(panel.selectedCels().size(), 3);
+        QCOMPARE(panel.selectedLayers().size(), 3);
 
-        QTest::mouseClick(button(QStringLiteral("Delete the selected cels")), Qt::LeftButton);
+        QTest::mouseClick(button(QStringLiteral("Delete the selected layers")), Qt::LeftButton);
         QCoreApplication::processEvents();
-        QCOMPARE(d.celCount(), 2);
+        QCOMPARE(count(), 2);
         controller.undo();
-        QCOMPARE(d.celCount(), 5);
+        QCOMPARE(count(), 5);
     }
 
     // The lasso fill sub tool: an outline drawn freehand, its inside filled
@@ -1223,12 +1267,12 @@ private slots:
         QTest::keyClick(canvas, Qt::Key_Comma);
         QTest::keyClick(canvas, Qt::Key_Comma); // stops at the start
         QCOMPARE(controller->currentFrame(), 0);
-        auto *cels = window.findChild<ui::LayersPanel *>()->findChild<QListWidget *>();
-        cels->setFocus(); // from a panel too
-        QTest::keyClick(cels, Qt::Key_Minus);
+        auto *layers = window.findChild<ui::LayersPanel *>()->findChild<QListWidget *>();
+        layers->setFocus(); // from a panel too
+        QTest::keyClick(layers, Qt::Key_Minus);
         QCOMPARE(controller->currentFrame(), 1);
         controller->setCurrentFrame(controller->document().frameCount() - 1);
-        QTest::keyClick(cels, Qt::Key_Minus); // and at the end
+        QTest::keyClick(layers, Qt::Key_Minus); // and at the end
         QCOMPARE(controller->currentFrame(), controller->document().frameCount() - 1);
 
         controller->setCurrentFrame(3);
@@ -1309,6 +1353,66 @@ private slots:
         QCOMPARE(after->value(), 3);
         QVERIFY(button->menu()->findChild<QWidget *>(QStringLiteral("onionOpacity")));
         QVERIFY(button->menu()->findChild<QToolButton *>(QStringLiteral("onionBeforeColor")));
+    }
+
+    // The cel bar adds, moves and deletes cels and sets the current one's
+    // blend and opacity; the row headers show, hide and lock them.
+    void timelineCelControls()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        ui::TimelinePanel panel(&controller, &state);
+        panel.resize(800, 300);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        const doc::Document &d = controller.document();
+        const doc::CelId first = controller.currentCel();
+        auto *add = panel.findChild<QToolButton *>(QStringLiteral("celAdd"));
+        auto *remove = panel.findChild<QToolButton *>(QStringLiteral("celRemove"));
+        auto *down = panel.findChild<QToolButton *>(QStringLiteral("celDown"));
+        auto *blend = panel.findChild<QComboBox *>(QStringLiteral("celBlend"));
+        auto *opacity = panel.findChild<QSpinBox *>(QStringLiteral("celOpacityValue"));
+        QVERIFY(add && remove && down && blend && opacity);
+        QVERIFY(!remove->isEnabled()); // the only cel
+
+        add->click();
+        QCOMPARE(d.celCount(), 2);
+        const doc::CelId second = controller.currentCel();
+        QCOMPARE(d.indexOf(second), 1);
+        QCOMPARE(d.cel(second)->properties().name, std::string("Cel 2"));
+        QVERIFY(remove->isEnabled());
+
+        blend->setCurrentIndex(ui::blendModeIndex(doc::BlendMode::Multiply));
+        emit blend->activated(blend->currentIndex());
+        QCOMPARE(d.cel(second)->properties().blend, doc::BlendMode::Multiply);
+        opacity->setValue(40);
+        QCOMPARE(d.cel(second)->properties().opacity, 0.4f);
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo cel properties"));
+        controller.setCurrentCel(first);
+        QCOMPARE(blend->currentIndex(), ui::blendModeIndex(doc::BlendMode::Normal)); // follows the current cel
+        QCOMPARE(opacity->value(), 100);
+
+        controller.setCurrentCel(second);
+        down->click();
+        QCOMPARE(d.indexOf(second), 0);
+        QVERIFY(!down->isEnabled());
+
+        // The header of the top row (now the first cel): eye, then lock.
+        ui::TimelineMetrics m;
+        auto *view = panel.view()->viewport();
+        const int y = m.rowY(0) + m.rowHeight / 2;
+        QTest::mouseClick(view, Qt::LeftButton, {}, QPoint(20, y));
+        QVERIFY(!d.cel(first)->properties().visible);
+        QTest::mouseClick(view, Qt::LeftButton, {}, QPoint(38, y));
+        QVERIFY(d.cel(first)->properties().locked);
+        QTest::mouseClick(view, Qt::LeftButton, {}, QPoint(90, y)); // the name: made current
+        QCOMPARE(controller.currentCel(), first);
+
+        remove->click();
+        QCOMPARE(d.celCount(), 1);
+        QVERIFY(!remove->isEnabled());
+        controller.undo();
+        QCOMPARE(d.celCount(), 2);
     }
 
     void animationMenuOpensAutoplay()

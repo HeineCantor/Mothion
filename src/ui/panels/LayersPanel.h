@@ -6,6 +6,8 @@
 #include <QTimer>
 #include <QWidget>
 
+#include <utility>
+
 class QComboBox;
 class QListWidget;
 class QSlider;
@@ -18,13 +20,15 @@ class DocumentController;
 
 namespace mothion::ui {
 
-// The layer stack of the document, top layer first, with the paper at the
-// bottom. Selecting a row makes it the current layer; Ctrl+click adds or
-// takes away a layer, Shift+click selects a range, as in a file manager.
-// Dragging rows moves the selected layers to where they are dropped.
-// The header edits the blend mode and opacity of the selected layers,
-// delete and the arrows act on all of them; each row toggles visibility
-// and lock; double-click renames. Every edit is one undoable command.
+// The layers of the drawing (frame) the current cel shows at the current
+// frame, top layer first, with the paper at the bottom; on an empty frame
+// there are none. Selecting a row makes it the current layer; Ctrl+click
+// adds or takes away a layer, Shift+click selects a range, as in a file
+// manager. Dragging rows moves the selected layers to where they are
+// dropped. The header edits the blend mode and opacity of the selected
+// layers, delete and the arrows act on all of them; each row toggles
+// visibility and lock; double-click renames. Every edit is one undoable
+// command.
 class LayersPanel : public QWidget
 {
     Q_OBJECT
@@ -33,7 +37,7 @@ public:
     explicit LayersPanel(document::DocumentController *document, QWidget *parent = nullptr);
 
     // The selected layers, bottom first; at least the current one.
-    QList<doc::CelId> selectedCels() const;
+    QList<doc::LayerId> selectedLayers() const;
     // Moves the selected layers, in their order, before list row `row`
     // (rows are top first; the paper's row = to the bottom). One undo step.
     void moveSelectedToRow(int row);
@@ -50,13 +54,17 @@ private:
     void refreshThumbnails(); // throttled: pixels or frame changed
     void selectCurrentRow();
     void restoreSelection(); // after rebuildList()
-    void renameCel(doc::CelId id);
+    void renameLayer(doc::LayerId id);
     void commitOpacity();
     void removeSelected();
     void moveSelected(int direction); // +1 up, -1 down, each by one place
 
     template<typename Edit>
-    void editSelectedCels(Edit edit); // runs `edit` on copies of the properties, then executes
+    void editSelectedLayers(Edit edit); // runs `edit` on copies of the properties, then executes
+
+    // Which drawing the rows show: the current cel's at the current frame.
+    using Shown = std::pair<doc::CelId, doc::DrawingId>;
+    Shown shownDrawing() const;
 
     document::DocumentController *m_document;
     QComboBox *m_blend;
@@ -68,7 +76,8 @@ private:
     QToolButton *m_up;
     QToolButton *m_down;
     QTimer m_thumbnailTimer;
-    QList<doc::CelId> m_selected; // kept across rebuilds of the rows
+    QList<doc::LayerId> m_selected; // kept across rebuilds of the rows
+    Shown m_shown;
 };
 
 } // namespace mothion::ui

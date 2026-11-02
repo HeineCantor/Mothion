@@ -1,10 +1,13 @@
 #include "ui/panels/timeline/TimelineView.h"
 
+#include "core/document/commands/CelCommands.h"
 #include "core/document/commands/DrawingCommands.h"
 #include "core/document/commands/TimingCommands.h"
 #include "document/DocumentController.h"
+#include "ui/IconFactory.h"
 
 #include <QContextMenuEvent>
+#include <QInputDialog>
 #include <QKeyEvent>
 #include <QMenu>
 #include <QMouseEvent>
@@ -98,6 +101,16 @@ std::optional<TimelineView::Resize> TimelineView::edgeAt(const QPoint &pos) cons
             return Resize{celIndex, e.start, e.length};
     }
     return std::nullopt;
+}
+
+QRect TimelineView::eyeRect(int row) const
+{
+    return QRect(12, m_metrics.rowY(row) + (m_metrics.rowHeight - 16) / 2, 16, 16);
+}
+
+QRect TimelineView::lockRect(int row) const
+{
+    return eyeRect(row).translated(18, 0);
 }
 
 QColor TimelineView::colorForCel(int celIndex)
@@ -220,7 +233,7 @@ void TimelineView::paintCells(QPainter &p) const
     const int endX = m.frameX(frames);
     const int fps = std::max(1, int(std::lround(d.frameRate().fps())));
 
-    // Row backgrounds; the current layer's row is highlighted.
+    // Row backgrounds; the current cel's row is highlighted.
     for (int row = 0; row < rowCount(); ++row) {
         const bool current = d.celAt(celIndexForRow(row)).id() == m_document->currentCel();
         const QColor bg = current ? palette().highlight().color().darker(260)
@@ -315,9 +328,17 @@ void TimelineView::paintHeaders(QPainter &p) const
         if (cel.id() == m_document->currentCel())
             p.fillRect(r, palette().highlight().color().darker(200));
         p.fillRect(QRect(r.left() + 4, r.top() + 6, 4, r.height() - 12), colorForCel(celIndex));
+        // The toggles: the icon when on, an empty slot when off.
+        p.setPen(palette().mid().color());
+        for (const QRect &slot : {eyeRect(row), lockRect(row)})
+            p.drawRect(slot.adjusted(0, 0, -1, -1));
+        if (cel.properties().visible)
+            icon(IconId::Eye).paint(&p, eyeRect(row).adjusted(1, 1, -1, -1));
+        if (cel.properties().locked)
+            icon(IconId::Lock).paint(&p, lockRect(row).adjusted(1, 1, -1, -1));
         p.setPen(cel.properties().visible ? palette().text().color()
-                                            : palette().color(QPalette::Disabled, QPalette::Text));
-        p.drawText(r.adjusted(14, 0, -4, 0), Qt::AlignVCenter | Qt::AlignLeft,
+                                          : palette().color(QPalette::Disabled, QPalette::Text));
+        p.drawText(r.adjusted(lockRect(row).right() + 6, 0, -4, 0), Qt::AlignVCenter | Qt::AlignLeft,
                    QString::fromStdString(cel.properties().name));
         p.setPen(palette().mid().color());
         p.drawLine(r.bottomLeft(), r.bottomRight());
@@ -354,12 +375,20 @@ void TimelineView::scrubTo(const QPoint &pos, bool selectCel)
 void TimelineView::mousePressEvent(QMouseEvent *event)
 {
     if (event->button() != Qt::LeftButton || event->position().x() < m_metrics.headerWidth) {
-        // Clicking a layer name selects the layer.
-        if (event->button() == Qt::LeftButton) {
-            const int row = rowAt(int(event->position().y()));
-            if (row >= 0)
-                m_document->setCurrentCel(m_document->document().celAt(celIndexForRow(row)).id());
-        }
+        // In a header: the toggles, or the cel made current.
+        const int row = rowAt(int(event->position().y()));
+        if (event->button() != Qt::LeftButton || row < 0)
+            return;
+        const doc::Cel &cel = m_document->document().celAt(celIndexForRow(row));
+        const QPoint pos = event->position().toPoint();
+        doc::CelProperties p = cel.properties();
+        if (eyeRect(row).contains(pos))
+            p.visible = !p.visible;
+        else if (lockRect(row).contains(pos))
+            p.locked = !p.locked;
+        else
+            m_document->setCurrentCel(cel.id());
+        m_document->execute(doc::makeSetCelProperties(m_document->document(), cel.id(), p));
         return;
     }
     const QPoint pos = event->position().toPoint();
@@ -407,6 +436,33 @@ void TimelineView::mouseReleaseEvent(QMouseEvent *)
     viewport()->update();
 }
 
+void TimelineView::mouseDoubleClickEvent(QMouseEvent *event)
+{
+    const int row = rowAt(int(event->position().y()));
+    const QPoint pos = event->position().toPoint();
+    if (event->button() == Qt::LeftButton && row >= 0 && pos.x() < m_metrics.headerWidth
+        && !eyeRect(row).contains(pos) && !lockRect(row).contains(pos)) {
+        renameCel(celIndexForRow(row));
+        return;
+    }
+    mousePressEvent(event); // a quick second click on the cells is a click
+}
+
+void TimelineView::renameCel(int celIndex)
+{
+    const doc::Cel &cel = m_document->document().celAt(celIndex);
+    const doc::CelId id = cel.id();
+    bool ok = false;
+    const QString name = QInputDialog::getText(this, tr("Rename cel"), tr("Name:"), QLineEdit::Normal,
+                                               QString::fromStdString(cel.properties().name), &ok);
+    const doc::Cel *still = m_document->document().cel(id);
+    if (!ok || name.trimmed().isEmpty() || !still)
+        return;
+    doc::CelProperties props = still->properties();
+    props.name = name.trimmed().toStdString();
+    m_document->execute(doc::makeSetCelProperties(m_document->document(), id, props));
+}
+
 void TimelineView::contextMenuEvent(QContextMenuEvent *event)
 {
     const int row = rowAt(event->pos().y());
@@ -420,7 +476,9 @@ void TimelineView::contextMenuEvent(QContextMenuEvent *event)
 
     QMenu menu(this);
     menu.addAction(tr("New frame"), this, [this, celId, frame] {
-        m_document->execute(doc::makeNewDrawing(m_document->documentForCommands(), celId, frame).command);
+        m_document->execute(
+            doc::makeNewDrawing(m_document->documentForCommands(), celId, frame, 1, tr("Layer 1").toStdString())
+                .command);
     });
     const doc::Drawing *drawing = cel.drawingAt(frame);
     QAction *clear = menu.addAction(tr("Clear frame"), this, [this, celId, frame] {
@@ -466,7 +524,7 @@ void TimelineView::keyPressEvent(QKeyEvent *event)
     case Qt::Key_Right: m_document->setCurrentFrame(frame + 1); break;
     case Qt::Key_Home: m_document->setCurrentFrame(0); break;
     case Qt::Key_End: m_document->setCurrentFrame(d.frameCount() - 1); break;
-    case Qt::Key_Up: // up the list = higher layer
+    case Qt::Key_Up: // up the list = higher cel
         if (celIndex >= 0 && celIndex + 1 < d.celCount())
             m_document->setCurrentCel(d.celAt(celIndex + 1).id());
         break;

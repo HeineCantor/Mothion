@@ -14,16 +14,18 @@ class DocumentController;
 namespace mothion::ui {
 
 // Exposure timeline (Harmony style) of the document:
-// one row per layer (top layer first), frames horizontally, each exposure a
-// block spanning its hold with the drawing name. A ruler on top shows frame
-// numbers and the current-frame cursor.
+// one row per cel (top cel first), frames horizontally, each exposure a
+// block spanning its hold with the frame's (drawing's) name. A ruler on top
+// shows frame numbers and the current-frame cursor.
 //
 // Interaction:
-//  - click / drag in the ruler or cells: current frame (and layer, in cells);
+//  - click / drag in the ruler or cells: current frame (and cel, in cells);
+//  - in a row's header: the eye and the lock show / hide and lock the cel,
+//    a click elsewhere makes it current, a double-click renames it;
 //  - drag the right edge of a block: change the hold length (ripple), one
 //    undo step on release;
-//  - right click: new drawing, clear frame, insert/remove frames, delete drawing;
-//  - Left/Right: frame, Up/Down: layer.
+//  - right click: new frame, clear frame, insert/remove frames, delete frame;
+//  - Left/Right: frame, Up/Down: cel.
 //
 // Everything is custom-painted in one widget so the ruler, names and cells
 // scroll together without synchronising several widgets.
@@ -50,6 +52,7 @@ protected:
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
+    void mouseDoubleClickEvent(QMouseEvent *event) override;
     void wheelEvent(QWheelEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
     void contextMenuEvent(QContextMenuEvent *event) override;
@@ -64,10 +67,14 @@ private:
     };
 
     int rowCount() const;
-    int celIndexForRow(int row) const; // rows are top-first, layers bottom-first
+    int celIndexForRow(int row) const; // rows are top-first, cels bottom-first
     int rowAt(int y) const;              // -1 outside the rows
     int frameAt(int x) const;
-    // Exposure whose right edge is under (x, row), as {layer index, start}.
+    // The eye and lock toggles in a row's header.
+    QRect eyeRect(int row) const;
+    QRect lockRect(int row) const;
+    void renameCel(int celIndex);
+    // Exposure whose right edge is under (x, row), as {cel index, start}.
     std::optional<Resize> edgeAt(const QPoint &pos) const;
     const doc::Timing &timingForPainting(int celIndex) const; // preview while resizing
 
@@ -88,7 +95,7 @@ private:
     TimelineMetrics m_metrics;
     bool m_scrubbing = false;
     std::optional<Resize> m_resize;
-    doc::Timing m_previewTiming; // the resized layer's timing during a drag
+    doc::Timing m_previewTiming; // the resized cel's timing during a drag
 };
 
 } // namespace mothion::ui

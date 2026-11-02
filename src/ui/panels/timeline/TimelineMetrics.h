@@ -10,7 +10,7 @@ namespace mothion::ui {
 //   +-----------+---------------------------+
 //   |  corner   |  ruler (frame numbers)    |  rulerHeight
 //   +-----------+---------------------------+
-//   |  layer    |  cells (exposures)        |  rowHeight per track
+//   |  cel      |  cells (exposures)        |  rowHeight per track
 //   |  names    |                           |
 //   +-----------+---------------------------+
 //    headerWidth   frameWidth per frame, scrolled by scrollX
