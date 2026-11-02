@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace mothion::ui {
 
@@ -87,6 +88,8 @@ const doc::Timing &TimelineView::timingForPainting(int celIndex) const
 {
     if (m_resize && m_resize->celIndex == celIndex)
         return m_previewTiming;
+    if (const auto it = m_movePreview.find(celIndex); it != m_movePreview.end())
+        return it->second;
     return m_document->document().celAt(celIndex).timing();
 }
 
@@ -137,8 +140,24 @@ void TimelineView::setFrameWidth(int width)
     emit frameWidthChanged(width);
 }
 
+bool TimelineView::isSelected(doc::CelId cel, int start) const
+{
+    return std::find(m_selected.begin(), m_selected.end(), doc::ExposureRef{cel, start}) != m_selected.end();
+}
+
+void TimelineView::pruneSelection()
+{
+    const doc::Document &d = m_document->document();
+    std::erase_if(m_selected, [&d](const doc::ExposureRef &ref) {
+        const doc::Cel *cel = d.cel(ref.cel);
+        const doc::Exposure *e = cel ? cel->timing().exposureAt(ref.start) : nullptr;
+        return !e || e->start != ref.start;
+    });
+}
+
 void TimelineView::onStructureChanged()
 {
+    pruneSelection();
     updateScrollBars();
     viewport()->update();
 }
@@ -259,25 +278,27 @@ void TimelineView::paintCells(QPainter &p) const
     for (int row = 0; row < rowCount(); ++row) {
         const int celIndex = celIndexForRow(row);
         const doc::Cel &cel = d.celAt(celIndex);
+        const int shift = m_frameDrag && m_frameDrag->moved ? m_frameDrag->offset : 0;
         for (const doc::Exposure &e : timingForPainting(celIndex).exposures()) {
             if (e.end() < first || e.start > last)
                 continue;
             const doc::Drawing *drawing = cel.drawing(e.drawing);
             const QString name = drawing ? QString::fromStdString(drawing->name) : QStringLiteral("?");
-            paintExposure(p, e, name, colorForCel(celIndex), m.rowY(row));
+            const bool selected = isSelected(cel.id(), e.start - shift);
+            paintExposure(p, e, name, colorForCel(celIndex), m.rowY(row), selected);
         }
     }
 }
 
 void TimelineView::paintExposure(QPainter &p, const doc::Exposure &e, const QString &name, const QColor &color,
-                                 int y) const
+                                 int y, bool selected) const
 {
     const TimelineMetrics &m = m_metrics;
     const QRect block(m.frameX(e.start) + 1, y + 2, e.length * m.frameWidth - 2, m.rowHeight - 4);
 
-    p.fillRect(block, color.darker(170));
+    p.fillRect(block, selected ? color.darker(115) : color.darker(170));
     p.fillRect(QRect(block.left(), block.top(), 3, block.height()), color); // exposure start mark
-    p.setPen(color.darker(120));
+    p.setPen(selected ? palette().highlightedText().color() : color.darker(120));
     p.drawRect(block.adjusted(0, 0, -1, -1));
 
     // Drawing name at the start of the block; the rest of the hold shows a line.
@@ -397,8 +418,110 @@ void TimelineView::mousePressEvent(QMouseEvent *event)
         m_previewTiming = m_document->document().celAt(edge->celIndex).timing();
         return;
     }
+    // On a block: its selection, and maybe a drag of the selected ones.
+    const int row = rowAt(pos.y());
+    if (row >= 0) {
+        const doc::Cel &cel = m_document->document().celAt(celIndexForRow(row));
+        const int frame = frameAt(pos.x());
+        if (const doc::Exposure *e = cel.timing().exposureAt(frame)) {
+            pressFrame({cel.id(), e->start}, frame, pos.x(), event->modifiers());
+            return;
+        }
+        m_selected.clear(); // an empty cell
+        m_anchor.reset();
+        viewport()->update();
+    }
     m_scrubbing = true;
     scrubTo(pos, pos.y() >= m_metrics.rulerHeight);
+}
+
+void TimelineView::pressFrame(const doc::ExposureRef &ref, int frame, int x, Qt::KeyboardModifiers modifiers)
+{
+    FrameDrag drag;
+    drag.pressX = x;
+    drag.grabbed = ref;
+    drag.pressFrame = frame;
+    if (modifiers & Qt::ShiftModifier) {
+        // The row's blocks from the last one clicked to this one.
+        if (m_anchor && m_anchor->cel == ref.cel) {
+            const int from = std::min(m_anchor->start, ref.start), to = std::max(m_anchor->start, ref.start);
+            for (const doc::Exposure &e : m_document->document().cel(ref.cel)->timing().exposures())
+                if (e.start >= from && e.start <= to && !isSelected(ref.cel, e.start))
+                    m_selected.push_back({ref.cel, e.start});
+        } else if (!isSelected(ref.cel, ref.start)) {
+            m_selected.push_back(ref);
+        }
+    } else if (modifiers & Qt::ControlModifier) {
+        if (isSelected(ref.cel, ref.start))
+            std::erase(m_selected, ref);
+        else
+            m_selected.push_back(ref);
+        m_anchor = ref;
+    } else {
+        if (!isSelected(ref.cel, ref.start))
+            m_selected = {ref};
+        else
+            drag.selectOnlyIt = m_selected.size() > 1;
+        m_anchor = ref;
+    }
+    m_frameDrag = drag; // a click or a drag: known on release
+    viewport()->update();
+}
+
+void TimelineView::dragFrames(int x)
+{
+    FrameDrag &drag = *m_frameDrag;
+    if (!isSelected(drag.grabbed.cel, drag.grabbed.start))
+        return; // Ctrl took it out of the selection: nothing to drag
+    if (!drag.moved && std::abs(x - drag.pressX) < 4)
+        return;
+    drag.moved = true;
+    // As many frames as the pen went, but none of them before frame 0.
+    int earliest = std::numeric_limits<int>::max();
+    for (const doc::ExposureRef &ref : m_selected)
+        earliest = std::min(earliest, ref.start);
+    const int offset = std::max(m_metrics.frameAt(x) - drag.pressFrame, -earliest);
+    if (offset == drag.offset && !m_movePreview.empty())
+        return;
+    drag.offset = offset;
+    const doc::Document &d = m_document->document();
+    std::map<doc::CelId, std::vector<int>> byCel;
+    for (const doc::ExposureRef &ref : m_selected)
+        byCel[ref.cel].push_back(ref.start);
+    m_movePreview.clear();
+    for (const auto &[cel, starts] : byCel)
+        if (const int index = d.indexOf(cel); index >= 0)
+            m_movePreview[index] = doc::movedExposures(d.celAt(index).timing(), starts, offset);
+    updateScrollBars();
+    viewport()->update();
+}
+
+void TimelineView::dropFrames()
+{
+    const FrameDrag drag = *m_frameDrag;
+    m_frameDrag.reset();
+    m_movePreview.clear();
+    if (!drag.moved) {
+        // A click: the frame under it current (a drag leaves the cursor where it is).
+        if (drag.selectOnlyIt)
+            m_selected = {drag.grabbed};
+        m_document->setCurrentCel(drag.grabbed.cel);
+        m_document->setCurrentFrame(drag.pressFrame);
+        viewport()->update();
+        return;
+    }
+    if (!isSelected(drag.grabbed.cel, drag.grabbed.start))
+        return; // Ctrl took it out of the selection: nothing was dragged
+    if (drag.offset != 0) {
+        const std::vector<doc::ExposureRef> moving = m_selected;
+        for (doc::ExposureRef &ref : m_selected) // where they will be
+            ref.start += drag.offset;
+        if (drag.grabbed.cel != doc::kNoId)
+            m_anchor = doc::ExposureRef{drag.grabbed.cel, drag.grabbed.start + drag.offset};
+        m_document->execute(doc::makeMoveExposures(m_document->document(), moving, drag.offset));
+    }
+    updateScrollBars();
+    viewport()->update();
 }
 
 void TimelineView::mouseMoveEvent(QMouseEvent *event)
@@ -416,6 +539,10 @@ void TimelineView::mouseMoveEvent(QMouseEvent *event)
         }
         return;
     }
+    if (m_frameDrag) {
+        dragFrames(pos.x());
+        return;
+    }
     if (m_scrubbing) {
         scrubTo(pos, false);
         return;
@@ -426,6 +553,10 @@ void TimelineView::mouseMoveEvent(QMouseEvent *event)
 void TimelineView::mouseReleaseEvent(QMouseEvent *)
 {
     m_scrubbing = false;
+    if (m_frameDrag) {
+        dropFrames();
+        return;
+    }
     if (!m_resize)
         return;
     const Resize r = *m_resize;
@@ -535,6 +666,15 @@ void TimelineView::keyPressEvent(QKeyEvent *event)
     case Qt::Key_Down:
         if (celIndex > 0)
             m_document->setCurrentCel(d.celAt(celIndex - 1).id());
+        break;
+    case Qt::Key_Escape: // a drag dropped, else the selection cleared
+        if (m_frameDrag) {
+            m_frameDrag.reset();
+            m_movePreview.clear();
+        } else {
+            m_selected.clear();
+        }
+        viewport()->update();
         break;
     default: QAbstractScrollArea::keyPressEvent(event); return;
     }

@@ -34,4 +34,21 @@ std::unique_ptr<Command> makeResizeExposure(const Document &doc, CelId cel, int 
 std::unique_ptr<Command> makeInsertEmptyFrames(const Document &doc, CelId cel, int frame, int count);
 std::unique_ptr<Command> makeRemoveFrames(const Document &doc, CelId cel, int frame, int count);
 
+// The exposures starting at `starts` moved by `offset` frames: all taken out
+// first, then put back there over whatever is shown there (to frame 0 at
+// the earliest).
+Timing movedExposures(const Timing &timing, const std::vector<int> &starts, int offset);
+
+// An exposure of a cel, by the frame it starts at.
+struct ExposureRef
+{
+    CelId cel = kNoId;
+    int start = 0;
+    bool operator==(const ExposureRef &) const = default;
+};
+// movedExposures() on each cel the exposures belong to, as one step;
+// nullptr when nothing moves.
+std::unique_ptr<Command> makeMoveExposures(const Document &doc, const std::vector<ExposureRef> &exposures,
+                                           int offset);
+
 } // namespace mothion::doc

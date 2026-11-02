@@ -1630,6 +1630,74 @@ private slots:
         QVERIFY(button->menu()->findChild<QToolButton *>(QStringLiteral("onionBeforeColor")));
     }
 
+    // Blocks on the timeline are selected with clicks (Ctrl adds, Shift a
+    // range of the row) and dragged along the time together, in one step.
+    void timelineDragsTheSelectedFrames()
+    {
+        document::DocumentController controller;
+        doc::Document &d = controller.documentForCommands();
+        const doc::CelId bottom = controller.currentCel();
+        controller.addCel();
+        const doc::CelId top = controller.currentCel();
+        doc::NewDrawing a = doc::makeNewDrawing(d, bottom, 0, 2, "Line");
+        controller.execute(std::move(a.command));
+        doc::NewDrawing b = doc::makeNewDrawing(d, bottom, 2, 1, "Line");
+        controller.execute(std::move(b.command));
+        doc::NewDrawing c = doc::makeNewDrawing(d, bottom, 6, 1, "Line");
+        controller.execute(std::move(c.command));
+        doc::NewDrawing t = doc::makeNewDrawing(d, top, 1, 1, "Line");
+        controller.execute(std::move(t.command));
+
+        ui::TimelineView view(&controller);
+        view.resize(800, 200);
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        ui::TimelineMetrics m;
+        auto cell = [&](int row, int frame) { // rows top first
+            return QPoint(m.frameX(frame) + m.frameWidth / 2, m.rowY(row) + m.rowHeight / 2);
+        };
+        auto *vp = view.viewport();
+        QTest::mouseClick(vp, Qt::LeftButton, {}, cell(1, 0));
+        QCOMPARE(view.selectedFrames(), (std::vector<doc::ExposureRef>{{bottom, 0}}));
+        QTest::mouseClick(vp, Qt::LeftButton, Qt::ShiftModifier, cell(1, 6)); // the row's blocks up to it
+        QCOMPARE(view.selectedFrames().size(), std::size_t(3));
+        QTest::mouseClick(vp, Qt::LeftButton, Qt::ControlModifier, cell(1, 2)); // b out
+        QTest::mouseClick(vp, Qt::LeftButton, Qt::ControlModifier, cell(0, 1)); // the top cel's in
+        QCOMPARE(view.selectedFrames().size(), std::size_t(3));
+
+        // Dragged three frames on: a, c and the top one move, b stays.
+        QTest::mousePress(vp, Qt::LeftButton, {}, cell(1, 0));
+        QTest::mouseMove(vp, cell(1, 2));
+        QTest::mouseMove(vp, cell(1, 3));
+        QTest::mouseRelease(vp, Qt::LeftButton, {}, cell(1, 3));
+        const doc::Timing &low = d.cel(bottom)->timing(), &high = d.cel(top)->timing();
+        QCOMPARE(low.drawingAt(3), a.id);
+        QCOMPARE(low.exposureAt(3)->length, 2);
+        QCOMPARE(low.drawingAt(2), b.id);
+        QCOMPARE(low.drawingAt(0), doc::kNoId);
+        QCOMPARE(low.drawingAt(9), c.id);
+        QCOMPARE(high.drawingAt(4), t.id);
+        QCOMPARE(controller.currentFrame(), 1); // the cursor stays: where the last click put it
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo move frames"));
+        QCOMPARE(view.selectedFrames().size(), std::size_t(3)); // where they went
+        QVERIFY(std::find(view.selectedFrames().begin(), view.selectedFrames().end(),
+                          doc::ExposureRef{bottom, 3}) != view.selectedFrames().end());
+
+        controller.undo(); // all at once
+        QCOMPARE(low.drawingAt(0), a.id);
+        QCOMPARE(low.drawingAt(6), c.id);
+        QCOMPARE(high.drawingAt(1), t.id);
+
+        // A click on an empty cell clears the selection; one on a selected
+        // block among several, without dragging, keeps it alone.
+        QTest::mouseClick(vp, Qt::LeftButton, {}, cell(1, 0));
+        QTest::mouseClick(vp, Qt::LeftButton, Qt::ControlModifier, cell(1, 6));
+        QTest::mouseClick(vp, Qt::LeftButton, {}, cell(1, 6));
+        QCOMPARE(view.selectedFrames(), (std::vector<doc::ExposureRef>{{bottom, 6}}));
+        QTest::mouseClick(vp, Qt::LeftButton, {}, cell(1, 12));
+        QVERIFY(view.selectedFrames().empty());
+    }
+
     // The cel bar adds, moves and deletes cels and sets the current one's
     // blend and opacity; the row headers show, hide and lock them.
     void timelineCelControls()

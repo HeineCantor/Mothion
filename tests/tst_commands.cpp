@@ -177,6 +177,35 @@ private slots:
         QCOMPARE(cel->drawing(a.id)->layers.front().image.pixel(0, 0), kInk);
     }
 
+    // Exposures moved by an offset: taken out, then put back over what is
+    // there; never before frame 0; all cels in one step.
+    void movedExposuresOverwriteWhereTheyLand()
+    {
+        Timing t;
+        t.setExposure(0, 2, 1);
+        t.setExposure(2, 1, 2);
+        t.setExposure(5, 2, 3);
+        const Timing moved = movedExposures(t, {0, 2}, 3);
+        QCOMPARE(moved.drawingAt(0), kNoId);
+        QCOMPARE(moved.drawingAt(3), DrawingId(1));
+        QCOMPARE(moved.exposureAt(3)->length, 2);
+        QCOMPARE(moved.drawingAt(5), DrawingId(2)); // over the start of 3
+        QCOMPARE(moved.drawingAt(6), DrawingId(3));
+        QCOMPARE(movedExposures(t, {5}, -9).drawingAt(0), DrawingId(3)); // to frame 0 at the earliest
+        QVERIFY(movedExposures(t, {1}, 2) == t); // not the start of an exposure: nothing
+
+        auto [doc, celId] = docWithCel();
+        History history;
+        NewDrawing a = makeNewDrawing(*doc, celId, 0, 2);
+        history.execute(*doc, std::move(a.command));
+        QVERIFY(!makeMoveExposures(*doc, {{celId, 0}}, 0));
+        history.execute(*doc, makeMoveExposures(*doc, {{celId, 0}}, 4));
+        QCOMPARE(doc->cel(celId)->timing().drawingAt(4), a.id);
+        QCOMPARE(doc->cel(celId)->timing().drawingAt(0), kNoId);
+        history.undo(*doc);
+        QCOMPARE(doc->cel(celId)->timing().drawingAt(0), a.id);
+    }
+
     void timingFactories()
     {
         auto [doc, celId] = docWithCel();
