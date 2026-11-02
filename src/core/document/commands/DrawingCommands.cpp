@@ -104,4 +104,45 @@ NewDrawing makeNewDrawing(Document &doc, CelId celId, int frame, int length, std
     return {std::make_unique<GroupCommand>(CommandKind::AddDrawing, std::move(steps)), id, layer};
 }
 
+NewDrawing makeSplitDrawing(Document &doc, CelId celId, int frame)
+{
+    const Cel *cel = doc.cel(celId);
+    const Exposure *hold = cel ? cel->timing().exposureAt(frame) : nullptr;
+    if (!hold || hold->start == frame)
+        return {};
+    const Drawing &source = *cel->drawing(hold->drawing);
+    Drawing copy = source;
+    copy.id = doc.allocateDrawingId();
+    copy.name = cel->nextDrawingName();
+    for (Layer &layer : copy.layers)
+        layer.id = doc.allocateLayerId();
+    const DrawingId id = copy.id;
+    const LayerId top = copy.layers.empty() ? kNoId : copy.layers.back().id;
+    Timing after = cel->timing();
+    after.setExposure(frame, hold->end() - frame, id);
+
+    std::vector<std::unique_ptr<Command>> steps;
+    steps.push_back(std::make_unique<AddDrawingCommand>(celId, std::move(copy)));
+    steps.push_back(std::make_unique<SetTimingCommand>(celId, cel->timing(), std::move(after)));
+    return {std::make_unique<GroupCommand>(CommandKind::SplitFrame, std::move(steps)), id, top};
+}
+
+NewDrawing makeInbetween(Document &doc, CelId celId, int frame, std::string layerName)
+{
+    const Cel *cel = doc.cel(celId);
+    if (!cel || frame < 0)
+        return {};
+    const DrawingId id = doc.allocateDrawingId();
+    const LayerId layer = doc.allocateLayerId();
+    Timing after = cel->timing();
+    after.insertEmptyFrames(frame, 1);
+    after.setExposure(frame, 1, id);
+
+    std::vector<std::unique_ptr<Command>> steps;
+    steps.push_back(std::make_unique<AddDrawingCommand>(
+        celId, Drawing{id, cel->nextDrawingName(), {Layer{layer, {std::move(layerName)}, {}}}}));
+    steps.push_back(std::make_unique<SetTimingCommand>(celId, cel->timing(), std::move(after)));
+    return {std::make_unique<GroupCommand>(CommandKind::InsertInbetween, std::move(steps)), id, layer};
+}
+
 } // namespace mothion::doc

@@ -56,4 +56,15 @@ struct NewDrawing
 };
 NewDrawing makeNewDrawing(Document &doc, CelId cel, int frame, int length = 1, std::string layerName = "Layer 1");
 
+// "Split frame": the hold showing a drawing at `frame` is cut there; from
+// `frame` to the end of the hold a copy of the drawing is shown instead,
+// independent of it (its layers with new ids, the pixels shared until one
+// side is painted). No command when `frame` is empty or starts its hold.
+NewDrawing makeSplitDrawing(Document &doc, CelId cel, int frame);
+
+// "Insert inbetween": the cel's frames from `frame` on move one place to
+// the right (a hold crossing it is cut around the gap) and a new drawing
+// with one empty layer is shown at `frame`.
+NewDrawing makeInbetween(Document &doc, CelId cel, int frame, std::string layerName = "Layer 1");
+
 } // namespace mothion::doc

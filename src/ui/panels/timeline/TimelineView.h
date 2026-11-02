@@ -24,7 +24,8 @@ namespace mothion::ui {
 //    a click elsewhere makes it current, a double-click renames it;
 //  - drag the right edge of a block: change the hold length (ripple), one
 //    undo step on release;
-//  - right click: new frame, clear frame, insert/remove frames, delete frame;
+//  - right click: new frame, clear frame, split frame, insert inbetween,
+//    insert/remove frames, delete frame;
 //  - Left/Right: frame, Up/Down: cel.
 //
 // Everything is custom-painted in one widget so the ruler, names and cells

@@ -577,6 +577,8 @@ QString DocumentController::commandName(doc::CommandKind kind)
     case doc::CommandKind::Fill: return tr("fill");
     case doc::CommandKind::Transform: return tr("transform");
     case doc::CommandKind::Paste: return tr("paste");
+    case doc::CommandKind::SplitFrame: return tr("split frame");
+    case doc::CommandKind::InsertInbetween: return tr("insert inbetween");
     }
     return {};
 }

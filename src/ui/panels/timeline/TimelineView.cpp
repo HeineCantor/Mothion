@@ -485,6 +485,17 @@ void TimelineView::contextMenuEvent(QContextMenuEvent *event)
         m_document->execute(doc::makeSetExposure(m_document->document(), celId, frame, 1, doc::kNoId));
     });
     clear->setEnabled(drawing != nullptr);
+    // Two independent frames from here: the hold's second part gets a copy.
+    const doc::Exposure *hold = cel.timing().exposureAt(frame);
+    QAction *split = menu.addAction(tr("Split frame"), this, [this, celId, frame] {
+        m_document->execute(doc::makeSplitDrawing(m_document->documentForCommands(), celId, frame).command);
+    });
+    split->setEnabled(hold && hold->start < frame);
+    menu.addAction(tr("Insert inbetween"), this, [this, celId, frame] {
+        m_document->execute(
+            doc::makeInbetween(m_document->documentForCommands(), celId, frame, tr("Layer 1").toStdString())
+                .command);
+    });
     menu.addSeparator();
     menu.addAction(tr("Insert empty frame"), this, [this, celId, frame] {
         m_document->execute(doc::makeInsertEmptyFrames(m_document->document(), celId, frame, 1));

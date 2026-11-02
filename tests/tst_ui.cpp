@@ -1385,6 +1385,49 @@ private slots:
         QCOMPARE(t.lastFrame(), 4);
     }
 
+    // Split frame cuts a hold in two independent frames; insert inbetween
+    // moves the cel's frames from a point one place on and puts a new one there.
+    void splitFrameAndInsertInbetween()
+    {
+        document::DocumentController controller;
+        doc::Document &d = controller.documentForCommands();
+        const doc::CelId cel = controller.currentCel();
+        doc::NewDrawing a = doc::makeNewDrawing(d, cel, 0, 4, "Line");
+        controller.execute(std::move(a.command));
+        d.layer(cel, a.id, a.layer)->image.setPixel(3, 3, 0xff000000);
+        const doc::Timing &t = d.cel(cel)->timing();
+
+        QVERIFY(!doc::makeSplitDrawing(d, cel, 0).command); // the start of the hold
+        QVERIFY(!doc::makeSplitDrawing(d, cel, 6).command); // nothing there
+        doc::NewDrawing split = doc::makeSplitDrawing(d, cel, 2);
+        controller.execute(std::move(split.command));
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo split frame"));
+        QCOMPARE(t.exposureAt(0)->length, 2);
+        QCOMPARE(t.exposureAt(0)->drawing, a.id);
+        QCOMPARE(t.exposureAt(2)->drawing, split.id);
+        QCOMPARE(t.exposureAt(2)->length, 2);
+        const doc::Drawing *copy = d.cel(cel)->drawing(split.id);
+        QCOMPARE(copy->name, std::string("2"));
+        QCOMPARE(copy->layers.size(), std::size_t(1));
+        QVERIFY(copy->layers[0].id != a.layer);
+        QCOMPARE(copy->layers[0].image.pixel(3, 3), doc::Pixel(0xff000000));
+        d.layer(cel, split.id, split.layer)->image.setPixel(3, 3, 0); // independent: one painted, not the other
+        QCOMPARE(d.layer(cel, a.id, a.layer)->image.pixel(3, 3), doc::Pixel(0xff000000));
+
+        doc::NewDrawing between = doc::makeInbetween(d, cel, 1, "Line");
+        controller.execute(std::move(between.command));
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo insert inbetween"));
+        QCOMPARE(t.drawingAt(0), a.id);
+        QCOMPARE(t.drawingAt(1), between.id);
+        QCOMPARE(t.drawingAt(2), a.id); // the rest of the hold, moved on
+        QCOMPARE(t.drawingAt(3), split.id);
+        QCOMPARE(t.lastFrame(), 5);
+        QCOMPARE(d.cel(cel)->drawing(between.id)->layers.size(), std::size_t(1));
+        controller.undo();
+        QCOMPARE(t.lastFrame(), 4);
+        QCOMPARE(t.drawingAt(1), a.id);
+    }
+
     // The onion skin shows the current layer's drawings of the frames around
     // this one, once each, tinted: the ones before in one color, after in another.
     void onionSkinShowsTheFramesAround()
