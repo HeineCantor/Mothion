@@ -29,7 +29,8 @@ namespace mothion::ui {
 //
 // The current row says what the header and the buttons act on:
 //  - a cel: its blend mode and opacity; new cel, delete, up and down;
-//  - a frame: new layer on top of it;
+//  - a frame: new layer on top of it; delete removes every selected frame
+//    (Ctrl and Shift select several, of any cel);
 //  - a layer: the blend mode and opacity of the selected layers (of that
 //    frame: Ctrl+click adds or takes away one, Shift+click a range); new
 //    layer above, delete, up and down.

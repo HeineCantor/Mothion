@@ -1428,6 +1428,55 @@ private slots:
         QCOMPARE(t.drawingAt(1), a.id);
     }
 
+    // Frames selected in the Layers panel, of any cel, go together.
+    void layersPanelDeletesSeveralFrames()
+    {
+        document::DocumentController controller;
+        ui::LayersPanel panel(&controller);
+        panel.resize(320, 600);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        doc::Document &d = controller.documentForCommands();
+        const doc::CelId cel = controller.currentCel();
+        std::vector<doc::DrawingId> ids;
+        for (int f : {0, 1, 2}) {
+            doc::NewDrawing nd = doc::makeNewDrawing(d, cel, f, 1, "Line");
+            ids.push_back(nd.id);
+            controller.execute(std::move(nd.command));
+        }
+        QCoreApplication::processEvents();
+        auto *tree = panel.findChild<QTreeWidget *>();
+        auto click = [&](doc::DrawingId id, Qt::KeyboardModifiers mods) {
+            const QPoint at = tree->visualItemRect(panel.frameItem(id)).center();
+            QTest::mouseClick(tree->viewport(), Qt::LeftButton, mods, at);
+        };
+        click(ids[0], {});
+        click(ids[2], Qt::ControlModifier);
+        QCOMPARE(panel.focus(), ui::LayersPanel::Focus::Frame);
+        QToolButton *remove = nullptr;
+        for (QToolButton *b : panel.findChildren<QToolButton *>())
+            if (b->toolTip() == QStringLiteral("Delete the selected frames"))
+                remove = b;
+        QVERIFY(remove && remove->isEnabled());
+        remove->click();
+        QCoreApplication::processEvents();
+        QCOMPARE(d.cel(cel)->drawings().size(), std::size_t(1));
+        QVERIFY(d.cel(cel)->drawing(ids[1]));
+        QCOMPARE(d.cel(cel)->timing().drawingAt(0), doc::kNoId);
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo delete frame"));
+        controller.undo(); // one step
+        QCOMPARE(d.cel(cel)->drawings().size(), std::size_t(3));
+        QCOMPARE(d.cel(cel)->timing().drawingAt(2), ids[2]);
+
+        QCoreApplication::processEvents();
+        click(ids[1], {});
+        tree->setFocus();
+        QTest::keyClick(tree, Qt::Key_Delete); // the key does the same
+        QCoreApplication::processEvents();
+        QCOMPARE(d.cel(cel)->drawings().size(), std::size_t(2));
+        QVERIFY(!d.cel(cel)->drawing(ids[1]));
+    }
+
     // The onion skin shows the current layer's drawings of the frames around
     // this one, once each, tinted: the ones before in one color, after in another.
     void onionSkinShowsTheFramesAround()

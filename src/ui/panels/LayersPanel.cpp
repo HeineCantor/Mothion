@@ -3,6 +3,7 @@
 #include "canvas/FrameRenderer.h"
 #include "canvas/TileQt.h"
 #include "core/document/commands/CelCommands.h"
+#include "core/document/commands/DrawingCommands.h"
 #include "core/document/commands/GroupCommand.h"
 #include "core/document/commands/LayerCommands.h"
 #include "document/DocumentController.h"
@@ -19,6 +20,7 @@
 #include <QPainter>
 #include <QPointer>
 #include <QScrollBar>
+#include <QShortcut>
 #include <QSignalBlocker>
 #include <QSlider>
 #include <QSpinBox>
@@ -302,6 +304,12 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
 
     connect(m_add, &QToolButton::clicked, this, &LayersPanel::addClicked);
     connect(m_remove, &QToolButton::clicked, this, &LayersPanel::removeSelected);
+    // Delete in the tree: the same as the bin.
+    auto *remove = new QShortcut(QKeySequence::Delete, m_tree, this, [this] {
+        if (m_remove->isEnabled())
+            removeSelected();
+    });
+    remove->setContext(Qt::WidgetShortcut);
     connect(m_up, &QToolButton::clicked, this, [this] { moveSelected(+1); });
     connect(m_down, &QToolButton::clicked, this, [this] { moveSelected(-1); });
 
@@ -796,6 +804,17 @@ void LayersPanel::removeSelected()
             m_document->execute(std::make_unique<doc::RemoveCelCommand>(m_document->currentCel()));
         return;
     }
+    if (m_focus == Focus::Frame) {
+        // Every selected frame, from whichever cel, with the points showing it.
+        std::vector<std::unique_ptr<doc::Command>> steps;
+        for (const QTreeWidgetItem *item : m_tree->selectedItems())
+            if (kindOf(item) == Row::Frame)
+                steps.push_back(std::make_unique<doc::RemoveDrawingCommand>(celOf(item), drawingOf(item)));
+        if (!steps.empty())
+            m_document->execute(
+                std::make_unique<doc::GroupCommand>(doc::CommandKind::RemoveDrawing, std::move(steps)));
+        return;
+    }
     const doc::Drawing *drawing = m_document->currentDrawing();
     const QList<doc::LayerId> layers = selectedLayers();
     if (m_focus != Focus::Layer || !drawing || layers.isEmpty() || layers.size() >= int(drawing->layers.size()))
@@ -1017,8 +1036,10 @@ void LayersPanel::syncHeader()
     }
     case Focus::Frame:
         canAdd = drawing != nullptr;
+        for (const QTreeWidgetItem *item : m_tree->selectedItems())
+            canRemove = canRemove || kindOf(item) == Row::Frame;
         m_add->setToolTip(tr("New layer on top of the frame"));
-        m_remove->setToolTip(tr("Delete layer"));
+        m_remove->setToolTip(tr("Delete the selected frames"));
         m_up->setToolTip(tr("Move up"));
         m_down->setToolTip(tr("Move down"));
         break;
