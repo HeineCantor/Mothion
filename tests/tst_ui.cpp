@@ -14,6 +14,7 @@
 #include "tools/BrushLibrary.h"
 #include "tools/BrushPreset.h"
 #include "tools/ToolState.h"
+#include "ui/AutoplayWindow.h"
 #include "ui/ExportDialog.h"
 #include "ui/MainWindow.h"
 #include "ui/PanelDock.h"
@@ -43,6 +44,8 @@
 #include <QStandardPaths>
 #include <QTabletEvent>
 #include <QTemporaryDir>
+#include <QMenuBar>
+#include <QSlider>
 #include <QTest>
 #include <QWheelEvent>
 #include <QToolButton>
@@ -1078,6 +1081,85 @@ private slots:
         QGuiApplication::clipboard()->setImage(other);
         action(QKeySequence::Paste)->trigger();
         QCOMPARE(source.drawingAt(0)->image.pixel(960, 540), doc::Pixel(0xff0000ff));
+    }
+
+    // Autoplay plays the frames in a loop, the slider following; Play stops
+    // it, the slider picks a frame, the speed sets the pace.
+    void autoplayLoopsTheAnimation()
+    {
+        document::DocumentController controller;
+        const QColor colors[] = {Qt::red, Qt::green, Qt::blue}; // a three-frame animation
+        for (int f = 0; f < 3; ++f) {
+            QImage image(40, 40, QImage::Format_ARGB32);
+            image.fill(colors[f]);
+            controller.setCurrentFrame(f);
+            QVERIFY(controller.pasteImage(image, QPoint(940, 520)));
+        }
+        controller.clearSelection();
+
+        ui::AutoplayWindow window(&controller);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *play = window.findChild<QCheckBox *>();
+        auto *slider = window.findChild<QSlider *>();
+        auto *speed = window.findChild<QComboBox *>();
+        QVERIFY(play && slider && speed);
+        QVERIFY(play->isChecked());
+        QVERIFY(window.isPlaying());
+        QCOMPARE(window.frameCount(), 3); // to the last frame with something on it
+        QCOMPARE(window.fps(), 24.0);     // the document's rate
+        QCOMPARE(slider->maximum(), 2);
+
+        const int start = window.frame();
+        QTRY_VERIFY(window.frame() != start);
+        QTRY_COMPARE(window.frame(), 0); // and round again
+        QCOMPARE(slider->value(), window.frame());
+
+        play->setChecked(false);
+        QVERIFY(!window.isPlaying());
+        slider->setValue(1); // a frame picked
+        QCOMPARE(window.frame(), 1);
+        QCOMPARE(window.image().pixelColor(960, 540), QColor(Qt::green));
+        slider->setValue(2);
+        QCOMPARE(window.image().pixelColor(960, 540), QColor(Qt::blue));
+        QTest::qWait(100);
+        QCOMPARE(window.frame(), 2); // stopped
+
+        speed->setCurrentIndex(speed->findData(6.0));
+        QCOMPARE(window.fps(), 6.0);
+        QTest::keyClick(&window, Qt::Key_Space); // Space plays too
+        QVERIFY(play->isChecked() && window.isPlaying());
+        QElapsedTimer timer;
+        timer.start();
+        QTRY_COMPARE(window.frame(), 0); // the next frame, at 6 fps
+        QVERIFY(timer.elapsed() > 120);
+
+        QImage more(40, 40, QImage::Format_ARGB32); // a frame drawn while it plays: in the loop
+        more.fill(Qt::yellow);
+        controller.setCurrentFrame(3);
+        QVERIFY(controller.pasteImage(more, QPoint(940, 520)));
+        QTRY_COMPARE(window.frameCount(), 4);
+    }
+
+    void animationMenuOpensAutoplay()
+    {
+        ui::MainWindow window;
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        QAction *autoplay = nullptr;
+        for (QAction *menu : window.menuBar()->actions())
+            if (menu->text().remove(QLatin1Char('&')) == QStringLiteral("Animation"))
+                for (QAction *a : menu->menu()->actions())
+                    if (a->text() == QStringLiteral("Autoplay"))
+                        autoplay = a;
+        QVERIFY(autoplay);
+        autoplay->trigger();
+        auto *player = window.findChild<ui::AutoplayWindow *>();
+        QVERIFY(player);
+        QTRY_VERIFY(player->isVisible());
+        QVERIFY(player->isPlaying());
+        autoplay->trigger(); // the same window again
+        QCOMPARE(window.findChildren<ui::AutoplayWindow *>().size(), 1);
     }
 
     // The ants march while there is a selection: the dashes swap in turns.

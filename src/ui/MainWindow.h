@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QMainWindow>
+#include <QPointer>
 
 class QMenu;
 
@@ -17,6 +18,7 @@ class ToolState;
 
 namespace mothion::ui {
 
+class AutoplayWindow;
 class DockLayout;
 
 // The single workspace window.
@@ -68,6 +70,7 @@ private:
     canvas::CanvasView *m_canvas = nullptr;
     DockLayout *m_dockLayout = nullptr;
     QMenu *m_viewMenu = nullptr;
+    QPointer<AutoplayWindow> m_autoplay; // one at a time, made when first asked for
     QList<QAction *> m_fileActions;
     QList<QAction *> m_editActions;
     QAction *m_saveAsAction = nullptr;

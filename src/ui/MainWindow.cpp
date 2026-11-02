@@ -7,6 +7,7 @@
 #include "io/ProjectFile.h"
 #include "tools/BrushLibrary.h"
 #include "tools/ToolState.h"
+#include "ui/AutoplayWindow.h"
 #include "ui/DockLayout.h"
 #include "ui/ExportDialog.h"
 #include "ui/IconFactory.h"
@@ -276,6 +277,17 @@ void MainWindow::createMenus()
     debug->setShortcut(QKeySequence(Qt::Key_F12));
     debug->setShortcutContext(Qt::ApplicationShortcut); // also when a floating panel has focus
     connect(debug, &QAction::toggled, m_canvas, &canvas::CanvasView::setDebugOverlayVisible);
+
+    QMenu *animation = menuBar()->addMenu(tr("&Animation"));
+    animation->addAction(tr("Autoplay"), this, [this] {
+        if (!m_autoplay) {
+            m_autoplay = new AutoplayWindow(m_document, this);
+            m_autoplay->setAttribute(Qt::WA_DeleteOnClose); // closed: made again, playing, next time
+        }
+        m_autoplay->show();
+        m_autoplay->raise();
+        m_autoplay->activateWindow();
+    });
 
     QMenu *window = menuBar()->addMenu(tr("&Window"));
     for (PanelDock *dock : m_dockLayout->docks())
@@ -569,7 +581,8 @@ bool isPartOf(const QWidget *widget, const QWidget *window)
     for (; widget; widget = widget->parentWidget()) {
         if (widget == window)
             return true;
-        if (qobject_cast<const QDialog *>(widget))
+        // Windows of their own with their own keys (Space plays the autoplay).
+        if (qobject_cast<const QDialog *>(widget) || qobject_cast<const AutoplayWindow *>(widget))
             return false;
     }
     return false;
