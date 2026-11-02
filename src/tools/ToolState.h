@@ -13,8 +13,8 @@ namespace mothion::tools {
 
 // The tools in the tool palette. Not to be confused with mothion::InputTool,
 // which is the *physical* end of the pen (tip / eraser / mouse).
-enum class ToolId { Brush, Eraser, Hand, Zoom, Move, RectSelect, LassoSelect, Puppet };
-inline constexpr int kToolCount = 8;
+enum class ToolId { Brush, Eraser, Hand, Zoom, Move, RectSelect, LassoSelect, Puppet, Eyedropper };
+inline constexpr int kToolCount = 9;
 
 // Puppet warp options (see puppet::PuppetRig).
 struct PuppetSettings

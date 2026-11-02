@@ -119,6 +119,21 @@ void drawGlyph(QPainter &p, IconId id)
         path.moveTo(10, 7);
         path.lineTo(10, 13);
         break;
+    case IconId::Eyedropper: // a pipette, tip down-left
+        path.moveTo(4, 20);
+        path.lineTo(5, 17);
+        path.lineTo(13, 9);
+        path.moveTo(15, 11);
+        path.lineTo(7, 19);
+        path.lineTo(4, 20);
+        path.moveTo(11, 7);
+        path.lineTo(17, 13);
+        path.moveTo(14, 8);
+        path.lineTo(17, 5);
+        path.quadTo(19, 3, 20.5, 4.5); // the bulb
+        path.quadTo(21, 6, 19, 7);
+        path.lineTo(16, 10);
+        break;
     case IconId::Move: // four arrows
         path.moveTo(12, 3);
         path.lineTo(12, 21);

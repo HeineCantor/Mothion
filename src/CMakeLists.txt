@@ -73,6 +73,7 @@ qt_add_library(mothion_gui STATIC
     canvas/NavigationGesture.h canvas/NavigationGesture.cpp
     canvas/CanvasTool.h
     canvas/MoveTool.h canvas/MoveTool.cpp
+    canvas/EyedropperTool.h canvas/EyedropperTool.cpp
     canvas/SelectionMask.h canvas/SelectionMask.cpp
     canvas/SelectionTool.h canvas/SelectionTool.cpp
     canvas/PuppetTool.h canvas/PuppetTool.cpp

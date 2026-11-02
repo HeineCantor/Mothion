@@ -32,6 +32,7 @@ QString ToolState::displayName(ToolId tool)
     case ToolId::RectSelect: return tr("Rectangle selection");
     case ToolId::LassoSelect: return tr("Lasso selection");
     case ToolId::Puppet: return tr("Puppet warp");
+    case ToolId::Eyedropper: return tr("Eyedropper");
     }
     return {};
 }

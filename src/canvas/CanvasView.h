@@ -139,6 +139,7 @@ private:
     std::unique_ptr<CanvasTool> m_rectSelectTool;
     std::unique_ptr<CanvasTool> m_lassoSelectTool;
     std::unique_ptr<CanvasTool> m_puppetTool;
+    std::unique_ptr<CanvasTool> m_eyedropperTool;
     CanvasTool *m_editTool = nullptr; // the canvas tool between its press and release
     std::optional<brush::DabGenerator> m_dabs;
     std::vector<brush::BrushInput> m_points; // the stroke so far, for the final pass
@@ -160,6 +161,11 @@ private:
     bool m_spaceHeld = false;
     bool m_tabHeld = false;
     bool panKeyHeld() const { return m_spaceHeld || m_tabHeld; }
+    // Alt held with a paint tool: the pen picks colors instead.
+    bool m_altHeld = false;
+    bool picksColor() const;
+    // The frame's color at a document point, invalid off the sheet.
+    QColor colorAt(const QPointF &docPos) const;
     bool *panKeyFlag(int key); // the flag of a pan key, nullptr for other keys
     bool m_fittedOnce = false;
     // Runs the ants while there is a selection, stops them otherwise.

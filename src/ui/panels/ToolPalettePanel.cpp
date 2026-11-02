@@ -24,6 +24,7 @@ ToolPalettePanel::ToolPalettePanel(tools::ToolState *state, QWidget *parent)
         {ToolId::Puppet, IconId::Puppet, QKeySequence(Qt::Key_P)},
         {ToolId::Brush, IconId::Brush, QKeySequence(Qt::Key_B)},
         {ToolId::Eraser, IconId::Eraser, QKeySequence(Qt::Key_E)},
+        {ToolId::Eyedropper, IconId::Eyedropper, QKeySequence(Qt::Key_I)},
         {ToolId::Hand, IconId::Hand, QKeySequence(Qt::Key_H)},
         {ToolId::Zoom, IconId::Zoom, QKeySequence(Qt::Key_Z)},
     };

@@ -1,6 +1,7 @@
 #include "canvas/CanvasView.h"
 
 #include "canvas/DebugOverlay.h"
+#include "canvas/EyedropperTool.h"
 #include "canvas/MoveTool.h"
 #include "canvas/PuppetTool.h"
 #include "canvas/SelectionTool.h"
@@ -73,6 +74,8 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
         std::make_unique<SelectionTool>(m_document, SelectionTool::Shape::Lasso);
     m_puppetTool = std::make_unique<PuppetTool>(
         m_document, m_toolState, [this](const QString &text) { emit statusMessage(text); }, [this] { update(); });
+    m_eyedropperTool =
+        std::make_unique<EyedropperTool>(m_toolState, [this](const QPointF &docPos) { return colorAt(docPos); });
     m_antsTimer = new QTimer(this);
     m_antsTimer->setInterval(kAntsIntervalMs);
     connect(m_antsTimer, &QTimer::timeout, this, [this] {
@@ -191,7 +194,8 @@ void CanvasView::paintEvent(QPaintEvent *)
     }
 
     m_paintedOutline = QRect();
-    if (m_pointerVisible && ToolState::isPaintTool(m_toolState->activeTool()) && !m_gesture.isActive()) {
+    if (m_pointerVisible && ToolState::isPaintTool(m_toolState->activeTool()) && !m_gesture.isActive()
+        && !picksColor() && m_editTool != m_eyedropperTool.get()) {
         p.setRenderHint(QPainter::Antialiasing);
         p.setBrush(Qt::NoBrush);
         const QRectF outline = brushOutlineRect();
@@ -339,6 +343,9 @@ void CanvasView::handleSample(const PenSample &sample)
             break; // a second button during a drag: keep doing what we do
         if (const Mode mode = navigationModeFor(sample); mode != Mode::None) {
             m_gesture.begin(mode, QPointF(sample.x, sample.y), m_view);
+        } else if (picksColor() && sample.tipDown() && sample.tool != InputTool::Eraser) {
+            m_eyedropperTool->press(docPos, modifiers);
+            m_editTool = m_eyedropperTool.get();
         } else if (sample.tipDown()
                    && (sample.tool == InputTool::Eraser || ToolState::isPaintTool(m_toolState->activeTool()))) {
             beginStroke(sample);
@@ -493,6 +500,7 @@ CanvasTool *CanvasView::canvasTool() const
     case ToolId::RectSelect: return m_rectSelectTool.get();
     case ToolId::LassoSelect: return m_lassoSelectTool.get();
     case ToolId::Puppet: return m_puppetTool.get();
+    case ToolId::Eyedropper: return m_eyedropperTool.get();
     default: return nullptr;
     }
 }
@@ -576,6 +584,10 @@ void CanvasView::keyPressEvent(QKeyEvent *event)
         }
         return;
     }
+    if (event->key() == Qt::Key_Alt && !m_altHeld) {
+        m_altHeld = true;
+        updateCursor();
+    }
     QWidget::keyPressEvent(event);
 }
 
@@ -588,6 +600,10 @@ void CanvasView::keyReleaseEvent(QKeyEvent *event)
         }
         return;
     }
+    if (event->key() == Qt::Key_Alt && m_altHeld) {
+        m_altHeld = false;
+        updateCursor();
+    }
     QWidget::keyReleaseEvent(event);
 }
 
@@ -598,6 +614,21 @@ void CanvasView::updateAnts()
     else if (!m_antsTimer->isActive())
         m_antsTimer->start();
     update();
+}
+
+bool CanvasView::picksColor() const
+{
+    // The key flag for the cursor; the modifier too, for an Alt pressed
+    // while the focus was elsewhere.
+    const bool alt = m_altHeld || (QGuiApplication::keyboardModifiers() & Qt::AltModifier);
+    return alt && ToolState::isPaintTool(m_toolState->activeTool());
+}
+
+QColor CanvasView::colorAt(const QPointF &docPos) const
+{
+    const QImage &frame = m_frame.image();
+    const QPoint p(int(std::floor(docPos.x())), int(std::floor(docPos.y())));
+    return frame.rect().contains(p) ? frame.pixelColor(p) : QColor();
 }
 
 bool *CanvasView::panKeyFlag(int key)
@@ -612,8 +643,8 @@ bool *CanvasView::panKeyFlag(int key)
 void CanvasView::focusOutEvent(QFocusEvent *event)
 {
     // The release of a key held while focus moves away never reaches us.
-    if (panKeyHeld()) {
-        m_spaceHeld = m_tabHeld = false;
+    if (panKeyHeld() || m_altHeld) {
+        m_spaceHeld = m_tabHeld = m_altHeld = false;
         updateCursor();
     }
     QWidget::focusOutEvent(event);
@@ -625,6 +656,8 @@ void CanvasView::updateCursor()
         setCursor(Qt::OpenHandCursor);
     else if (m_toolState->activeTool() == ToolId::Zoom)
         setCursor(Qt::SizeHorCursor);
+    else if (picksColor())
+        setCursor(Qt::CrossCursor);
     else if (const CanvasTool *tool = canvasTool())
         setCursor(tool->cursor());
     else

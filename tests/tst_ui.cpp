@@ -634,6 +634,38 @@ private slots:
         QVERIFY(controller.selection().contains(QPointF(70, 30))); // closed: a triangle
     }
 
+    // The eyedropper picks the color shown; Alt does the same with the brush,
+    // without painting.
+    void eyedropperPicksTheShownColor()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        QImage image(200, 200, QImage::Format_ARGB32);
+        image.fill(QColor(200, 40, 30));
+        controller.importImage(image, QStringLiteral("red")); // centered: 860..1059, 440..639
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(400, 300);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        const QPoint onRed = canvas.view().documentToView().map(QPointF(960, 540)).toPoint();
+        const QPoint onPaper = canvas.view().documentToView().map(QPointF(100, 100)).toPoint();
+
+        state.setActiveTool(tools::ToolId::Eyedropper);
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, onRed);
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, onRed);
+        QCOMPARE(state.color(), QColor(200, 40, 30));
+
+        state.setActiveTool(tools::ToolId::Brush);
+        state.setColor(Qt::blue);
+        QTest::keyPress(&canvas, Qt::Key_Alt);
+        QTest::mousePress(&canvas, Qt::LeftButton, Qt::AltModifier, onPaper);
+        QTest::mouseMove(&canvas, onRed);
+        QTest::mouseRelease(&canvas, Qt::LeftButton, Qt::AltModifier, onRed);
+        QTest::keyRelease(&canvas, Qt::Key_Alt);
+        QCOMPARE(state.color(), QColor(200, 40, 30)); // live, to where it was let go
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo import image")); // no stroke
+    }
+
     // The ants march while there is a selection: the dashes swap in turns.
     void selectionAntsMarch()
     {
