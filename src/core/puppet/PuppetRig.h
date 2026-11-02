@@ -82,6 +82,10 @@ public:
     bool beginLocalDrag(Vec2 at, double radius);
     // Where the pen is now: each grabbed vertex moved by the pen's travel.
     void localDragTo(Vec2 to, int iterations = 8);
+    // Another radius during the drag: the discs are measured again on the
+    // shape as it was at the start, and the bend redone as if it had been
+    // that radius all along (what falls out goes back to where it was).
+    void setLocalRadius(double radius, int iterations = 8);
     // Ends the drag, the pins hold their mesh again.
     void endLocalDrag();
     bool isLocalDragging() const { return m_local.has_value(); }
@@ -135,14 +139,20 @@ private:
         struct Part // one mesh with grabbed vertices
         {
             int mesh = -1;
-            // Solves from the shape at the start of the drag, as its rest.
+            std::vector<Vec2> start;   // the shape at the start of the drag
+            std::vector<int> vertices; // the grabbed ones
+            // Solves from `start`, as its rest.
             std::unique_ptr<ArapDeformer> deformer;
-            std::vector<Vec2> targets; // of the mesh's handles, set at the start
+            std::vector<Vec2> targets; // of the deformer's handles
             std::vector<Grabbed> grabbed;
         };
         std::vector<Part> parts;
         Vec2 pressedAt; // the pen at the start
+        Vec2 pen;       // and now
     };
+    // Holds the pins and what lies out of the discs of `radius` (on the
+    // shape at the start) where they were then; the grabbed ones move.
+    void holdOutside(LocalDrag::Part &part, double radius);
     std::optional<LocalDrag> m_local;
 };
 

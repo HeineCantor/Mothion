@@ -1505,6 +1505,32 @@ private slots:
         tool.release({960, 540}, {});
     }
 
+    // + during a radius drag widens what bends, at once.
+    void puppetRadiusChangesWhileDragging()
+    {
+        document::DocumentController controller;
+        tools::ToolState state;
+        QImage image(400, 40, QImage::Format_ARGB32);
+        image.fill(Qt::darkCyan);
+        controller.importImage(image, QStringLiteral("bar")); // x 760..1159, y 520..559
+        const doc::Layer &layer = controller.document().layerAt(1);
+        auto pixel = [&](int x, int y) { return layer.drawing(layer.timing().drawingAt(0))->image.pixel(x, y); };
+        tools::PuppetSettings settings = state.puppetSettings();
+        settings.local = true;
+        settings.radius = 30;
+        settings.density = 2;
+        state.setPuppetSettings(settings);
+        canvas::PuppetTool tool(&controller, &state, [](const QString &) {}, [] {});
+        tool.press({1130, 540}, {});
+        tool.move({1130, 600}, {});
+        QVERIFY(qAlpha(pixel(1060, 525)) != 0); // 70 px away: untouched so far
+        for (int i = 0; i < 8; ++i) // 30 × 1.15⁸ ≈ 92 px
+            QVERIFY(tool.keyPress(Qt::Key_Plus));
+        QVERIFY(tool.isActive()); // still dragging
+        QCOMPARE(qAlpha(pixel(1060, 521)), 0); // now pulled down with the rest
+        tool.release({1130, 600}, {});
+    }
+
     // In radius mode the mesh is there as soon as the tool is chosen, so the
     // point a drag would take shows before the first drag.
     void puppetRadiusModeMeshesAtOnce()

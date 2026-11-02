@@ -283,6 +283,34 @@ private slots:
         QVERIFY2(most < 1.0, qPrintable(QStringLiteral("jumped by %1 px").arg(most)));
     }
 
+    // The radius changed during a drag acts at once, as if it had been that
+    // one from the start.
+    void localRadiusChangesDuringTheDrag()
+    {
+        Bitmask m(0, 0, 220, 60);
+        for (int y = 20; y < 40; ++y)
+            for (int x = 10; x < 210; ++x)
+                m.set(x, y, true); // a long bar
+        PuppetRig rig(m, {2, 3});
+        const auto &mesh = rig.meshes()[0];
+        auto movedAround = [&](double x) { // how far the vertices near x went
+            double most = 0.0;
+            for (std::size_t v = 0; v < mesh.rest.vertices.size(); ++v)
+                if (std::abs(mesh.rest.vertices[v].x - x) < 5)
+                    most = std::max(most, length(mesh.deformed[v] - mesh.rest.vertices[v]));
+            return most;
+        };
+        QVERIFY(rig.beginLocalDrag({180, 30}, 20));
+        rig.localDragTo({180, 60}, 30);
+        QVERIFY(movedAround(130) < 1e-9); // 50 px away: out of a 20 px disc
+        rig.setLocalRadius(80, 40);
+        QVERIFY(movedAround(130) > 1.0); // in an 80 px one
+        rig.setLocalRadius(20, 40);
+        QVERIFY(movedAround(130) < 1e-9); // back where it was
+        QVERIFY(movedAround(180) > 20.0); // the grabbed point still follows the pen
+        rig.endLocalDrag();
+    }
+
     void warpDrawsTheShapeWhereItMoved()
     {
         Bitmask m(0, 0, 40, 40);

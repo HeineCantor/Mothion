@@ -41,7 +41,7 @@ namespace mothion::canvas {
 // lies within the radius around it. Shift (or Ctrl) + click picks several
 // points, a drag from one of them moves them all, each bending its disc.
 // The wheel, or + and −, sizes the radius, shown as a circle around the
-// points a drag would take.
+// points a drag would take; turned during a drag, it changes what bends.
 class PuppetTool : public CanvasTool
 {
 public:

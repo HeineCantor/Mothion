@@ -454,6 +454,12 @@ void PuppetTool::stepRadius(double steps)
 void PuppetTool::settingsChanged()
 {
     m_repaint(); // the mesh may be shown or hidden
+    if (m_session && m_localDrag) { // a radius changed mid-drag acts at once
+        m_session->rig->setLocalRadius(m_toolState->puppetSettings().radius, kSettleIterations);
+        m_session->stepChanged = true;
+        render();
+        return;
+    }
     if (!m_session || isActive())
         return;
     const puppet::RigSettings now = rigSettings(m_toolState->puppetSettings());
