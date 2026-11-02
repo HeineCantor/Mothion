@@ -441,39 +441,23 @@ bool DocumentController::pasteImage(const QImage &image, std::optional<QPoint> o
         return false;
     }
 
-    // New layer above the current one, a drawing on this frame, the pixels
-    // (what lies in the sheet), the selection around them: applied now,
-    // recorded together.
-    std::vector<std::unique_ptr<doc::Command>> steps;
-    auto layer = std::make_unique<doc::AddLayerCommand>(d, d.indexOf(m_currentLayer) + 1,
-                                                        doc::LayerProperties{tr("Pasted").toStdString()});
-    const doc::LayerId layerId = layer->layerId();
-    publish(layer->apply(d));
-    steps.push_back(std::move(layer));
-    doc::NewDrawing drawing = doc::makeNewDrawing(d, layerId, m_currentFrame, 1);
-    publish(drawing.command->apply(d));
-    steps.push_back(std::move(drawing.command));
-    doc::TiledImage &target = d.layer(layerId)->drawing(drawing.id)->image;
-    const doc::TiledImage empty = target;
+    // Over what is drawn there, as a paint step: the drawing it may need, the
+    // pixels and the selection around them are recorded together.
+    const auto target = beginPaint(true, reason);
+    if (!target)
+        return false;
+    const doc::TiledImage before = *target->image;
+    doc::TiledImage pasted;
     const QPoint from = area.topLeft() - at;
-    target.write(area.x(), area.y(), area.width(), area.height(),
+    pasted.write(area.x(), area.y(), area.width(), area.height(),
                  reinterpret_cast<const doc::Pixel *>(pixels.constScanLine(from.y())) + from.x(),
                  pixels.bytesPerLine() / 4);
-    if (auto paint = doc::PaintCommand::capture(layerId, drawing.id, empty, target))
-        steps.push_back(std::move(paint));
-    emit pixelsChanged(layerId, drawing.id, area);
-
+    canvas::compositeOver(*target->image, pasted);
+    notifyPainted(area);
     QPainterPath selected;
     selected.addRect(area);
-    if (selected != m_selection) {
-        auto select = std::make_unique<SelectionCommand>(
-            doc::CommandKind::Select, [this](const QPainterPath &a) { assignSelection(a); }, m_selection, selected);
-        select->apply(d);
-        steps.push_back(std::move(select));
-    }
-    m_history.pushApplied(std::make_unique<doc::GroupCommand>(doc::CommandKind::Paste, std::move(steps)));
-    emit historyChanged();
-    setCurrentLayer(layerId);
+    setSelection(selected);
+    endPaint(before, doc::CommandKind::Paste);
     return true;
 }
 

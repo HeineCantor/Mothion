@@ -986,15 +986,14 @@ private slots:
         QVERIFY(!tool.isActive());
     }
 
-    // Copy takes the selected pixels and where they were; paste puts them in
-    // a new layer, in place, on this frame, selected: one undo step.
+    // Copy takes the selected pixels and where they were; paste puts them on
+    // the current layer, in place, on this frame, selected: one undo step.
     void copyAndPasteSelectedPixels()
     {
         document::DocumentController controller;
         QImage image(100, 10, QImage::Format_ARGB32);
         image.fill(Qt::green);
         controller.importImage(image, QStringLiteral("bar")); // x 910..1009, y 535..544
-        const doc::LayerId bar = controller.currentLayer();
         QPainterPath left;
         left.addRect(900, 500, 60, 100); // the bar's left half
         controller.setSelection(left);
@@ -1004,30 +1003,42 @@ private slots:
         QCOMPARE(copied.size(), QSize(50, 10)); // cropped to what is drawn
         QCOMPARE(origin, QPoint(910, 535));
 
+        doc::Document &d = controller.documentForCommands(); // another layer, another frame
+        auto ink = std::make_unique<doc::AddLayerCommand>(d, d.layerCount(), doc::LayerProperties{"ink"});
+        const doc::LayerId inkId = ink->layerId();
+        controller.execute(std::move(ink));
+        controller.setCurrentLayer(inkId);
         controller.setCurrentFrame(5);
-        const int layers = controller.document().layerCount();
+        const int layers = d.layerCount();
         QVERIFY(controller.pasteImage(copied, origin));
-        QCOMPARE(controller.document().layerCount(), layers + 1);
-        const doc::Layer &pasted = *controller.document().layer(controller.currentLayer());
-        QVERIFY(pasted.id() != bar);
-        QVERIFY(pasted.drawingAt(5));
-        QVERIFY(!pasted.drawingAt(4)); // on this frame only
-        QCOMPARE(pasted.drawingAt(5)->image.pixel(930, 540), doc::Pixel(0xff00ff00));
-        QCOMPARE(qAlpha(pasted.drawingAt(5)->image.pixel(990, 540)), 0);
+        QCOMPARE(d.layerCount(), layers); // no new layer
+        QCOMPARE(controller.currentLayer(), inkId);
+        const doc::Layer &target = *controller.document().layer(inkId);
+        QVERIFY(target.drawingAt(5));
+        QVERIFY(!target.drawingAt(4)); // on this frame only
+        QCOMPARE(target.drawingAt(5)->image.pixel(930, 540), doc::Pixel(0xff00ff00));
+        QCOMPARE(qAlpha(target.drawingAt(5)->image.pixel(990, 540)), 0);
         QCOMPARE(controller.selection().boundingRect(), QRectF(910, 535, 50, 10));
         QCOMPARE(controller.undoText(), QStringLiteral("Undo paste"));
-        controller.undo(); // all of it, the selection too
-        QCOMPARE(controller.document().layerCount(), layers);
+        controller.undo(); // all of it: the drawing it made, the selection
+        QVERIFY(!target.drawingAt(5));
         QCOMPARE(controller.selection().boundingRect(), QRectF(900, 500, 60, 100));
 
         QVERIFY(controller.pasteImage(QImage(20, 20, QImage::Format_ARGB32_Premultiplied), std::nullopt));
         QCOMPARE(controller.selection().boundingRect(), QRectF(950, 530, 20, 20)); // no place: centered
-        doc::Document &d = controller.documentForCommands(); // an empty layer: nothing to copy
+
+        doc::LayerProperties locked = target.properties(); // a layer that cannot take it
+        locked.locked = true;
+        controller.execute(doc::makeSetLayerProperties(controller.document(), inkId, locked));
+        QString reason;
+        QVERIFY(!controller.pasteImage(copied, origin, &reason));
+        QVERIFY(!reason.isEmpty());
+
         auto empty = std::make_unique<doc::AddLayerCommand>(d, d.layerCount(), doc::LayerProperties{"empty"});
         const doc::LayerId emptyId = empty->layerId();
         controller.execute(std::move(empty));
-        controller.setCurrentLayer(emptyId);
-        QString reason;
+        controller.setCurrentLayer(emptyId); // nothing to copy there
+        reason.clear();
         QVERIFY(controller.copyPixels(nullptr, &reason).isNull());
         QVERIFY(!reason.isEmpty());
     }
@@ -1058,17 +1069,15 @@ private slots:
         const doc::Layer &source = *controller->document().layer(bar);
         QCOMPARE(qAlpha(source.drawingAt(0)->image.pixel(930, 540)), 0); // cut
         QVERIFY(QGuiApplication::clipboard()->mimeData()->hasImage()); // for other apps too
-        action(QKeySequence::Paste)->trigger();
-        const doc::Layer &pasted = *controller->document().layer(controller->currentLayer());
-        QVERIFY(pasted.id() != bar);
-        QCOMPARE(pasted.drawingAt(0)->image.pixel(930, 540), doc::Pixel(0xff00ff00)); // in place
+        action(QKeySequence::Paste)->trigger(); // back onto the same layer, in place
+        QCOMPARE(controller->currentLayer(), bar);
+        QCOMPARE(source.drawingAt(0)->image.pixel(930, 540), doc::Pixel(0xff00ff00));
 
         QImage other(10, 10, QImage::Format_ARGB32); // an image from another app: centered
         other.fill(Qt::blue);
         QGuiApplication::clipboard()->setImage(other);
         action(QKeySequence::Paste)->trigger();
-        const doc::Layer &centered = *controller->document().layer(controller->currentLayer());
-        QCOMPARE(centered.drawingAt(0)->image.pixel(960, 540), doc::Pixel(0xff0000ff));
+        QCOMPARE(source.drawingAt(0)->image.pixel(960, 540), doc::Pixel(0xff0000ff));
     }
 
     // The ants march while there is a selection: the dashes swap in turns.

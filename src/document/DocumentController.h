@@ -99,10 +99,10 @@ public:
     // drawn; `origin` gets where their top-left corner is. A null image, with
     // `reason`, when there is nothing to copy.
     QImage copyPixels(QPoint *origin, QString *reason = nullptr);
-    // Pastes `image` into a new layer above the current one, at `origin` (centered
-    // in the document when there is none), shown on the current frame; the
-    // pasted area becomes the selection and the new layer the current one.
-    // One undo step.
+    // Pastes `image` over the drawing at the current layer and frame (made if
+    // the frame is empty), at `origin` (centered in the document when there
+    // is none); the pasted area becomes the selection. One undo step; false,
+    // with `reason`, if the layer cannot be painted (hidden, locked).
     bool pasteImage(const QImage &image, std::optional<QPoint> origin, QString *reason = nullptr);
 
     QString undoText() const; // "Undo stroke", or plain "Undo"
