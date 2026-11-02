@@ -7,6 +7,8 @@
 #include <QList>
 #include <QString>
 
+#include <optional>
+
 namespace mothion::tools {
 
 // A named set of tool settings ("sub tool"): picking one in the Sub-tool
@@ -21,6 +23,8 @@ struct BrushPreset
     PressureCurve curve;
     double smoothing = 0.3;
     BrushDefinitionPtr brush; // null = round brush
+    // A fill sub tool: sets only the fill mode, none of the brush values above.
+    std::optional<FillSettings::Mode> fillMode;
 };
 
 // Built-in presets for a tool (empty for tools without sub tools).

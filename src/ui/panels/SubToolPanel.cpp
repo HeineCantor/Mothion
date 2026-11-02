@@ -9,6 +9,7 @@
 #include <QLabel>
 #include <QListWidget>
 #include <QPainter>
+#include <QPainterPath>
 #include <QStyledItemDelegate>
 #include <QVBoxLayout>
 
@@ -52,6 +53,38 @@ QImage renderPreview(const tools::BrushPreset &preset, const QColor &ink)
     }
     session.paintStroke(style, 12345, std::move(points)); // fixed seed: the preview never changes
     return canvas::toQImage(image, area);
+}
+
+// A fill sub tool: a closed shape filled (bucket), or a lasso loop with its
+// inside filled (lasso).
+QImage renderFillPreview(tools::FillSettings::Mode mode, const QColor &ink)
+{
+    QImage image(kPreviewSize, QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+    QPainter p(&image);
+    p.setRenderHint(QPainter::Antialiasing);
+    QColor fill = ink;
+    fill.setAlphaF(0.45);
+    const QRectF r(QPointF(10, 6), QPointF(kPreviewSize.width() - 10, kPreviewSize.height() - 6));
+    if (mode == tools::FillSettings::Mode::Bucket) {
+        p.setPen(QPen(ink, 2));
+        p.setBrush(fill);
+        p.drawRoundedRect(r, 10, 10);
+    } else {
+        QPainterPath loop;
+        loop.moveTo(r.left() + 8, r.center().y());
+        loop.cubicTo(r.left(), r.top() - 4, r.center().x(), r.top() + 2, r.right() - 6, r.top() + 6);
+        loop.cubicTo(r.right() + 4, r.center().y(), r.center().x() + 10, r.bottom() + 4, r.left() + 20, r.bottom());
+        loop.closeSubpath();
+        p.setPen(Qt::NoPen);
+        p.setBrush(fill);
+        p.drawPath(loop);
+        QPen dashes(ink, 1.5, Qt::DashLine);
+        p.setPen(dashes);
+        p.setBrush(Qt::NoBrush);
+        p.drawPath(loop);
+    }
+    return image;
 }
 
 // One row: stroke preview on the left, preset name bottom-right.
@@ -135,12 +168,18 @@ void SubToolPanel::showPresetsFor(tools::ToolId tool)
     const QColor ink = palette().text().color();
     for (const tools::BrushPreset &preset : std::as_const(m_presets)) {
         auto *item = new QListWidgetItem(preset.name, m_list);
-        item->setData(kPreviewRole, renderPreview(preset, ink));
+        item->setData(kPreviewRole,
+                      preset.fillMode ? renderFillPreview(*preset.fillMode, ink) : renderPreview(preset, ink));
     }
     m_list->setVisible(!m_presets.isEmpty());
     m_empty->setVisible(m_presets.isEmpty());
-    if (!m_presets.isEmpty())
-        m_list->setCurrentRow(m_selected.count(tool) ? m_selected[tool] : 0);
+    if (m_presets.isEmpty())
+        return;
+    int row = m_selected.count(tool) ? m_selected[tool] : 0;
+    for (int i = 0; i < m_presets.size(); ++i) // a fill sub tool: the mode in use, whoever set it
+        if (m_presets[i].fillMode && *m_presets[i].fillMode == m_state->fillSettings().mode)
+            row = i;
+    m_list->setCurrentRow(row);
 }
 
 void SubToolPanel::changeEvent(QEvent *event)

@@ -1,8 +1,10 @@
 #pragma once
 
 #include "canvas/CanvasTool.h"
+#include "core/document/Tile.h"
 
 #include <QImage>
+#include <QPolygonF>
 
 #include <functional>
 
@@ -20,6 +22,9 @@ namespace mothion::canvas {
 // empty), as one undo step. The area is found in the current layer or in
 // the frame as shown, by the tool's fill settings, and kept inside the
 // selection if there is one.
+//
+// In lasso mode (FillSettings::Mode::Lasso) a drag draws an outline instead,
+// shown open while drawn; the release fills its inside, over what is there.
 class FillTool : public CanvasTool
 {
 public:
@@ -30,12 +35,19 @@ public:
              std::function<void(const QString &)> status);
 
     void press(const QPointF &docPos, Qt::KeyboardModifiers modifiers) override;
-    void move(const QPointF &, Qt::KeyboardModifiers) override {}
-    void release(const QPointF &, Qt::KeyboardModifiers) override {}
-    void cancel() override {}
-    bool isActive() const override { return false; } // all done on the press
+    void move(const QPointF &docPos, Qt::KeyboardModifiers modifiers) override;
+    void release(const QPointF &docPos, Qt::KeyboardModifiers modifiers) override;
+    void cancel() override { m_lasso.clear(); }
+    bool isActive() const override { return !m_lasso.isEmpty(); } // the bucket is done on the press
+    void paintOverlay(QPainter &painter, const ViewTransform &view) const override;
 
 private:
+    void fillAround(const QPointF &docPos);
+    void fillLasso();
+    // The main color at the fill opacity, premultiplied.
+    doc::Pixel fillColor() const;
+
+    QPolygonF m_lasso; // the outline being drawn
     document::DocumentController *m_document;
     tools::ToolState *m_state;
     Frame m_frame;

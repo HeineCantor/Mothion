@@ -11,6 +11,7 @@
 #include "core/document/commands/LayerCommands.h"
 #include "document/DocumentController.h"
 #include "io/ProjectFile.h"
+#include "tools/BrushPreset.h"
 #include "tools/ToolState.h"
 #include "ui/ExportDialog.h"
 #include "ui/MainWindow.h"
@@ -899,6 +900,52 @@ private slots:
         QCOMPARE(d.layerCount(), 2);
         controller.undo();
         QCOMPARE(d.layerCount(), 5);
+    }
+
+    // The lasso fill sub tool: an outline drawn freehand, its inside filled
+    // over what is there, within the selection, as one undo step.
+    void lassoFillFillsTheOutline()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        const auto presets = tools::builtInPresets(tools::ToolId::Fill);
+        QCOMPARE(presets.size(), 2);
+        state.setOpacity(tools::ToolId::Fill, 0.5);
+        tools::applyPreset(state, presets[1]);
+        QCOMPARE(state.fillSettings().mode, tools::FillSettings::Mode::Lasso);
+        QCOMPARE(state.settings(tools::ToolId::Fill).opacity, 0.5); // a fill sub tool keeps the rest
+        state.setOpacity(tools::ToolId::Fill, 1.0);
+        state.setColor(Qt::blue);
+
+        canvas::FrameRenderer frame;
+        canvas::FillTool tool(&controller, &state, [&]() -> const QImage & { return frame.image(); },
+                              [](const QString &) {});
+        tool.press({100, 100}, Qt::NoModifier);
+        QVERIFY(tool.isActive());
+        tool.move({300, 100}, Qt::NoModifier);
+        tool.move({300, 300}, Qt::NoModifier);
+        tool.release({100, 300}, Qt::NoModifier); // a square, closed by the release
+        QVERIFY(!tool.isActive());
+        const doc::Layer &layer = *controller.document().layer(controller.currentLayer());
+        auto pixel = [&](int x, int y) { return layer.drawingAt(0)->image.pixel(x, y); };
+        QCOMPARE(pixel(200, 200), doc::Pixel(0xff0000ff));
+        QCOMPARE(qAlpha(pixel(350, 200)), 0);
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo fill"));
+
+        QPainterPath left; // kept inside the selection
+        left.addRect(400, 400, 50, 200);
+        controller.setSelection(left);
+        state.setColor(Qt::red);
+        tool.press({420, 450}, Qt::NoModifier);
+        tool.move({500, 450}, Qt::NoModifier);
+        tool.release({500, 550}, Qt::NoModifier);
+        QCOMPARE(pixel(440, 460), doc::Pixel(0xffff0000)); // in the triangle and the selection
+        QCOMPARE(qAlpha(pixel(480, 460)), 0);               // in the triangle, out of the selection
+
+        tool.press({600, 600}, Qt::NoModifier); // cancelled: nothing
+        tool.move({700, 600}, Qt::NoModifier);
+        tool.cancel();
+        QVERIFY(!tool.isActive());
     }
 
     // The ants march while there is a selection: the dashes swap in turns.

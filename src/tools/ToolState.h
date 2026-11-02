@@ -33,6 +33,10 @@ struct PuppetSettings
 // Paint bucket options.
 struct FillSettings
 {
+    // Bucket: the area around the click. Lasso: the inside of an outline
+    // drawn freehand.
+    enum class Mode { Bucket, Lasso };
+    Mode mode = Mode::Bucket;
     int tolerance = 10;    // 0..255: how far a color may be from the clicked one
     int expand = 2;        // px the fill grows under the lines around it
     bool allLayers = true; // the area is found in everything shown, else in this layer

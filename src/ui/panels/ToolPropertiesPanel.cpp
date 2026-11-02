@@ -214,6 +214,10 @@ void ToolPropertiesPanel::syncFillFromState()
     m_tolerance->setValue(int(std::lround(s.tolerance / 2.55)));
     m_fillExpand->setValue(s.expand);
     m_fillSource->setCurrentIndex(s.allLayers ? 0 : 1);
+    const bool bucket = s.mode == tools::FillSettings::Mode::Bucket; // the lasso has only its outline
+    m_tolerance->setEnabled(bucket);
+    m_fillExpand->setEnabled(bucket);
+    m_fillSource->setEnabled(bucket);
 }
 
 } // namespace mothion::ui
