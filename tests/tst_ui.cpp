@@ -276,6 +276,41 @@ private slots:
         QCOMPARE(state.activeTool(), tools::ToolId::Puppet);
     }
 
+    // A tool key held lasts as long as it is held; tapped, the tool stays.
+    // X swaps the colors, [ and ] step the size through the presets.
+    void toolKeysHoldSwapAndResize()
+    {
+        tools::ToolState state;
+        ui::ToolPalettePanel palette(&state);
+        palette.show();
+        palette.activateWindow();
+        QVERIFY(QTest::qWaitForWindowActive(&palette));
+
+        QTest::keyClick(&palette, Qt::Key_L); // tap
+        QCOMPARE(state.activeTool(), tools::ToolId::LassoSelect);
+        QTest::keyPress(&palette, Qt::Key_B); // hold
+        QCOMPARE(state.activeTool(), tools::ToolId::Brush);
+        QTest::qWait(ui::ToolPalettePanel::kHoldMs + 50);
+        QTest::keyRelease(&palette, Qt::Key_B);
+        QCOMPARE(state.activeTool(), tools::ToolId::LassoSelect);
+
+        QTest::keyClick(&palette, Qt::Key_B);
+        state.setColor(Qt::red);
+        state.setSecondaryColor(Qt::white);
+        QTest::keyClick(&palette, Qt::Key_X);
+        QCOMPARE(state.color(), QColor(Qt::white));
+        QCOMPARE(state.secondaryColor(), QColor(Qt::red));
+
+        state.setSize(tools::ToolId::Brush, 9); // between presets 8 and 10
+        QTest::keyClick(&palette, Qt::Key_BracketRight);
+        QCOMPARE(state.settings(tools::ToolId::Brush).size, 10.0);
+        QTest::keyClick(&palette, Qt::Key_BracketRight);
+        QCOMPARE(state.settings(tools::ToolId::Brush).size, 12.0);
+        QTest::keyClick(&palette, Qt::Key_BracketLeft);
+        QTest::keyClick(&palette, Qt::Key_BracketLeft);
+        QCOMPARE(state.settings(tools::ToolId::Brush).size, 8.0);
+    }
+
     // E selects the eraser and, pressed again, the tool used before; a click
     // on the eraser button just keeps the eraser.
     void eraserShortcutTogglesBack()

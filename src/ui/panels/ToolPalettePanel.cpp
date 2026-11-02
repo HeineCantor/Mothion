@@ -1,12 +1,17 @@
 #include "ui/panels/ToolPalettePanel.h"
 
 #include "ui/IconFactory.h"
+#include "ui/panels/BrushSizePanel.h"
 
 #include <QAbstractButton>
+#include <QApplication>
 #include <QButtonGroup>
+#include <QKeyEvent>
 #include <QShortcut>
 #include <QToolButton>
 #include <QVBoxLayout>
+
+#include <algorithm>
 
 namespace mothion::ui {
 
@@ -14,6 +19,7 @@ using tools::ToolId;
 
 ToolPalettePanel::ToolPalettePanel(tools::ToolState *state, QWidget *parent)
     : QWidget(parent)
+    , m_state(state)
     , m_group(new QButtonGroup(this))
 {
     struct Entry { ToolId tool; IconId icon; QKeySequence shortcut; };
@@ -42,12 +48,18 @@ ToolPalettePanel::ToolPalettePanel(tools::ToolState *state, QWidget *parent)
         // The key is a shortcut of its own, not the button's: pressed while the
         // eraser is active it goes back to the previous tool, a click does not.
         auto *shortcut = new QShortcut(e.shortcut, this);
+        shortcut->setAutoRepeat(false); // a held key selects once
         const bool toggles = e.tool == ToolId::Eraser;
-        connect(shortcut, &QShortcut::activated, state, [state, tool = e.tool, toggles] {
+        connect(shortcut, &QShortcut::activated, this, [this, state, key = e.shortcut[0].key(), tool = e.tool, toggles] {
+            const ToolId before = state->activeTool();
             if (toggles)
                 state->toggleTool(tool);
             else
                 state->setActiveTool(tool);
+            m_heldKey = key;
+            m_heldTool = state->activeTool();
+            m_toolBeforeHold = before;
+            m_held.start();
         });
         const QString name = tools::ToolState::displayName(e.tool);
         button->setToolTip(toggles ? tr("%1 (%2; again to go back)").arg(name, e.shortcut.toString())
@@ -57,11 +69,53 @@ ToolPalettePanel::ToolPalettePanel(tools::ToolState *state, QWidget *parent)
     }
     layout->addStretch(1);
 
+    auto *swap = new QShortcut(QKeySequence(Qt::Key_X), this);
+    connect(swap, &QShortcut::activated, state, &tools::ToolState::swapColors);
+    auto *smaller = new QShortcut(QKeySequence(Qt::Key_BracketLeft), this);
+    connect(smaller, &QShortcut::activated, this, [this] { stepSize(-1); });
+    auto *bigger = new QShortcut(QKeySequence(Qt::Key_BracketRight), this);
+    connect(bigger, &QShortcut::activated, this, [this] { stepSize(+1); });
+    qApp->installEventFilter(this); // the release of a held tool key, wherever the focus is
+
     m_group->button(static_cast<int>(state->activeTool()))->setChecked(true);
     connect(m_group, &QButtonGroup::idClicked, state,
             [state](int id) { state->setActiveTool(static_cast<ToolId>(id)); });
     connect(state, &tools::ToolState::activeToolChanged, this,
             [this](ToolId tool) { m_group->button(static_cast<int>(tool))->setChecked(true); });
+}
+
+bool ToolPalettePanel::eventFilter(QObject *watched, QEvent *event)
+{
+    if (event->type() == QEvent::KeyRelease && m_heldKey != 0) {
+        auto *key = static_cast<QKeyEvent *>(event);
+        if (key->key() == m_heldKey && !key->isAutoRepeat()) {
+            m_heldKey = 0;
+            // Held, and still on the tool it gave: back to the one before.
+            if (m_held.elapsed() >= kHoldMs && m_state->activeTool() == m_heldTool)
+                m_state->setActiveTool(m_toolBeforeHold);
+        }
+    }
+    return QWidget::eventFilter(watched, event);
+}
+
+void ToolPalettePanel::stepSize(int direction)
+{
+    const ToolId tool = m_state->activeTool();
+    if (!tools::ToolState::isPaintTool(tool))
+        return;
+    const double size = m_state->settings(tool).size;
+    const QList<double> &presets = BrushSizeGrid::presets();
+    double next = size;
+    if (direction > 0) {
+        const auto it = std::upper_bound(presets.begin(), presets.end(), size + 0.05);
+        if (it != presets.end())
+            next = *it;
+    } else {
+        const auto it = std::lower_bound(presets.begin(), presets.end(), size - 0.05);
+        if (it != presets.begin())
+            next = *(it - 1);
+    }
+    m_state->setSize(tool, next);
 }
 
 } // namespace mothion::ui
