@@ -49,6 +49,7 @@ enum class CommandKind {
     CutToLayer,
     CopyToLayer,
     Fill,
+    Transform,
 };
 
 // An undoable change to a Document.

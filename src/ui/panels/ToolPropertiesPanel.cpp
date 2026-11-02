@@ -39,6 +39,10 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
     , m_tolerance(new SliderField(tr("Tolerance"), 0, 100, QStringLiteral(" %"), m_fillControls))
     , m_fillExpand(new QSpinBox(m_fillControls))
     , m_fillSource(new QComboBox(m_fillControls))
+    , m_transformHelp(new QLabel(tr("Drag a corner to scale (Shift keeps the proportions), a side to stretch,\n"
+                                    "inside the box to move, outside it to rotate (Shift: 15° steps).\n"
+                                    "Enter applies, Esc cancels."),
+                                 this))
 {
     m_toolName->setObjectName(QStringLiteral("PanelTitle"));
     auto *resetCurve = new QPushButton(tr("Linear curve"), m_brushControls);
@@ -92,6 +96,9 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
     layout->addWidget(m_brushControls, 1);
     layout->addWidget(m_puppetControls);
     layout->addWidget(m_fillControls);
+    m_transformHelp->setWordWrap(true);
+    m_transformHelp->setEnabled(false); // dimmed, as a hint
+    layout->addWidget(m_transformHelp);
     layout->addStretch(0);
 
     connect(m_size, &SliderField::valueEdited, this,
@@ -154,7 +161,9 @@ void ToolPropertiesPanel::syncFromState()
     const bool puppet = tool == ToolId::Puppet;
     const bool fill = tool == ToolId::Fill;
     m_toolName->setText(ToolState::displayName(tool));
-    m_brushControls->setVisible(!puppet && !fill);
+    const bool transform = tool == ToolId::Transform;
+    m_brushControls->setVisible(!puppet && !fill && !transform);
+    m_transformHelp->setVisible(transform);
     m_puppetControls->setVisible(puppet);
     m_fillControls->setVisible(fill);
     m_size->setEnabled(paint);

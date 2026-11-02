@@ -50,6 +50,8 @@ private:
     SliderField *m_tolerance;
     QSpinBox *m_fillExpand;
     QComboBox *m_fillSource;
+
+    QLabel *m_transformHelp;
 };
 
 } // namespace mothion::ui

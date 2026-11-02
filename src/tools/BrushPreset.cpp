@@ -38,6 +38,7 @@ QList<BrushPreset> builtInPresets(ToolId tool)
     case ToolId::Puppet:
     case ToolId::Eyedropper:
     case ToolId::Fill:
+    case ToolId::Transform:
         return {};
     }
     return {};

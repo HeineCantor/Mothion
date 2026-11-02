@@ -80,8 +80,15 @@ ToolPalettePanel::ToolPalettePanel(tools::ToolState *state, QWidget *parent)
     m_group->button(static_cast<int>(state->activeTool()))->setChecked(true);
     connect(m_group, &QButtonGroup::idClicked, state,
             [state](int id) { state->setActiveTool(static_cast<ToolId>(id)); });
-    connect(state, &tools::ToolState::activeToolChanged, this,
-            [this](ToolId tool) { m_group->button(static_cast<int>(tool))->setChecked(true); });
+    connect(state, &tools::ToolState::activeToolChanged, this, [this](ToolId tool) {
+        if (QAbstractButton *button = m_group->button(static_cast<int>(tool))) {
+            button->setChecked(true);
+        } else if (QAbstractButton *checked = m_group->checkedButton()) { // a tool with no button (transform)
+            m_group->setExclusive(false);
+            checked->setChecked(false);
+            m_group->setExclusive(true);
+        }
+    });
 }
 
 bool ToolPalettePanel::eventFilter(QObject *watched, QEvent *event)

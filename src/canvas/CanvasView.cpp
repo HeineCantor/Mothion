@@ -6,6 +6,7 @@
 #include "canvas/MoveTool.h"
 #include "canvas/PuppetTool.h"
 #include "canvas/SelectionTool.h"
+#include "canvas/TransformTool.h"
 #include "document/DocumentController.h"
 #include "input/TabletInputAdapter.h"
 #include "tools/ToolState.h"
@@ -80,6 +81,8 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
     m_fillTool = std::make_unique<FillTool>(
         m_document, m_toolState, [this]() -> const QImage & { return m_frame.image(); },
         [this](const QString &text) { emit statusMessage(text); });
+    m_transformTool = std::make_unique<TransformTool>(
+        m_document, m_toolState, [this](const QString &text) { emit statusMessage(text); }, [this] { update(); });
     m_antsTimer = new QTimer(this);
     m_antsTimer->setInterval(kAntsIntervalMs);
     connect(m_antsTimer, &QTimer::timeout, this, [this] {
@@ -91,6 +94,12 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
 
     connect(m_toolState, &ToolState::activeToolChanged, this, &CanvasView::commitPendingEdits);
     connect(m_toolState, &ToolState::activeToolChanged, this, &CanvasView::updateCursor);
+    connect(m_toolState, &ToolState::activeToolChanged, this, [this] {
+        if (CanvasTool *tool = canvasTool()) {
+            tool->setViewZoom(m_view.zoom());
+            tool->activated();
+        }
+    });
     connect(m_toolState, &ToolState::toolSettingsChanged, this, [this] { updateBrushOutline(m_pointerPos); });
     updateCursor();
 }
@@ -506,6 +515,7 @@ CanvasTool *CanvasView::canvasTool() const
     case ToolId::Puppet: return m_puppetTool.get();
     case ToolId::Eyedropper: return m_eyedropperTool.get();
     case ToolId::Fill: return m_fillTool.get();
+    case ToolId::Transform: return m_transformTool.get();
     default: return nullptr;
     }
 }
@@ -513,7 +523,8 @@ CanvasTool *CanvasView::canvasTool() const
 void CanvasView::commitPendingEdits()
 {
     // An edit left open (a puppet warp) is applied when another tool takes over.
-    for (CanvasTool *tool : {m_moveTool.get(), m_rectSelectTool.get(), m_lassoSelectTool.get(), m_puppetTool.get()})
+    for (CanvasTool *tool : {m_moveTool.get(), m_rectSelectTool.get(), m_lassoSelectTool.get(), m_puppetTool.get(),
+                              m_transformTool.get()})
         if (tool != canvasTool() && tool->hasPendingEdit())
             tool->commit();
 }
@@ -530,7 +541,8 @@ void CanvasView::cancelStroke()
     }
     // An open edit is applied: undo then takes it back, a frame or layer
     // change keeps it.
-    for (CanvasTool *tool : {m_moveTool.get(), m_rectSelectTool.get(), m_lassoSelectTool.get(), m_puppetTool.get()})
+    for (CanvasTool *tool : {m_moveTool.get(), m_rectSelectTool.get(), m_lassoSelectTool.get(), m_puppetTool.get(),
+                              m_transformTool.get()})
         if (tool->hasPendingEdit())
             tool->commit();
     if (!m_stroke)

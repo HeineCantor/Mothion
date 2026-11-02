@@ -34,6 +34,7 @@ QString ToolState::displayName(ToolId tool)
     case ToolId::Puppet: return tr("Puppet warp");
     case ToolId::Eyedropper: return tr("Eyedropper");
     case ToolId::Fill: return tr("Fill");
+    case ToolId::Transform: return tr("Transform");
     }
     return {};
 }

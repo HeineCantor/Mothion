@@ -2,6 +2,7 @@
 
 #include "canvas/CanvasView.h"
 #include "document/DocumentController.h"
+#include "tools/ToolState.h"
 #include "ui/IconFactory.h"
 
 #include <QEvent>
@@ -19,7 +20,8 @@ constexpr int kMargin = 4; // between the bar and the canvas edges
 
 } // namespace
 
-SelectionBar::SelectionBar(canvas::CanvasView *canvas, document::DocumentController *document)
+SelectionBar::SelectionBar(canvas::CanvasView *canvas, document::DocumentController *document,
+                           tools::ToolState *toolState)
     : QFrame(canvas)
     , m_canvas(canvas)
     , m_document(document)
@@ -65,6 +67,9 @@ SelectionBar::SelectionBar(canvas::CanvasView *canvas, document::DocumentControl
         ->setObjectName(QStringLiteral("cut"));
     add(IconId::CopyToLayer, tr("Copy to a new layer"), withReason(&Controller::copySelectionToLayer))
         ->setObjectName(QStringLiteral("copy"));
+    add(IconId::Transform, tr("Transform (Ctrl+T)"),
+        [toolState] { toolState->setActiveTool(tools::ToolId::Transform); })
+        ->setObjectName(QStringLiteral("transform"));
 
     connect(m_document, &Controller::selectionChanged, this, &SelectionBar::place);
     connect(m_document, &Controller::documentReplaced, this, &SelectionBar::place);

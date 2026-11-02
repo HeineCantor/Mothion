@@ -6,6 +6,7 @@
 #include "canvas/MoveTool.h"
 #include "canvas/PuppetTool.h"
 #include "canvas/SelectionTool.h"
+#include "canvas/TransformTool.h"
 #include "canvas/ViewTransform.h"
 #include "core/document/commands/LayerCommands.h"
 #include "document/DocumentController.h"
@@ -747,6 +748,65 @@ private slots:
         QVERIFY(!messages.isEmpty());
     }
 
+    // The transform moves, scales and rotates the selected pixels with their
+    // selection; Enter applies (one undo step), Esc drops it, either goes back.
+    void transformMovesScalesAndRotatesTheSelection()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        QImage image(100, 10, QImage::Format_ARGB32);
+        image.fill(Qt::green);
+        controller.importImage(image, QStringLiteral("bar")); // x 910..1009, y 535..544
+        const doc::Layer &layer = controller.document().layerAt(1);
+        auto pixel = [&](int x, int y) { return layer.drawing(layer.timing().drawingAt(0))->image.pixel(x, y); };
+        const doc::Pixel green = pixel(930, 540);
+        QPainterPath left;
+        left.addRect(900, 500, 60, 100); // the bar's left half
+        controller.setSelection(left);
+        state.setActiveTool(tools::ToolId::LassoSelect);
+        state.setActiveTool(tools::ToolId::Transform);
+
+        canvas::TransformTool tool(&controller, &state, [](const QString &) {}, [] {});
+        tool.activated();
+        QVERIFY(tool.hasPendingEdit());
+        QCOMPARE(tool.box(), QRect(910, 535, 50, 10)); // tight around the pixels
+
+        tool.press({930, 540}, Qt::NoModifier); // inside: moves
+        tool.move({930, 590}, Qt::NoModifier);
+        QCOMPARE(controller.selection().boundingRect(), QRectF(900, 550, 60, 100)); // live
+        tool.release({930, 640}, Qt::NoModifier);
+        QCOMPARE(pixel(930, 640), green);
+        QCOMPARE(qAlpha(pixel(930, 540)), 0);
+        QCOMPARE(pixel(990, 540), green); // outside the selection: stays
+        QVERIFY(tool.keyPress(Qt::Key_Return));
+        QVERIFY(!tool.hasPendingEdit());
+        QCOMPARE(state.activeTool(), tools::ToolId::LassoSelect);
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo transform"));
+        controller.undo();
+        QCOMPARE(pixel(930, 540), green);
+        QCOMPARE(controller.selection().boundingRect(), QRectF(900, 500, 60, 100));
+
+        tool.activated(); // the bottom-right corner, twice as far from the top-left one
+        tool.press({960, 545}, Qt::NoModifier);
+        tool.release({1010, 555}, Qt::NoModifier);
+        QCOMPARE(tool.transform().mapRect(QRectF(tool.box())), QRectF(910, 535, 100, 20));
+        QCOMPARE(pixel(1000, 550), green);
+        QVERIFY(tool.keyPress(Qt::Key_Escape)); // dropped
+        QCOMPARE(qAlpha(pixel(1000, 550)), 0);
+        QCOMPARE(pixel(930, 540), green);
+        QCOMPARE(controller.selection().boundingRect(), QRectF(900, 500, 60, 100));
+
+        tool.activated(); // outside the box: a quarter turn around its center (935, 540)
+        tool.press({1000, 540}, Qt::NoModifier);
+        tool.release({935, 600}, Qt::NoModifier);
+        const QPointF axis = tool.transform().map(QPointF(1, 0)) - tool.transform().map(QPointF(0, 0));
+        QVERIFY(std::abs(axis.x()) < 1e-6 && std::abs(axis.y() - 1) < 1e-6);
+        QCOMPARE(pixel(935, 560), green); // the bar now stands upright
+        QCOMPARE(qAlpha(pixel(915, 540)), 0);
+        tool.commit();
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo transform"));
+    }
+
     // The ants march while there is a selection: the dashes swap in turns.
     void selectionAntsMarch()
     {
@@ -867,7 +927,7 @@ private slots:
         document::DocumentController controller;
         canvas::CanvasView canvas(&state, &controller);
         canvas.resize(600, 400);
-        ui::SelectionBar bar(&canvas, &controller);
+        ui::SelectionBar bar(&canvas, &controller, &state);
         canvas.show();
         QVERIFY(QTest::qWaitForWindowExposed(&canvas));
         QVERIFY(!bar.isVisible());
@@ -900,6 +960,9 @@ private slots:
         QCOMPARE(controller.undoText(), QStringLiteral("Undo selection")); // no stroke
         invert->click();
         QVERIFY(!controller.selection().contains(QPointF(900, 500)));
+        bar.findChild<QAbstractButton *>(QStringLiteral("transform"))->click();
+        QCOMPARE(state.activeTool(), tools::ToolId::Transform);
+        state.setActiveTool(tools::ToolId::Brush);
         bar.findChild<QAbstractButton *>(QStringLiteral("deselect"))->click();
         QVERIFY(!controller.hasSelection());
         QVERIFY(!bar.isVisible());

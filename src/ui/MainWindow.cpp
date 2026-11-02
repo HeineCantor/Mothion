@@ -90,7 +90,7 @@ MainWindow::MainWindow(QWidget *parent)
     statusBar()->showMessage(tr("Ready"));
     connect(m_canvas, &canvas::CanvasView::statusMessage, this,
             [this](const QString &text) { statusBar()->showMessage(text, 4000); });
-    auto *selectionBar = new SelectionBar(m_canvas, m_document);
+    auto *selectionBar = new SelectionBar(m_canvas, m_document, m_toolState);
     connect(selectionBar, &SelectionBar::statusMessage, this,
             [this](const QString &text) { statusBar()->showMessage(text, 4000); });
     auto *viewInfo = new QLabel(this);
@@ -245,6 +245,9 @@ void MainWindow::createMenus()
                     &document::DocumentController::clearSelection);
     edit->addAction(tr("Invert selection"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_I), m_document,
                     &document::DocumentController::invertSelection);
+    edit->addSeparator();
+    edit->addAction(icon(IconId::Transform), tr("Transform"), QKeySequence(Qt::CTRL | Qt::Key_T), this,
+                    [this] { m_toolState->setActiveTool(tools::ToolId::Transform); });
 
     m_viewMenu = menuBar()->addMenu(tr("&View"));
     m_viewMenu->addActions(m_zoomActions);

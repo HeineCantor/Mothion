@@ -30,6 +30,9 @@ public:
     // Between press and release.
     virtual bool isActive() const = 0;
 
+    // The tool was just chosen (a tool that shows something at once).
+    virtual void activated() {}
+
     // An edit that lasts beyond one drag (a puppet warp with its pins): the
     // canvas commits it when the tool changes or the controller interrupts.
     virtual bool hasPendingEdit() const { return false; }

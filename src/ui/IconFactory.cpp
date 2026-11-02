@@ -146,6 +146,12 @@ void drawGlyph(QPainter &p, IconId id)
         path.quadTo(22.5, 18.5, 20, 20);
         path.quadTo(17.5, 18.5, 20, 15);
         break;
+    case IconId::Transform: // a box with handles
+        path.addRect(QRectF(6, 6, 12, 12));
+        for (QPointF at : {QPointF(6, 6), QPointF(18, 6), QPointF(18, 18), QPointF(6, 18), QPointF(12, 6),
+                           QPointF(18, 12), QPointF(12, 18), QPointF(6, 12)})
+            path.addRect(QRectF(at.x() - 1.5, at.y() - 1.5, 3, 3));
+        break;
     case IconId::Move: // four arrows
         path.moveTo(12, 3);
         path.lineTo(12, 21);
