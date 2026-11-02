@@ -44,6 +44,9 @@ private:
     QComboBox *m_meshDensity;
     QSpinBox *m_meshExpand;
     QCheckBox *m_showMesh;
+    QComboBox *m_puppetMode;
+    QSpinBox *m_puppetRadius;
+    QLabel *m_puppetHelp;
 
     QWidget *m_fillControls;
     SliderField *m_fillOpacity;

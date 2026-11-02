@@ -40,6 +40,7 @@
 #include <QTabletEvent>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QWheelEvent>
 #include <QToolButton>
 
 using namespace mothion;
@@ -1089,6 +1090,56 @@ private slots:
         QVERIFY(controller.canUndo());
         controller.undo();
         QVERIFY(!controller.canUndo());
+    }
+
+    // Radius mode: no pins, a drag bends only what lies around the pen; the
+    // wheel over the canvas sizes the radius instead of zooming.
+    void puppetRadiusModeBendsAroundThePen()
+    {
+        document::DocumentController controller;
+        tools::ToolState state;
+        QImage image(400, 40, QImage::Format_ARGB32);
+        image.fill(Qt::darkCyan);
+        controller.importImage(image, QStringLiteral("bar")); // x 760..1159, y 520..559
+        const doc::Layer &layer = controller.document().layerAt(1);
+        auto pixel = [&](int x, int y) { return layer.drawing(layer.timing().drawingAt(0))->image.pixel(x, y); };
+        const doc::Pixel ink = pixel(960, 540);
+        tools::PuppetSettings settings = state.puppetSettings();
+        settings.local = true;
+        settings.radius = 60;
+        settings.density = 2;
+        state.setPuppetSettings(settings);
+
+        canvas::PuppetTool tool(&controller, &state, [](const QString &) {}, [] {});
+        tool.press({1130, 540}, Qt::NoModifier); // near the right end
+        QVERIFY(tool.isActive());
+        tool.move({1130, 600}, Qt::NoModifier);
+        tool.release({1130, 640}, Qt::NoModifier);
+        QVERIFY(!tool.isActive());
+        QCOMPARE(pixel(1130, 640), ink);       // the end went down
+        QCOMPARE(qAlpha(pixel(1130, 540)), 0); // from where it was
+        QCOMPARE(pixel(800, 540), ink);        // far from it nothing moved
+        QCOMPARE(pixel(1000, 540), ink);
+        QVERIFY(tool.keyPress(Qt::Key_Return));
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo stroke"));
+        controller.undo();
+        QCOMPARE(pixel(1130, 540), ink);
+
+        canvas::CanvasView canvas(&state, &controller); // the wheel: radius, not zoom
+        canvas.resize(400, 300);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        state.setActiveTool(tools::ToolId::Puppet);
+        const double zoom = canvas.view().zoom();
+        QWheelEvent up(QPointF(200, 150), canvas.mapToGlobal(QPointF(200, 150)), {}, QPoint(0, 120), Qt::NoButton,
+                       Qt::NoModifier, Qt::NoScrollPhase, false);
+        QApplication::sendEvent(&canvas, &up);
+        QVERIFY(state.puppetSettings().radius > 60);
+        QCOMPARE(canvas.view().zoom(), zoom);
+        QWheelEvent ctrlUp(QPointF(200, 150), canvas.mapToGlobal(QPointF(200, 150)), {}, QPoint(0, 120),
+                           Qt::NoButton, Qt::ControlModifier, Qt::NoScrollPhase, false);
+        QApplication::sendEvent(&canvas, &ctrlUp);
+        QVERIFY(canvas.view().zoom() > zoom); // Ctrl+wheel still zooms
     }
 
     void puppetWarpBendsTheDrawingInOneStep()

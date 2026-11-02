@@ -30,6 +30,11 @@ namespace mothion::canvas {
 // The warp stays open across clicks; Enter, another tool, undo or a frame
 // or layer change applies it as one undo step, Esc drops it. Alt+click or
 // Delete removes a pin.
+//
+// In local mode (PuppetSettings::local) there are no pins to place: all of
+// the shape is held, a drag moves the point under the pen and bends what
+// lies within the radius around it. The wheel sizes the radius, shown as a
+// circle around the pen.
 class PuppetTool : public CanvasTool
 {
 public:
@@ -41,11 +46,13 @@ public:
     void move(const QPointF &docPos, Qt::KeyboardModifiers modifiers) override;
     void release(const QPointF &docPos, Qt::KeyboardModifiers modifiers) override;
     void cancel() override;
-    bool isActive() const override { return m_dragPin.has_value(); }
+    bool isActive() const override { return m_dragPin.has_value() || m_localDrag; }
     bool hasPendingEdit() const override { return m_session != nullptr; }
     void commit() override;
     bool keyPress(int key) override;
     void setViewZoom(double zoom) override { m_zoom = zoom; }
+    bool hover(const QPointF &docPos) override;
+    bool wheel(double steps, Qt::KeyboardModifiers modifiers) override;
     void paintOverlay(QPainter &painter, const ViewTransform &view) const override;
 
 private:
@@ -74,6 +81,9 @@ private:
     bool m_dragMoved = false;
     puppet::Vec2 m_grabOffset;  // pin position − pen position at the press
     std::optional<int> m_selectedPin;
+    bool m_localDrag = false;
+    QPointF m_pointer; // last pen position, for the radius circle
+    bool m_pointerKnown = false;
     QMetaObject::Connection m_settingsConnection;
 };
 

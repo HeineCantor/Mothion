@@ -43,6 +43,21 @@ public:
         (void)key;
         return false;
     }
+    // The pen or mouse moving over the canvas with nothing pressed; true if
+    // the overlay changes with it.
+    virtual bool hover(const QPointF &docPos)
+    {
+        (void)docPos;
+        return false;
+    }
+    // Wheel turned over the canvas by `steps` notches (+ away from the user);
+    // true if the tool took it (the view does not zoom then).
+    virtual bool wheel(double steps, Qt::KeyboardModifiers modifiers)
+    {
+        (void)steps;
+        (void)modifiers;
+        return false;
+    }
     // View zoom, for handles that should be grabbed at a fixed screen size.
     virtual void setViewZoom(double zoom) { (void)zoom; }
 

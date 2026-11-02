@@ -56,6 +56,16 @@ public:
     // The pin within `radius` of `at` (nearest), if any.
     std::optional<int> pinAt(Vec2 at, double radius) const;
 
+    // Local warp: the whole shape held except a disc of `radius` around the
+    // mesh vertex nearest `at`, which follows the pen; the disc bends with
+    // it (ARAP), pins stay put. Starts a drag; false if no mesh is at `at`.
+    bool beginLocalDrag(Vec2 at, double radius);
+    // Where the pen is now; the grabbed point keeps its offset from it.
+    void localDragTo(Vec2 to, int iterations = 8);
+    // Ends the drag, the pins hold their mesh again.
+    void endLocalDrag();
+    bool isLocalDragging() const { return m_local.has_value(); }
+
     // Rebuilds the meshes with other settings, keeping pins and deformation.
     void setSettings(RigSettings settings);
 
@@ -63,11 +73,23 @@ private:
     void buildMeshes();
     void remesh(int mesh);
     std::optional<std::pair<int, Vec2>> restPointUnder(Vec2 at) const; // (mesh, rest point)
+    // The pins' vertices of a mesh, once each, and where they are.
+    void pinHandles(int mesh, std::vector<int> &handles, std::vector<Vec2> &targets) const;
 
     Bitmask m_shape;
     RigSettings m_settings;
     std::vector<Mesh> m_meshes;
     std::vector<Pin> m_pins;
+
+    struct LocalDrag
+    {
+        int mesh = -1;
+        int vertex = -1;           // the grabbed vertex
+        std::vector<Vec2> targets; // of the mesh's handles, set at the start
+        std::size_t grabbed = 0;   // the moving one among them
+        Vec2 offset;               // grabbed vertex − pen, at the start
+    };
+    std::optional<LocalDrag> m_local;
 };
 
 // Barycentric coordinates of p in triangle (a, b, c).

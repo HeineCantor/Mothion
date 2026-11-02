@@ -10,6 +10,8 @@
 #include <QPalette>
 #include <QApplication>
 
+#include <cmath>
+
 namespace mothion::canvas {
 
 namespace {
@@ -109,10 +111,21 @@ void PuppetTool::render()
 
 void PuppetTool::press(const QPointF &docPos, Qt::KeyboardModifiers modifiers)
 {
+    m_pointer = docPos;
+    m_pointerKnown = true;
     if (!m_session && !start())
         return;
     puppet::PuppetRig &rig = *m_session->rig;
     const puppet::Vec2 at{docPos.x(), docPos.y()};
+    const tools::PuppetSettings settings = m_toolState->puppetSettings();
+    if (settings.local) {
+        m_selectedPin.reset();
+        m_localDrag = rig.beginLocalDrag(at, settings.radius);
+        if (!m_localDrag)
+            m_status(QObject::tr("Drag on the drawing to bend it"));
+        m_repaint();
+        return;
+    }
     if (const auto pin = rig.pinAt(at, kGrabRadius / m_zoom)) {
         if (modifiers & Qt::AltModifier) {
             rig.removePin(*pin);
@@ -135,6 +148,12 @@ void PuppetTool::press(const QPointF &docPos, Qt::KeyboardModifiers modifiers)
 
 void PuppetTool::move(const QPointF &docPos, Qt::KeyboardModifiers)
 {
+    m_pointer = docPos;
+    if (m_session && m_localDrag) {
+        m_session->rig->localDragTo({docPos.x(), docPos.y()}, kDragIterations);
+        render();
+        return;
+    }
     if (!m_session || !m_dragPin)
         return;
     m_session->rig->movePin(*m_dragPin, puppet::Vec2{docPos.x(), docPos.y()} + m_grabOffset, kDragIterations);
@@ -144,6 +163,14 @@ void PuppetTool::move(const QPointF &docPos, Qt::KeyboardModifiers)
 
 void PuppetTool::release(const QPointF &docPos, Qt::KeyboardModifiers)
 {
+    m_pointer = docPos;
+    if (m_session && m_localDrag) {
+        m_session->rig->localDragTo({docPos.x(), docPos.y()}, kSettleIterations);
+        m_session->rig->endLocalDrag();
+        m_localDrag = false;
+        render();
+        return;
+    }
     if (!m_session || !m_dragPin)
         return;
     if (m_dragMoved) { // settle the shape where the pen left it
@@ -156,6 +183,7 @@ void PuppetTool::release(const QPointF &docPos, Qt::KeyboardModifiers)
 
 void PuppetTool::commit()
 {
+    m_localDrag = false;
     if (!m_session)
         return;
     const std::unique_ptr<Session> s = std::move(m_session);
@@ -170,6 +198,7 @@ void PuppetTool::commit()
 
 void PuppetTool::cancel()
 {
+    m_localDrag = false;
     if (!m_session)
         return;
     const std::unique_ptr<Session> s = std::move(m_session);
@@ -203,10 +232,27 @@ bool PuppetTool::keyPress(int key)
     }
 }
 
+bool PuppetTool::hover(const QPointF &docPos)
+{
+    m_pointer = docPos;
+    m_pointerKnown = true;
+    return m_toolState->puppetSettings().local; // the circle follows
+}
+
+bool PuppetTool::wheel(double steps, Qt::KeyboardModifiers modifiers)
+{
+    tools::PuppetSettings s = m_toolState->puppetSettings();
+    if (!s.local || modifiers != Qt::NoModifier)
+        return false; // Ctrl/Shift+wheel still zoom and rotate the view
+    s.radius *= std::pow(1.15, steps);
+    m_toolState->setPuppetSettings(s);
+    return true;
+}
+
 void PuppetTool::settingsChanged()
 {
     m_repaint(); // the mesh may be shown or hidden
-    if (!m_session || m_dragPin)
+    if (!m_session || m_dragPin || m_localDrag)
         return;
     m_session->rig->setSettings(rigSettings(m_toolState->puppetSettings()));
     m_selectedPin.reset();
@@ -216,12 +262,22 @@ void PuppetTool::settingsChanged()
 
 void PuppetTool::paintOverlay(QPainter &painter, const ViewTransform &view) const
 {
+    const QTransform toView = view.documentToView();
+    painter.setRenderHint(QPainter::Antialiasing);
+    // Local mode: the radius around the pen, even before the first drag.
+    if (m_toolState->puppetSettings().local && m_pointerKnown) {
+        const double r = m_toolState->puppetSettings().radius * view.zoom();
+        const QPointF c = toView.map(m_pointer);
+        painter.setBrush(Qt::NoBrush);
+        painter.setPen(QPen(QColor(0, 0, 0, 160), 1.0));
+        painter.drawEllipse(c, r, r);
+        painter.setPen(QPen(QColor(255, 255, 255, 160), 1.0));
+        painter.drawEllipse(c, r - 1, r - 1);
+    }
     if (!m_session)
         return;
-    const QTransform toView = view.documentToView();
     auto map = [&](puppet::Vec2 p) { return toView.map(QPointF(p.x, p.y)); };
     const QPalette &palette = QApplication::palette();
-    painter.setRenderHint(QPainter::Antialiasing);
 
     if (m_toolState->puppetSettings().showMesh) {
         QColor line = palette.color(QPalette::Highlight);

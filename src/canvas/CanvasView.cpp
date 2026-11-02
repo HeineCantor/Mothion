@@ -378,6 +378,8 @@ void CanvasView::handleSample(const PenSample &sample)
         } else if (m_editTool) {
             m_editTool->move(docPos, modifiers);
             update();
+        } else if (CanvasTool *tool = canvasTool(); tool && tool->hover(docPos)) {
+            update();
         }
         break;
     case SamplePhase::Release:
@@ -391,6 +393,8 @@ void CanvasView::handleSample(const PenSample &sample)
         }
         break;
     case SamplePhase::Hover:
+        if (CanvasTool *tool = canvasTool(); tool && !busy && tool->hover(docPos))
+            update();
         break;
     }
 }
@@ -580,6 +584,11 @@ void CanvasView::wheelEvent(QWheelEvent *event)
     // Some platforms turn Shift+wheel into horizontal scrolling: accept either axis.
     const QPoint a = event->angleDelta();
     const int delta = a.y() != 0 ? a.y() : a.x();
+    if (CanvasTool *tool = canvasTool(); tool && tool->wheel(delta / 120.0, event->modifiers())) {
+        update();
+        event->accept();
+        return;
+    }
     if (event->modifiers() & Qt::ShiftModifier)
         m_view.rotateAround(event->position(), delta > 0 ? -kRotateStep : kRotateStep);
     else

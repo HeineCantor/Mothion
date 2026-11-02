@@ -190,6 +190,40 @@ private slots:
         QVERIFY(farthest > 170.0 && farthest < 215.0);
     }
 
+    // The local warp holds everything out of the disc: only around the
+    // grabbed point does the shape move, and the pins stay.
+    void localDragMovesOnlyTheDisc()
+    {
+        Bitmask m(0, 0, 220, 60);
+        for (int y = 20; y < 40; ++y)
+            for (int x = 10; x < 210; ++x)
+                m.set(x, y, true); // a long bar
+        PuppetRig rig(m, {2, 3});
+        const auto pin = rig.addPin({60, 30});
+        QVERIFY(!rig.beginLocalDrag({300, 300}, 40)); // off the shape
+        QVERIFY(rig.beginLocalDrag({180, 30}, 40));
+        QVERIFY(rig.isLocalDragging());
+        rig.localDragTo({180, 60}, 30); // the right end, pulled down
+        rig.endLocalDrag();
+        QVERIFY(!rig.isLocalDragging());
+
+        const auto &mesh = rig.meshes()[0];
+        double grabbedMoved = 0.0;
+        for (std::size_t v = 0; v < mesh.rest.vertices.size(); ++v) {
+            const double moved = length(mesh.deformed[v] - mesh.rest.vertices[v]);
+            if (length(mesh.rest.vertices[v] - Vec2{180, 30}) > 45)
+                QVERIFY2(moved < 1e-9, "outside the disc nothing moves");
+            else
+                grabbedMoved = std::max(grabbedMoved, moved);
+        }
+        QVERIFY(grabbedMoved > 25.0);
+        const PuppetRig::Pin &p = rig.pins()[std::size_t(*pin)];
+        QCOMPARE(mesh.deformed[std::size_t(p.vertex)].x, 60.0);
+
+        rig.movePin(*pin, {60, 40}, 20); // the pins work again after it
+        QVERIFY(std::abs(mesh.deformed[std::size_t(p.vertex)].y - 40.0) < 1e-6);
+    }
+
     void warpDrawsTheShapeWhereItMoved()
     {
         Bitmask m(0, 0, 40, 40);

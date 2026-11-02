@@ -22,6 +22,10 @@ struct PuppetSettings
     int density = 1;      // mesh: 0 coarse, 1 normal, 2 fine
     int expand = 3;       // px of mesh around the drawing
     bool showMesh = true; // draw the mesh over the canvas
+    // Local mode: no pins to place, everything is held; a drag moves the
+    // point under the pen and bends what lies within `radius` of it.
+    bool local = false;
+    double radius = 80.0; // document px
 
     bool operator==(const PuppetSettings &) const = default;
 };
@@ -94,6 +98,8 @@ public:
     bool usesTilt() const { return m_useTilt; }
     void setUseTilt(bool use);
 
+    static constexpr double kMinPuppetRadius = 5.0;
+    static constexpr double kMaxPuppetRadius = 2000.0;
     PuppetSettings puppetSettings() const { return m_puppet; }
     void setPuppetSettings(const PuppetSettings &settings);
 

@@ -134,9 +134,11 @@ void ToolState::setUseTilt(bool use)
 
 void ToolState::setPuppetSettings(const PuppetSettings &settings)
 {
-    if (settings == m_puppet)
+    PuppetSettings s = settings;
+    s.radius = std::clamp(s.radius, kMinPuppetRadius, kMaxPuppetRadius);
+    if (s == m_puppet)
         return;
-    m_puppet = settings;
+    m_puppet = s;
     emit puppetSettingsChanged();
 }
 
