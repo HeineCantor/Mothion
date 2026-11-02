@@ -134,8 +134,8 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     layout->setContentsMargins(4, 4, 4, 4);
     layout->setSpacing(4);
     layout->addLayout(header);
-    layout->addWidget(m_list, 1);
     layout->addLayout(buttons);
+    layout->addWidget(m_list, 1);
 
     // Header edits.
     connect(m_blend, &QComboBox::activated, this, [this](int index) {
