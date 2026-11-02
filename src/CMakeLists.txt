@@ -107,6 +107,7 @@ qt_add_resources(mothion_gui "mothion_resources"
     FILES
         "${PROJECT_SOURCE_DIR}/resources/theme/dark.qss"
         "${PROJECT_SOURCE_DIR}/resources/icon/mothion.png"
+        "${PROJECT_SOURCE_DIR}/resources/fonts/Montserrat-Bold.ttf"
 )
 # Tablet backend selection: Wintab needs Qt's private GUI API, Windows only.
 if(WIN32 AND MOTHION_ENABLE_WINTAB)
