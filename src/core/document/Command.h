@@ -15,12 +15,12 @@ struct ChangeSet
 {
     struct Pixels
     {
-        LayerId layer = kNoId;
+        CelId cel = kNoId;
         DrawingId drawing = kNoId;
         std::vector<TileCoord> tiles;
     };
 
-    bool structure = false;     // layers, drawings, timing or document properties
+    bool structure = false;     // cels, drawings, timing or document properties
     std::vector<Pixels> pixels; // painted tiles
 
     bool isEmpty() const { return !structure && pixels.empty(); }
@@ -38,10 +38,10 @@ enum class CommandKind {
     AddDrawing,
     RemoveDrawing,
     ChangeTiming,
-    AddLayer,
-    RemoveLayer,
-    MoveLayer,
-    ChangeLayerProperties,
+    AddCel,
+    RemoveCel,
+    MoveCel,
+    ChangeCelProperties,
     ImportImage,
     ClearDrawing,
     Move,
@@ -57,7 +57,7 @@ enum class CommandKind {
 //
 // apply() does (and redoes) the change, revert() undoes it; each is called
 // only when the document is in the matching state, as History guarantees.
-// Anything a command needs to redo exactly (new ids, removed layers or
+// Anything a command needs to redo exactly (new ids, removed cels or
 // drawings, old tiles) is captured when it is created or first applied.
 class Command
 {

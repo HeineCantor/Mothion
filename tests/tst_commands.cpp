@@ -3,7 +3,7 @@
 #include "core/document/Document.h"
 #include "core/document/History.h"
 #include "core/document/commands/DrawingCommands.h"
-#include "core/document/commands/LayerCommands.h"
+#include "core/document/commands/CelCommands.h"
 #include "core/document/commands/PaintCommand.h"
 #include "core/document/commands/TimingCommands.h"
 
@@ -16,12 +16,12 @@ namespace {
 constexpr Pixel kInk = 0xff202020;
 
 // A document with one layer, returned with that layer's id.
-std::pair<std::unique_ptr<Document>, LayerId> docWithLayer()
+std::pair<std::unique_ptr<Document>, CelId> docWithCel()
 {
     auto doc = std::make_unique<Document>(1920, 1080);
-    AddLayerCommand add(*doc, 0, {"Linee"});
+    AddCelCommand add(*doc, 0, {"Linee"});
     add.apply(*doc);
-    return {std::move(doc), add.layerId()};
+    return {std::move(doc), add.celId()};
 }
 
 // A command whose memory footprint is set by the test.
@@ -47,18 +47,18 @@ class TestCommands : public QObject
 private slots:
     void paintCaptureUndoRedo()
     {
-        auto [doc, layerId] = docWithLayer();
+        auto [doc, celId] = docWithCel();
         History history;
-        NewDrawing nd = makeNewDrawing(*doc, layerId, 0);
+        NewDrawing nd = makeNewDrawing(*doc, celId, 0);
         history.execute(*doc, std::move(nd.command));
-        Drawing *drawing = doc->layer(layerId)->drawing(nd.id);
+        Drawing *drawing = doc->cel(celId)->drawing(nd.id);
         QVERIFY(drawing);
 
         // A stroke: snapshot, paint live, capture.
         const TiledImage before = drawing->image;
         drawing->image.setPixel(10, 10, kInk);
         drawing->image.setPixel(200, 10, kInk);
-        auto paint = PaintCommand::capture(layerId, nd.id, before, drawing->image);
+        auto paint = PaintCommand::capture(celId, nd.id, before, drawing->image);
         QVERIFY(paint);
         QCOMPARE(paint->swaps().size(), std::size_t(2)); // two tiles touched
         history.pushApplied(std::move(paint));
@@ -73,20 +73,20 @@ private slots:
         QCOMPARE(drawing->image.pixel(200, 10), kInk);
 
         // Painting nothing gives no command.
-        QVERIFY(!PaintCommand::capture(layerId, nd.id, drawing->image, drawing->image));
+        QVERIFY(!PaintCommand::capture(celId, nd.id, drawing->image, drawing->image));
     }
 
     void paintOverExistingTileKeepsOldPixels()
     {
-        auto [doc, layerId] = docWithLayer();
-        NewDrawing nd = makeNewDrawing(*doc, layerId, 0);
+        auto [doc, celId] = docWithCel();
+        NewDrawing nd = makeNewDrawing(*doc, celId, 0);
         nd.command->apply(*doc);
-        Drawing *drawing = doc->layer(layerId)->drawing(nd.id);
+        Drawing *drawing = doc->cel(celId)->drawing(nd.id);
         drawing->image.setPixel(1, 1, kInk);
 
         const TiledImage before = drawing->image;
         drawing->image.setPixel(2, 2, kInk); // same tile as the existing pixel
-        auto paint = PaintCommand::capture(layerId, nd.id, before, drawing->image);
+        auto paint = PaintCommand::capture(celId, nd.id, before, drawing->image);
         QVERIFY(paint);
         paint->revert(*doc);
         QCOMPARE(drawing->image.pixel(1, 1), kInk);
@@ -95,108 +95,108 @@ private slots:
 
     void newDrawingUndoRedoKeepsId()
     {
-        auto [doc, layerId] = docWithLayer();
+        auto [doc, celId] = docWithCel();
         History history;
-        NewDrawing nd = makeNewDrawing(*doc, layerId, 4, 3);
+        NewDrawing nd = makeNewDrawing(*doc, celId, 4, 3);
         history.execute(*doc, std::move(nd.command));
-        Layer *layer = doc->layer(layerId);
-        QCOMPARE(layer->drawingAt(5)->name, std::string("1"));
-        QCOMPARE(layer->timing().drawingAt(3), kNoId);
+        Cel *cel = doc->cel(celId);
+        QCOMPARE(cel->drawingAt(5)->name, std::string("1"));
+        QCOMPARE(cel->timing().drawingAt(3), kNoId);
 
         history.undo(*doc);
-        QVERIFY(layer->drawings().empty());
-        QVERIFY(layer->timing().isEmpty());
+        QVERIFY(cel->drawings().empty());
+        QVERIFY(cel->timing().isEmpty());
 
         history.redo(*doc);
-        QCOMPARE(layer->timing().drawingAt(6), nd.id);
-        QVERIFY(layer->drawing(nd.id));
+        QCOMPARE(cel->timing().drawingAt(6), nd.id);
+        QVERIFY(cel->drawing(nd.id));
     }
 
     void removeDrawingRestoresItsExposures()
     {
-        auto [doc, layerId] = docWithLayer();
+        auto [doc, celId] = docWithCel();
         History history;
-        NewDrawing a = makeNewDrawing(*doc, layerId, 0, 2);
+        NewDrawing a = makeNewDrawing(*doc, celId, 0, 2);
         history.execute(*doc, std::move(a.command));
-        NewDrawing b = makeNewDrawing(*doc, layerId, 2, 2);
+        NewDrawing b = makeNewDrawing(*doc, celId, 2, 2);
         history.execute(*doc, std::move(b.command));
-        history.execute(*doc, makeSetExposure(*doc, layerId, 4, 2, a.id)); // cycle back to A
-        Layer *layer = doc->layer(layerId);
-        layer->drawing(a.id)->image.setPixel(0, 0, kInk);
-        const Timing timingBefore = layer->timing();
+        history.execute(*doc, makeSetExposure(*doc, celId, 4, 2, a.id)); // cycle back to A
+        Cel *cel = doc->cel(celId);
+        cel->drawing(a.id)->image.setPixel(0, 0, kInk);
+        const Timing timingBefore = cel->timing();
 
-        history.execute(*doc, std::make_unique<RemoveDrawingCommand>(layerId, a.id));
-        QVERIFY(!layer->drawing(a.id));
-        QVERIFY(!layer->timing().usesDrawing(a.id));
+        history.execute(*doc, std::make_unique<RemoveDrawingCommand>(celId, a.id));
+        QVERIFY(!cel->drawing(a.id));
+        QVERIFY(!cel->timing().usesDrawing(a.id));
 
         history.undo(*doc);
-        QVERIFY(layer->timing() == timingBefore);
-        QCOMPARE(layer->drawing(a.id)->image.pixel(0, 0), kInk);
+        QVERIFY(cel->timing() == timingBefore);
+        QCOMPARE(cel->drawing(a.id)->image.pixel(0, 0), kInk);
     }
 
     void timingFactories()
     {
-        auto [doc, layerId] = docWithLayer();
+        auto [doc, celId] = docWithCel();
         History history;
-        NewDrawing nd = makeNewDrawing(*doc, layerId, 0, 2);
+        NewDrawing nd = makeNewDrawing(*doc, celId, 0, 2);
         history.execute(*doc, std::move(nd.command));
-        Layer *layer = doc->layer(layerId);
+        Cel *cel = doc->cel(celId);
 
-        history.execute(*doc, makeResizeExposure(*doc, layerId, 0, 6));
-        QCOMPARE(layer->timing().lastFrame(), 6);
-        history.execute(*doc, makeInsertEmptyFrames(*doc, layerId, 3, 2));
-        QCOMPARE(layer->timing().drawingAt(3), kNoId);
-        history.execute(*doc, makeRemoveFrames(*doc, layerId, 3, 2));
-        QCOMPARE(layer->timing().drawingAt(3), nd.id);
+        history.execute(*doc, makeResizeExposure(*doc, celId, 0, 6));
+        QCOMPARE(cel->timing().lastFrame(), 6);
+        history.execute(*doc, makeInsertEmptyFrames(*doc, celId, 3, 2));
+        QCOMPARE(cel->timing().drawingAt(3), kNoId);
+        history.execute(*doc, makeRemoveFrames(*doc, celId, 3, 2));
+        QCOMPARE(cel->timing().drawingAt(3), nd.id);
 
         // No-ops and invalid edits produce no command.
-        QVERIFY(!makeResizeExposure(*doc, layerId, 0, 6));
-        QVERIFY(!makeResizeExposure(*doc, layerId, 50, 2));
-        QVERIFY(!makeSetExposure(*doc, layerId, 0, 2, nd.id));
+        QVERIFY(!makeResizeExposure(*doc, celId, 0, 6));
+        QVERIFY(!makeResizeExposure(*doc, celId, 50, 2));
+        QVERIFY(!makeSetExposure(*doc, celId, 0, 2, nd.id));
 
         history.undo(*doc);
         history.undo(*doc);
         history.undo(*doc);
-        QCOMPARE(layer->timing().lastFrame(), 2);
+        QCOMPARE(cel->timing().lastFrame(), 2);
     }
 
     void layerCommands()
     {
         Document doc(800, 600);
         History history;
-        auto addA = std::make_unique<AddLayerCommand>(doc, 0, LayerProperties{"A"});
-        const LayerId a = addA->layerId();
+        auto addA = std::make_unique<AddCelCommand>(doc, 0, CelProperties{"A"});
+        const CelId a = addA->celId();
         history.execute(doc, std::move(addA));
-        auto addB = std::make_unique<AddLayerCommand>(doc, 1, LayerProperties{"B"});
-        const LayerId b = addB->layerId();
+        auto addB = std::make_unique<AddCelCommand>(doc, 1, CelProperties{"B"});
+        const CelId b = addB->celId();
         history.execute(doc, std::move(addB));
         QCOMPARE(doc.indexOf(b), 1);
 
-        history.execute(doc, std::make_unique<MoveLayerCommand>(b, 0));
+        history.execute(doc, std::make_unique<MoveCelCommand>(b, 0));
         QCOMPARE(doc.indexOf(b), 0);
-        LayerProperties hidden = doc.layer(a)->properties();
+        CelProperties hidden = doc.cel(a)->properties();
         hidden.visible = false;
         hidden.opacity = 0.5f;
-        history.execute(doc, makeSetLayerProperties(doc, a, hidden));
-        QVERIFY(!doc.layer(a)->properties().visible);
-        QVERIFY(!makeSetLayerProperties(doc, a, hidden));
+        history.execute(doc, makeSetCelProperties(doc, a, hidden));
+        QVERIFY(!doc.cel(a)->properties().visible);
+        QVERIFY(!makeSetCelProperties(doc, a, hidden));
 
-        history.execute(doc, std::make_unique<RemoveLayerCommand>(a));
-        QCOMPARE(doc.layerCount(), 1);
+        history.execute(doc, std::make_unique<RemoveCelCommand>(a));
+        QCOMPARE(doc.celCount(), 1);
 
         history.undo(doc); // remove
         QCOMPARE(doc.indexOf(a), 1);
-        QVERIFY(!doc.layer(a)->properties().visible);
+        QVERIFY(!doc.cel(a)->properties().visible);
         history.undo(doc); // properties
-        QVERIFY(doc.layer(a)->properties().visible);
+        QVERIFY(doc.cel(a)->properties().visible);
         history.undo(doc); // move
         QCOMPARE(doc.indexOf(b), 1);
         history.undo(doc); // add B
         history.undo(doc); // add A
-        QCOMPARE(doc.layerCount(), 0);
+        QCOMPARE(doc.celCount(), 0);
 
         history.redo(doc);
-        QCOMPARE(doc.layerAt(0).id(), a); // same id on redo
+        QCOMPARE(doc.celAt(0).id(), a); // same id on redo
     }
 
     void historyDiscardsRedoBranch()

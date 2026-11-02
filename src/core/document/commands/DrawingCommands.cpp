@@ -21,8 +21,8 @@ ChangeSet structural()
 
 // --- AddDrawingCommand ------------------------------------------------------------
 
-AddDrawingCommand::AddDrawingCommand(LayerId layer, Drawing drawing)
-    : m_layer(layer)
+AddDrawingCommand::AddDrawingCommand(CelId cel, Drawing drawing)
+    : m_cel(cel)
     , m_id(drawing.id)
     , m_drawing(std::move(drawing))
 {
@@ -30,18 +30,18 @@ AddDrawingCommand::AddDrawingCommand(LayerId layer, Drawing drawing)
 
 ChangeSet AddDrawingCommand::apply(Document &doc)
 {
-    Layer *layer = doc.layer(m_layer);
-    if (!layer || !m_drawing)
+    Cel *cel = doc.cel(m_cel);
+    if (!cel || !m_drawing)
         return {};
-    layer->addDrawing(std::move(*m_drawing));
+    cel->addDrawing(std::move(*m_drawing));
     m_drawing.reset();
     return structural();
 }
 
 ChangeSet AddDrawingCommand::revert(Document &doc)
 {
-    if (Layer *layer = doc.layer(m_layer))
-        m_drawing = layer->takeDrawing(m_id);
+    if (Cel *cel = doc.cel(m_cel))
+        m_drawing = cel->takeDrawing(m_id);
     return structural();
 }
 
@@ -52,31 +52,31 @@ std::size_t AddDrawingCommand::memoryBytes() const
 
 // --- RemoveDrawingCommand ---------------------------------------------------------
 
-RemoveDrawingCommand::RemoveDrawingCommand(LayerId layer, DrawingId drawing)
-    : m_layer(layer)
+RemoveDrawingCommand::RemoveDrawingCommand(CelId cel, DrawingId drawing)
+    : m_cel(cel)
     , m_id(drawing)
 {
 }
 
 ChangeSet RemoveDrawingCommand::apply(Document &doc)
 {
-    Layer *layer = doc.layer(m_layer);
-    if (!layer)
+    Cel *cel = doc.cel(m_cel);
+    if (!cel)
         return {};
-    m_timingBefore = layer->timing();
-    layer->timing().removeDrawing(m_id);
-    m_drawing = layer->takeDrawing(m_id);
+    m_timingBefore = cel->timing();
+    cel->timing().removeDrawing(m_id);
+    m_drawing = cel->takeDrawing(m_id);
     return structural();
 }
 
 ChangeSet RemoveDrawingCommand::revert(Document &doc)
 {
-    Layer *layer = doc.layer(m_layer);
-    if (!layer || !m_drawing)
+    Cel *cel = doc.cel(m_cel);
+    if (!cel || !m_drawing)
         return {};
-    layer->addDrawing(std::move(*m_drawing));
+    cel->addDrawing(std::move(*m_drawing));
     m_drawing.reset();
-    layer->timing() = m_timingBefore;
+    cel->timing() = m_timingBefore;
     return structural();
 }
 
@@ -87,18 +87,18 @@ std::size_t RemoveDrawingCommand::memoryBytes() const
 
 // --- factory ----------------------------------------------------------------------
 
-NewDrawing makeNewDrawing(Document &doc, LayerId layerId, int frame, int length)
+NewDrawing makeNewDrawing(Document &doc, CelId celId, int frame, int length)
 {
-    const Layer *layer = doc.layer(layerId);
-    if (!layer)
+    const Cel *cel = doc.cel(celId);
+    if (!cel)
         return {};
     const DrawingId id = doc.allocateDrawingId();
-    Timing after = layer->timing();
+    Timing after = cel->timing();
     after.setExposure(frame, length, id);
 
     std::vector<std::unique_ptr<Command>> steps;
-    steps.push_back(std::make_unique<AddDrawingCommand>(layerId, Drawing{id, layer->nextDrawingName(), {}}));
-    steps.push_back(std::make_unique<SetTimingCommand>(layerId, layer->timing(), std::move(after)));
+    steps.push_back(std::make_unique<AddDrawingCommand>(celId, Drawing{id, cel->nextDrawingName(), {}}));
+    steps.push_back(std::make_unique<SetTimingCommand>(celId, cel->timing(), std::move(after)));
     return {std::make_unique<GroupCommand>(CommandKind::AddDrawing, std::move(steps)), id};
 }
 

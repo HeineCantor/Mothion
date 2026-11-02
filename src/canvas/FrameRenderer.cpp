@@ -42,10 +42,10 @@ void FrameRenderer::render(const doc::Document &doc, int frame, const QRect &rec
     p.fillRect(area, m_paper ? QColor::fromRgba(doc.paperColor()) : QColor(Qt::transparent));
 
     const std::vector<doc::TileCoord> tiles = tilesIn(area);
-    for (int i = 0; i < doc.layerCount(); ++i) {
-        const doc::Layer &layer = doc.layerAt(i);
-        const doc::LayerProperties &props = layer.properties();
-        const doc::Drawing *drawing = layer.drawingAt(frame);
+    for (int i = 0; i < doc.celCount(); ++i) {
+        const doc::Cel &cel = doc.celAt(i);
+        const doc::CelProperties &props = cel.properties();
+        const doc::Drawing *drawing = cel.drawingAt(frame);
         if (!props.visible || props.opacity <= 0.0f || !drawing)
             continue;
         p.setOpacity(props.opacity);

@@ -7,8 +7,8 @@
 
 namespace mothion::doc {
 
-// One drawing (a "cel") of a layer. It exists independently of time:
-// the layer's Timing decides on which frames it is shown, possibly several
+// One drawing of a cel, a "frame" in the interface. It exists independently
+// of time: the cel's Timing decides on which frames it is shown, possibly several
 // times (holds, cycles).
 struct Drawing
 {

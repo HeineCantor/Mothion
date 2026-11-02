@@ -168,8 +168,8 @@ void AutoplayWindow::updateRange()
     // To the last frame anything is exposed on (all of them on an empty document).
     const doc::Document &d = m_document->document();
     int last = 0;
-    for (int i = 0; i < d.layerCount(); ++i)
-        last = std::max(last, d.layerAt(i).timing().lastFrame());
+    for (int i = 0; i < d.celCount(); ++i)
+        last = std::max(last, d.celAt(i).timing().lastFrame());
     m_frameCount = std::clamp(last == 0 ? d.frameCount() : last, 1, d.frameCount());
     const QSignalBlocker block(m_slider);
     m_slider->setRange(0, m_frameCount - 1);
@@ -192,9 +192,9 @@ std::vector<doc::DrawingId> AutoplayWindow::exposedAt(int frame) const
 {
     const doc::Document &d = m_document->document();
     std::vector<doc::DrawingId> shown;
-    for (int i = 0; i < d.layerCount(); ++i) {
-        const doc::Layer &layer = d.layerAt(i);
-        shown.push_back(layer.properties().visible ? layer.timing().drawingAt(frame) : doc::kNoId);
+    for (int i = 0; i < d.celCount(); ++i) {
+        const doc::Cel &cel = d.celAt(i);
+        shown.push_back(cel.properties().visible ? cel.timing().drawingAt(frame) : doc::kNoId);
     }
     return shown;
 }

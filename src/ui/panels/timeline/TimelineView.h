@@ -58,23 +58,23 @@ private:
     // Hold-length drag in progress.
     struct Resize
     {
-        int layerIndex = -1;
+        int celIndex = -1;
         int start = 0;     // first frame of the exposure being resized
         int newLength = 1;
     };
 
     int rowCount() const;
-    int layerIndexForRow(int row) const; // rows are top-first, layers bottom-first
+    int celIndexForRow(int row) const; // rows are top-first, layers bottom-first
     int rowAt(int y) const;              // -1 outside the rows
     int frameAt(int x) const;
     // Exposure whose right edge is under (x, row), as {layer index, start}.
     std::optional<Resize> edgeAt(const QPoint &pos) const;
-    const doc::Timing &timingForPainting(int layerIndex) const; // preview while resizing
+    const doc::Timing &timingForPainting(int celIndex) const; // preview while resizing
 
     void onStructureChanged();
     void updateScrollBars();
     void ensureFrameVisible(int frame);
-    void scrubTo(const QPoint &pos, bool selectLayer);
+    void scrubTo(const QPoint &pos, bool selectCel);
 
     void paintCells(QPainter &p) const;
     void paintExposure(QPainter &p, const doc::Exposure &e, const QString &name, const QColor &color,
@@ -82,7 +82,7 @@ private:
     void paintRuler(QPainter &p) const;
     void paintHeaders(QPainter &p) const;
     void paintCursor(QPainter &p) const;
-    static QColor colorForLayer(int layerIndex);
+    static QColor colorForCel(int celIndex);
 
     document::DocumentController *m_document;
     TimelineMetrics m_metrics;

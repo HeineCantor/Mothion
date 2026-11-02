@@ -40,7 +40,7 @@ TimelineView::TimelineView(DocumentController *document, QWidget *parent)
         ensureFrameVisible(frame);
         viewport()->update();
     });
-    connect(m_document, &DocumentController::currentLayerChanged, viewport(), qOverload<>(&QWidget::update));
+    connect(m_document, &DocumentController::currentCelChanged, viewport(), qOverload<>(&QWidget::update));
     updateScrollBars();
 }
 
@@ -48,10 +48,10 @@ TimelineView::TimelineView(DocumentController *document, QWidget *parent)
 
 int TimelineView::rowCount() const
 {
-    return m_document->document().layerCount();
+    return m_document->document().celCount();
 }
 
-int TimelineView::layerIndexForRow(int row) const
+int TimelineView::celIndexForRow(int row) const
 {
     return rowCount() - 1 - row;
 }
@@ -73,18 +73,18 @@ int TimelineView::displayedFrames() const
 {
     const doc::Document &d = m_document->document();
     int last = 0;
-    for (int i = 0; i < d.layerCount(); ++i)
-        last = std::max(last, d.layerAt(i).timing().lastFrame());
+    for (int i = 0; i < d.celCount(); ++i)
+        last = std::max(last, d.celAt(i).timing().lastFrame());
     if (m_resize)
         last = std::max(last, m_previewTiming.lastFrame());
     return std::max({d.frameCount(), last + kExtraFrames, m_document->currentFrame() + 1});
 }
 
-const doc::Timing &TimelineView::timingForPainting(int layerIndex) const
+const doc::Timing &TimelineView::timingForPainting(int celIndex) const
 {
-    if (m_resize && m_resize->layerIndex == layerIndex)
+    if (m_resize && m_resize->celIndex == celIndex)
         return m_previewTiming;
-    return m_document->document().layerAt(layerIndex).timing();
+    return m_document->document().celAt(celIndex).timing();
 }
 
 std::optional<TimelineView::Resize> TimelineView::edgeAt(const QPoint &pos) const
@@ -92,19 +92,19 @@ std::optional<TimelineView::Resize> TimelineView::edgeAt(const QPoint &pos) cons
     const int row = rowAt(pos.y());
     if (row < 0 || pos.x() < m_metrics.headerWidth)
         return std::nullopt;
-    const int layerIndex = layerIndexForRow(row);
-    for (const doc::Exposure &e : m_document->document().layerAt(layerIndex).timing().exposures()) {
+    const int celIndex = celIndexForRow(row);
+    for (const doc::Exposure &e : m_document->document().celAt(celIndex).timing().exposures()) {
         if (std::abs(pos.x() - m_metrics.frameX(e.end())) <= kEdgeGrab)
-            return Resize{layerIndex, e.start, e.length};
+            return Resize{celIndex, e.start, e.length};
     }
     return std::nullopt;
 }
 
-QColor TimelineView::colorForLayer(int layerIndex)
+QColor TimelineView::colorForCel(int celIndex)
 {
     static const QColor colors[] = {QColor(0x4f, 0x8c, 0xd6), QColor(0xd0, 0x8a, 0x4a), QColor(0x5a, 0x9a, 0x6a),
                                     QColor(0xb0, 0x6a, 0xd0), QColor(0xc8, 0x5a, 0x6a), QColor(0x4a, 0xa8, 0xa8)};
-    return colors[layerIndex % int(std::size(colors))];
+    return colors[celIndex % int(std::size(colors))];
 }
 
 // --- scrolling --------------------------------------------------------------------
@@ -222,7 +222,7 @@ void TimelineView::paintCells(QPainter &p) const
 
     // Row backgrounds; the current layer's row is highlighted.
     for (int row = 0; row < rowCount(); ++row) {
-        const bool current = d.layerAt(layerIndexForRow(row)).id() == m_document->currentLayer();
+        const bool current = d.celAt(celIndexForRow(row)).id() == m_document->currentCel();
         const QColor bg = current ? palette().highlight().color().darker(260)
                                   : (row % 2 ? palette().alternateBase().color() : palette().base().color());
         p.fillRect(QRect(m.headerWidth, m.rowY(row), endX - m.headerWidth, m.rowHeight), bg);
@@ -244,14 +244,14 @@ void TimelineView::paintCells(QPainter &p) const
 
     // Exposures.
     for (int row = 0; row < rowCount(); ++row) {
-        const int layerIndex = layerIndexForRow(row);
-        const doc::Layer &layer = d.layerAt(layerIndex);
-        for (const doc::Exposure &e : timingForPainting(layerIndex).exposures()) {
+        const int celIndex = celIndexForRow(row);
+        const doc::Cel &cel = d.celAt(celIndex);
+        for (const doc::Exposure &e : timingForPainting(celIndex).exposures()) {
             if (e.end() < first || e.start > last)
                 continue;
-            const doc::Drawing *drawing = layer.drawing(e.drawing);
+            const doc::Drawing *drawing = cel.drawing(e.drawing);
             const QString name = drawing ? QString::fromStdString(drawing->name) : QStringLiteral("?");
-            paintExposure(p, e, name, colorForLayer(layerIndex), m.rowY(row));
+            paintExposure(p, e, name, colorForCel(celIndex), m.rowY(row));
         }
     }
 }
@@ -309,16 +309,16 @@ void TimelineView::paintHeaders(QPainter &p) const
     const doc::Document &d = m_document->document();
     p.fillRect(QRect(0, m.rulerHeight, m.headerWidth, viewport()->height()), palette().window());
     for (int row = 0; row < rowCount(); ++row) {
-        const int layerIndex = layerIndexForRow(row);
-        const doc::Layer &layer = d.layerAt(layerIndex);
+        const int celIndex = celIndexForRow(row);
+        const doc::Cel &cel = d.celAt(celIndex);
         const QRect r(0, m.rowY(row), m.headerWidth - 1, m.rowHeight);
-        if (layer.id() == m_document->currentLayer())
+        if (cel.id() == m_document->currentCel())
             p.fillRect(r, palette().highlight().color().darker(200));
-        p.fillRect(QRect(r.left() + 4, r.top() + 6, 4, r.height() - 12), colorForLayer(layerIndex));
-        p.setPen(layer.properties().visible ? palette().text().color()
+        p.fillRect(QRect(r.left() + 4, r.top() + 6, 4, r.height() - 12), colorForCel(celIndex));
+        p.setPen(cel.properties().visible ? palette().text().color()
                                             : palette().color(QPalette::Disabled, QPalette::Text));
         p.drawText(r.adjusted(14, 0, -4, 0), Qt::AlignVCenter | Qt::AlignLeft,
-                   QString::fromStdString(layer.properties().name));
+                   QString::fromStdString(cel.properties().name));
         p.setPen(palette().mid().color());
         p.drawLine(r.bottomLeft(), r.bottomRight());
     }
@@ -341,12 +341,12 @@ void TimelineView::paintCursor(QPainter &p) const
 
 // --- interaction ------------------------------------------------------------------
 
-void TimelineView::scrubTo(const QPoint &pos, bool selectLayer)
+void TimelineView::scrubTo(const QPoint &pos, bool selectCel)
 {
-    if (selectLayer) {
+    if (selectCel) {
         const int row = rowAt(pos.y());
         if (row >= 0)
-            m_document->setCurrentLayer(m_document->document().layerAt(layerIndexForRow(row)).id());
+            m_document->setCurrentCel(m_document->document().celAt(celIndexForRow(row)).id());
     }
     m_document->setCurrentFrame(frameAt(pos.x()));
 }
@@ -358,14 +358,14 @@ void TimelineView::mousePressEvent(QMouseEvent *event)
         if (event->button() == Qt::LeftButton) {
             const int row = rowAt(int(event->position().y()));
             if (row >= 0)
-                m_document->setCurrentLayer(m_document->document().layerAt(layerIndexForRow(row)).id());
+                m_document->setCurrentCel(m_document->document().celAt(celIndexForRow(row)).id());
         }
         return;
     }
     const QPoint pos = event->position().toPoint();
     if (auto edge = edgeAt(pos)) {
         m_resize = edge;
-        m_previewTiming = m_document->document().layerAt(edge->layerIndex).timing();
+        m_previewTiming = m_document->document().celAt(edge->celIndex).timing();
         return;
     }
     m_scrubbing = true;
@@ -380,7 +380,7 @@ void TimelineView::mouseMoveEvent(QMouseEvent *event)
         const int length = std::max(1, m_metrics.frameAt(pos.x() + m_metrics.frameWidth / 2) - m_resize->start);
         if (length != m_resize->newLength) {
             m_resize->newLength = length;
-            m_previewTiming = m_document->document().layerAt(m_resize->layerIndex).timing();
+            m_previewTiming = m_document->document().celAt(m_resize->celIndex).timing();
             m_previewTiming.resizeExposure(m_resize->start, length);
             updateScrollBars();
             viewport()->update();
@@ -401,8 +401,8 @@ void TimelineView::mouseReleaseEvent(QMouseEvent *)
         return;
     const Resize r = *m_resize;
     m_resize.reset();
-    const doc::LayerId layer = m_document->document().layerAt(r.layerIndex).id();
-    m_document->execute(doc::makeResizeExposure(m_document->document(), layer, r.start, r.newLength));
+    const doc::CelId cel = m_document->document().celAt(r.celIndex).id();
+    m_document->execute(doc::makeResizeExposure(m_document->document(), cel, r.start, r.newLength));
     updateScrollBars();
     viewport()->update();
 }
@@ -413,33 +413,33 @@ void TimelineView::contextMenuEvent(QContextMenuEvent *event)
     if (row < 0 || event->pos().x() < m_metrics.headerWidth)
         return;
     const int frame = frameAt(event->pos().x());
-    const doc::Layer &layer = m_document->document().layerAt(layerIndexForRow(row));
-    const doc::LayerId layerId = layer.id();
-    m_document->setCurrentLayer(layerId);
+    const doc::Cel &cel = m_document->document().celAt(celIndexForRow(row));
+    const doc::CelId celId = cel.id();
+    m_document->setCurrentCel(celId);
     m_document->setCurrentFrame(frame);
 
     QMenu menu(this);
-    menu.addAction(tr("New drawing"), this, [this, layerId, frame] {
-        m_document->execute(doc::makeNewDrawing(m_document->documentForCommands(), layerId, frame).command);
+    menu.addAction(tr("New frame"), this, [this, celId, frame] {
+        m_document->execute(doc::makeNewDrawing(m_document->documentForCommands(), celId, frame).command);
     });
-    const doc::Drawing *drawing = layer.drawingAt(frame);
-    QAction *clear = menu.addAction(tr("Clear frame"), this, [this, layerId, frame] {
-        m_document->execute(doc::makeSetExposure(m_document->document(), layerId, frame, 1, doc::kNoId));
+    const doc::Drawing *drawing = cel.drawingAt(frame);
+    QAction *clear = menu.addAction(tr("Clear frame"), this, [this, celId, frame] {
+        m_document->execute(doc::makeSetExposure(m_document->document(), celId, frame, 1, doc::kNoId));
     });
     clear->setEnabled(drawing != nullptr);
     menu.addSeparator();
-    menu.addAction(tr("Insert empty frame"), this, [this, layerId, frame] {
-        m_document->execute(doc::makeInsertEmptyFrames(m_document->document(), layerId, frame, 1));
+    menu.addAction(tr("Insert empty frame"), this, [this, celId, frame] {
+        m_document->execute(doc::makeInsertEmptyFrames(m_document->document(), celId, frame, 1));
     });
-    menu.addAction(tr("Delete frame"), this, [this, layerId, frame] {
-        m_document->execute(doc::makeRemoveFrames(m_document->document(), layerId, frame, 1));
+    menu.addAction(tr("Delete frame"), this, [this, celId, frame] {
+        m_document->execute(doc::makeRemoveFrames(m_document->document(), celId, frame, 1));
     });
     if (drawing) {
         menu.addSeparator();
         const doc::DrawingId id = drawing->id;
-        menu.addAction(tr("Delete drawing “%1” (from all frames)").arg(QString::fromStdString(drawing->name)),
-                       this, [this, layerId, id] {
-                           m_document->execute(std::make_unique<doc::RemoveDrawingCommand>(layerId, id));
+        menu.addAction(tr("Delete frame “%1” (from the whole timeline)").arg(QString::fromStdString(drawing->name)),
+                       this, [this, celId, id] {
+                           m_document->execute(std::make_unique<doc::RemoveDrawingCommand>(celId, id));
                        });
     }
     menu.exec(event->globalPos());
@@ -460,19 +460,19 @@ void TimelineView::keyPressEvent(QKeyEvent *event)
 {
     const int frame = m_document->currentFrame();
     const doc::Document &d = m_document->document();
-    const int layerIndex = d.indexOf(m_document->currentLayer());
+    const int celIndex = d.indexOf(m_document->currentCel());
     switch (event->key()) {
     case Qt::Key_Left: m_document->setCurrentFrame(frame - 1); break;
     case Qt::Key_Right: m_document->setCurrentFrame(frame + 1); break;
     case Qt::Key_Home: m_document->setCurrentFrame(0); break;
     case Qt::Key_End: m_document->setCurrentFrame(d.frameCount() - 1); break;
     case Qt::Key_Up: // up the list = higher layer
-        if (layerIndex >= 0 && layerIndex + 1 < d.layerCount())
-            m_document->setCurrentLayer(d.layerAt(layerIndex + 1).id());
+        if (celIndex >= 0 && celIndex + 1 < d.celCount())
+            m_document->setCurrentCel(d.celAt(celIndex + 1).id());
         break;
     case Qt::Key_Down:
-        if (layerIndex > 0)
-            m_document->setCurrentLayer(d.layerAt(layerIndex - 1).id());
+        if (celIndex > 0)
+            m_document->setCurrentCel(d.celAt(celIndex - 1).id());
         break;
     default: QAbstractScrollArea::keyPressEvent(event); return;
     }

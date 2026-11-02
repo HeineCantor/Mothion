@@ -4,8 +4,8 @@
 
 namespace mothion::doc {
 
-SetTimingCommand::SetTimingCommand(LayerId layer, Timing before, Timing after)
-    : m_layer(layer)
+SetTimingCommand::SetTimingCommand(CelId cel, Timing before, Timing after)
+    : m_cel(cel)
     , m_before(std::move(before))
     , m_after(std::move(after))
 {
@@ -13,10 +13,10 @@ SetTimingCommand::SetTimingCommand(LayerId layer, Timing before, Timing after)
 
 ChangeSet SetTimingCommand::put(Document &doc, const Timing &timing)
 {
-    Layer *layer = doc.layer(m_layer);
-    if (!layer)
+    Cel *cel = doc.cel(m_cel);
+    if (!cel)
         return {};
-    layer->timing() = timing;
+    cel->timing() = timing;
     ChangeSet c;
     c.structure = true;
     return c;
@@ -34,41 +34,41 @@ ChangeSet SetTimingCommand::revert(Document &doc)
 
 namespace {
 
-// Runs `edit` on a copy of the layer's timing; a command only if it changed.
+// Runs `edit` on a copy of the cel's timing; a command only if it changed.
 template<typename Edit>
-std::unique_ptr<Command> editTiming(const Document &doc, LayerId layerId, Edit edit)
+std::unique_ptr<Command> editTiming(const Document &doc, CelId celId, Edit edit)
 {
-    const Layer *layer = doc.layer(layerId);
-    if (!layer)
+    const Cel *cel = doc.cel(celId);
+    if (!cel)
         return nullptr;
-    Timing after = layer->timing();
+    Timing after = cel->timing();
     edit(after);
-    if (after == layer->timing())
+    if (after == cel->timing())
         return nullptr;
-    return std::make_unique<SetTimingCommand>(layerId, layer->timing(), std::move(after));
+    return std::make_unique<SetTimingCommand>(celId, cel->timing(), std::move(after));
 }
 
 } // namespace
 
-std::unique_ptr<Command> makeSetExposure(const Document &doc, LayerId layer, int start, int length,
+std::unique_ptr<Command> makeSetExposure(const Document &doc, CelId cel, int start, int length,
                                          DrawingId drawing)
 {
-    return editTiming(doc, layer, [&](Timing &t) { t.setExposure(start, length, drawing); });
+    return editTiming(doc, cel, [&](Timing &t) { t.setExposure(start, length, drawing); });
 }
 
-std::unique_ptr<Command> makeResizeExposure(const Document &doc, LayerId layer, int frame, int newLength)
+std::unique_ptr<Command> makeResizeExposure(const Document &doc, CelId cel, int frame, int newLength)
 {
-    return editTiming(doc, layer, [&](Timing &t) { t.resizeExposure(frame, newLength); });
+    return editTiming(doc, cel, [&](Timing &t) { t.resizeExposure(frame, newLength); });
 }
 
-std::unique_ptr<Command> makeInsertEmptyFrames(const Document &doc, LayerId layer, int frame, int count)
+std::unique_ptr<Command> makeInsertEmptyFrames(const Document &doc, CelId cel, int frame, int count)
 {
-    return editTiming(doc, layer, [&](Timing &t) { t.insertEmptyFrames(frame, count); });
+    return editTiming(doc, cel, [&](Timing &t) { t.insertEmptyFrames(frame, count); });
 }
 
-std::unique_ptr<Command> makeRemoveFrames(const Document &doc, LayerId layer, int frame, int count)
+std::unique_ptr<Command> makeRemoveFrames(const Document &doc, CelId cel, int frame, int count)
 {
-    return editTiming(doc, layer, [&](Timing &t) { t.removeFrames(frame, count); });
+    return editTiming(doc, cel, [&](Timing &t) { t.removeFrames(frame, count); });
 }
 
 } // namespace mothion::doc

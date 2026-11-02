@@ -127,7 +127,7 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
     q.prepare(QStringLiteral("insert into document values (?, ?, ?, ?, ?, ?, ?, ?, ?)"));
     for (const QVariant &v : {QVariant(d.width()), QVariant(d.height()), QVariant(d.frameRate().numerator),
                               QVariant(d.frameRate().denominator), QVariant(d.frameCount()),
-                              QVariant(qlonglong(d.paperColor())), idValue(d.nextLayerId()),
+                              QVariant(qlonglong(d.paperColor())), idValue(d.nextCelId()),
                               idValue(d.nextDrawingId()), QVariant(QCoreApplication::applicationVersion())})
         q.addBindValue(v);
     if (!q.exec()) {
@@ -135,8 +135,8 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
         return false;
     }
 
-    QSqlQuery layer(db), drawing(db), exposure(db), tile(db);
-    layer.prepare(QStringLiteral("insert into layers values (?, ?, ?, ?, ?, ?, ?)"));
+    QSqlQuery cel(db), drawing(db), exposure(db), tile(db);
+    cel.prepare(QStringLiteral("insert into layers values (?, ?, ?, ?, ?, ?, ?)"));
     drawing.prepare(QStringLiteral("insert into drawings values (?, ?, ?)"));
     exposure.prepare(QStringLiteral("insert into exposures values (?, ?, ?, ?)"));
     tile.prepare(QStringLiteral("insert into tiles values (?, ?, ?, ?)"));
@@ -149,10 +149,10 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
         return false;
     };
 
-    for (int i = 0; i < d.layerCount(); ++i) {
-        const doc::Layer &l = d.layerAt(i);
-        const doc::LayerProperties &p = l.properties();
-        if (!exec(layer, {idValue(l.id()), i, QString::fromStdString(p.name), p.visible, p.locked,
+    for (int i = 0; i < d.celCount(); ++i) {
+        const doc::Cel &l = d.celAt(i);
+        const doc::CelProperties &p = l.properties();
+        if (!exec(cel, {idValue(l.id()), i, QString::fromStdString(p.name), p.visible, p.locked,
                           double(p.opacity), blendName(p.blend)}))
             return false;
         for (const auto &[id, dr] : l.drawings()) {
@@ -205,7 +205,7 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
     auto d = std::make_unique<doc::Document>(width, height, rate);
     d->setFrameCount(q.value(4).toInt());
     d->setPaperColor(doc::Pixel(q.value(5).toLongLong()));
-    const doc::LayerId nextLayer = idFrom(q.value(6));
+    const doc::CelId nextCel = idFrom(q.value(6));
     const doc::DrawingId nextDrawing = idFrom(q.value(7));
 
     if (!q.exec(QStringLiteral("select id, name, visible, locked, opacity, blend from layers order by position"))) {
@@ -213,13 +213,13 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
         return nullptr;
     }
     while (q.next()) {
-        doc::LayerProperties p;
+        doc::CelProperties p;
         p.name = q.value(1).toString().toStdString();
         p.visible = q.value(2).toBool();
         p.locked = q.value(3).toBool();
         p.opacity = std::clamp(q.value(4).toFloat(), 0.0f, 1.0f);
         p.blend = blendFromName(q.value(5).toString());
-        d->insertLayer(d->layerCount(), std::make_unique<doc::Layer>(idFrom(q.value(0)), std::move(p)));
+        d->insertCel(d->celCount(), std::make_unique<doc::Cel>(idFrom(q.value(0)), std::move(p)));
     }
 
     std::map<doc::DrawingId, doc::Drawing *> drawings;
@@ -228,11 +228,11 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
         return nullptr;
     }
     while (q.next()) {
-        doc::Layer *layer = d->layer(idFrom(q.value(1)));
+        doc::Cel *cel = d->cel(idFrom(q.value(1)));
         const doc::DrawingId id = idFrom(q.value(0));
-        if (!layer || id == doc::kNoId || drawings.count(id))
+        if (!cel || id == doc::kNoId || drawings.count(id))
             continue;
-        drawings[id] = &layer->addDrawing({id, q.value(2).toString().toStdString(), {}});
+        drawings[id] = &cel->addDrawing({id, q.value(2).toString().toStdString(), {}});
     }
 
     if (!q.exec(QStringLiteral("select drawing, x, y, pixels from tiles"))) {
@@ -256,14 +256,14 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
         return nullptr;
     }
     while (q.next()) {
-        doc::Layer *layer = d->layer(idFrom(q.value(0)));
+        doc::Cel *cel = d->cel(idFrom(q.value(0)));
         const doc::DrawingId drawing = idFrom(q.value(3));
         const int start = q.value(1).toInt(), length = q.value(2).toInt();
-        if (layer && layer->drawing(drawing) && start >= 0 && length >= 1)
-            layer->timing().setExposure(start, length, drawing);
+        if (cel && cel->drawing(drawing) && start >= 0 && length >= 1)
+            cel->timing().setExposure(start, length, drawing);
     }
 
-    d->restoreIdCounters(nextLayer, nextDrawing);
+    d->restoreIdCounters(nextCel, nextDrawing);
     return d;
 }
 

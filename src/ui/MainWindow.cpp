@@ -209,7 +209,7 @@ void MainWindow::createCanvasArea()
     auto syncClear = [this] { m_clearAction->setEnabled(m_document->canClearCurrentDrawing()); };
     using document::DocumentController;
     connect(m_document, &DocumentController::structureChanged, this, syncClear);
-    connect(m_document, &DocumentController::currentLayerChanged, this, syncClear);
+    connect(m_document, &DocumentController::currentCelChanged, this, syncClear);
     connect(m_document, &DocumentController::currentFrameChanged, this, syncClear);
     connect(m_document, &DocumentController::pixelsChanged, this, syncClear);
     connect(m_document, &DocumentController::historyChanged, this, syncClear);

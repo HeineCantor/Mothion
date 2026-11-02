@@ -4,7 +4,7 @@
 #include "canvas/ViewTransform.h"
 #include "core/document/Document.h"
 #include "core/document/commands/DrawingCommands.h"
-#include "core/document/commands/LayerCommands.h"
+#include "core/document/commands/CelCommands.h"
 #include "core/document/commands/PaintCommand.h"
 
 #include <QTest>
@@ -131,17 +131,17 @@ private slots:
     void strokeCaptureUndoRedo()
     {
         doc::Document document(200, 100);
-        doc::AddLayerCommand addLayer(document, 0, {"L"});
-        addLayer.apply(document);
-        doc::NewDrawing nd = doc::makeNewDrawing(document, addLayer.layerId(), 0);
+        doc::AddCelCommand addCel(document, 0, {"L"});
+        addCel.apply(document);
+        doc::NewDrawing nd = doc::makeNewDrawing(document, addCel.celId(), 0);
         nd.command->apply(document);
-        doc::Drawing *drawing = document.layer(addLayer.layerId())->drawing(nd.id);
+        doc::Drawing *drawing = document.cel(addCel.celId())->drawing(nd.id);
 
         canvas::StrokeSession session(drawing->image, Qt::black, 1.0, false);
         brush::DabGenerator gen(roundStyle(3.0));
         session.addDabs(gen.begin(point(10, 10)));
         session.addDabs(gen.continueTo(point(150, 10)));
-        auto paint = doc::PaintCommand::capture(addLayer.layerId(), nd.id, session.before(), drawing->image);
+        auto paint = doc::PaintCommand::capture(addCel.celId(), nd.id, session.before(), drawing->image);
         QVERIFY(paint);
         QCOMPARE(paint->swaps().size(), std::size_t(3));
 
@@ -249,17 +249,17 @@ private slots:
     {
         doc::Document document(128, 64);
         // Bottom layer: red on frame 0, nothing on frame 1.
-        doc::AddLayerCommand bottom(document, 0, {"B"});
+        doc::AddCelCommand bottom(document, 0, {"B"});
         bottom.apply(document);
-        doc::NewDrawing red = doc::makeNewDrawing(document, bottom.layerId(), 0);
+        doc::NewDrawing red = doc::makeNewDrawing(document, bottom.celId(), 0);
         red.command->apply(document);
-        document.layer(bottom.layerId())->drawing(red.id)->image.setPixel(5, 5, 0xffff0000);
+        document.cel(bottom.celId())->drawing(red.id)->image.setPixel(5, 5, 0xffff0000);
         // Top layer, half opacity: blue on frames 0-1.
-        doc::AddLayerCommand top(document, 1, {"T", true, false, 0.5f});
+        doc::AddCelCommand top(document, 1, {"T", true, false, 0.5f});
         top.apply(document);
-        doc::NewDrawing blue = doc::makeNewDrawing(document, top.layerId(), 0, 2);
+        doc::NewDrawing blue = doc::makeNewDrawing(document, top.celId(), 0, 2);
         blue.command->apply(document);
-        document.layer(top.layerId())->drawing(blue.id)->image.setPixel(5, 5, 0xff0000ff);
+        document.cel(top.celId())->drawing(blue.id)->image.setPixel(5, 5, 0xff0000ff);
 
         canvas::FrameRenderer renderer;
         renderer.renderAll(document, 0);
@@ -271,9 +271,9 @@ private slots:
         c = renderer.image().pixelColor(5, 5);
         QVERIFY(c.red() > 120 && c.green() > 120 && c.blue() == 255); // 50 % blue over paper
 
-        doc::LayerProperties hidden = document.layer(top.layerId())->properties();
+        doc::CelProperties hidden = document.cel(top.celId())->properties();
         hidden.visible = false;
-        document.layer(top.layerId())->setProperties(hidden);
+        document.cel(top.celId())->setProperties(hidden);
         renderer.render(document, 0, QRect(0, 0, 10, 10)); // partial refresh
         QCOMPARE(renderer.image().pixelColor(5, 5), QColor(Qt::red));
     }

@@ -45,7 +45,7 @@ public:
     // progress, so that the document is complete, e.g. before saving.
     void finishEdits() { interruptStroke(); }
 
-    doc::LayerId currentLayer() const { return m_currentLayer; }
+    doc::CelId currentCel() const { return m_currentCel; }
     int currentFrame() const { return m_currentFrame; }
 
     // --- commands -------------------------------------------------------------
@@ -113,7 +113,7 @@ public:
     // A stroke paints live into a drawing, then is recorded in one go.
     struct PaintTarget
     {
-        doc::LayerId layer = doc::kNoId;
+        doc::CelId cel = doc::kNoId;
         doc::DrawingId drawing = doc::kNoId;
         doc::TiledImage *image = nullptr;
     };
@@ -136,15 +136,15 @@ public slots:
     void undo();
     void redo();
     void setCurrentFrame(int frame);
-    void setCurrentLayer(doc::LayerId layer);
+    void setCurrentCel(doc::CelId cel);
 
 signals:
     // Pixels of `drawing` changed in `rect` (document coordinates).
-    void pixelsChanged(doc::LayerId layer, doc::DrawingId drawing, const QRect &rect);
+    void pixelsChanged(doc::CelId cel, doc::DrawingId drawing, const QRect &rect);
     // Layers, drawings, timing or document properties changed.
     void structureChanged();
     void currentFrameChanged(int frame);
-    void currentLayerChanged(doc::LayerId layer);
+    void currentCelChanged(doc::CelId cel);
     // Undo/redo availability or labels changed.
     void historyChanged();
     void selectionChanged();
@@ -163,12 +163,12 @@ private:
     // Sets the selection as is, recording nothing.
     void assignSelection(const QPainterPath &area);
     void publish(const doc::ChangeSet &changes);
-    void ensureValidCurrentLayer();
+    void ensureValidCurrentCel();
     static std::unique_ptr<doc::Document> makeDefaultDocument();
 
     std::unique_ptr<doc::Document> m_document;
     doc::History m_history;
-    doc::LayerId m_currentLayer = doc::kNoId;
+    doc::CelId m_currentCel = doc::kNoId;
     int m_currentFrame = 0;
     QPainterPath m_selection;
 

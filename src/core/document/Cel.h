@@ -11,7 +11,7 @@ namespace mothion::doc {
 
 enum class BlendMode { Normal, Multiply, Screen, Overlay, Add };
 
-struct LayerProperties
+struct CelProperties
 {
     std::string name;
     bool visible = true;
@@ -19,20 +19,20 @@ struct LayerProperties
     float opacity = 1.0f; // 0..1
     BlendMode blend = BlendMode::Normal;
 
-    bool operator==(const LayerProperties &) const = default;
+    bool operator==(const CelProperties &) const = default;
 };
 
-// A layer ("element" in Harmony terms): its own set of drawings plus the
-// timing that says which of them is shown on each frame.
-class Layer
+// A cel, a row of the timeline ("element" in Harmony terms): its own set of
+// drawings plus the timing that says which of them is shown on each frame.
+class Cel
 {
 public:
-    Layer(LayerId id, LayerProperties properties);
+    Cel(CelId id, CelProperties properties);
 
-    LayerId id() const { return m_id; }
+    CelId id() const { return m_id; }
 
-    const LayerProperties &properties() const { return m_properties; }
-    void setProperties(LayerProperties properties) { m_properties = std::move(properties); }
+    const CelProperties &properties() const { return m_properties; }
+    void setProperties(CelProperties properties) { m_properties = std::move(properties); }
 
     // Drawings, ordered by id (creation order).
     const std::map<DrawingId, Drawing> &drawings() const { return m_drawings; }
@@ -51,8 +51,8 @@ public:
     std::string nextDrawingName() const;
 
 private:
-    LayerId m_id;
-    LayerProperties m_properties;
+    CelId m_id;
+    CelProperties m_properties;
     std::map<DrawingId, Drawing> m_drawings;
     Timing m_timing;
 };

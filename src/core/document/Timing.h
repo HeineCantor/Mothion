@@ -18,7 +18,7 @@ struct Exposure
     bool operator==(const Exposure &) const = default;
 };
 
-// The exposure sheet of one layer: which drawing is shown on each frame.
+// The exposure sheet of one cel: which drawing is shown on each frame.
 //
 // Stored as runs, Harmony style. Invariants kept by every operation:
 //  - sorted by start, non-overlapping, length >= 1, drawing != kNoId;

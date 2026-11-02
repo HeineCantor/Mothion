@@ -210,42 +210,42 @@ private slots:
 
     void layerDrawingsAndNames()
     {
-        Layer layer(1, {"Linee"});
-        QCOMPARE(layer.nextDrawingName(), std::string("1"));
-        layer.addDrawing({10, "1", {}});
-        layer.addDrawing({11, "3", {}});
-        QCOMPARE(layer.nextDrawingName(), std::string("2"));
-        layer.timing().setExposure(0, 2, 11);
-        QCOMPARE(layer.drawingAt(1)->name, std::string("3"));
-        QVERIFY(layer.drawingAt(2) == nullptr);
+        Cel cel(1, {"Linee"});
+        QCOMPARE(cel.nextDrawingName(), std::string("1"));
+        cel.addDrawing({10, "1", {}});
+        cel.addDrawing({11, "3", {}});
+        QCOMPARE(cel.nextDrawingName(), std::string("2"));
+        cel.timing().setExposure(0, 2, 11);
+        QCOMPARE(cel.drawingAt(1)->name, std::string("3"));
+        QVERIFY(cel.drawingAt(2) == nullptr);
 
-        auto taken = layer.takeDrawing(10);
+        auto taken = cel.takeDrawing(10);
         QVERIFY(taken && taken->name == "1");
-        QVERIFY(layer.drawing(10) == nullptr);
-        QVERIFY(!layer.takeDrawing(10));
+        QVERIFY(cel.drawing(10) == nullptr);
+        QVERIFY(!cel.takeDrawing(10));
     }
 
     void documentLayerStack()
     {
         Document doc(1920, 1080, {60, 1});
         QCOMPARE(doc.frameCount(), 60);
-        const LayerId a = doc.allocateLayerId();
-        const LayerId b = doc.allocateLayerId();
-        const LayerId c = doc.allocateLayerId();
+        const CelId a = doc.allocateCelId();
+        const CelId b = doc.allocateCelId();
+        const CelId c = doc.allocateCelId();
         QVERIFY(a != b && b != c && a != kNoId);
-        Layer &la = doc.insertLayer(0, std::make_unique<Layer>(a, LayerProperties{"A"}));
-        doc.insertLayer(1, std::make_unique<Layer>(b, LayerProperties{"B"}));
-        doc.insertLayer(99, std::make_unique<Layer>(c, LayerProperties{"C"})); // clamped to top
+        Cel &la = doc.insertCel(0, std::make_unique<Cel>(a, CelProperties{"A"}));
+        doc.insertCel(1, std::make_unique<Cel>(b, CelProperties{"B"}));
+        doc.insertCel(99, std::make_unique<Cel>(c, CelProperties{"C"})); // clamped to top
         QCOMPARE(doc.indexOf(c), 2);
 
-        doc.moveLayer(a, 2);
+        doc.moveCel(a, 2);
         QCOMPARE(doc.indexOf(a), 2);
         QCOMPARE(doc.indexOf(b), 0);
-        QCOMPARE(&la, doc.layer(a)); // references survive reordering
+        QCOMPARE(&la, doc.cel(a)); // references survive reordering
 
-        auto taken = doc.takeLayer(b);
+        auto taken = doc.takeCel(b);
         QVERIFY(taken && taken->properties().name == "B");
-        QCOMPARE(doc.layerCount(), 2);
+        QCOMPARE(doc.celCount(), 2);
         QCOMPARE(doc.indexOf(b), -1);
     }
 

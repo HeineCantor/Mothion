@@ -13,57 +13,57 @@ Document::Document(int width, int height, FrameRate frameRate)
 {
 }
 
-int Document::indexOf(LayerId id) const
+int Document::indexOf(CelId id) const
 {
-    const auto it = std::find_if(m_layers.begin(), m_layers.end(),
+    const auto it = std::find_if(m_cels.begin(), m_cels.end(),
                                  [id](const auto &l) { return l->id() == id; });
-    return it == m_layers.end() ? -1 : int(it - m_layers.begin());
+    return it == m_cels.end() ? -1 : int(it - m_cels.begin());
 }
 
-Layer *Document::layer(LayerId id)
+Cel *Document::cel(CelId id)
 {
     const int i = indexOf(id);
-    return i < 0 ? nullptr : m_layers[std::size_t(i)].get();
+    return i < 0 ? nullptr : m_cels[std::size_t(i)].get();
 }
 
-const Layer *Document::layer(LayerId id) const
+const Cel *Document::cel(CelId id) const
 {
     const int i = indexOf(id);
-    return i < 0 ? nullptr : m_layers[std::size_t(i)].get();
+    return i < 0 ? nullptr : m_cels[std::size_t(i)].get();
 }
 
-Layer &Document::insertLayer(int index, std::unique_ptr<Layer> layer)
+Cel &Document::insertCel(int index, std::unique_ptr<Cel> cel)
 {
-    index = std::clamp(index, 0, layerCount());
-    return **m_layers.insert(m_layers.begin() + index, std::move(layer));
+    index = std::clamp(index, 0, celCount());
+    return **m_cels.insert(m_cels.begin() + index, std::move(cel));
 }
 
-std::unique_ptr<Layer> Document::takeLayer(LayerId id)
+std::unique_ptr<Cel> Document::takeCel(CelId id)
 {
     const int i = indexOf(id);
     if (i < 0)
         return nullptr;
-    std::unique_ptr<Layer> taken = std::move(m_layers[std::size_t(i)]);
-    m_layers.erase(m_layers.begin() + i);
+    std::unique_ptr<Cel> taken = std::move(m_cels[std::size_t(i)]);
+    m_cels.erase(m_cels.begin() + i);
     return taken;
 }
 
-void Document::moveLayer(LayerId id, int newIndex)
+void Document::moveCel(CelId id, int newIndex)
 {
-    if (auto taken = takeLayer(id))
-        insertLayer(newIndex, std::move(taken));
+    if (auto taken = takeCel(id))
+        insertCel(newIndex, std::move(taken));
 }
 
-void Document::restoreIdCounters(LayerId nextLayer, DrawingId nextDrawing)
+void Document::restoreIdCounters(CelId nextCel, DrawingId nextDrawing)
 {
-    LayerId layerFloor = 1;
+    CelId celFloor = 1;
     DrawingId drawingFloor = 1;
-    for (const auto &l : m_layers) {
-        layerFloor = std::max(layerFloor, l->id() + 1);
+    for (const auto &l : m_cels) {
+        celFloor = std::max(celFloor, l->id() + 1);
         if (!l->drawings().empty())
             drawingFloor = std::max(drawingFloor, l->drawings().rbegin()->first + 1);
     }
-    m_nextLayerId = std::max(nextLayer, layerFloor);
+    m_nextCelId = std::max(nextCel, celFloor);
     m_nextDrawingId = std::max(nextDrawing, drawingFloor);
 }
 

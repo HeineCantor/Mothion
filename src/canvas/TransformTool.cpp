@@ -285,10 +285,10 @@ void TransformTool::render()
             p.setTransform(s.transform * QTransform::fromTranslate(-now.x(), -now.y()));
             p.drawImage(s.box.topLeft(), s.source);
         }
-        doc::TiledImage layer;
-        layer.write(now.x(), now.y(), now.width(), now.height(), reinterpret_cast<const doc::Pixel *>(moved.constBits()),
+        doc::TiledImage cel;
+        cel.write(now.x(), now.y(), now.width(), now.height(), reinterpret_cast<const doc::Pixel *>(moved.constBits()),
                     moved.bytesPerLine() / 4);
-        compositeOver(result, layer);
+        compositeOver(result, cel);
     }
     *s.image = std::move(result);
     if (!s.selection.isEmpty())

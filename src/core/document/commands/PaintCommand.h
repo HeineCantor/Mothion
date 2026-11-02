@@ -25,10 +25,10 @@ public:
     };
 
     // nullptr if `before` and `after` share every tile (nothing was painted).
-    static std::unique_ptr<PaintCommand> capture(LayerId layer, DrawingId drawing, const TiledImage &before,
+    static std::unique_ptr<PaintCommand> capture(CelId cel, DrawingId drawing, const TiledImage &before,
                                                  const TiledImage &after);
 
-    PaintCommand(LayerId layer, DrawingId drawing, std::vector<TileSwap> swaps);
+    PaintCommand(CelId cel, DrawingId drawing, std::vector<TileSwap> swaps);
 
     CommandKind kind() const override { return CommandKind::Paint; }
     ChangeSet apply(Document &doc) override;
@@ -40,7 +40,7 @@ public:
 private:
     ChangeSet put(Document &doc, bool after);
 
-    LayerId m_layer;
+    CelId m_cel;
     DrawingId m_drawing;
     std::vector<TileSwap> m_swaps;
 };

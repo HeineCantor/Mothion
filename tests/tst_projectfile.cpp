@@ -30,15 +30,15 @@ std::unique_ptr<doc::Document> sampleDocument()
     d->setFrameCount(48);
     d->setPaperColor(0xfff0e8d0);
 
-    const doc::LayerId bottomId = d->allocateLayerId();
-    doc::Layer &bottom = d->insertLayer(0, std::make_unique<doc::Layer>(bottomId, doc::LayerProperties{"Background"}));
+    const doc::CelId bottomId = d->allocateCelId();
+    doc::Cel &bottom = d->insertCel(0, std::make_unique<doc::Cel>(bottomId, doc::CelProperties{"Background"}));
     doc::Drawing &bg = bottom.addDrawing({d->allocateDrawingId(), "1", {}});
     bg.image.setPixel(10, 20, kRed);
     bg.image.setPixel(-70, -3, kHalfBlue);
     bottom.timing().setExposure(0, 48, bg.id);
 
-    doc::LayerProperties top{"Ink è ✓", false, true, 0.5f, doc::BlendMode::Multiply};
-    doc::Layer &ink = d->insertLayer(1, std::make_unique<doc::Layer>(d->allocateLayerId(), top));
+    doc::CelProperties top{"Ink è ✓", false, true, 0.5f, doc::BlendMode::Multiply};
+    doc::Cel &ink = d->insertCel(1, std::make_unique<doc::Cel>(d->allocateCelId(), top));
     doc::Drawing &a = ink.addDrawing({d->allocateDrawingId(), "A", {}});
     a.image.setPixel(100, 100, kHalfBlue);
     doc::Drawing &b = ink.addDrawing({d->allocateDrawingId(), "B", {}});
@@ -46,7 +46,7 @@ std::unique_ptr<doc::Document> sampleDocument()
     ink.timing().setExposure(0, 3, a.id);
     ink.timing().setExposure(5, 2, b.id);
     ink.timing().setExposure(7, 4, a.id);
-    d->allocateLayerId(); // an id used by a layer since deleted: must not come back
+    d->allocateCelId(); // an id used by a layer since deleted: must not come back
     return d;
 }
 
@@ -57,11 +57,11 @@ void compareDocuments(const doc::Document &x, const doc::Document &y)
     QVERIFY(x.frameRate() == y.frameRate());
     QCOMPARE(x.frameCount(), y.frameCount());
     QCOMPARE(x.paperColor(), y.paperColor());
-    QCOMPARE(x.nextLayerId(), y.nextLayerId());
+    QCOMPARE(x.nextCelId(), y.nextCelId());
     QCOMPARE(x.nextDrawingId(), y.nextDrawingId());
-    QCOMPARE(x.layerCount(), y.layerCount());
-    for (int i = 0; i < x.layerCount(); ++i) {
-        const doc::Layer &lx = x.layerAt(i), &ly = y.layerAt(i);
+    QCOMPARE(x.celCount(), y.celCount());
+    for (int i = 0; i < x.celCount(); ++i) {
+        const doc::Cel &lx = x.celAt(i), &ly = y.celAt(i);
         QCOMPARE(lx.id(), ly.id());
         QVERIFY(lx.properties() == ly.properties());
         QVERIFY(lx.timing() == ly.timing());
@@ -112,16 +112,16 @@ private slots:
         const auto loaded = io::loadProject(path, &error);
         QVERIFY(loaded);
         QCOMPARE(loaded->width(), 64);
-        QCOMPARE(loaded->layerCount(), 0);
+        QCOMPARE(loaded->celCount(), 0);
     }
 
     void loadedIdsAreNeverReused()
     {
         doc::Document d(10, 10);
-        d.insertLayer(0, std::make_unique<doc::Layer>(7, doc::LayerProperties{"L"}));
-        d.layerAt(0).addDrawing({12, "1", {}});
+        d.insertCel(0, std::make_unique<doc::Cel>(7, doc::CelProperties{"L"}));
+        d.celAt(0).addDrawing({12, "1", {}});
         d.restoreIdCounters(1, 1); // a file claiming counters below the ids in use
-        QCOMPARE(d.allocateLayerId(), doc::LayerId(8));
+        QCOMPARE(d.allocateCelId(), doc::CelId(8));
         QCOMPARE(d.allocateDrawingId(), doc::DrawingId(13));
     }
 
@@ -199,11 +199,11 @@ private slots:
         QVERIFY(!controller.canUndo());
         QCOMPARE(controller.currentFrame(), 0);
         QVERIFY(!controller.hasSelection());
-        QCOMPARE(controller.currentLayer(), controller.document().layerAt(1).id()); // the top one
+        QCOMPARE(controller.currentCel(), controller.document().celAt(1).id()); // the top one
 
         controller.newDocument();
         QCOMPARE(controller.document().width(), 1920);
-        QCOMPARE(controller.document().layerCount(), 1);
+        QCOMPARE(controller.document().celCount(), 1);
         QVERIFY(!controller.isModified());
     }
 

@@ -48,7 +48,7 @@ PuppetTool::PuppetTool(document::DocumentController *document, tools::ToolState 
     m_documentConnections = {
         QObject::connect(m_document, &DocumentController::pixelsChanged, m_document, retry),
         QObject::connect(m_document, &DocumentController::structureChanged, m_document, retry),
-        QObject::connect(m_document, &DocumentController::currentLayerChanged, m_document, retry),
+        QObject::connect(m_document, &DocumentController::currentCelChanged, m_document, retry),
         QObject::connect(m_document, &DocumentController::currentFrameChanged, m_document, retry),
         QObject::connect(m_document, &DocumentController::selectionChanged, m_document, retry),
     };

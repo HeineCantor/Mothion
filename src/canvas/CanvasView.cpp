@@ -54,13 +54,13 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
 
     using document::DocumentController;
     connect(m_document, &DocumentController::pixelsChanged, this,
-            [this](doc::LayerId, doc::DrawingId drawing, const QRect &rect) {
+            [this](doc::CelId, doc::DrawingId drawing, const QRect &rect) {
                 m_onionImages.erase(drawing);
                 renderDocumentRect(rect);
             });
     connect(m_document, &DocumentController::structureChanged, this, [this] { m_onionImages.clear(); });
     connect(m_document, &DocumentController::documentReplaced, this, [this] { m_onionImages.clear(); });
-    connect(m_document, &DocumentController::currentLayerChanged, this, qOverload<>(&QWidget::update));
+    connect(m_document, &DocumentController::currentCelChanged, this, qOverload<>(&QWidget::update));
     connect(m_toolState, &ToolState::onionSkinChanged, this, qOverload<>(&QWidget::update));
     connect(m_document, &DocumentController::structureChanged, this, &CanvasView::renderWholeFrame);
     connect(m_document, &DocumentController::currentFrameChanged, this, &CanvasView::renderWholeFrame);
@@ -118,18 +118,18 @@ QList<int> CanvasView::onionSkinFrames() const
 {
     QList<int> frames;
     const tools::OnionSkinSettings s = m_toolState->onionSkin();
-    const doc::Layer *layer = m_document->document().layer(m_document->currentLayer());
-    if (!s.enabled || !layer)
+    const doc::Cel *cel = m_document->document().cel(m_document->currentCel());
+    if (!s.enabled || !cel)
         return frames;
     const int current = m_document->currentFrame();
     const int count = m_document->document().frameCount();
-    std::vector<doc::DrawingId> seen{layer->timing().drawingAt(current)}; // the current one is not a ghost
+    std::vector<doc::DrawingId> seen{cel->timing().drawingAt(current)}; // the current one is not a ghost
     auto side = [&](int direction, int reach) {
         for (int k = 1; k <= reach; ++k) {
             const int frame = current + direction * k;
             if (frame < 0 || frame >= count)
                 break;
-            const doc::DrawingId id = layer->timing().drawingAt(frame);
+            const doc::DrawingId id = cel->timing().drawingAt(frame);
             if (id == doc::kNoId || std::find(seen.begin(), seen.end(), id) != seen.end())
                 continue;
             seen.push_back(id);
@@ -148,8 +148,8 @@ const CanvasView::OnionImage &CanvasView::onionImage(doc::DrawingId id, const QC
         return cached;
     cached = {};
     cached.color = color.rgba();
-    const doc::Layer *layer = m_document->document().layer(m_document->currentLayer());
-    const doc::Drawing *drawing = layer ? layer->drawing(id) : nullptr;
+    const doc::Cel *cel = m_document->document().cel(m_document->currentCel());
+    const doc::Drawing *drawing = cel ? cel->drawing(id) : nullptr;
     if (!drawing || drawing->image.isEmpty())
         return cached;
     QRect bounds;
@@ -179,8 +179,8 @@ const CanvasView::OnionImage &CanvasView::onionImage(doc::DrawingId id, const QC
 void CanvasView::paintOnionSkin(QPainter &p)
 {
     const tools::OnionSkinSettings s = m_toolState->onionSkin();
-    const doc::Layer *layer = m_document->document().layer(m_document->currentLayer());
-    if (!s.enabled || !layer)
+    const doc::Cel *cel = m_document->document().cel(m_document->currentCel());
+    if (!s.enabled || !cel)
         return;
     QList<int> frames = onionSkinFrames();
     // Farthest first, so the nearest lie on top; each step away fainter.
@@ -188,7 +188,7 @@ void CanvasView::paintOnionSkin(QPainter &p)
     for (const int distance : frames) {
         const int reach = distance < 0 ? s.before : s.after;
         const double fade = 1.0 - double(std::abs(distance) - 1) / double(reach + 1);
-        const OnionImage &ghost = onionImage(layer->timing().drawingAt(m_document->currentFrame() + distance),
+        const OnionImage &ghost = onionImage(cel->timing().drawingAt(m_document->currentFrame() + distance),
                                              distance < 0 ? s.beforeColor : s.afterColor);
         if (ghost.tinted.isNull())
             continue;

@@ -30,7 +30,7 @@ add_library(mothion_core STATIC
     core/document/Ids.h
     core/document/Drawing.h
     core/document/Timing.h core/document/Timing.cpp
-    core/document/Layer.h core/document/Layer.cpp
+    core/document/Cel.h core/document/Cel.cpp
     core/document/Document.h core/document/Document.cpp
     core/document/Command.h
     core/document/History.h core/document/History.cpp
@@ -38,7 +38,7 @@ add_library(mothion_core STATIC
     core/document/commands/PaintCommand.h core/document/commands/PaintCommand.cpp
     core/document/commands/DrawingCommands.h core/document/commands/DrawingCommands.cpp
     core/document/commands/TimingCommands.h core/document/commands/TimingCommands.cpp
-    core/document/commands/LayerCommands.h core/document/commands/LayerCommands.cpp
+    core/document/commands/CelCommands.h core/document/commands/CelCommands.cpp
 )
 set_target_properties(mothion_core PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
 target_include_directories(mothion_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

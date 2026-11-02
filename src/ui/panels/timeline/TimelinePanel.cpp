@@ -119,14 +119,14 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
     auto *frameLabel = new QLabel(this);
     frameLabel->setMinimumWidth(150);
 
-    auto *newDrawing = new QPushButton(tr("New drawing"), this);
-    newDrawing->setToolTip(tr("Create an empty drawing at the current frame of the current layer"));
+    auto *newDrawing = new QPushButton(tr("New frame"), this);
+    newDrawing->setToolTip(tr("Create an empty frame at this point of the current cel"));
 
     // Onion skin: the button turns it on, its arrow opens the settings.
     auto *onion = new QToolButton(this);
     onion->setObjectName(QStringLiteral("onionSkin"));
     onion->setText(tr("Onion skin"));
-    onion->setToolTip(tr("Show the drawings of the frames around this one (the arrow: settings)"));
+    onion->setToolTip(tr("Show the frames around this one (the arrow: settings)"));
     onion->setCheckable(true);
     onion->setChecked(toolState->onionSkin().enabled);
     onion->setPopupMode(QToolButton::MenuButtonPopup);
@@ -182,7 +182,7 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
     connect(next, &QToolButton::clicked, m_document,
             [this] { m_document->setCurrentFrame(m_document->currentFrame() + 1); });
     connect(newDrawing, &QPushButton::clicked, m_document, [this] {
-        m_document->execute(doc::makeNewDrawing(m_document->documentForCommands(), m_document->currentLayer(),
+        m_document->execute(doc::makeNewDrawing(m_document->documentForCommands(), m_document->currentCel(),
                                                 m_document->currentFrame())
                                 .command);
     });
