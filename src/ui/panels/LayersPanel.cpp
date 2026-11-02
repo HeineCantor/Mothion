@@ -1,6 +1,7 @@
 #include "ui/panels/LayersPanel.h"
 
 #include "canvas/TileQt.h"
+#include "core/document/commands/GroupCommand.h"
 #include "core/document/commands/LayerCommands.h"
 #include "document/DocumentController.h"
 #include "ui/IconFactory.h"
@@ -115,6 +116,10 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     m_opacityValue->setButtonSymbols(QAbstractSpinBox::NoButtons);
     m_opacityValue->setKeyboardTracking(false);
     m_list->setFrameShape(QFrame::NoFrame);
+    m_list->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    m_remove->setToolTip(tr("Delete the selected layers"));
+    m_up->setToolTip(tr("Move the selected layers up"));
+    m_down->setToolTip(tr("Move the selected layers down"));
 
     auto *header = new QHBoxLayout;
     header->setSpacing(4);
@@ -139,7 +144,7 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
 
     // Header edits.
     connect(m_blend, &QComboBox::activated, this, [this](int index) {
-        editCurrentLayer([index](doc::LayerProperties &p) { p.blend = kBlendModes[index]; });
+        editSelectedLayers([index](doc::LayerProperties &p) { p.blend = kBlendModes[index]; });
     });
     // Opacity: the slider previews in the spin box while dragged and is
     // committed once, on release, so a drag is a single undo step.
@@ -166,22 +171,30 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
         m_document->execute(std::move(add));
         m_document->setCurrentLayer(id);
     });
-    connect(m_remove, &QToolButton::clicked, this, [this] {
-        m_document->execute(std::make_unique<doc::RemoveLayerCommand>(m_document->currentLayer()));
-    });
-    connect(m_up, &QToolButton::clicked, this, [this] {
-        const doc::LayerId id = m_document->currentLayer();
-        m_document->execute(std::make_unique<doc::MoveLayerCommand>(id, m_document->document().indexOf(id) + 1));
-    });
-    connect(m_down, &QToolButton::clicked, this, [this] {
-        const doc::LayerId id = m_document->currentLayer();
-        m_document->execute(std::make_unique<doc::MoveLayerCommand>(id, m_document->document().indexOf(id) - 1));
-    });
+    connect(m_remove, &QToolButton::clicked, this, &LayersPanel::removeSelected);
+    connect(m_up, &QToolButton::clicked, this, [this] { moveSelected(+1); });
+    connect(m_down, &QToolButton::clicked, this, [this] { moveSelected(-1); });
 
     // Selection and renaming.
     connect(m_list, &QListWidget::currentItemChanged, this, [this](QListWidgetItem *item) {
         if (item && item->data(kLayerIdRole).isValid())
             m_document->setCurrentLayer(item->data(kLayerIdRole).value<doc::LayerId>());
+    });
+    connect(m_list, &QListWidget::itemSelectionChanged, this, [this] {
+        m_selected.clear();
+        const QList<QListWidgetItem *> selected = m_list->selectedItems();
+        for (QListWidgetItem *item : selected)
+            m_selected << item->data(kLayerIdRole).value<doc::LayerId>();
+        // Ctrl+click took the current layer out: another selected one takes its place.
+        QListWidgetItem *current = m_list->currentItem();
+        if (current && !current->isSelected() && !selected.isEmpty()) {
+            {
+                const QSignalBlocker block(m_list);
+                m_list->setCurrentItem(selected.last(), QItemSelectionModel::NoUpdate);
+            }
+            m_document->setCurrentLayer(selected.last()->data(kLayerIdRole).value<doc::LayerId>());
+        }
+        syncHeader();
     });
     connect(m_list, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem *item) {
         if (item->data(kLayerIdRole).isValid())
@@ -209,21 +222,75 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     rebuildList();
 }
 
-template<typename Edit>
-void LayersPanel::editCurrentLayer(Edit edit)
+QList<doc::LayerId> LayersPanel::selectedLayers() const
 {
-    const doc::Layer *layer = m_document->document().layer(m_document->currentLayer());
-    if (!layer)
-        return;
-    doc::LayerProperties props = layer->properties();
-    edit(props);
-    m_document->execute(doc::makeSetLayerProperties(m_document->document(), layer->id(), props));
+    const doc::Document &d = m_document->document();
+    QList<doc::LayerId> layers;
+    for (int i = 0; i < d.layerCount(); ++i) {
+        const doc::LayerId id = d.layerAt(i).id();
+        if (m_selected.contains(id) || id == m_document->currentLayer())
+            layers << id;
+    }
+    return layers;
+}
+
+template<typename Edit>
+void LayersPanel::editSelectedLayers(Edit edit)
+{
+    std::vector<std::unique_ptr<doc::Command>> steps;
+    for (doc::LayerId id : selectedLayers()) {
+        doc::LayerProperties props = m_document->document().layer(id)->properties();
+        edit(props);
+        if (auto step = doc::makeSetLayerProperties(m_document->document(), id, props))
+            steps.push_back(std::move(step));
+    }
+    if (steps.size() == 1)
+        m_document->execute(std::move(steps.front()));
+    else if (!steps.empty())
+        m_document->execute(
+            std::make_unique<doc::GroupCommand>(doc::CommandKind::ChangeLayerProperties, std::move(steps)));
 }
 
 void LayersPanel::commitOpacity()
 {
     const float opacity = float(m_opacity->value()) / 100.0f;
-    editCurrentLayer([opacity](doc::LayerProperties &p) { p.opacity = opacity; });
+    editSelectedLayers([opacity](doc::LayerProperties &p) { p.opacity = opacity; });
+}
+
+void LayersPanel::removeSelected()
+{
+    const QList<doc::LayerId> layers = selectedLayers();
+    if (layers.isEmpty() || layers.size() >= m_document->document().layerCount())
+        return; // keep at least one layer
+    std::vector<std::unique_ptr<doc::Command>> steps;
+    for (doc::LayerId id : layers)
+        steps.push_back(std::make_unique<doc::RemoveLayerCommand>(id));
+    m_selected.clear();
+    m_document->execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::RemoveLayer, std::move(steps)));
+}
+
+void LayersPanel::moveSelected(int direction)
+{
+    // The stack as it will be, step by step: a selected layer swaps with an
+    // unselected neighbour; one that would bump into the end, or into a
+    // selected layer that cannot move, stays (the block keeps its gaps).
+    const doc::Document &d = m_document->document();
+    const QList<doc::LayerId> selected = selectedLayers();
+    std::vector<doc::LayerId> order;
+    for (int i = 0; i < d.layerCount(); ++i)
+        order.push_back(d.layerAt(i).id());
+    std::vector<std::unique_ptr<doc::Command>> steps;
+    const int n = int(order.size());
+    for (int k = 0; k < n; ++k) {
+        const int i = direction > 0 ? n - 1 - k : k; // the end it moves to first
+        const int to = i + direction;
+        if (to < 0 || to >= n || !selected.contains(order[std::size_t(i)]) || selected.contains(order[std::size_t(to)]))
+            continue;
+        steps.push_back(std::make_unique<doc::MoveLayerCommand>(order[std::size_t(i)], to));
+        std::swap(order[std::size_t(i)], order[std::size_t(to)]);
+    }
+    if (!steps.empty())
+        m_document->execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::MoveLayer, std::move(steps)));
 }
 
 void LayersPanel::renameLayer(doc::LayerId id)
@@ -310,7 +377,7 @@ void LayersPanel::rebuildList()
     paperItem->setSizeHint(paperRow->sizeHint());
     m_list->setItemWidget(paperItem, paperRow);
 
-    selectCurrentRow();
+    restoreSelection();
     syncHeader();
 }
 
@@ -331,27 +398,65 @@ void LayersPanel::refreshThumbnails()
 
 void LayersPanel::selectCurrentRow()
 {
+    // The current layer chosen here (a click) keeps the selection made with
+    // it; chosen elsewhere it becomes the only one selected.
+    const QListWidgetItem *current = m_list->currentItem();
+    if (current && current->data(kLayerIdRole).isValid()
+        && current->data(kLayerIdRole).value<doc::LayerId>() == m_document->currentLayer())
+        return;
     const QSignalBlocker block(m_list);
+    m_selected.clear();
     for (int row = 0; row < m_list->count(); ++row) {
         const QVariant id = m_list->item(row)->data(kLayerIdRole);
         if (id.isValid() && id.value<doc::LayerId>() == m_document->currentLayer()) {
-            m_list->setCurrentRow(row);
+            m_list->setCurrentRow(row); // and only it selected
+            m_selected << id.value<doc::LayerId>();
             return;
         }
     }
+}
+
+void LayersPanel::restoreSelection()
+{
+    // After a rebuild: the layers selected before that still exist, and the
+    // current one (as current, without touching the rest).
+    const QSignalBlocker block(m_list);
+    QList<doc::LayerId> kept;
+    for (int row = 0; row < m_list->count(); ++row) {
+        QListWidgetItem *item = m_list->item(row);
+        const QVariant id = item->data(kLayerIdRole);
+        if (!id.isValid())
+            continue;
+        const doc::LayerId layer = id.value<doc::LayerId>();
+        const bool current = layer == m_document->currentLayer();
+        if (current)
+            m_list->setCurrentItem(item, QItemSelectionModel::NoUpdate);
+        if (current || m_selected.contains(layer)) {
+            item->setSelected(true);
+            kept << layer;
+        }
+    }
+    m_selected = kept;
 }
 
 void LayersPanel::syncHeader()
 {
     const doc::Document &d = m_document->document();
     const doc::Layer *layer = d.layer(m_document->currentLayer());
-    const int index = layer ? d.indexOf(layer->id()) : -1;
 
     for (QWidget *w : std::initializer_list<QWidget *>{m_blend, m_opacity, m_opacityValue})
         w->setEnabled(layer != nullptr);
-    m_remove->setEnabled(layer && d.layerCount() > 1); // keep at least one layer
-    m_up->setEnabled(layer && index + 1 < d.layerCount());
-    m_down->setEnabled(layer && index > 0);
+    // Up and down while some selected layer can still go that way.
+    const QList<doc::LayerId> selected = selectedLayers();
+    bool canUp = false, canDown = false;
+    for (doc::LayerId id : selected) {
+        const int i = d.indexOf(id);
+        canUp = canUp || (i + 1 < d.layerCount() && !selected.contains(d.layerAt(i + 1).id()));
+        canDown = canDown || (i > 0 && !selected.contains(d.layerAt(i - 1).id()));
+    }
+    m_remove->setEnabled(layer && selected.size() < d.layerCount()); // keep at least one layer
+    m_up->setEnabled(layer && canUp);
+    m_down->setEnabled(layer && canDown);
     if (!layer)
         return;
 

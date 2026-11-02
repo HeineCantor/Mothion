@@ -17,6 +17,7 @@
 #include "ui/PanelDock.h"
 #include "ui/SelectionBar.h"
 #include "ui/panels/BrushSizePanel.h"
+#include "ui/panels/LayersPanel.h"
 #include "ui/SplashScreen.h"
 #include "ui/panels/ToolPalettePanel.h"
 #include "ui/panels/SubToolPanel.h"
@@ -39,6 +40,7 @@
 #include <QTabletEvent>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QToolButton>
 
 using namespace mothion;
 
@@ -805,6 +807,71 @@ private slots:
         QCOMPARE(qAlpha(pixel(915, 540)), 0);
         tool.commit();
         QCOMPARE(controller.undoText(), QStringLiteral("Undo transform"));
+    }
+
+    // Ctrl+click adds a layer to the selection, Shift+click a range; the
+    // header and the buttons then act on all of them, as one undo step.
+    void layersSelectWithCtrlAndShift()
+    {
+        document::DocumentController controller;
+        for (int i = 2; i <= 5; ++i) { // Layer 1..5, bottom to top
+            doc::Document &d = controller.documentForCommands();
+            controller.execute(std::make_unique<doc::AddLayerCommand>(
+                d, d.layerCount(), doc::LayerProperties{QStringLiteral("Layer %1").arg(i).toStdString()}));
+        }
+        ui::LayersPanel panel(&controller);
+        panel.resize(300, 500);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        QCoreApplication::processEvents(); // the queued rebuild
+        auto *list = panel.findChild<QListWidget *>();
+        const doc::Document &d = controller.document();
+        auto id = [&](int index) { return d.layerAt(index).id(); };
+        auto click = [&](int index, Qt::KeyboardModifiers mods) { // by layer index; rows are top first
+            const QRect r = list->visualItemRect(list->item(d.layerCount() - 1 - index));
+            QTest::mouseClick(list->viewport(), Qt::LeftButton, mods, r.center());
+        };
+
+        click(1, {});
+        QCOMPARE(controller.currentLayer(), id(1));
+        QCOMPARE(panel.selectedLayers(), QList<doc::LayerId>({id(1)}));
+        click(3, Qt::ControlModifier);
+        QCOMPARE(controller.currentLayer(), id(3));
+        QCOMPARE(panel.selectedLayers(), QList<doc::LayerId>({id(1), id(3)}));
+        click(0, Qt::ShiftModifier); // from the anchor (3) down to 0
+        QCOMPARE(panel.selectedLayers(), QList<doc::LayerId>({id(0), id(1), id(2), id(3)}));
+        click(2, Qt::ControlModifier); // and 2 out again
+        QCOMPARE(panel.selectedLayers(), QList<doc::LayerId>({id(0), id(1), id(3)}));
+
+        panel.findChild<QSpinBox *>()->setValue(40); // opacity for all three
+        for (int i : {0, 1, 3})
+            QCOMPARE(d.layerAt(i).properties().opacity, 0.4f);
+        QCOMPARE(d.layerAt(2).properties().opacity, 1.0f);
+        controller.undo();
+        QCOMPARE(d.layerAt(0).properties().opacity, 1.0f);
+        QCoreApplication::processEvents();
+
+        const doc::LayerId a = id(0), b = id(1), c = id(3), e = id(4), mid = id(2);
+        auto button = [&](const QString &tip) {
+            for (QToolButton *b : panel.findChildren<QToolButton *>())
+                if (b->toolTip() == tip)
+                    return b;
+            return static_cast<QToolButton *>(nullptr);
+        };
+        QTest::mouseClick(button(QStringLiteral("Move the selected layers up")), Qt::LeftButton);
+        QCoreApplication::processEvents();
+        QCOMPARE(d.indexOf(a), 1); // each one place up
+        QCOMPARE(d.indexOf(b), 2);
+        QCOMPARE(d.indexOf(c), 4);
+        QCOMPARE(d.indexOf(mid), 0);
+        QCOMPARE(d.indexOf(e), 3);
+        QCOMPARE(panel.selectedLayers().size(), 3); // still selected after the rebuild
+
+        QTest::mouseClick(button(QStringLiteral("Delete the selected layers")), Qt::LeftButton);
+        QCoreApplication::processEvents();
+        QCOMPARE(d.layerCount(), 2);
+        controller.undo();
+        QCOMPARE(d.layerCount(), 5);
     }
 
     // The ants march while there is a selection: the dashes swap in turns.
