@@ -18,8 +18,9 @@ class DocumentController;
 namespace mothion::canvas {
 
 // Moves the drawing at the current layer and frame by whole pixels, or only
-// its selected part when there is a selection (which then moves along).
-// One drag is one undo step; Shift keeps the move horizontal or vertical.
+// its selected part when there is a selection (which then moves along, live).
+// One drag is one undo step, selection included; Shift keeps the move
+// horizontal or vertical.
 class MoveTool : public CanvasTool
 {
 public:

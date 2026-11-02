@@ -80,11 +80,18 @@ QPainterPath SelectionTool::shapeSoFar() const
 
 void SelectionTool::paintOverlay(QPainter &painter, const ViewTransform &view) const
 {
-    if (m_active)
+    if (!m_active)
+        return;
+    if (m_shape == Shape::Lasso) { // open: the closing line only comes with the release
+        QPainterPath open;
+        open.addPolygon(m_lasso);
+        paintSelectionOutline(painter, view, open);
+    } else {
         paintSelectionOutline(painter, view, shapeSoFar());
+    }
 }
 
-void paintSelectionOutline(QPainter &painter, const ViewTransform &view, const QPainterPath &area)
+void paintSelectionOutline(QPainter &painter, const ViewTransform &view, const QPainterPath &area, int phase)
 {
     if (area.isEmpty())
         return;
@@ -96,6 +103,7 @@ void paintSelectionOutline(QPainter &painter, const ViewTransform &view, const Q
     painter.drawPath(onScreen);
     QPen dashes(Qt::black, 1, Qt::CustomDashLine);
     dashes.setDashPattern({4, 4});
+    dashes.setDashOffset(phase * 4); // a dash's length: black where white was
     painter.setPen(dashes);
     painter.drawPath(onScreen);
     painter.restore();

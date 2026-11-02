@@ -70,7 +70,9 @@ public:
 
     // --- selection ------------------------------------------------------------------
     // The selected area in document coordinates; empty = nothing selected
-    // (tools then act on the whole drawing). Not part of the undo history.
+    // (tools then act on the whole drawing). Every change is an undo step;
+    // one made during a paint (a move carrying it) is part of the paint's
+    // step: see endPaint().
     const QPainterPath &selection() const { return m_selection; }
     bool hasSelection() const { return !m_selection.isEmpty(); }
     void setSelection(const QPainterPath &area);
@@ -97,7 +99,9 @@ public:
     // Live pixel updates during the stroke.
     void notifyPainted(const QRect &docRect);
     // Records the stroke; `before` is the drawing image as it was at beginPaint().
-    void endPaint(const doc::TiledImage &before);
+    // If the selection changed meanwhile, that change is part of the same
+    // undo step. `kind` names the step ("Undo move").
+    void endPaint(const doc::TiledImage &before, doc::CommandKind kind = doc::CommandKind::Paint);
     // Abandons the stroke (the caller has already restored the pixels).
     void cancelPaint();
     bool isPainting() const { return m_paint.has_value(); }
@@ -127,6 +131,8 @@ signals:
 
 private:
     void interruptStroke();
+    // Sets the selection as is, recording nothing.
+    void assignSelection(const QPainterPath &area);
     void publish(const doc::ChangeSet &changes);
     void ensureValidCurrentLayer();
     static std::unique_ptr<doc::Document> makeDefaultDocument();
@@ -141,6 +147,7 @@ private:
     {
         PaintTarget target;
         std::unique_ptr<doc::Command> createdDrawing; // applied, not yet recorded
+        QPainterPath selectionBefore;
     };
     std::optional<PaintState> m_paint;
 };

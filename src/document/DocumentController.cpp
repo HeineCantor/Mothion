@@ -7,6 +7,7 @@
 #include "core/document/commands/PaintCommand.h"
 
 #include <algorithm>
+#include <functional>
 #include <vector>
 
 namespace mothion::document {
@@ -25,6 +26,41 @@ QRect boundsOf(const std::vector<doc::TileCoord> &tiles)
         r |= canvas::tileRect(c);
     return r;
 }
+
+// The selection as it was before and after a step: made, cleared, or carried
+// by a move. The selection lives in the controller, not in the document, so
+// the command sets it there through `assign`; it changes no pixels.
+class SelectionCommand : public doc::Command
+{
+public:
+    using Assign = std::function<void(const QPainterPath &)>;
+
+    SelectionCommand(doc::CommandKind kind, Assign assign, QPainterPath before, QPainterPath after)
+        : m_kind(kind)
+        , m_assign(std::move(assign))
+        , m_before(std::move(before))
+        , m_after(std::move(after))
+    {
+    }
+
+    doc::CommandKind kind() const override { return m_kind; }
+    doc::ChangeSet apply(doc::Document &) override
+    {
+        m_assign(m_after);
+        return {};
+    }
+    doc::ChangeSet revert(doc::Document &) override
+    {
+        m_assign(m_before);
+        return {};
+    }
+
+private:
+    doc::CommandKind m_kind;
+    Assign m_assign;
+    QPainterPath m_before;
+    QPainterPath m_after;
+};
 
 } // namespace
 
@@ -183,7 +219,21 @@ void DocumentController::setSelection(const QPainterPath &area)
         clipped = QPainterPath();
     if (clipped == m_selection)
         return;
-    m_selection = clipped;
+    if (m_paint) { // recorded with the paint, by endPaint()
+        assignSelection(clipped);
+        return;
+    }
+    QPainterPath before = m_selection;
+    assignSelection(clipped);
+    m_history.pushApplied(std::make_unique<SelectionCommand>(
+        doc::CommandKind::Select, [this](const QPainterPath &a) { assignSelection(a); }, std::move(before),
+        m_selection));
+    emit historyChanged();
+}
+
+void DocumentController::assignSelection(const QPainterPath &area)
+{
+    m_selection = area;
     emit selectionChanged();
 }
 
@@ -230,6 +280,8 @@ QString DocumentController::commandName(doc::CommandKind kind)
     case doc::CommandKind::ChangeLayerProperties: return tr("layer properties");
     case doc::CommandKind::ImportImage: return tr("import image");
     case doc::CommandKind::ClearDrawing: return tr("clear");
+    case doc::CommandKind::Move: return tr("move");
+    case doc::CommandKind::Select: return tr("selection");
     }
     return {};
 }
@@ -319,6 +371,7 @@ std::optional<DocumentController::PaintTarget> DocumentController::beginPaint(bo
         drawing = created.id;
     }
     state.target = {m_currentLayer, drawing, &layer->drawing(drawing)->image};
+    state.selectionBefore = m_selection;
     m_paint = std::move(state);
     return m_paint->target;
 }
@@ -329,29 +382,33 @@ void DocumentController::notifyPainted(const QRect &docRect)
         emit pixelsChanged(m_paint->target.layer, m_paint->target.drawing, docRect);
 }
 
-void DocumentController::endPaint(const doc::TiledImage &before)
+void DocumentController::endPaint(const doc::TiledImage &before, doc::CommandKind kind)
 {
     if (!m_paint)
         return;
     PaintState state = std::move(*m_paint);
     m_paint.reset();
 
+    // New drawing + stroke + selection change: one undo step.
+    std::vector<std::unique_ptr<doc::Command>> steps;
     auto paint = doc::PaintCommand::capture(state.target.layer, state.target.drawing, before, *state.target.image);
-    if (state.createdDrawing) {
-        if (!paint) { // nothing drawn: the drawing we created is not wanted
-            publish(state.createdDrawing->revert(*m_document));
-            return;
-        }
-        // New drawing + stroke: one undo step.
-        std::vector<std::unique_ptr<doc::Command>> steps;
-        steps.push_back(std::move(state.createdDrawing));
+    if (paint) {
+        if (state.createdDrawing)
+            steps.push_back(std::move(state.createdDrawing));
         steps.push_back(std::move(paint));
-        m_history.pushApplied(std::make_unique<doc::GroupCommand>(doc::CommandKind::Paint, std::move(steps)));
-    } else if (paint) {
-        m_history.pushApplied(std::move(paint));
-    } else {
-        return;
+    } else if (state.createdDrawing) { // nothing drawn: the drawing we created is not wanted
+        publish(state.createdDrawing->revert(*m_document));
     }
+    if (m_selection != state.selectionBefore)
+        steps.push_back(std::make_unique<SelectionCommand>(
+            doc::CommandKind::Move, [this](const QPainterPath &a) { assignSelection(a); }, state.selectionBefore,
+            m_selection));
+    if (steps.empty())
+        return;
+    if (steps.size() == 1 && steps.front()->kind() == kind)
+        m_history.pushApplied(std::move(steps.front()));
+    else
+        m_history.pushApplied(std::make_unique<doc::GroupCommand>(kind, std::move(steps)));
     emit historyChanged();
 }
 

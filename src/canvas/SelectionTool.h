@@ -12,7 +12,9 @@ class DocumentController;
 namespace mothion::canvas {
 
 // Draws a new selection: a rectangle (Shift: a square) or a free lasso
-// outline. A click without a drag clears the selection.
+// outline. A click without a drag clears the selection. The lasso is shown
+// open while drawn; on release it closes with a straight line back to the
+// start.
 class SelectionTool : public CanvasTool
 {
 public:
@@ -39,7 +41,8 @@ private:
     QPolygonF m_lasso;
 };
 
-// The selection outline as "marching ants" (dashed black and white).
-void paintSelectionOutline(QPainter &painter, const ViewTransform &view, const QPainterPath &area);
+// The selection outline as "marching ants" (dashed black and white); phase 1
+// swaps the black and white dashes.
+void paintSelectionOutline(QPainter &painter, const ViewTransform &view, const QPainterPath &area, int phase = 0);
 
 } // namespace mothion::canvas

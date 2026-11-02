@@ -68,6 +68,7 @@ void MoveTool::moveTo(QPoint offset)
         doc::TiledImage moved = s.rest;
         compositeOver(moved, s.floating.translated(offset.x(), offset.y()));
         *s.image = std::move(moved);
+        m_document->setSelection(s.selection.translated(offset)); // the outline follows live
     }
     m_document->notifyPainted(old | s.content.translated(offset));
 }
@@ -79,9 +80,8 @@ void MoveTool::release(const QPointF &docPos, Qt::KeyboardModifiers modifiers)
     move(docPos, modifiers);
     const Session s = std::move(*m_session);
     m_session.reset();
-    m_document->endPaint(s.before); // records nothing if it did not move
-    if (!s.selection.isEmpty() && !s.offset.isNull())
-        m_document->setSelection(s.selection.translated(s.offset));
+    // Pixels and selection in one undo step; nothing if it did not move.
+    m_document->endPaint(s.before, doc::CommandKind::Move);
 }
 
 void MoveTool::cancel()
@@ -91,6 +91,8 @@ void MoveTool::cancel()
     Session s = std::move(*m_session);
     m_session.reset();
     *s.image = s.before;
+    if (!s.selection.isEmpty())
+        m_document->setSelection(s.selection);
     m_document->notifyPainted(s.content.translated(s.offset) | s.content);
     m_document->cancelPaint();
 }

@@ -14,6 +14,7 @@
 #include <QPainter>
 #include <QRandomGenerator>
 #include <QTabletEvent>
+#include <QTimer>
 #include <QWheelEvent>
 
 #include <algorithm>
@@ -29,6 +30,8 @@ using tools::ToolState;
 namespace {
 constexpr double kZoomStep = 1.25;
 constexpr double kRotateStep = 15.0;
+// How often the selection outline's black and white dashes swap.
+constexpr int kAntsIntervalMs = 200;
 } // namespace
 
 CanvasView::CanvasView(ToolState *toolState, document::DocumentController *document, QWidget *parent)
@@ -64,11 +67,20 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
     connect(this, &CanvasView::deviceChanged, m_overlay, &DebugOverlay::setDevice);
 
     m_moveTool = std::make_unique<MoveTool>(m_document, [this](const QString &text) { emit statusMessage(text); });
-    m_rectSelectTool = std::make_unique<SelectionTool>(m_document, SelectionTool::Shape::Rectangle);
-    m_lassoSelectTool = std::make_unique<SelectionTool>(m_document, SelectionTool::Shape::Lasso);
+    m_rectSelectTool =
+        std::make_unique<SelectionTool>(m_document, SelectionTool::Shape::Rectangle);
+    m_lassoSelectTool =
+        std::make_unique<SelectionTool>(m_document, SelectionTool::Shape::Lasso);
     m_puppetTool = std::make_unique<PuppetTool>(
         m_document, m_toolState, [this](const QString &text) { emit statusMessage(text); }, [this] { update(); });
-    connect(m_document, &DocumentController::selectionChanged, this, qOverload<>(&QWidget::update));
+    m_antsTimer = new QTimer(this);
+    m_antsTimer->setInterval(kAntsIntervalMs);
+    connect(m_antsTimer, &QTimer::timeout, this, [this] {
+        m_antsPhase = 1 - m_antsPhase;
+        update();
+    });
+    connect(m_document, &DocumentController::selectionChanged, this, &CanvasView::updateAnts);
+    connect(m_document, &DocumentController::documentReplaced, this, &CanvasView::updateAnts);
 
     connect(m_toolState, &ToolState::activeToolChanged, this, &CanvasView::commitPendingEdits);
     connect(m_toolState, &ToolState::activeToolChanged, this, &CanvasView::updateCursor);
@@ -171,7 +183,7 @@ void CanvasView::paintEvent(QPaintEvent *)
     p.drawImage(QPointF(0, 0), m_frame.image()); // paper included
     p.restore();
 
-    paintSelectionOutline(p, m_view, m_document->selection());
+    paintSelectionOutline(p, m_view, m_document->selection(), m_antsPhase);
     if (const CanvasTool *tool = canvasTool()) {
         p.save();
         tool->paintOverlay(p, m_view);
@@ -577,6 +589,15 @@ void CanvasView::keyReleaseEvent(QKeyEvent *event)
         return;
     }
     QWidget::keyReleaseEvent(event);
+}
+
+void CanvasView::updateAnts()
+{
+    if (!m_document->hasSelection())
+        m_antsTimer->stop();
+    else if (!m_antsTimer->isActive())
+        m_antsTimer->start();
+    update();
 }
 
 bool *CanvasView::panKeyFlag(int key)

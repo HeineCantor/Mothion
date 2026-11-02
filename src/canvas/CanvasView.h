@@ -18,6 +18,7 @@
 #include <vector>
 
 class QPointingDevice;
+class QTimer;
 
 namespace mothion::document {
 class DocumentController;
@@ -50,6 +51,9 @@ public:
     const ViewTransform &view() const { return m_view; }
     // The document pixels as displayed (for thumbnails such as the navigator).
     const QImage &documentImage() const { return m_frame.image(); }
+    // The selection outline's ants march: black and white dashes swap at
+    // regular intervals while there is a selection. 0 or 1.
+    int selectionAntsPhase() const { return m_antsPhase; }
 
 public slots:
     void zoomIn();
@@ -158,6 +162,10 @@ private:
     bool panKeyHeld() const { return m_spaceHeld || m_tabHeld; }
     bool *panKeyFlag(int key); // the flag of a pan key, nullptr for other keys
     bool m_fittedOnce = false;
+    // Runs the ants while there is a selection, stops them otherwise.
+    void updateAnts();
+    QTimer *m_antsTimer;
+    int m_antsPhase = 0;
 };
 
 } // namespace mothion::canvas

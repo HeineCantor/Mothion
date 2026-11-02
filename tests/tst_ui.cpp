@@ -4,6 +4,7 @@
 #include "canvas/MoveTool.h"
 #include "canvas/PuppetTool.h"
 #include "canvas/SelectionTool.h"
+#include "canvas/ViewTransform.h"
 #include "core/document/commands/LayerCommands.h"
 #include "document/DocumentController.h"
 #include "io/ProjectFile.h"
@@ -22,6 +23,7 @@
 #include <QButtonGroup>
 #include <QComboBox>
 #include <QPaintEvent>
+#include <QPainter>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QElapsedTimer>
@@ -559,6 +561,145 @@ private slots:
         QCOMPARE(pixels.pixel(990, 540), doc::Pixel(0xff00ff00)); // right half stayed
         QCOMPARE(qAlpha(pixels.pixel(990, 640)), 0);
         QCOMPARE(controller.selection().boundingRect(), QRectF(900, 600, 60, 100)); // followed
+    }
+
+    // The selection follows the move while dragging, and the move is undone
+    // with it: pixels and selection in one step.
+    void moveCarriesTheSelectionLiveAndUndoesIt()
+    {
+        document::DocumentController controller;
+        QImage image(100, 10, QImage::Format_ARGB32);
+        image.fill(Qt::green);
+        controller.importImage(image, QStringLiteral("bar")); // x 910..1009, y 535..544
+        const doc::Layer &layer = controller.document().layerAt(1);
+        const doc::TiledImage &pixels = layer.drawing(layer.timing().drawingAt(0))->image;
+        QPainterPath left;
+        left.addRect(900, 500, 60, 100);
+        controller.setSelection(left);
+
+        canvas::MoveTool tool(&controller, [](const QString &) {});
+        tool.press({0, 0}, Qt::NoModifier);
+        tool.move({0, 50}, Qt::NoModifier);
+        QCOMPARE(controller.selection().boundingRect(), QRectF(900, 550, 60, 100)); // live
+        tool.release({0, 100}, Qt::NoModifier);
+        QCOMPARE(controller.selection().boundingRect(), QRectF(900, 600, 60, 100));
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo move"));
+
+        controller.undo();
+        QCOMPARE(controller.selection().boundingRect(), QRectF(900, 500, 60, 100));
+        QCOMPARE(pixels.pixel(930, 540), doc::Pixel(0xff00ff00));
+        controller.redo();
+        QCOMPARE(controller.selection().boundingRect(), QRectF(900, 600, 60, 100));
+        QCOMPARE(pixels.pixel(930, 640), doc::Pixel(0xff00ff00));
+
+        tool.press({0, 0}, Qt::NoModifier); // a cancelled move puts the selection back
+        tool.move({30, 0}, Qt::NoModifier);
+        QCOMPARE(controller.selection().boundingRect(), QRectF(930, 600, 60, 100));
+        tool.cancel();
+        QCOMPARE(controller.selection().boundingRect(), QRectF(900, 600, 60, 100));
+
+        QPainterPath empty; // over transparent pixels only the selection moves: still undoable
+        empty.addRect(100, 100, 50, 50);
+        controller.setSelection(empty);
+        tool.press({0, 0}, Qt::NoModifier);
+        tool.release({20, 0}, Qt::NoModifier);
+        QCOMPARE(controller.selection().boundingRect(), QRectF(120, 100, 50, 50));
+        controller.undo();
+        QCOMPARE(controller.selection().boundingRect(), QRectF(100, 100, 50, 50));
+    }
+
+    // While drawn the lasso is an open line; the release closes it.
+    void lassoShowsNoClosingLineWhileDrawn()
+    {
+        document::DocumentController controller;
+        canvas::SelectionTool lasso(&controller, canvas::SelectionTool::Shape::Lasso);
+        lasso.press({10, 10}, Qt::NoModifier);
+        lasso.move({90, 10}, Qt::NoModifier);
+        lasso.move({90, 90}, Qt::NoModifier);
+
+        const canvas::ViewTransform view;
+        QImage image(100, 100, QImage::Format_ARGB32_Premultiplied);
+        image.fill(Qt::transparent);
+        {
+            QPainter p(&image);
+            lasso.paintOverlay(p, view);
+        }
+        const QPoint onEdge = view.documentToView().map(QPointF(50, 10)).toPoint();
+        const QPoint onClosingLine = view.documentToView().map(QPointF(50, 50)).toPoint();
+        QVERIFY(qAlpha(image.pixel(onEdge)) > 0);
+        QCOMPARE(qAlpha(image.pixel(onClosingLine)), 0);
+
+        lasso.release({90, 90}, Qt::NoModifier);
+        QVERIFY(controller.selection().contains(QPointF(70, 30))); // closed: a triangle
+    }
+
+    // The ants march while there is a selection: the dashes swap in turns.
+    void selectionAntsMarch()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(400, 300);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        state.setActiveTool(tools::ToolId::LassoSelect);
+
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, QPoint(100, 100));
+        QTest::mouseMove(&canvas, QPoint(250, 100));
+        QTest::mouseMove(&canvas, QPoint(250, 220));
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, QPoint(250, 220));
+        QVERIFY(controller.hasSelection());
+        const int phase = canvas.selectionAntsPhase();
+        QTRY_VERIFY(canvas.selectionAntsPhase() != phase);
+        QTRY_VERIFY(canvas.selectionAntsPhase() == phase);
+
+        const canvas::ViewTransform view; // phase 1 is phase 0 with black and white swapped
+        QImage still(100, 100, QImage::Format_ARGB32), swapped(100, 100, QImage::Format_ARGB32);
+        QPainterPath line;
+        line.moveTo(10, 50);
+        line.lineTo(90, 50);
+        for (auto [image, ph] : {std::pair{&still, 0}, std::pair{&swapped, 1}}) {
+            image->fill(Qt::transparent);
+            QPainter p(image);
+            canvas::paintSelectionOutline(p, view, line, ph);
+        }
+        const int y = view.documentToView().map(QPointF(0, 50)).toPoint().y();
+        int swaps = 0;
+        for (int x = 0; x < 100; ++x)
+            if (qAlpha(still.pixel(x, y)) && still.pixel(x, y) != swapped.pixel(x, y))
+                ++swaps;
+        QVERIFY(swaps > 0);
+    }
+
+    // Making, changing and clearing a selection are undo steps.
+    void selectionChangesAreUndoable()
+    {
+        document::DocumentController controller;
+        QPainterPath box;
+        box.addRect(100, 100, 50, 50);
+        controller.setSelection(box);
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo selection"));
+        controller.selectAll();
+        controller.clearSelection();
+        QVERIFY(!controller.hasSelection());
+
+        controller.undo();
+        QCOMPARE(controller.selection().boundingRect(),
+                 QRectF(0, 0, controller.document().width(), controller.document().height()));
+        controller.undo();
+        QCOMPARE(controller.selection().boundingRect(), QRectF(100, 100, 50, 50));
+        controller.undo();
+        QVERIFY(!controller.hasSelection());
+        QVERIFY(!controller.canUndo());
+        controller.redo();
+        QCOMPARE(controller.selection().boundingRect(), QRectF(100, 100, 50, 50));
+
+        controller.setSelection(box); // the same selection again is no step
+        controller.clearSelection();
+        controller.undo();
+        QVERIFY(controller.canUndo());
+        controller.undo();
+        QVERIFY(!controller.canUndo());
     }
 
     void puppetWarpBendsTheDrawingInOneStep()
