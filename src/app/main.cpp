@@ -1,13 +1,20 @@
 // Entry point: input-related application attributes, command line,
-// application identity (used by QSettings), theme, main window.
+// application identity (used by QSettings), theme, splash, main window.
 
 #include "input/TabletBackend.h"
 #include "ui/MainWindow.h"
+#include "ui/SplashScreen.h"
 #include "ui/Theme.h"
 
 #include <QApplication>
 #include <QCommandLineParser>
+#include <QElapsedTimer>
 #include <QIcon>
+#include <QScreen>
+#include <QSplashScreen>
+#include <QTimer>
+
+#include <algorithm>
 
 int main(int argc, char *argv[])
 {
@@ -39,9 +46,21 @@ int main(int argc, char *argv[])
 
     mothion::ui::applySavedTheme(app);
 
+    // The splash stays up at least this long, so a fast start does not just flash it.
+    constexpr int kSplashMinimumMs = 1500;
+    QSplashScreen splash(mothion::ui::splashPixmap(QApplication::applicationVersion(),
+                                                   QGuiApplication::primaryScreen()->devicePixelRatio()));
+    splash.show();
+    QElapsedTimer shown;
+    shown.start();
+    QApplication::processEvents();
+
     mothion::ui::MainWindow window;
-    window.show();
-    if (!parser.positionalArguments().isEmpty())
-        window.openFile(parser.positionalArguments().constFirst());
+    QTimer::singleShot(std::max<qint64>(0, kSplashMinimumMs - shown.elapsed()), &window, [&] {
+        window.show();
+        splash.finish(&window);
+        if (!parser.positionalArguments().isEmpty())
+            window.openFile(parser.positionalArguments().constFirst());
+    });
     return app.exec();
 }

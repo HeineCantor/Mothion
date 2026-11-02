@@ -82,6 +82,7 @@ qt_add_library(mothion_gui STATIC
     ui/DockLayout.h ui/DockLayout.cpp
     ui/ExportDialog.h ui/ExportDialog.cpp
     ui/PanelDock.h ui/PanelDock.cpp
+    ui/SplashScreen.h ui/SplashScreen.cpp
     ui/IconFactory.h ui/IconFactory.cpp
     ui/Theme.h ui/Theme.cpp
     ui/panels/ToolPalettePanel.h ui/panels/ToolPalettePanel.cpp

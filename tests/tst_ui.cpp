@@ -11,6 +11,7 @@
 #include "ui/ExportDialog.h"
 #include "ui/MainWindow.h"
 #include "ui/PanelDock.h"
+#include "ui/SplashScreen.h"
 #include "ui/panels/ToolPalettePanel.h"
 #include "ui/panels/ToolPropertiesPanel.h"
 
@@ -217,6 +218,17 @@ private slots:
         QTest::keyClick(&palette, Qt::Key_B); // other tools do not toggle
         QTest::keyClick(&palette, Qt::Key_B);
         QCOMPARE(state.activeTool(), tools::ToolId::Brush);
+    }
+
+    // The splash is drawn sharp on HiDPI screens and finds the logo in the resources.
+    void splashShowsTheLogo()
+    {
+        const QPixmap splash = ui::splashPixmap(QStringLiteral("1.2.3"), 2.0);
+        QCOMPARE(splash.deviceIndependentSize().toSize(), QSize(600, 340));
+        QCOMPARE(splash.size(), QSize(1200, 680));
+        const QImage image = splash.toImage();
+        const QColor background = image.pixelColor(4, image.height() / 2);
+        QVERIFY(image.pixelColor(2 * (24 + 140), 2 * 170) != background); // the logo's body
     }
 
     // Holding Tab turns the pen into the hand, like Space; Tab stays on the
