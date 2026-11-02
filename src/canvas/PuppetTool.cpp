@@ -10,6 +10,7 @@
 #include <QPalette>
 #include <QApplication>
 
+#include <algorithm>
 #include <cmath>
 
 namespace mothion::canvas {
@@ -101,7 +102,7 @@ bool PuppetTool::start(bool quiet)
     }
     s->shown = area;
     m_session = std::move(s);
-    m_selectedPin.reset();
+    clearSelection();
     return true;
 }
 
@@ -165,7 +166,7 @@ bool PuppetTool::undoStep()
     s.redo.push_back(s.rig->state());
     s.rig->restore(s.undo.back());
     s.undo.pop_back();
-    m_selectedPin.reset();
+    clearSelection();
     show();
     m_repaint();
     return true;
@@ -179,10 +180,34 @@ bool PuppetTool::redoStep()
     s.undo.push_back(s.rig->state());
     s.rig->restore(s.redo.back());
     s.redo.pop_back();
-    m_selectedPin.reset();
+    clearSelection();
     show();
     m_repaint();
     return true;
+}
+
+void PuppetTool::clearSelection()
+{
+    m_selectedPins.clear();
+    m_localPoints.clear();
+}
+
+std::optional<std::size_t> PuppetTool::pickedPointAt(puppet::Vec2 at) const
+{
+    for (std::size_t i = 0; i < m_localPoints.size(); ++i)
+        if (puppet::length(m_session->rig->position(m_localPoints[i]) - at) <= kGrabRadius / m_zoom)
+            return i;
+    return std::nullopt;
+}
+
+void PuppetTool::startPinDrag(puppet::Vec2 at)
+{
+    m_dragPins = m_selectedPins;
+    m_dragStarts.clear();
+    for (int pin : m_dragPins)
+        m_dragStarts.push_back(m_session->rig->pins()[std::size_t(pin)].position);
+    m_pressAt = at;
+    m_draggingPins = true;
 }
 
 void PuppetTool::press(const QPointF &docPos, Qt::KeyboardModifiers modifiers)
@@ -196,9 +221,27 @@ void PuppetTool::press(const QPointF &docPos, Qt::KeyboardModifiers modifiers)
     puppet::PuppetRig &rig = *m_session->rig;
     const puppet::Vec2 at{docPos.x(), docPos.y()};
     const tools::PuppetSettings settings = m_toolState->puppetSettings();
+    const bool extend = modifiers & (Qt::ShiftModifier | Qt::ControlModifier);
+
     if (settings.local) {
-        m_selectedPin.reset();
-        m_localDrag = rig.beginLocalDrag(at, settings.radius);
+        m_selectedPins.clear();
+        if (extend) { // pick a point, or drop a picked one
+            m_session->stepStart.reset();
+            if (const auto picked = pickedPointAt(at))
+                m_localPoints.erase(m_localPoints.begin() + std::ptrdiff_t(*picked));
+            else if (const auto v = rig.vertexAt(at))
+                m_localPoints.push_back(*v);
+            else
+                m_status(QObject::tr("Shift+click on the drawing to pick a point"));
+            m_repaint();
+            return;
+        }
+        if (pickedPointAt(at)) {
+            m_localDrag = rig.beginLocalDrag(m_localPoints, at, settings.radius);
+        } else {
+            m_localPoints.clear();
+            m_localDrag = rig.beginLocalDrag(at, settings.radius);
+        }
         if (!m_localDrag) {
             m_session->stepStart.reset();
             m_status(QObject::tr("Drag on the drawing to bend it"));
@@ -206,23 +249,39 @@ void PuppetTool::press(const QPointF &docPos, Qt::KeyboardModifiers modifiers)
         m_repaint();
         return;
     }
+
+    m_localPoints.clear();
     if (const auto pin = rig.pinAt(at, kGrabRadius / m_zoom)) {
         if (modifiers & Qt::AltModifier) {
             m_session->stepChanged = true;
             endStep();
             rig.removePin(*pin);
-            m_selectedPin.reset();
+            m_selectedPins.clear(); // the indices after it moved down
             if (m_session->changed)
                 render();
             m_repaint();
             return;
         }
-        m_dragPin = m_selectedPin = *pin;
-        m_grabOffset = rig.pins()[std::size_t(*pin)].position - at;
+        const auto selected = std::find(m_selectedPins.begin(), m_selectedPins.end(), *pin);
+        if (extend && selected != m_selectedPins.end()) { // taken out: nothing to drag
+            m_selectedPins.erase(selected);
+            m_session->stepStart.reset();
+            m_repaint();
+            return;
+        }
+        if (extend)
+            m_selectedPins.push_back(*pin);
+        else if (selected == m_selectedPins.end())
+            m_selectedPins = {*pin};
+        startPinDrag(at);
     } else if (const auto added = rig.addPin(at)) {
-        m_dragPin = m_selectedPin = *added;
-        m_grabOffset = {};
         m_session->stepChanged = true; // a new pin is a step, even unmoved
+        if (extend) {
+            m_selectedPins.push_back(*added);
+        } else {
+            m_selectedPins = {*added};
+            startPinDrag(at);
+        }
     } else {
         m_session->stepStart.reset();
         m_status(QObject::tr("Click on the drawing to place a pin"));
@@ -239,12 +298,21 @@ void PuppetTool::move(const QPointF &docPos, Qt::KeyboardModifiers)
         render();
         return;
     }
-    if (!m_session || !m_dragPin)
+    if (!m_session || !m_draggingPins)
         return;
-    m_session->rig->movePin(*m_dragPin, puppet::Vec2{docPos.x(), docPos.y()} + m_grabOffset, kDragIterations);
+    moveDraggedPins(docPos, kDragIterations);
     m_dragMoved = true;
     m_session->stepChanged = true;
     render();
+}
+
+void PuppetTool::moveDraggedPins(const QPointF &pen, int iterations)
+{
+    const puppet::Vec2 travel = puppet::Vec2{pen.x(), pen.y()} - m_pressAt;
+    std::vector<puppet::Vec2> to;
+    for (const puppet::Vec2 &start : m_dragStarts)
+        to.push_back(start + travel);
+    m_session->rig->movePins(m_dragPins, to, iterations);
 }
 
 void PuppetTool::release(const QPointF &docPos, Qt::KeyboardModifiers)
@@ -258,13 +326,13 @@ void PuppetTool::release(const QPointF &docPos, Qt::KeyboardModifiers)
         endStep();
         return;
     }
-    if (!m_session || !m_dragPin)
+    if (!m_session || !m_draggingPins)
         return;
     if (m_dragMoved) { // settle the shape where the pen left it
-        m_session->rig->movePin(*m_dragPin, puppet::Vec2{docPos.x(), docPos.y()} + m_grabOffset, kSettleIterations);
+        moveDraggedPins(docPos, kSettleIterations);
         render();
     }
-    m_dragPin.reset();
+    m_draggingPins = false;
     m_dragMoved = false;
     endStep();
 }
@@ -275,8 +343,8 @@ void PuppetTool::commit()
     if (!m_session)
         return;
     const std::unique_ptr<Session> s = std::move(m_session);
-    m_dragPin.reset();
-    m_selectedPin.reset();
+    m_draggingPins = false;
+    clearSelection();
     if (s->changed)
         m_document->endPaint(s->before);
     else
@@ -290,8 +358,8 @@ void PuppetTool::cancel()
     if (!m_session)
         return;
     const std::unique_ptr<Session> s = std::move(m_session);
-    m_dragPin.reset();
-    m_selectedPin.reset();
+    m_draggingPins = false;
+    clearSelection();
     *s->image = s->before;
     m_document->notifyPainted(s->shown | boundsOf(s->before));
     m_document->cancelPaint();
@@ -316,10 +384,13 @@ bool PuppetTool::keyPress(int key)
     case Qt::Key_Escape: cancel(); return true;
     case Qt::Key_Delete:
     case Qt::Key_Backspace:
-        if (m_selectedPin && !m_dragPin) {
+        if (!m_selectedPins.empty() && !m_draggingPins) {
             pushStep(m_session->rig->state());
-            m_session->rig->removePin(*m_selectedPin);
-            m_selectedPin.reset();
+            std::vector<int> pins = m_selectedPins; // from the last, so the others keep their index
+            std::sort(pins.rbegin(), pins.rend());
+            for (int pin : pins)
+                m_session->rig->removePin(pin);
+            m_selectedPins.clear();
             if (m_session->changed)
                 render();
             m_repaint();
@@ -357,9 +428,7 @@ std::optional<QPointF> PuppetTool::grabPoint() const
 {
     if (!m_session || !m_pointerKnown)
         return std::nullopt;
-    const puppet::PuppetRig &rig = *m_session->rig;
-    const auto at = rig.isLocalDragging() ? rig.localDragPoint()
-                                          : rig.localGrabPoint({m_pointer.x(), m_pointer.y()});
+    const auto at = m_session->rig->localGrabPoint({m_pointer.x(), m_pointer.y()});
     if (!at)
         return std::nullopt;
     return QPointF(at->x, at->y);
@@ -385,10 +454,14 @@ void PuppetTool::stepRadius(double steps)
 void PuppetTool::settingsChanged()
 {
     m_repaint(); // the mesh may be shown or hidden
-    if (!m_session || m_dragPin || m_localDrag)
+    if (!m_session || isActive())
         return;
-    m_session->rig->setSettings(rigSettings(m_toolState->puppetSettings()));
-    m_selectedPin.reset();
+    const puppet::RigSettings now = rigSettings(m_toolState->puppetSettings());
+    const puppet::RigSettings was = m_session->rig->settings();
+    if (now.density == was.density && now.expand == was.expand)
+        return; // the radius, the mode, the mesh shown: nothing to remesh
+    m_session->rig->setSettings(now);
+    m_localPoints.clear(); // their vertices are gone
     if (m_session->changed)
         render();
 }
@@ -397,22 +470,44 @@ void PuppetTool::paintOverlay(QPainter &painter, const ViewTransform &view) cons
 {
     const QTransform toView = view.documentToView();
     painter.setRenderHint(QPainter::Antialiasing);
-    // Radius mode: the point a drag takes (or has taken) and the disc that
-    // bends with it; off the drawing, just the radius around the pen.
+    // Radius mode: the points a drag takes (or has taken), each with the disc
+    // that bends with it; off the drawing, just the radius around the pen.
     if (m_toolState->puppetSettings().local && m_pointerKnown) {
-        const std::optional<QPointF> grab = grabPoint();
         const double r = m_toolState->puppetSettings().radius * view.zoom();
-        const QPointF c = toView.map(grab.value_or(m_pointer));
-        painter.setBrush(Qt::NoBrush);
-        painter.setPen(QPen(QColor(0, 0, 0, 160), 1.0));
-        painter.drawEllipse(c, r, r);
-        painter.setPen(QPen(QColor(255, 255, 255, 160), 1.0));
-        painter.drawEllipse(c, r - 1, r - 1);
-        if (grab) {
-            const QPalette &palette = QApplication::palette();
+        struct Mark
+        {
+            QPointF at;
+            bool taken; // picked or being dragged, not just under the pen
+        };
+        std::vector<Mark> marks;
+        if (m_session && m_session->rig->isLocalDragging()) {
+            for (const puppet::Vec2 &p : m_session->rig->localDragPoints())
+                marks.push_back({QPointF(p.x, p.y), true});
+        } else if (m_session) {
+            for (const auto &v : m_localPoints) {
+                const puppet::Vec2 p = m_session->rig->position(v);
+                marks.push_back({QPointF(p.x, p.y), true});
+            }
+            const std::optional<QPointF> hovered = grabPoint();
+            if (hovered && !pickedPointAt({m_pointer.x(), m_pointer.y()}))
+                marks.push_back({*hovered, false});
+        }
+        auto circle = [&](QPointF c) {
+            painter.setBrush(Qt::NoBrush);
+            painter.setPen(QPen(QColor(0, 0, 0, 160), 1.0));
+            painter.drawEllipse(c, r, r);
+            painter.setPen(QPen(QColor(255, 255, 255, 160), 1.0));
+            painter.drawEllipse(c, r - 1, r - 1);
+        };
+        if (marks.empty())
+            circle(toView.map(m_pointer));
+        for (const Mark &m : marks)
+            circle(toView.map(m.at));
+        const QPalette &palette = QApplication::palette();
+        for (const Mark &m : marks) {
             painter.setPen(QPen(Qt::black, 1.5));
-            painter.setBrush(m_localDrag ? palette.color(QPalette::Highlight) : QColor(Qt::white));
-            painter.drawEllipse(c, kPinRadius, kPinRadius);
+            painter.setBrush(m.taken ? palette.color(QPalette::Highlight) : QColor(Qt::white));
+            painter.drawEllipse(toView.map(m.at), kPinRadius, kPinRadius);
         }
     }
     if (!m_session)
@@ -437,7 +532,7 @@ void PuppetTool::paintOverlay(QPainter &painter, const ViewTransform &view) cons
 
     const auto &pins = m_session->rig->pins();
     for (std::size_t p = 0; p < pins.size(); ++p) {
-        const bool selected = m_selectedPin && *m_selectedPin == int(p);
+        const bool selected = std::find(m_selectedPins.begin(), m_selectedPins.end(), int(p)) != m_selectedPins.end();
         painter.setPen(QPen(Qt::black, 1.5));
         painter.setBrush(selected ? palette.color(QPalette::Highlight) : QColor(Qt::white));
         painter.drawEllipse(map(pins[p].position), kPinRadius, kPinRadius);

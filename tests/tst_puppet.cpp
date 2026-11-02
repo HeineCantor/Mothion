@@ -224,6 +224,38 @@ private slots:
         QVERIFY(std::abs(mesh.deformed[std::size_t(p.vertex)].y - 40.0) < 1e-6);
     }
 
+    // Several grabbed points move together, each bending its own disc; and
+    // several pins can be moved at once.
+    void localDragTakesSeveralPointsAndPinsMoveTogether()
+    {
+        Bitmask m(0, 0, 220, 60);
+        for (int y = 20; y < 40; ++y)
+            for (int x = 10; x < 210; ++x)
+                m.set(x, y, true); // a long bar
+        PuppetRig rig(m, {2, 3});
+        const auto left = rig.vertexAt({30, 30}), right = rig.vertexAt({190, 30});
+        QVERIFY(left && right);
+        QVERIFY(rig.beginLocalDrag({*left, *right}, {30, 30}, 30));
+        rig.localDragTo({30, 60}, 30); // both ends down by 30
+        QCOMPARE(rig.localDragPoints().size(), std::size_t(2));
+        rig.endLocalDrag();
+        QVERIFY(rig.position(*left).y > 50); // both went down (a disc gives a little)
+        QVERIFY(rig.position(*right).y > 50);
+        const auto &mesh = rig.meshes()[0];
+        for (std::size_t v = 0; v < mesh.rest.vertices.size(); ++v)
+            if (std::abs(mesh.rest.vertices[v].x - 110) < 40) // the middle, far from both discs
+                QVERIFY(length(mesh.deformed[v] - mesh.rest.vertices[v]) < 1e-9);
+
+        PuppetRig pinned(m, {2, 3});
+        const int a = *pinned.addPin({20, 30}), b = *pinned.addPin({110, 30}), c = *pinned.addPin({200, 30});
+        pinned.movePins({b, c}, {{110, 50}, {200, 50}}, 30);
+        QCOMPARE(pinned.pins()[std::size_t(a)].position.y, 30.0);
+        QCOMPARE(pinned.pins()[std::size_t(b)].position.y, 50.0);
+        QCOMPARE(pinned.pins()[std::size_t(c)].position.y, 50.0);
+        const auto &bent = pinned.meshes()[0];
+        QVERIFY(std::abs(bent.deformed[std::size_t(pinned.pins()[std::size_t(c)].vertex)].y - 50.0) < 1e-6);
+    }
+
     void warpDrawsTheShapeWhereItMoved()
     {
         Bitmask m(0, 0, 40, 40);

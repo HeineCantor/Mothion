@@ -198,53 +198,82 @@ std::size_t PuppetRig::nearestVertex(int mesh, Vec2 at) const
     return nearest;
 }
 
-std::optional<Vec2> PuppetRig::localGrabPoint(Vec2 at) const
+std::optional<PuppetRig::VertexRef> PuppetRig::vertexAt(Vec2 at) const
 {
     const auto under = restPointUnder(at);
     if (!under)
         return std::nullopt;
-    return m_meshes[std::size_t(under->first)].deformed[nearestVertex(under->first, at)];
+    return VertexRef{under->first, int(nearestVertex(under->first, at))};
 }
 
-std::optional<Vec2> PuppetRig::localDragPoint() const
+std::optional<Vec2> PuppetRig::localGrabPoint(Vec2 at) const
 {
-    if (!m_local)
-        return std::nullopt;
-    return m_meshes[std::size_t(m_local->mesh)].deformed[std::size_t(m_local->vertex)];
+    const auto v = vertexAt(at);
+    return v ? std::optional<Vec2>(position(*v)) : std::nullopt;
+}
+
+std::vector<Vec2> PuppetRig::localDragPoints() const
+{
+    std::vector<Vec2> points;
+    if (m_local)
+        for (const LocalDrag::Part &part : m_local->parts)
+            for (const LocalDrag::Grabbed &g : part.grabbed)
+                points.push_back(m_meshes[std::size_t(part.mesh)].deformed[std::size_t(g.vertex)]);
+    return points;
 }
 
 bool PuppetRig::beginLocalDrag(Vec2 at, double radius)
 {
-    endLocalDrag();
-    const auto under = restPointUnder(at);
-    if (!under)
-        return false;
-    Mesh &mesh = m_meshes[std::size_t(under->first)];
-    const std::size_t grabbed = nearestVertex(under->first, at);
-    const Vec2 centre = mesh.deformed[grabbed];
+    const auto v = vertexAt(at);
+    return v && beginLocalDrag({*v}, at, radius);
+}
 
-    // Held: the pins, and every vertex out of the disc, where they are now.
+bool PuppetRig::beginLocalDrag(const std::vector<VertexRef> &grabbed, Vec2 at, double radius)
+{
+    endLocalDrag();
     LocalDrag drag;
-    drag.mesh = under->first;
-    drag.vertex = int(grabbed);
-    std::vector<int> handles;
-    pinHandles(drag.mesh, handles, drag.targets);
-    for (std::size_t v = 0; v < mesh.deformed.size(); ++v)
-        if (v != grabbed && length(mesh.deformed[v] - centre) > radius
-            && std::find(handles.begin(), handles.end(), int(v)) == handles.end()) {
-            handles.push_back(int(v));
-            drag.targets.push_back(mesh.deformed[v]);
+    drag.pressedAt = at;
+    for (std::size_t m = 0; m < m_meshes.size(); ++m) {
+        std::vector<int> mine;
+        for (const VertexRef &g : grabbed)
+            if (g.mesh == int(m) && g.vertex >= 0 && g.vertex < int(m_meshes[m].deformed.size())
+                && std::find(mine.begin(), mine.end(), g.vertex) == mine.end())
+                mine.push_back(g.vertex);
+        if (mine.empty())
+            continue;
+        Mesh &mesh = m_meshes[m];
+        auto inADisc = [&](std::size_t v) {
+            for (int g : mine)
+                if (length(mesh.deformed[v] - mesh.deformed[std::size_t(g)]) <= radius)
+                    return true;
+            return false;
+        };
+
+        // Held: the pins, and every vertex out of the discs, where they are now.
+        LocalDrag::Part part;
+        part.mesh = int(m);
+        std::vector<int> handles;
+        pinHandles(part.mesh, handles, part.targets);
+        for (std::size_t v = 0; v < mesh.deformed.size(); ++v)
+            if (!inADisc(v) && std::find(handles.begin(), handles.end(), int(v)) == handles.end()) {
+                handles.push_back(int(v));
+                part.targets.push_back(mesh.deformed[v]);
+            }
+        for (int g : mine) {
+            // A pinned vertex is already a handle: it moves, its pin with it.
+            auto slot = std::find(handles.begin(), handles.end(), g);
+            if (slot == handles.end()) {
+                handles.push_back(g);
+                part.targets.push_back(mesh.deformed[std::size_t(g)]);
+                slot = handles.end() - 1;
+            }
+            part.grabbed.push_back({g, std::size_t(slot - handles.begin()), mesh.deformed[std::size_t(g)]});
         }
-    const auto pinned = std::find(handles.begin(), handles.end(), int(grabbed));
-    if (pinned != handles.end()) { // a pinned vertex: it moves, its pin with it
-        drag.grabbed = std::size_t(pinned - handles.begin());
-    } else {
-        drag.grabbed = handles.size();
-        handles.push_back(int(grabbed));
-        drag.targets.push_back(centre);
+        mesh.deformer->setHandles(handles);
+        drag.parts.push_back(std::move(part));
     }
-    drag.offset = centre - at;
-    mesh.deformer->setHandles(handles);
+    if (drag.parts.empty())
+        return false;
     m_local = std::move(drag);
     return true;
 }
@@ -253,25 +282,32 @@ void PuppetRig::localDragTo(Vec2 to, int iterations)
 {
     if (!m_local)
         return;
-    Mesh &mesh = m_meshes[std::size_t(m_local->mesh)];
-    const Vec2 target = to + m_local->offset;
-    m_local->targets[m_local->grabbed] = target;
-    for (Pin &p : m_pins) // a grabbed pin goes along
-        if (p.mesh == m_local->mesh && p.vertex == m_local->vertex)
-            p.position = target;
-    mesh.deformer->solve(mesh.deformed, m_local->targets, iterations);
+    const Vec2 travel = to - m_local->pressedAt;
+    for (LocalDrag::Part &part : m_local->parts) {
+        for (const LocalDrag::Grabbed &g : part.grabbed) {
+            const Vec2 target = g.start + travel;
+            part.targets[g.handle] = target;
+            for (Pin &p : m_pins) // a grabbed pin goes along
+                if (p.mesh == part.mesh && p.vertex == g.vertex)
+                    p.position = target;
+        }
+        Mesh &mesh = m_meshes[std::size_t(part.mesh)];
+        mesh.deformer->solve(mesh.deformed, part.targets, iterations);
+    }
 }
 
 void PuppetRig::endLocalDrag()
 {
     if (!m_local)
         return;
-    const int index = m_local->mesh;
+    const LocalDrag drag = std::move(*m_local);
     m_local.reset();
-    std::vector<int> handles;
-    std::vector<Vec2> targets;
-    pinHandles(index, handles, targets);
-    m_meshes[std::size_t(index)].deformer->setHandles(handles);
+    for (const LocalDrag::Part &part : drag.parts) {
+        std::vector<int> handles;
+        std::vector<Vec2> targets;
+        pinHandles(part.mesh, handles, targets);
+        m_meshes[std::size_t(part.mesh)].deformer->setHandles(handles);
+    }
 }
 
 std::optional<std::pair<int, Vec2>> PuppetRig::restPointUnder(Vec2 at) const
@@ -318,6 +354,26 @@ void PuppetRig::movePin(int pin, Vec2 to, int iterations)
             targets.push_back(p.position);
         }
     mesh.deformer->solve(mesh.deformed, targets, iterations);
+}
+
+void PuppetRig::movePins(const std::vector<int> &pins, const std::vector<Vec2> &to, int iterations)
+{
+    std::vector<int> meshes;
+    for (std::size_t i = 0; i < pins.size() && i < to.size(); ++i) {
+        if (pins[i] < 0 || pins[i] >= int(m_pins.size()))
+            continue;
+        Pin &p = m_pins[std::size_t(pins[i])];
+        p.position = to[i];
+        if (std::find(meshes.begin(), meshes.end(), p.mesh) == meshes.end())
+            meshes.push_back(p.mesh);
+    }
+    for (int index : meshes) {
+        std::vector<int> handles;
+        std::vector<Vec2> targets;
+        pinHandles(index, handles, targets);
+        Mesh &mesh = m_meshes[std::size_t(index)];
+        mesh.deformer->solve(mesh.deformed, targets, iterations);
+    }
 }
 
 std::optional<int> PuppetRig::pinAt(Vec2 at, double radius) const

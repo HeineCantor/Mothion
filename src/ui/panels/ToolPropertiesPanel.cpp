@@ -196,10 +196,12 @@ void ToolPropertiesPanel::syncPuppetFromState()
     m_puppetRadius->setValue(int(std::lround(s.radius)));
     m_puppetRadius->setEnabled(s.local);
     m_puppetHelp->setText(s.local ? tr("Drag the drawing to bend it: what lies within the radius follows,\n"
-                                       "the rest stays. The mouse wheel changes the radius.\n"
+                                       "the rest stays. Shift+click picks more points to move together.\n"
+                                       "The mouse wheel or + and − change the radius.\n"
                                        "Enter applies, Esc cancels.")
                                   : tr("Click the drawing to add pins, drag a pin to deform.\n"
-                                       "Alt+click or Delete removes a pin.\n"
+                                       "Shift+click selects more pins to move together.\n"
+                                       "Alt+click removes a pin, Delete the selected ones.\n"
                                        "Enter applies, Esc cancels."));
     m_meshDensity->setCurrentIndex(s.density);
     m_meshExpand->setValue(s.expand);

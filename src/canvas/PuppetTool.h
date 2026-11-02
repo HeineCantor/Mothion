@@ -31,12 +31,17 @@ namespace mothion::canvas {
 // The warp stays open across clicks; Enter, another tool, a frame or layer
 // change, or undo once there is nothing left to undo in it applies it as one
 // undo step, Esc drops it. While it is open undo and redo go through its own
-// steps (each drag, pin added or removed). Alt+click or Delete removes a pin.
+// steps (each drag, pin added or removed). Alt+click removes a pin.
+// Shift (or Ctrl) + click adds a pin to the selected ones or takes it out,
+// on the drawing places one more; dragging a selected pin moves all of
+// them together. Delete removes the selected pins.
 //
 // In local mode (PuppetSettings::local) there are no pins to place: all of
 // the shape is held, a drag moves the point under the pen and bends what
-// lies within the radius around it. The wheel, or + and −, sizes the
-// radius, shown as a circle around the point a drag would take.
+// lies within the radius around it. Shift (or Ctrl) + click picks several
+// points, a drag from one of them moves them all, each bending its disc.
+// The wheel, or + and −, sizes the radius, shown as a circle around the
+// points a drag would take.
 class PuppetTool : public CanvasTool
 {
 public:
@@ -48,7 +53,7 @@ public:
     void move(const QPointF &docPos, Qt::KeyboardModifiers modifiers) override;
     void release(const QPointF &docPos, Qt::KeyboardModifiers modifiers) override;
     void cancel() override;
-    bool isActive() const override { return m_dragPin.has_value() || m_localDrag; }
+    bool isActive() const override { return m_draggingPins || m_localDrag; }
     bool hasPendingEdit() const override { return m_session != nullptr; }
     void commit() override;
     bool keyPress(int key) override;
@@ -57,6 +62,9 @@ public:
     bool hover(const QPointF &docPos) override;
     // Pins placed in the open warp.
     std::size_t pinCount() const { return m_session ? m_session->rig->pins().size() : 0; }
+    // Pins selected, and in radius mode the points picked, to move together.
+    const std::vector<int> &selectedPins() const { return m_selectedPins; }
+    std::size_t pickedPointCount() const { return m_localPoints.size(); }
     bool undoStep() override;
     bool redoStep() override;
     bool canUndoStep() const override { return m_session && !m_session->undo.empty() && !isActive(); }
@@ -70,8 +78,14 @@ private:
     // Radius mode shows what a drag would take before the first one: the
     // mesh is made as soon as it is needed, once per failed try.
     void startForPreview();
-    // The point a drag would take (dragging: the one taken), document coordinates.
+    // The point a drag would take, document coordinates.
     std::optional<QPointF> grabPoint() const;
+    // A picked point (radius mode) within grabbing distance of `at`.
+    std::optional<std::size_t> pickedPointAt(puppet::Vec2 at) const;
+    void startPinDrag(puppet::Vec2 at);
+    // The dragged pins, each moved by the pen's travel since the press.
+    void moveDraggedPins(const QPointF &pen, int iterations);
+    void clearSelection(); // pins and picked points: their indices may be gone
     // Radius mode: the radius times 1.15 per step (down for negative ones).
     void stepRadius(double steps);
     void render();
@@ -105,10 +119,15 @@ private:
     // Draws the rig, or the drawing as it was when the rig is undeformed.
     void show();
     std::unique_ptr<Session> m_session;
-    std::optional<int> m_dragPin;
+    // Pins mode: the selected pins, and the drag of them in progress.
+    std::vector<int> m_selectedPins;
+    bool m_draggingPins = false;
     bool m_dragMoved = false;
-    puppet::Vec2 m_grabOffset;  // pin position − pen position at the press
-    std::optional<int> m_selectedPin;
+    std::vector<int> m_dragPins;
+    std::vector<puppet::Vec2> m_dragStarts; // where each was at the press
+    puppet::Vec2 m_pressAt;
+    // Radius mode: the points picked to move together, and the drag.
+    std::vector<puppet::PuppetRig::VertexRef> m_localPoints;
     bool m_localDrag = false;
     QPointF m_pointer; // last pen position, for the radius circle
     bool m_pointerKnown = false;

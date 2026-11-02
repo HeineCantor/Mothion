@@ -47,6 +47,7 @@ public:
     const std::vector<Mesh> &meshes() const { return m_meshes; }
     const std::vector<Pin> &pins() const { return m_pins; }
     bool isEmpty() const { return m_meshes.empty(); }
+    RigSettings settings() const { return m_settings; }
     // Whether any vertex is away from its rest position (by more than 1/1000 px).
     bool isDeformed() const;
 
@@ -55,22 +56,37 @@ public:
     void removePin(int pin);
     // Moves a pin and solves its mesh (`iterations` ARAP steps from the current state).
     void movePin(int pin, Vec2 to, int iterations = 8);
+    // Moves several pins, each to its place, and solves each of their meshes once.
+    void movePins(const std::vector<int> &pins, const std::vector<Vec2> &to, int iterations = 8);
     // The pin within `radius` of `at` (nearest), if any.
     std::optional<int> pinAt(Vec2 at, double radius) const;
 
-    // Local warp: the whole shape held except a disc of `radius` around the
-    // mesh vertex nearest `at`, which follows the pen; the disc bends with
-    // it (ARAP), pins stay put. Starts a drag; false if no mesh is at `at`.
+    // A vertex of one of the meshes.
+    struct VertexRef
+    {
+        int mesh = -1;
+        int vertex = -1;
+        bool operator==(const VertexRef &) const = default;
+    };
+    // The vertex nearest `at` on the mesh the deformed shape has there, if any.
+    std::optional<VertexRef> vertexAt(Vec2 at) const;
+    Vec2 position(VertexRef v) const { return m_meshes[std::size_t(v.mesh)].deformed[std::size_t(v.vertex)]; }
+
+    // Local warp: the whole shape held except a disc of `radius` around each
+    // grabbed vertex; they follow the pen together, the discs bend with them
+    // (ARAP), pins stay put unless grabbed. Starts a drag with the pen at `at`.
+    bool beginLocalDrag(const std::vector<VertexRef> &grabbed, Vec2 at, double radius);
+    // The same with the vertex under `at`; false if no mesh is there.
     bool beginLocalDrag(Vec2 at, double radius);
-    // Where the pen is now; the grabbed point keeps its offset from it.
+    // Where the pen is now: each grabbed vertex moved by the pen's travel.
     void localDragTo(Vec2 to, int iterations = 8);
     // Ends the drag, the pins hold their mesh again.
     void endLocalDrag();
     bool isLocalDragging() const { return m_local.has_value(); }
     // The point a local drag at `at` would take (where it is now), if any.
     std::optional<Vec2> localGrabPoint(Vec2 at) const;
-    // Where the point taken by the local drag is now.
-    std::optional<Vec2> localDragPoint() const;
+    // Where the vertices taken by the local drag are now.
+    std::vector<Vec2> localDragPoints() const;
 
     // Rebuilds the meshes with other settings, keeping pins and deformation.
     void setSettings(RigSettings settings);
@@ -108,11 +124,20 @@ private:
 
     struct LocalDrag
     {
-        int mesh = -1;
-        int vertex = -1;           // the grabbed vertex
-        std::vector<Vec2> targets; // of the mesh's handles, set at the start
-        std::size_t grabbed = 0;   // the moving one among them
-        Vec2 offset;               // grabbed vertex − pen, at the start
+        struct Grabbed
+        {
+            int vertex = -1;
+            std::size_t handle = 0; // its place among the mesh's handles
+            Vec2 start;             // where it was at the start
+        };
+        struct Part // one mesh with grabbed vertices
+        {
+            int mesh = -1;
+            std::vector<Vec2> targets; // of the mesh's handles, set at the start
+            std::vector<Grabbed> grabbed;
+        };
+        std::vector<Part> parts;
+        Vec2 pressedAt; // the pen at the start
     };
     std::optional<LocalDrag> m_local;
 };

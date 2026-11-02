@@ -1315,6 +1315,73 @@ private slots:
         QCOMPARE(undo->text(), QStringLiteral("Undo import image"));
     }
 
+    // Shift+click selects several pins, dragging one moves them all, Delete
+    // removes them; in radius mode Shift+click picks several points.
+    void puppetMovesSeveralPinsOrPoints()
+    {
+        document::DocumentController controller;
+        tools::ToolState state;
+        QImage image(400, 40, QImage::Format_ARGB32);
+        image.fill(Qt::darkCyan);
+        controller.importImage(image, QStringLiteral("bar")); // x 760..1159, y 520..559
+        const doc::Layer &layer = controller.document().layerAt(1);
+        auto pixel = [&](int x, int y) { return layer.drawing(layer.timing().drawingAt(0))->image.pixel(x, y); };
+        const doc::Pixel ink = pixel(960, 540);
+        canvas::PuppetTool tool(&controller, &state, [](const QString &) {}, [] {});
+        auto click = [&](QPointF at, Qt::KeyboardModifiers mods) {
+            tool.press(at, mods);
+            tool.release(at, mods);
+        };
+
+        click({960, 540}, {});                 // the middle: an anchor
+        click({780, 540}, {});                 // the left end
+        click({1140, 540}, Qt::ShiftModifier); // and the right one, both selected
+        QCOMPARE(tool.pinCount(), std::size_t(3));
+        QCOMPARE(tool.selectedPins(), std::vector<int>({1, 2}));
+        click({960, 540}, Qt::ShiftModifier); // the anchor in, and out again
+        click({960, 540}, Qt::ShiftModifier);
+        QCOMPARE(tool.selectedPins(), std::vector<int>({1, 2}));
+
+        tool.press({780, 540}, {}); // dragging one of them moves both
+        tool.move({780, 580}, {});
+        tool.release({780, 600}, {});
+        QCOMPARE(pixel(780, 600), ink);
+        QCOMPARE(pixel(1140, 600), ink);
+        QCOMPARE(qAlpha(pixel(780, 540)), 0);
+        QCOMPARE(pixel(960, 540), ink); // the anchor held
+        QCOMPARE(tool.selectedPins().size(), std::size_t(2));
+
+        QVERIFY(tool.keyPress(Qt::Key_Delete));
+        QCOMPARE(tool.pinCount(), std::size_t(1));
+        QVERIFY(tool.selectedPins().empty());
+        tool.cancel();
+
+        tools::PuppetSettings settings = state.puppetSettings();
+        settings.local = true;
+        settings.radius = 40;
+        settings.density = 2;
+        state.setPuppetSettings(settings);
+        click({790, 540}, Qt::ShiftModifier); // two points picked
+        click({1130, 540}, Qt::ShiftModifier);
+        QCOMPARE(tool.pickedPointCount(), std::size_t(2));
+        click({1130, 540}, Qt::ShiftModifier); // out, and in again
+        QCOMPARE(tool.pickedPointCount(), std::size_t(1));
+        click({1130, 540}, Qt::ShiftModifier);
+        QCOMPARE(tool.pickedPointCount(), std::size_t(2));
+        tool.press({1130, 540}, {}); // from one of them: both go
+        tool.move({1130, 580}, {});
+        tool.release({1130, 600}, {});
+        QCOMPARE(pixel(1130, 600), ink);
+        QCOMPARE(pixel(790, 600), ink);
+        QCOMPARE(pixel(960, 540), ink); // the middle, out of both discs
+        QCOMPARE(qAlpha(pixel(960, 600)), 0);
+        QCOMPARE(tool.pickedPointCount(), std::size_t(2)); // still picked
+
+        tool.press({960, 540}, {}); // elsewhere: just that point, the picks dropped
+        QCOMPARE(tool.pickedPointCount(), std::size_t(0));
+        tool.release({960, 540}, {});
+    }
+
     // In radius mode the mesh is there as soon as the tool is chosen, so the
     // point a drag would take shows before the first drag.
     void puppetRadiusModeMeshesAtOnce()
