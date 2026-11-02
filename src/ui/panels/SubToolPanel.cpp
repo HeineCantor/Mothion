@@ -87,6 +87,28 @@ QImage renderFillPreview(tools::FillSettings::Mode mode, const QColor &ink)
     return image;
 }
 
+// A selection sub tool: its marching-ants outline, a rectangle or a lasso loop.
+QImage renderSelectionPreview(tools::ToolId tool, const QColor &ink)
+{
+    QImage image(kPreviewSize, QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+    QPainter p(&image);
+    p.setRenderHint(QPainter::Antialiasing);
+    const QRectF r(QPointF(10, 6), QPointF(kPreviewSize.width() - 10, kPreviewSize.height() - 6));
+    QPainterPath outline;
+    if (tool == tools::ToolId::RectSelect) {
+        outline.addRect(r);
+    } else {
+        outline.moveTo(r.left() + 8, r.center().y());
+        outline.cubicTo(r.left(), r.top() - 4, r.center().x(), r.top() + 2, r.right() - 6, r.top() + 6);
+        outline.cubicTo(r.right() + 4, r.center().y(), r.center().x() + 10, r.bottom() + 4, r.left() + 20, r.bottom());
+        outline.closeSubpath();
+    }
+    p.setPen(QPen(ink, 1.5, Qt::DashLine));
+    p.drawPath(outline);
+    return image;
+}
+
 // One row: stroke preview on the left, preset name bottom-right.
 class PresetDelegate : public QStyledItemDelegate
 {
@@ -151,8 +173,10 @@ SubToolPanel::SubToolPanel(tools::ToolState *state, tools::BrushLibrary *library
         tools::applyPreset(*m_state, m_presets[row]);
     });
     connect(m_state, &tools::ToolState::activeToolChanged, this, &SubToolPanel::showPresetsFor);
-    connect(m_library, &tools::BrushLibrary::presetsChanged, this,
-            [this] { showPresetsFor(m_state->activeTool()); });
+    connect(m_library, &tools::BrushLibrary::presetsChanged, this, [this] {
+        m_shownTool.reset(); // rebuilt whatever is shown
+        showPresetsFor(m_state->activeTool());
+    });
 
     // Start with the first brush preset applied, so the defaults are a real sub tool.
     const auto brushPresets = tools::builtInPresets(tools::ToolId::Brush);
@@ -163,30 +187,46 @@ SubToolPanel::SubToolPanel(tools::ToolState *state, tools::BrushLibrary *library
 
 void SubToolPanel::showPresetsFor(tools::ToolId tool)
 {
+    // The two selection tools share their sub tools: picking one of them
+    // only moves the highlight (and does not rebuild the list under its click).
+    auto isSelection = [](tools::ToolId t) { return t == tools::ToolId::RectSelect || t == tools::ToolId::LassoSelect; };
+    if (m_shownTool && isSelection(*m_shownTool) && isSelection(tool) && !m_presets.isEmpty()) {
+        m_shownTool = tool;
+        for (int i = 0; i < m_presets.size(); ++i)
+            if (m_presets[i].selectsTool == tool)
+                m_list->setCurrentRow(i);
+        return;
+    }
+    m_shownTool = tool;
     m_presets = m_library->presets(tool);
     m_list->clear();
     const QColor ink = palette().text().color();
     for (const tools::BrushPreset &preset : std::as_const(m_presets)) {
         auto *item = new QListWidgetItem(preset.name, m_list);
-        item->setData(kPreviewRole,
-                      preset.fillMode ? renderFillPreview(*preset.fillMode, ink) : renderPreview(preset, ink));
+        item->setData(kPreviewRole, preset.selectsTool ? renderSelectionPreview(*preset.selectsTool, ink)
+                                    : preset.fillMode  ? renderFillPreview(*preset.fillMode, ink)
+                                                       : renderPreview(preset, ink));
     }
     m_list->setVisible(!m_presets.isEmpty());
     m_empty->setVisible(m_presets.isEmpty());
     if (m_presets.isEmpty())
         return;
     int row = m_selected.count(tool) ? m_selected[tool] : 0;
-    for (int i = 0; i < m_presets.size(); ++i) // a fill sub tool: the mode in use, whoever set it
-        if (m_presets[i].fillMode && *m_presets[i].fillMode == m_state->fillSettings().mode)
+    for (int i = 0; i < m_presets.size(); ++i) { // what is in use, whoever set it
+        const tools::BrushPreset &p = m_presets[i];
+        if ((p.fillMode && *p.fillMode == m_state->fillSettings().mode) || (p.selectsTool && *p.selectsTool == tool))
             row = i;
+    }
     m_list->setCurrentRow(row);
 }
 
 void SubToolPanel::changeEvent(QEvent *event)
 {
     // The previews are drawn in the text color: redraw them after a theme switch.
-    if (event->type() == QEvent::PaletteChange)
+    if (event->type() == QEvent::PaletteChange) {
+        m_shownTool.reset();
         showPresetsFor(m_state->activeTool());
+    }
     QWidget::changeEvent(event);
 }
 

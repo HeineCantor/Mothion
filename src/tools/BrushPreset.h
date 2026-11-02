@@ -25,6 +25,9 @@ struct BrushPreset
     BrushDefinitionPtr brush; // null = round brush
     // A fill sub tool: sets only the fill mode, none of the brush values above.
     std::optional<FillSettings::Mode> fillMode;
+    // A sub tool that is a tool of its own (the selection shapes): picking it
+    // makes that tool active, nothing else.
+    std::optional<ToolId> selectsTool;
 };
 
 // Built-in presets for a tool (empty for tools without sub tools).

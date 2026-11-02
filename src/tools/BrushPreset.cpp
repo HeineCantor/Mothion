@@ -30,11 +30,17 @@ QList<BrushPreset> builtInPresets(ToolId tool)
             {QObject::tr("Fine eraser"), tool, 6.0, 1.0, kLinear, 0.2},
             {QObject::tr("Large eraser"), tool, 120.0, 1.0, kSteady, 0.0},
         };
+    case ToolId::RectSelect:
+    case ToolId::LassoSelect: { // the selection tool's two shapes
+        BrushPreset rectangle{QObject::tr("Rectangle"), tool};
+        rectangle.selectsTool = ToolId::RectSelect;
+        BrushPreset lasso{QObject::tr("Lasso"), tool};
+        lasso.selectsTool = ToolId::LassoSelect;
+        return {rectangle, lasso};
+    }
     case ToolId::Hand:
     case ToolId::Zoom:
     case ToolId::Move:
-    case ToolId::RectSelect:
-    case ToolId::LassoSelect:
     case ToolId::Puppet:
     case ToolId::Fill: {
         BrushPreset bucket{QObject::tr("Fill"), tool};
@@ -52,6 +58,10 @@ QList<BrushPreset> builtInPresets(ToolId tool)
 
 void applyPreset(ToolState &state, const BrushPreset &preset)
 {
+    if (preset.selectsTool) {
+        state.setActiveTool(*preset.selectsTool);
+        return;
+    }
     if (preset.fillMode) {
         FillSettings fill = state.fillSettings();
         fill.mode = *preset.fillMode;

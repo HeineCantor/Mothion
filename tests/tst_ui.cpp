@@ -11,6 +11,7 @@
 #include "core/document/commands/LayerCommands.h"
 #include "document/DocumentController.h"
 #include "io/ProjectFile.h"
+#include "tools/BrushLibrary.h"
 #include "tools/BrushPreset.h"
 #include "tools/ToolState.h"
 #include "ui/ExportDialog.h"
@@ -316,6 +317,41 @@ private slots:
         QTest::keyClick(&palette, Qt::Key_BracketLeft);
         QTest::keyClick(&palette, Qt::Key_BracketLeft);
         QCOMPARE(state.settings(tools::ToolId::Brush).size, 8.0);
+    }
+
+    // Rectangle and lasso are the sub tools of one selection tool: one button
+    // (M) that selects the shape used last, the shapes in the sub tool list.
+    void selectionIsOneToolWithTwoSubTools()
+    {
+        tools::ToolState state;
+        tools::BrushLibrary library;
+        ui::ToolPalettePanel palette(&state);
+        ui::SubToolPanel subTools(&state, &library);
+        palette.show();
+        palette.activateWindow();
+        QVERIFY(QTest::qWaitForWindowActive(&palette));
+        auto *group = palette.findChild<QButtonGroup *>();
+        QVERIFY(group->button(int(tools::ToolId::RectSelect)));
+        QVERIFY(!group->button(int(tools::ToolId::LassoSelect))); // no button of its own
+
+        QTest::keyClick(&palette, Qt::Key_M);
+        QCOMPARE(state.activeTool(), tools::ToolId::RectSelect);
+        auto *list = subTools.findChild<QListWidget *>();
+        QCOMPARE(list->count(), 2);
+        QCOMPARE(list->currentRow(), 0);
+        list->itemClicked(list->item(1)); // the lasso sub tool
+        QCOMPARE(state.activeTool(), tools::ToolId::LassoSelect);
+        QCOMPARE(list->currentRow(), 1);
+        QVERIFY(group->button(int(tools::ToolId::RectSelect))->isChecked()); // the same button
+
+        QTest::keyClick(&palette, Qt::Key_B);
+        QTest::keyClick(&palette, Qt::Key_M); // the shape used last
+        QCOMPARE(state.activeTool(), tools::ToolId::LassoSelect);
+        QTest::keyClick(&palette, Qt::Key_B);
+        group->button(int(tools::ToolId::RectSelect))->click();
+        QCOMPARE(state.activeTool(), tools::ToolId::LassoSelect);
+        list->itemClicked(list->item(0));
+        QCOMPARE(state.activeTool(), tools::ToolId::RectSelect);
     }
 
     // E selects the eraser and, pressed again, the tool used before; a click

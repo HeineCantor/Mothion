@@ -5,6 +5,7 @@
 #include <QWidget>
 
 #include <map>
+#include <optional>
 
 class QLabel;
 class QListWidget;
@@ -36,6 +37,7 @@ private:
     QListWidget *m_list;
     QLabel *m_empty;
     QList<tools::BrushPreset> m_presets;     // of the tool currently shown
+    std::optional<tools::ToolId> m_shownTool;
     std::map<tools::ToolId, int> m_selected; // remembered selection per tool
 };
 
