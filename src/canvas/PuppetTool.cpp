@@ -64,34 +64,48 @@ PuppetTool::~PuppetTool()
 bool PuppetTool::start(bool quiet)
 {
     QString reason;
-    const auto target = m_document->beginPaint(false, &reason);
-    if (!target) {
+    const auto targets = m_document->beginPaintLayers(&reason);
+    if (targets.empty()) {
         if (!quiet)
             m_status(reason.isEmpty() ? QObject::tr("Nothing to warp on this frame") : reason);
         return false;
     }
     auto s = std::make_unique<Session>();
-    s->image = target->image;
-    s->before = *target->image;
-    doc::TiledImage warped;
-    if (m_document->hasSelection())
-        splitByMask(s->before, SelectionMask::fromPath(m_document->selection()), warped, s->rest);
-    else
-        warped = s->before;
+    const std::optional<SelectionMask> mask = m_document->hasSelection()
+        ? std::optional(SelectionMask::fromPath(m_document->selection()))
+        : std::nullopt;
+    std::vector<doc::TiledImage> warped;
+    QRect area;
+    for (const auto &target : targets) {
+        Part part;
+        part.image = target.image;
+        part.before = *target.image;
+        doc::TiledImage pixels;
+        if (mask)
+            splitByMask(part.before, *mask, pixels, part.rest);
+        else
+            pixels = part.before;
+        area |= boundsOf(pixels);
+        warped.push_back(std::move(pixels));
+        s->parts.push_back(std::move(part));
+    }
 
-    // The pixels to warp, flat, and the shape they draw.
-    const QRect area = boundsOf(warped);
+    // The pixels to warp, flat, and the shape they draw together.
     if (area.isEmpty()) {
         m_document->cancelPaint();
         if (!quiet)
             m_status(QObject::tr("Nothing to warp here"));
         return false;
     }
-    s->source = puppet::RasterImage(area.x(), area.y(), area.width(), area.height());
-    warped.read(area.x(), area.y(), area.width(), area.height(), s->source.pixels.data(), area.width());
     puppet::Bitmask shape(area.x(), area.y(), area.width(), area.height());
-    for (std::size_t i = 0; i < s->source.pixels.size(); ++i)
-        shape.bits[i] = (s->source.pixels[i] >> 24) != 0 ? 1 : 0;
+    for (std::size_t k = 0; k < s->parts.size(); ++k) {
+        puppet::RasterImage &source = s->parts[k].source;
+        source = puppet::RasterImage(area.x(), area.y(), area.width(), area.height());
+        warped[k].read(area.x(), area.y(), area.width(), area.height(), source.pixels.data(), area.width());
+        for (std::size_t i = 0; i < source.pixels.size(); ++i)
+            if ((source.pixels[i] >> 24) != 0)
+                shape.bits[i] = 1;
+    }
 
     s->rig = std::make_unique<puppet::PuppetRig>(shape, rigSettings(m_toolState->puppetSettings()));
     if (s->rig->isEmpty()) {
@@ -111,13 +125,15 @@ void PuppetTool::render()
     Session &s = *m_session;
     int x, y, w, h;
     puppet::deformedBounds(*s.rig, x, y, w, h);
-    puppet::RasterImage target(x, y, w, h);
-    puppet::warp(*s.rig, s.source, target);
-    doc::TiledImage result = s.rest;
-    doc::TiledImage warped;
-    warped.write(x, y, w, h, target.pixels.data(), w);
-    compositeOver(result, warped);
-    *s.image = std::move(result);
+    for (Part &part : s.parts) {
+        puppet::RasterImage target(x, y, w, h);
+        puppet::warp(*s.rig, part.source, target);
+        doc::TiledImage result = part.rest;
+        doc::TiledImage warped;
+        warped.write(x, y, w, h, target.pixels.data(), w);
+        compositeOver(result, warped);
+        *part.image = std::move(result);
+    }
     const QRect now(x, y, w, h);
     m_document->notifyPainted(s.shown | now);
     s.shown = now;
@@ -151,10 +167,14 @@ void PuppetTool::show()
         render();
         return;
     }
-    // Undeformed (back at the start, or pins only): the drawing as it was,
+    // Undeformed (back at the start, or pins only): the layers as they were,
     // exactly, not warped again.
-    *s.image = s.before;
-    m_document->notifyPainted(s.shown | boundsOf(s.before));
+    QRect area = s.shown;
+    for (Part &part : s.parts) {
+        *part.image = part.before;
+        area |= boundsOf(part.before);
+    }
+    m_document->notifyPainted(area);
     s.changed = false;
 }
 
@@ -345,10 +365,14 @@ void PuppetTool::commit()
     const std::unique_ptr<Session> s = std::move(m_session);
     m_draggingPins = false;
     clearSelection();
-    if (s->changed)
-        m_document->endPaint(s->before);
-    else
+    if (s->changed) {
+        std::vector<doc::TiledImage> before;
+        for (const Part &part : s->parts)
+            before.push_back(part.before);
+        m_document->endPaint(before, doc::CommandKind::Paint);
+    } else {
         m_document->cancelPaint();
+    }
     m_repaint();
 }
 
@@ -360,8 +384,12 @@ void PuppetTool::cancel()
     const std::unique_ptr<Session> s = std::move(m_session);
     m_draggingPins = false;
     clearSelection();
-    *s->image = s->before;
-    m_document->notifyPainted(s->shown | boundsOf(s->before));
+    QRect area = s->shown;
+    for (const Part &part : s->parts) {
+        *part.image = part.before;
+        area |= boundsOf(part.before);
+    }
+    m_document->notifyPainted(area);
     m_document->cancelPaint();
     m_repaint();
 }

@@ -23,8 +23,9 @@ class ToolState;
 
 namespace mothion::canvas {
 
-// Puppet warp of the drawing at the current layer and frame (or of its
-// selected part): the first click meshes the drawn shape; clicking on it
+// Puppet warp of the current layer, or of every layer chosen in the Layers
+// panel (all those of a chosen frame or cel) together, or of their selected
+// part: the first click meshes the shape they draw together; clicking on it
 // places pins, dragging a pin deforms the mesh around the others
 // (puppet::PuppetRig), and the pixels follow (puppet::warp).
 //
@@ -98,12 +99,16 @@ private:
     std::function<void()> m_repaint;
     double m_zoom = 1.0;
 
-    struct Session
+    struct Part // one layer warped
     {
-        doc::TiledImage *image = nullptr; // the drawing being warped
+        doc::TiledImage *image = nullptr; // the layer
         doc::TiledImage before;           // as it was when the warp started
         doc::TiledImage rest;             // what stays put (outside the selection)
         puppet::RasterImage source;       // the pixels being warped, undeformed
+    };
+    struct Session
+    {
+        std::vector<Part> parts; // all bent by the one rig
         std::unique_ptr<puppet::PuppetRig> rig;
         QRect shown;                      // area last drawn by the warp
         bool changed = false;

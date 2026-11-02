@@ -2181,6 +2181,61 @@ private slots:
         QVERIFY(!tool.hasPendingEdit());
     }
 
+    // Transform and puppet warp take the layers chosen in the Layers panel
+    // together: one box, one mesh around all of them, one undo step.
+    void transformAndWarpTakeTheChosenLayers()
+    {
+        document::DocumentController controller;
+        tools::ToolState state;
+        QImage image(400, 40, QImage::Format_ARGB32);
+        image.fill(Qt::darkCyan);
+        controller.importImage(image, QStringLiteral("bar")); // x 760..1159, y 520..559
+        doc::Document &d = controller.documentForCommands();
+        const doc::CelId cel = controller.currentCel();
+        const doc::DrawingId drawing = controller.currentDrawingId();
+        const doc::LayerId line = controller.currentLayer();
+        // A second layer with a patch at the bar's right end only.
+        auto color = std::make_unique<doc::AddLayerCommand>(d, cel, drawing, 1, doc::LayerProperties{"Color"});
+        const doc::LayerId colorId = color->layerId();
+        controller.execute(std::move(color));
+        for (int y = 525; y < 555; ++y)
+            for (int x = 1120; x < 1155; ++x)
+                d.layer(cel, drawing, colorId)->image.setPixel(x, y, 0xffff0000);
+        const doc::TiledImage &linePixels = d.layer(cel, drawing, line)->image;
+        const doc::TiledImage &colorPixels = d.layer(cel, drawing, colorId)->image;
+        controller.setLayerSelection({{cel, drawing, line}, {cel, drawing, colorId}});
+
+        canvas::TransformTool transform(&controller, &state, [](const QString &) {}, [] {});
+        transform.activated();
+        QCOMPARE(transform.box(), QRect(760, 520, 400, 40)); // around both
+        transform.press({900, 540}, Qt::NoModifier);
+        transform.release({900, 640}, Qt::NoModifier); // 100 px down
+        QVERIFY(transform.keyPress(Qt::Key_Return));
+        QCOMPARE(qAlpha(linePixels.pixel(800, 540)), 0);
+        QVERIFY(qAlpha(linePixels.pixel(800, 640)) > 0);
+        QCOMPARE(qAlpha(colorPixels.pixel(1130, 540)), 0);
+        QVERIFY(qAlpha(colorPixels.pixel(1130, 640)) > 0);
+        controller.undo(); // both at once
+        QVERIFY(qAlpha(linePixels.pixel(800, 540)) > 0);
+        QVERIFY(qAlpha(colorPixels.pixel(1130, 540)) > 0);
+
+        canvas::PuppetTool warp(&controller, &state, [](const QString &) {}, [] {});
+        warp.press({780, 540}, Qt::NoModifier); // anchor at the left end
+        warp.release({780, 540}, Qt::NoModifier);
+        warp.press({1140, 540}, Qt::NoModifier); // the right end, down by 120 px
+        for (int step = 1; step <= 10; ++step)
+            warp.move({1140, 540.0 + 12 * step}, Qt::NoModifier);
+        warp.release({1140, 660}, Qt::NoModifier);
+        warp.commit();
+        QVERIFY(qAlpha(linePixels.pixel(780, 540)) > 0); // the anchored end stays
+        QCOMPARE(qAlpha(colorPixels.pixel(1140, 540)), 0); // the patch went along
+        QVERIFY(qAlpha(colorPixels.pixel(1130, 655)) > 0);
+        QVERIFY(qAlpha(linePixels.pixel(1130, 655)) > 0);
+        controller.undo();
+        QVERIFY(qAlpha(colorPixels.pixel(1140, 540)) > 0);
+        QCOMPARE(qAlpha(linePixels.pixel(1130, 655)), 0);
+    }
+
     void puppetWarpBendsTheDrawingInOneStep()
     {
         document::DocumentController controller;

@@ -83,37 +83,47 @@ void TransformTool::activated()
 bool TransformTool::start()
 {
     QString reason;
-    const auto target = m_document->beginPaint(false, &reason);
-    if (!target) {
+    const auto targets = m_document->beginPaintLayers(&reason);
+    if (targets.empty()) {
         m_status(reason.isEmpty() ? QObject::tr("Nothing to transform on this frame") : reason);
         return false;
     }
     auto s = std::make_unique<Session>();
-    s->image = target->image;
-    s->before = *target->image;
     s->selection = m_document->selection();
-    doc::TiledImage moving;
-    if (!s->selection.isEmpty())
-        splitByMask(s->before, SelectionMask::fromPath(s->selection), moving, s->rest);
-    else
-        moving = s->before;
-
-    const QRect tiles = tileBounds(moving);
+    const std::optional<SelectionMask> mask =
+        s->selection.isEmpty() ? std::nullopt : std::optional(SelectionMask::fromPath(s->selection));
+    // What moves of each layer, and one box around all of it.
+    std::vector<doc::TiledImage> moving;
     QRect box;
-    if (!tiles.isEmpty()) {
-        QImage area(tiles.size(), QImage::Format_ARGB32_Premultiplied);
-        moving.read(tiles.x(), tiles.y(), tiles.width(), tiles.height(), reinterpret_cast<doc::Pixel *>(area.bits()),
-                    area.bytesPerLine() / 4);
-        box = opaqueBounds(area);
-        if (!box.isEmpty()) {
-            s->source = area.copy(box);
-            box.translate(tiles.topLeft());
+    for (const auto &target : targets) {
+        Part part;
+        part.image = target.image;
+        part.before = *target.image;
+        doc::TiledImage pixels;
+        if (mask)
+            splitByMask(part.before, *mask, pixels, part.rest);
+        else
+            pixels = part.before;
+        const QRect tiles = tileBounds(pixels);
+        if (!tiles.isEmpty()) {
+            QImage area(tiles.size(), QImage::Format_ARGB32_Premultiplied);
+            pixels.read(tiles.x(), tiles.y(), tiles.width(), tiles.height(),
+                        reinterpret_cast<doc::Pixel *>(area.bits()), area.bytesPerLine() / 4);
+            box |= opaqueBounds(area).translated(tiles.topLeft());
         }
+        moving.push_back(std::move(pixels));
+        s->parts.push_back(std::move(part));
     }
     if (box.isEmpty()) {
         m_document->cancelPaint();
         m_status(QObject::tr("Nothing to transform here"));
         return false;
+    }
+    for (std::size_t i = 0; i < s->parts.size(); ++i) {
+        QImage &source = s->parts[i].source;
+        source = QImage(box.size(), QImage::Format_ARGB32_Premultiplied);
+        moving[i].read(box.x(), box.y(), box.width(), box.height(), reinterpret_cast<doc::Pixel *>(source.bits()),
+                       source.bytesPerLine() / 4);
     }
     s->box = box;
     s->shown = box;
@@ -236,8 +246,9 @@ void TransformTool::show()
         render();
         return;
     }
-    // Back at the start: the drawing and selection as they were, exactly.
-    *s.image = s.before;
+    // Back at the start: the layers and selection as they were, exactly.
+    for (Part &part : s.parts)
+        *part.image = part.before;
     if (!s.selection.isEmpty())
         m_document->setSelection(s.selection);
     m_document->notifyPainted(s.shown | s.box);
@@ -275,22 +286,24 @@ void TransformTool::render()
     const doc::Document &d = m_document->document();
     const QRect now = s.transform.mapRect(QRectF(s.box)).toAlignedRect().adjusted(-1, -1, 1, 1)
                       & QRect(0, 0, d.width(), d.height());
-    doc::TiledImage result = s.rest;
-    if (!now.isEmpty()) {
-        QImage moved(now.size(), QImage::Format_ARGB32_Premultiplied);
-        moved.fill(Qt::transparent);
-        {
-            QPainter p(&moved);
-            p.setRenderHint(QPainter::SmoothPixmapTransform);
-            p.setTransform(s.transform * QTransform::fromTranslate(-now.x(), -now.y()));
-            p.drawImage(s.box.topLeft(), s.source);
+    for (Part &part : s.parts) {
+        doc::TiledImage result = part.rest;
+        if (!now.isEmpty()) {
+            QImage moved(now.size(), QImage::Format_ARGB32_Premultiplied);
+            moved.fill(Qt::transparent);
+            {
+                QPainter p(&moved);
+                p.setRenderHint(QPainter::SmoothPixmapTransform);
+                p.setTransform(s.transform * QTransform::fromTranslate(-now.x(), -now.y()));
+                p.drawImage(s.box.topLeft(), part.source);
+            }
+            doc::TiledImage piece;
+            piece.write(now.x(), now.y(), now.width(), now.height(),
+                        reinterpret_cast<const doc::Pixel *>(moved.constBits()), moved.bytesPerLine() / 4);
+            compositeOver(result, piece);
         }
-        doc::TiledImage piece;
-        piece.write(now.x(), now.y(), now.width(), now.height(), reinterpret_cast<const doc::Pixel *>(moved.constBits()),
-                    moved.bytesPerLine() / 4);
-        compositeOver(result, piece);
+        *part.image = std::move(result);
     }
-    *s.image = std::move(result);
     if (!s.selection.isEmpty())
         m_document->setSelection(s.transform.map(s.selection)); // the outline follows live
     m_document->notifyPainted(s.shown | now);
@@ -305,8 +318,12 @@ void TransformTool::commit()
         return;
     const std::unique_ptr<Session> s = std::move(m_session);
     m_drag.reset();
-    if (s->changed)
-        m_document->endPaint(s->before, doc::CommandKind::Transform);
+    if (s->changed) {
+        std::vector<doc::TiledImage> before;
+        for (const Part &part : s->parts)
+            before.push_back(part.before);
+        m_document->endPaint(before, doc::CommandKind::Transform);
+    }
     else
         m_document->cancelPaint();
     m_repaint();
@@ -318,7 +335,8 @@ void TransformTool::cancel()
         return;
     const std::unique_ptr<Session> s = std::move(m_session);
     m_drag.reset();
-    *s->image = s->before;
+    for (const Part &part : s->parts)
+        *part.image = part.before;
     if (!s->selection.isEmpty())
         m_document->setSelection(s->selection);
     m_document->notifyPainted(s->shown | s->box);

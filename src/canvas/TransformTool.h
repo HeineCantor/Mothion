@@ -23,8 +23,10 @@ class ToolState;
 
 namespace mothion::canvas {
 
-// Free transform of the selected pixels (all of the drawing at the current
-// layer and frame when nothing is selected), in a box with eight handles:
+// Free transform of the selected pixels (all of them when nothing is
+// selected) of the current layer, or of every layer chosen in the Layers
+// panel (all those of a chosen frame or cel) together, in one box with eight
+// handles:
 // a corner scales (Shift keeps the proportions), a side scales one way,
 // inside the box moves, outside rotates (Shift: 15° steps). The selection
 // follows.
@@ -89,13 +91,17 @@ private:
     std::function<void()> m_repaint;
     double m_zoom = 1.0;
 
-    struct Session
+    struct Part // one layer transformed
     {
-        doc::TiledImage *image = nullptr; // the drawing being transformed
+        doc::TiledImage *image = nullptr; // the layer
         doc::TiledImage before;           // as it was when the transform started
         doc::TiledImage rest;             // what stays put (outside the selection)
-        QImage source;                    // the pixels transformed, over `box`
-        QRect box;                        // tight bounds of those pixels
+        QImage source;                    // the pixels transformed, over the box
+    };
+    struct Session
+    {
+        std::vector<Part> parts;
+        QRect box;                        // tight bounds of the pixels of all the parts
         QPainterPath selection;           // as it was, empty if none
         QTransform transform;
         QRect shown; // area last drawn by the transform
