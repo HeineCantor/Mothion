@@ -1,4 +1,4 @@
-// Tests for project files (.mothion), replacing the controller's document
+// Tests for project files (.moth), replacing the controller's document
 // and exporting frames as PNG/JPEG.
 
 #include "core/document/Document.h"
@@ -103,7 +103,7 @@ private slots:
     void roundTrip()
     {
         QTemporaryDir dir;
-        const QString path = dir.filePath(QStringLiteral("scene.mothion"));
+        const QString path = dir.filePath(QStringLiteral("scene.moth"));
         const auto original = sampleDocument();
         QString error;
         QVERIFY2(io::saveProject(*original, path, &error), qPrintable(error));
@@ -117,7 +117,7 @@ private slots:
     void saveReplacesAnExistingFile()
     {
         QTemporaryDir dir;
-        const QString path = dir.filePath(QStringLiteral("scene.mothion"));
+        const QString path = dir.filePath(QStringLiteral("scene.moth"));
         QString error;
         QVERIFY(io::saveProject(*sampleDocument(), path, &error));
         doc::Document small(64, 64);
@@ -144,7 +144,7 @@ private slots:
     void formatOneOpensWithALayerPerDrawing()
     {
         QTemporaryDir dir;
-        const QString path = dir.filePath(QStringLiteral("old.mothion"));
+        const QString path = dir.filePath(QStringLiteral("old.moth"));
         {
             QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), QStringLiteral("old"));
             db.setDatabaseName(path);
@@ -207,7 +207,7 @@ private slots:
     void missingFileIsAnError()
     {
         QTemporaryDir dir;
-        const QString path = dir.filePath(QStringLiteral("nothing.mothion"));
+        const QString path = dir.filePath(QStringLiteral("nothing.moth"));
         QString error;
         QVERIFY(!io::loadProject(path, &error));
         QVERIFY(!error.isEmpty());
@@ -217,7 +217,7 @@ private slots:
     void otherFilesAreRefused()
     {
         QTemporaryDir dir;
-        const QString text = dir.filePath(QStringLiteral("notes.mothion"));
+        const QString text = dir.filePath(QStringLiteral("notes.moth"));
         QFile f(text);
         QVERIFY(f.open(QIODevice::WriteOnly));
         f.write("not a database at all, just some text that is long enough");
@@ -227,7 +227,7 @@ private slots:
         QVERIFY(!error.isEmpty());
 
         // An SQLite database that is not a Mothion project.
-        const QString other = dir.filePath(QStringLiteral("other.mothion"));
+        const QString other = dir.filePath(QStringLiteral("other.moth"));
         {
             QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), QStringLiteral("other"));
             db.setDatabaseName(other);
@@ -244,7 +244,7 @@ private slots:
     void newerFormatIsRefused()
     {
         QTemporaryDir dir;
-        const QString path = dir.filePath(QStringLiteral("future.mothion"));
+        const QString path = dir.filePath(QStringLiteral("future.moth"));
         QString error;
         QVERIFY(io::saveProject(doc::Document(8, 8), path, &error));
         {

@@ -129,7 +129,7 @@ else()
 endif()
 
 target_include_directories(mothion_gui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-find_package(Qt6 REQUIRED COMPONENTS Sql) # .sut brushes and .mothion projects are SQLite databases
+find_package(Qt6 REQUIRED COMPONENTS Sql) # .sut brushes and .moth projects are SQLite databases
 target_link_libraries(mothion_gui PUBLIC mothion_core Qt6::Widgets PRIVATE Qt6::Sql)
 mothion_set_warnings(mothion_gui)
 

@@ -8,7 +8,7 @@
 
 namespace mothion::io {
 
-// Mothion project files (.mothion): an SQLite database, so a save is one
+// Mothion project files (.moth): an SQLite database, so a save is one
 // transaction and the file can be inspected with any SQLite tool.
 //
 //   PRAGMA application_id  'MOTH'
@@ -32,7 +32,8 @@ namespace mothion::io {
 // one at the end, so a failed save never damages the previous file.
 
 inline constexpr int kProjectFormatVersion = 2;
-inline constexpr char kProjectSuffix[] = "mothion";
+inline constexpr char kProjectSuffix[] = "moth";
+inline constexpr char kOldProjectSuffix[] = "mothion"; // what projects were named before; they still open
 
 // Writes `document` to `path`. On failure returns false and sets `error`.
 bool saveProject(const doc::Document &document, const QString &path, QString *error);

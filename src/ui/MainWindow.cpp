@@ -438,6 +438,13 @@ QString projectFilter()
     return MainWindow::tr("Mothion projects (*.%1)").arg(QLatin1String(io::kProjectSuffix));
 }
 
+// Opening: projects saved under the old name too.
+QString openProjectFilter()
+{
+    return MainWindow::tr("Mothion projects (*.%1 *.%2)")
+        .arg(QLatin1String(io::kProjectSuffix), QLatin1String(io::kOldProjectSuffix));
+}
+
 QString projectDirectory()
 {
     return QSettings().value(kProjectDirKey).toString();
@@ -463,7 +470,8 @@ void MainWindow::open()
 {
     if (!maybeSave())
         return;
-    const QString file = QFileDialog::getOpenFileName(this, tr("Open project"), projectDirectory(), projectFilter());
+    const QString file =
+        QFileDialog::getOpenFileName(this, tr("Open project"), projectDirectory(), openProjectFilter());
     if (!file.isEmpty())
         openFile(file);
 }

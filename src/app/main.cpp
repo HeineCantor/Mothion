@@ -36,7 +36,7 @@ int main(int argc, char *argv[])
     const QCommandLineOption wintab(QStringLiteral("wintab"),
                                     QStringLiteral("Windows: use the Wintab tablet API instead of Windows Ink."));
     parser.addOption(wintab);
-    parser.addPositionalArgument(QStringLiteral("project"), QStringLiteral("A .mothion project to open."),
+    parser.addPositionalArgument(QStringLiteral("project"), QStringLiteral("A .moth project to open."),
                                  QStringLiteral("[project]"));
     parser.process(app);
 

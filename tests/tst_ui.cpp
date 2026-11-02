@@ -73,7 +73,7 @@ private slots:
     void mainWindowOpensAProject()
     {
         QTemporaryDir dir;
-        const QString path = dir.filePath(QStringLiteral("shot 12.mothion"));
+        const QString path = dir.filePath(QStringLiteral("shot 12.moth"));
         doc::Document saved(640, 360);
         saved.insertCel(0, std::make_unique<doc::Cel>(saved.allocateCelId(), doc::CelProperties{"BG"}));
         doc::Cel &ink =
