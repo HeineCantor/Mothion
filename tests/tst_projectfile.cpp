@@ -10,6 +10,7 @@
 #include <QImage>
 #include <QSignalSpy>
 #include <QSqlDatabase>
+#include <QSqlError>
 #include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QTest>
@@ -23,7 +24,8 @@ namespace {
 constexpr doc::Pixel kRed = 0xffff0000;
 constexpr doc::Pixel kHalfBlue = 0x80000080; // premultiplied 50 % blue
 
-// Two layers, three drawings, holds and gaps, tiles at negative coordinates.
+// Two cels, three drawings (one of two layers), holds and gaps, tiles at
+// negative coordinates.
 std::unique_ptr<doc::Document> sampleDocument()
 {
     auto d = std::make_unique<doc::Document>(320, 240, doc::FrameRate{24000, 1001});
@@ -32,21 +34,25 @@ std::unique_ptr<doc::Document> sampleDocument()
 
     const doc::CelId bottomId = d->allocateCelId();
     doc::Cel &bottom = d->insertCel(0, std::make_unique<doc::Cel>(bottomId, doc::CelProperties{"Background"}));
-    doc::Drawing &bg = bottom.addDrawing({d->allocateDrawingId(), "1", {}});
-    bg.image.setPixel(10, 20, kRed);
-    bg.image.setPixel(-70, -3, kHalfBlue);
+    doc::Drawing &bg = bottom.addDrawing({d->allocateDrawingId(), "1", {{d->allocateLayerId(), {"Paint"}, {}}}});
+    bg.layers[0].image.setPixel(10, 20, kRed);
+    bg.layers[0].image.setPixel(-70, -3, kHalfBlue);
     bottom.timing().setExposure(0, 48, bg.id);
 
     doc::CelProperties top{"Ink è ✓", false, true, 0.5f, doc::BlendMode::Multiply};
     doc::Cel &ink = d->insertCel(1, std::make_unique<doc::Cel>(d->allocateCelId(), top));
     doc::Drawing &a = ink.addDrawing({d->allocateDrawingId(), "A", {}});
-    a.image.setPixel(100, 100, kHalfBlue);
-    doc::Drawing &b = ink.addDrawing({d->allocateDrawingId(), "B", {}});
-    b.image.setPixel(200, 150, kRed);
+    a.layers.push_back({d->allocateLayerId(), {"Line"}, {}});
+    a.layers.push_back({d->allocateLayerId(), {"Color ✓", false, true, 0.25f, doc::BlendMode::Screen}, {}});
+    a.layers[0].image.setPixel(100, 100, kHalfBlue);
+    a.layers[1].image.setPixel(-1, 300, kRed);
+    doc::Drawing &b = ink.addDrawing({d->allocateDrawingId(), "B", {{d->allocateLayerId(), {"Line"}, {}}}});
+    b.layers[0].image.setPixel(200, 150, kRed);
     ink.timing().setExposure(0, 3, a.id);
     ink.timing().setExposure(5, 2, b.id);
     ink.timing().setExposure(7, 4, a.id);
-    d->allocateCelId(); // an id used by a layer since deleted: must not come back
+    d->allocateCelId(); // ids used by a cel and a layer since deleted: must not come back
+    d->allocateLayerId();
     return d;
 }
 
@@ -59,6 +65,7 @@ void compareDocuments(const doc::Document &x, const doc::Document &y)
     QCOMPARE(x.paperColor(), y.paperColor());
     QCOMPARE(x.nextCelId(), y.nextCelId());
     QCOMPARE(x.nextDrawingId(), y.nextDrawingId());
+    QCOMPARE(x.nextLayerId(), y.nextLayerId());
     QCOMPARE(x.celCount(), y.celCount());
     for (int i = 0; i < x.celCount(); ++i) {
         const doc::Cel &lx = x.celAt(i), &ly = y.celAt(i);
@@ -70,12 +77,18 @@ void compareDocuments(const doc::Document &x, const doc::Document &y)
             const doc::Drawing *dy = ly.drawing(id);
             QVERIFY(dy);
             QCOMPARE(dy->name, dx.name);
-            auto cx = dx.image.tileCoords(), cy = dy->image.tileCoords();
-            std::sort(cx.begin(), cx.end());
-            std::sort(cy.begin(), cy.end());
-            QVERIFY(cx == cy);
-            for (const doc::TileCoord &c : cx)
-                QVERIFY(dx.image.tile(c)->pixels == dy->image.tile(c)->pixels);
+            QCOMPARE(dy->layers.size(), dx.layers.size());
+            for (std::size_t k = 0; k < dx.layers.size(); ++k) {
+                const doc::Layer &kx = dx.layers[k], &ky = dy->layers[k];
+                QCOMPARE(ky.id, kx.id);
+                QVERIFY(ky.properties == kx.properties);
+                auto cx = kx.image.tileCoords(), cy = ky.image.tileCoords();
+                std::sort(cx.begin(), cx.end());
+                std::sort(cy.begin(), cy.end());
+                QVERIFY(cx == cy);
+                for (const doc::TileCoord &c : cx)
+                    QVERIFY(kx.image.tile(c)->pixels == ky.image.tile(c)->pixels);
+            }
         }
     }
 }
@@ -119,10 +132,76 @@ private slots:
     {
         doc::Document d(10, 10);
         d.insertCel(0, std::make_unique<doc::Cel>(7, doc::CelProperties{"L"}));
-        d.celAt(0).addDrawing({12, "1", {}});
-        d.restoreIdCounters(1, 1); // a file claiming counters below the ids in use
+        d.celAt(0).addDrawing({12, "1", {{30, {"Line"}, {}}}});
+        d.restoreIdCounters(1, 1, 1); // a file claiming counters below the ids in use
         QCOMPARE(d.allocateCelId(), doc::CelId(8));
         QCOMPARE(d.allocateDrawingId(), doc::DrawingId(13));
+        QCOMPARE(d.allocateLayerId(), doc::LayerId(31));
+    }
+
+    // A file of format 1, before drawings had layers: each drawing opens with
+    // one layer holding its pixels, with an id of its own.
+    void formatOneOpensWithALayerPerDrawing()
+    {
+        QTemporaryDir dir;
+        const QString path = dir.filePath(QStringLiteral("old.mothion"));
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), QStringLiteral("old"));
+            db.setDatabaseName(path);
+            QVERIFY(db.open());
+            QSqlQuery q(db);
+            const QStringList sql{
+                QStringLiteral("pragma application_id = %1").arg(0x4D4F5448),
+                QStringLiteral("pragma user_version = 1"),
+                QStringLiteral("create table document (width integer, height integer, fps_numerator integer,"
+                               " fps_denominator integer, frame_count integer, paper_color integer,"
+                               " next_layer_id integer, next_drawing_id integer, saved_by text)"),
+                QStringLiteral("create table layers (id integer primary key, position integer, name text,"
+                               " visible integer, locked integer, opacity real, blend text)"),
+                QStringLiteral("create table drawings (id integer primary key, layer integer, name text)"),
+                QStringLiteral("create table exposures (layer integer, start integer, length integer,"
+                               " drawing integer)"),
+                QStringLiteral("create table tiles (drawing integer, x integer, y integer, pixels blob,"
+                               " primary key (drawing, x, y))"),
+                QStringLiteral("insert into document values (64, 64, 24, 1, 10, %1, 3, 5, '0.1')")
+                    .arg(qlonglong(0xffffffff)),
+                QStringLiteral("insert into layers values (2, 0, 'Ink', 1, 0, 0.5, 'multiply')"),
+                QStringLiteral("insert into drawings values (3, 2, '1')"),
+                QStringLiteral("insert into drawings values (4, 2, '2')"),
+                QStringLiteral("insert into exposures values (2, 0, 2, 3)"),
+                QStringLiteral("insert into exposures values (2, 2, 3, 4)"),
+            };
+            for (const QString &s : sql)
+                QVERIFY2(q.exec(s), qPrintable(q.lastError().text()));
+            std::vector<doc::Pixel> pixels(doc::kTilePixels, 0);
+            pixels[0] = kRed;
+            QByteArray raw(reinterpret_cast<const char *>(pixels.data()), qsizetype(pixels.size() * 4));
+            q.prepare(QStringLiteral("insert into tiles values (4, 0, 0, ?)"));
+            q.addBindValue(qCompress(raw));
+            QVERIFY2(q.exec(), qPrintable(q.lastError().text()));
+            db.close();
+        }
+        QSqlDatabase::removeDatabase(QStringLiteral("old"));
+
+        QString error;
+        const auto d = io::loadProject(path, &error);
+        QVERIFY2(d, qPrintable(error));
+        QCOMPARE(d->celCount(), 1);
+        const doc::Cel &cel = d->celAt(0);
+        QCOMPARE(cel.properties().name, std::string("Ink"));
+        QCOMPARE(cel.properties().blend, doc::BlendMode::Multiply);
+        QCOMPARE(cel.timing().drawingAt(3), doc::DrawingId(4));
+        const doc::Drawing *first = cel.drawing(3), *second = cel.drawing(4);
+        QVERIFY(first && second);
+        QCOMPARE(first->layers.size(), std::size_t(1));
+        QCOMPARE(second->layers.size(), std::size_t(1));
+        QVERIFY(first->layers[0].image.isEmpty());
+        QCOMPARE(second->layers[0].image.pixel(0, 0), kRed);
+        QVERIFY(first->layers[0].id != doc::kNoId);
+        QVERIFY(first->layers[0].id != second->layers[0].id);
+        QVERIFY(d->nextLayerId() > std::max(first->layers[0].id, second->layers[0].id));
+        QCOMPARE(d->nextCelId(), doc::CelId(3));
+        QCOMPARE(d->nextDrawingId(), doc::DrawingId(5));
     }
 
     void missingFileIsAnError()

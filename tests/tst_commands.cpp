@@ -4,6 +4,7 @@
 #include "core/document/History.h"
 #include "core/document/commands/DrawingCommands.h"
 #include "core/document/commands/CelCommands.h"
+#include "core/document/commands/LayerCommands.h"
 #include "core/document/commands/PaintCommand.h"
 #include "core/document/commands/TimingCommands.h"
 
@@ -55,10 +56,10 @@ private slots:
         QVERIFY(drawing);
 
         // A stroke: snapshot, paint live, capture.
-        const TiledImage before = drawing->image;
-        drawing->image.setPixel(10, 10, kInk);
-        drawing->image.setPixel(200, 10, kInk);
-        auto paint = PaintCommand::capture(celId, nd.id, before, drawing->image);
+        const TiledImage before = drawing->layers.front().image;
+        drawing->layers.front().image.setPixel(10, 10, kInk);
+        drawing->layers.front().image.setPixel(200, 10, kInk);
+        auto paint = PaintCommand::capture(celId, nd.id, nd.layer, before, drawing->layers.front().image);
         QVERIFY(paint);
         QCOMPARE(paint->swaps().size(), std::size_t(2)); // two tiles touched
         history.pushApplied(std::move(paint));
@@ -66,14 +67,14 @@ private slots:
         ChangeSet undone = history.undo(*doc);
         QCOMPARE(undone.pixels.size(), std::size_t(1));
         QCOMPARE(undone.pixels[0].tiles.size(), std::size_t(2));
-        QCOMPARE(drawing->image.pixel(10, 10), Pixel(0));
-        QVERIFY(drawing->image.isEmpty());
+        QCOMPARE(drawing->layers.front().image.pixel(10, 10), Pixel(0));
+        QVERIFY(drawing->layers.front().image.isEmpty());
 
         history.redo(*doc);
-        QCOMPARE(drawing->image.pixel(200, 10), kInk);
+        QCOMPARE(drawing->layers.front().image.pixel(200, 10), kInk);
 
         // Painting nothing gives no command.
-        QVERIFY(!PaintCommand::capture(celId, nd.id, drawing->image, drawing->image));
+        QVERIFY(!PaintCommand::capture(celId, nd.id, nd.layer, drawing->layers.front().image, drawing->layers.front().image));
     }
 
     void paintOverExistingTileKeepsOldPixels()
@@ -82,15 +83,15 @@ private slots:
         NewDrawing nd = makeNewDrawing(*doc, celId, 0);
         nd.command->apply(*doc);
         Drawing *drawing = doc->cel(celId)->drawing(nd.id);
-        drawing->image.setPixel(1, 1, kInk);
+        drawing->layers.front().image.setPixel(1, 1, kInk);
 
-        const TiledImage before = drawing->image;
-        drawing->image.setPixel(2, 2, kInk); // same tile as the existing pixel
-        auto paint = PaintCommand::capture(celId, nd.id, before, drawing->image);
+        const TiledImage before = drawing->layers.front().image;
+        drawing->layers.front().image.setPixel(2, 2, kInk); // same tile as the existing pixel
+        auto paint = PaintCommand::capture(celId, nd.id, nd.layer, before, drawing->layers.front().image);
         QVERIFY(paint);
         paint->revert(*doc);
-        QCOMPARE(drawing->image.pixel(1, 1), kInk);
-        QCOMPARE(drawing->image.pixel(2, 2), Pixel(0));
+        QCOMPARE(drawing->layers.front().image.pixel(1, 1), kInk);
+        QCOMPARE(drawing->layers.front().image.pixel(2, 2), Pixel(0));
     }
 
     void newDrawingUndoRedoKeepsId()
@@ -112,6 +113,48 @@ private slots:
         QVERIFY(cel->drawing(nd.id));
     }
 
+    // A new drawing has one layer; layers are added, moved, changed and
+    // removed with their pixels, each undoable.
+    void layerCommandsUndoRedo()
+    {
+        auto [doc, celId] = docWithCel();
+        History history;
+        NewDrawing nd = makeNewDrawing(*doc, celId, 0, 1, "Line");
+        history.execute(*doc, std::move(nd.command));
+        Drawing *drawing = doc->cel(celId)->drawing(nd.id);
+        QCOMPARE(drawing->layers.size(), std::size_t(1));
+        QCOMPARE(drawing->layers[0].id, nd.layer);
+        QCOMPARE(drawing->layers[0].properties.name, std::string("Line"));
+
+        auto add = std::make_unique<AddLayerCommand>(*doc, celId, nd.id, 1, LayerProperties{"Color"});
+        const LayerId color = add->layerId();
+        history.execute(*doc, std::move(add));
+        QCOMPARE(drawing->indexOf(color), 1);
+        drawing->layer(color)->image.setPixel(3, 3, kInk);
+
+        history.execute(*doc, std::make_unique<MoveLayerCommand>(celId, nd.id, color, 0));
+        QCOMPARE(drawing->indexOf(color), 0);
+        LayerProperties hidden = drawing->layer(color)->properties;
+        hidden.visible = false;
+        history.execute(*doc, makeSetLayerProperties(*doc, celId, nd.id, color, hidden));
+        QVERIFY(!drawing->layer(color)->properties.visible);
+        QVERIFY(!makeSetLayerProperties(*doc, celId, nd.id, color, hidden)); // no change
+
+        history.execute(*doc, std::make_unique<RemoveLayerCommand>(celId, nd.id, color));
+        QCOMPARE(drawing->layers.size(), std::size_t(1));
+        history.undo(*doc);
+        QCOMPARE(drawing->indexOf(color), 0);
+        QCOMPARE(drawing->layer(color)->image.pixel(3, 3), kInk);
+        history.undo(*doc);
+        QVERIFY(drawing->layer(color)->properties.visible);
+        history.undo(*doc);
+        QCOMPARE(drawing->indexOf(color), 1);
+        history.undo(*doc);
+        QVERIFY(!drawing->layer(color));
+        history.redo(*doc);
+        QCOMPARE(drawing->indexOf(color), 1); // the same id again
+    }
+
     void removeDrawingRestoresItsExposures()
     {
         auto [doc, celId] = docWithCel();
@@ -122,7 +165,7 @@ private slots:
         history.execute(*doc, std::move(b.command));
         history.execute(*doc, makeSetExposure(*doc, celId, 4, 2, a.id)); // cycle back to A
         Cel *cel = doc->cel(celId);
-        cel->drawing(a.id)->image.setPixel(0, 0, kInk);
+        cel->drawing(a.id)->layers.front().image.setPixel(0, 0, kInk);
         const Timing timingBefore = cel->timing();
 
         history.execute(*doc, std::make_unique<RemoveDrawingCommand>(celId, a.id));
@@ -131,7 +174,7 @@ private slots:
 
         history.undo(*doc);
         QVERIFY(cel->timing() == timingBefore);
-        QCOMPARE(cel->drawing(a.id)->image.pixel(0, 0), kInk);
+        QCOMPARE(cel->drawing(a.id)->layers.front().image.pixel(0, 0), kInk);
     }
 
     void timingFactories()

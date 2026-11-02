@@ -18,7 +18,7 @@ std::size_t celBytes(const Cel *cel)
     std::size_t total = sizeof(Cel);
     if (cel)
         for (const auto &[id, d] : cel->drawings())
-            total += d.image.memoryBytes();
+            total += d.memoryBytes();
     return total;
 }
 
@@ -100,8 +100,7 @@ ChangeSet MoveCelCommand::revert(Document &doc)
 
 // --- SetCelPropertiesCommand --------------------------------------------------------
 
-SetCelPropertiesCommand::SetCelPropertiesCommand(CelId cel, CelProperties before,
-                                                     CelProperties after)
+SetCelPropertiesCommand::SetCelPropertiesCommand(CelId cel, CelProperties before, CelProperties after)
     : m_id(cel)
     , m_before(std::move(before))
     , m_after(std::move(after))

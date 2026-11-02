@@ -17,10 +17,11 @@ struct ChangeSet
     {
         CelId cel = kNoId;
         DrawingId drawing = kNoId;
+        LayerId layer = kNoId;
         std::vector<TileCoord> tiles;
     };
 
-    bool structure = false;     // cels, drawings, timing or document properties
+    bool structure = false;     // cels, drawings, layers, timing or document properties
     std::vector<Pixels> pixels; // painted tiles
 
     bool isEmpty() const { return !structure && pixels.empty(); }
@@ -42,8 +43,12 @@ enum class CommandKind {
     RemoveCel,
     MoveCel,
     ChangeCelProperties,
+    AddLayer,
+    RemoveLayer,
+    MoveLayer,
+    ChangeLayerProperties,
     ImportImage,
-    ClearDrawing,
+    ClearLayer,
     Move,
     Select,
     CutToLayer,

@@ -5,6 +5,7 @@
 #include "core/document/commands/DrawingCommands.h"
 #include "core/document/commands/GroupCommand.h"
 #include "core/document/commands/CelCommands.h"
+#include "core/document/commands/LayerCommands.h"
 #include "core/document/commands/PaintCommand.h"
 
 #include <algorithm>
@@ -120,12 +121,19 @@ void DocumentController::replaceDocument(std::unique_ptr<doc::Document> document
     m_currentCel = m_document->celCount() > 0 ? m_document->celAt(m_document->celCount() - 1).id()
                                                   : doc::kNoId;
     m_currentFrame = 0;
+    m_currentLayer = doc::kNoId;
+    m_currentLayerName.clear();
     m_selection = QPainterPath();
+    if (const doc::Drawing *drawing = currentDrawing(); drawing && !drawing->layers.empty()) {
+        m_currentLayer = drawing->layers.back().id;
+        m_currentLayerName = drawing->layers.back().properties.name;
+    }
 
     emit documentReplaced();
     emit structureChanged();
     emit currentCelChanged(m_currentCel);
     emit currentFrameChanged(m_currentFrame);
+    emit currentLayerChanged(m_currentLayer);
     emit selectionChanged();
     emit historyChanged();
 }
@@ -164,20 +172,20 @@ void DocumentController::importImage(const QImage &image, const QString &name)
     // then the pixels: each step applied now, recorded together.
     std::vector<std::unique_ptr<doc::Command>> steps;
     auto cel = std::make_unique<doc::AddCelCommand>(d, d.indexOf(m_currentCel) + 1,
-                                                        doc::CelProperties{name.toStdString()});
+                                                    doc::CelProperties{name.toStdString()});
     const doc::CelId celId = cel->celId();
     publish(cel->apply(d));
     steps.push_back(std::move(cel));
 
-    doc::NewDrawing drawing = doc::makeNewDrawing(d, celId, 0, d.frameCount());
+    doc::NewDrawing drawing = doc::makeNewDrawing(d, celId, 0, d.frameCount(), tr("Layer 1").toStdString());
     publish(drawing.command->apply(d));
     steps.push_back(std::move(drawing.command));
 
-    doc::TiledImage &target = d.cel(celId)->drawing(drawing.id)->image;
+    doc::TiledImage &target = d.layer(celId, drawing.id, drawing.layer)->image;
     const doc::TiledImage before = target;
     target.write(at.x(), at.y(), pixels.width(), pixels.height(),
                  reinterpret_cast<const doc::Pixel *>(pixels.constBits()), pixels.bytesPerLine() / 4);
-    if (auto paint = doc::PaintCommand::capture(celId, drawing.id, before, target))
+    if (auto paint = doc::PaintCommand::capture(celId, drawing.id, drawing.layer, before, target))
         steps.push_back(std::move(paint));
     emit pixelsChanged(celId, drawing.id, QRect(at, pixels.size()));
 
@@ -186,43 +194,74 @@ void DocumentController::importImage(const QImage &image, const QString &name)
     setCurrentCel(celId);
 }
 
-bool DocumentController::canClearCurrentDrawing() const
+const doc::Drawing *DocumentController::currentDrawing() const
+{
+    const doc::Cel *cel = m_document->cel(m_currentCel);
+    return cel ? cel->drawingAt(m_currentFrame) : nullptr;
+}
+
+doc::DrawingId DocumentController::currentDrawingId() const
+{
+    const doc::Cel *cel = m_document->cel(m_currentCel);
+    return cel ? cel->timing().drawingAt(m_currentFrame) : doc::kNoId;
+}
+
+doc::Layer *DocumentController::workLayer(bool changesIt, const QString &nothing, QString *reason)
+{
+    auto fail = [reason](const QString &why) -> doc::Layer * {
+        if (reason)
+            *reason = why;
+        return nullptr;
+    };
+    doc::Cel *cel = m_document->cel(m_currentCel);
+    if (!cel)
+        return fail(tr("No cel selected"));
+    const QString celName = QString::fromStdString(cel->properties().name);
+    if (!cel->properties().visible)
+        return fail(tr("Cel “%1” is hidden").arg(celName));
+    if (changesIt && cel->properties().locked)
+        return fail(tr("Cel “%1” is locked").arg(celName));
+    doc::Layer *layer = m_document->layer(m_currentCel, currentDrawingId(), m_currentLayer);
+    if (!layer)
+        return fail(nothing);
+    const QString name = QString::fromStdString(layer->properties.name);
+    if (!layer->properties.visible)
+        return fail(tr("Layer “%1” is hidden").arg(name));
+    if (changesIt && layer->properties.locked)
+        return fail(tr("Layer “%1” is locked").arg(name));
+    return layer;
+}
+
+bool DocumentController::canClearCurrentLayer() const
 {
     const doc::Cel *cel = m_document->cel(m_currentCel);
     if (!cel || !cel->properties().visible || cel->properties().locked)
         return false;
-    const doc::Drawing *drawing = cel->drawingAt(m_currentFrame);
-    return drawing && !drawing->image.isEmpty();
+    const doc::Layer *layer = m_document->layer(m_currentCel, currentDrawingId(), m_currentLayer);
+    return layer && layer->properties.visible && !layer->properties.locked && !layer->image.isEmpty();
 }
 
-bool DocumentController::clearCurrentDrawing(QString *reason)
+bool DocumentController::clearCurrentLayer(QString *reason)
 {
-    auto fail = [reason](const QString &why) {
-        if (reason)
-            *reason = why;
-        return false;
-    };
     interruptStroke(); // an open edit is applied first, then cleared with the rest
-    doc::Cel *cel = m_document->cel(m_currentCel);
-    if (!cel)
-        return fail(tr("No cel selected"));
-    const QString name = QString::fromStdString(cel->properties().name);
-    if (!cel->properties().visible)
-        return fail(tr("Cel “%1” is hidden").arg(name));
-    if (cel->properties().locked)
-        return fail(tr("Cel “%1” is locked").arg(name));
-    const doc::DrawingId drawingId = cel->timing().drawingAt(m_currentFrame);
-    doc::Drawing *drawing = cel->drawing(drawingId);
-    if (!drawing || drawing->image.isEmpty())
-        return fail(tr("Nothing to clear on this frame"));
+    const QString nothing = tr("Nothing to clear on this frame");
+    doc::Layer *layer = workLayer(true, nothing, reason);
+    if (!layer)
+        return false;
+    if (layer->image.isEmpty()) {
+        if (reason)
+            *reason = nothing;
+        return false;
+    }
 
-    // The drawing stays (its exposures too), only its pixels go.
-    const doc::TiledImage before = drawing->image;
+    // The layer stays (and its drawing, exposures too), only its pixels go.
+    const doc::DrawingId drawingId = currentDrawingId();
+    const doc::TiledImage before = layer->image;
     const QRect area = boundsOf(before.tileCoords());
-    drawing->image = doc::TiledImage();
+    layer->image = doc::TiledImage();
     std::vector<std::unique_ptr<doc::Command>> steps;
-    steps.push_back(doc::PaintCommand::capture(m_currentCel, drawingId, before, drawing->image));
-    m_history.pushApplied(std::make_unique<doc::GroupCommand>(doc::CommandKind::ClearDrawing, std::move(steps)));
+    steps.push_back(doc::PaintCommand::capture(m_currentCel, drawingId, m_currentLayer, before, layer->image));
+    m_history.pushApplied(std::make_unique<doc::GroupCommand>(doc::CommandKind::ClearLayer, std::move(steps)));
     emit pixelsChanged(m_currentCel, drawingId, area);
     emit historyChanged();
     return true;
@@ -275,49 +314,32 @@ void DocumentController::invertSelection()
     setSelection(page.subtracted(m_selection));
 }
 
-doc::Drawing *DocumentController::selectedDrawing(bool changesIt, QString *reason)
-{
-    auto fail = [reason](const QString &why) -> doc::Drawing * {
-        if (reason)
-            *reason = why;
-        return nullptr;
-    };
-    if (!hasSelection())
-        return fail(tr("Nothing is selected"));
-    doc::Cel *cel = m_document->cel(m_currentCel);
-    if (!cel)
-        return fail(tr("No cel selected"));
-    const QString name = QString::fromStdString(cel->properties().name);
-    if (!cel->properties().visible)
-        return fail(tr("Cel “%1” is hidden").arg(name));
-    if (changesIt && cel->properties().locked)
-        return fail(tr("Cel “%1” is locked").arg(name));
-    doc::Drawing *drawing = cel->drawing(cel->timing().drawingAt(m_currentFrame));
-    if (!drawing || drawing->image.isEmpty())
-        return fail(tr("Nothing in the selection on this frame"));
-    return drawing;
-}
-
 bool DocumentController::eraseSelection(QString *reason)
 {
     interruptStroke();
-    doc::Drawing *drawing = selectedDrawing(true, reason);
-    if (!drawing)
+    const QString nothing = tr("Nothing in the selection on this frame");
+    if (!hasSelection()) {
+        if (reason)
+            *reason = tr("Nothing is selected");
+        return false;
+    }
+    doc::Layer *layer = workLayer(true, nothing, reason);
+    if (!layer)
         return false;
     const canvas::SelectionMask mask = canvas::SelectionMask::fromPath(m_selection);
     doc::TiledImage inside, outside;
-    canvas::splitByMask(drawing->image, mask, inside, outside);
+    canvas::splitByMask(layer->image, mask, inside, outside);
     if (inside.isEmpty()) {
         if (reason)
-            *reason = tr("Nothing in the selection on this frame");
+            *reason = nothing;
         return false;
     }
-    const doc::DrawingId drawingId = m_document->cel(m_currentCel)->timing().drawingAt(m_currentFrame);
-    const doc::TiledImage before = drawing->image;
-    drawing->image = std::move(outside);
+    const doc::DrawingId drawingId = currentDrawingId();
+    const doc::TiledImage before = layer->image;
+    layer->image = std::move(outside);
     std::vector<std::unique_ptr<doc::Command>> steps;
-    steps.push_back(doc::PaintCommand::capture(m_currentCel, drawingId, before, drawing->image));
-    m_history.pushApplied(std::make_unique<doc::GroupCommand>(doc::CommandKind::ClearDrawing, std::move(steps)));
+    steps.push_back(doc::PaintCommand::capture(m_currentCel, drawingId, m_currentLayer, before, layer->image));
+    m_history.pushApplied(std::make_unique<doc::GroupCommand>(doc::CommandKind::ClearLayer, std::move(steps)));
     emit pixelsChanged(m_currentCel, drawingId, mask.bounds);
     emit historyChanged();
     return true;
@@ -336,52 +358,47 @@ bool DocumentController::copySelectionToLayer(QString *reason)
 bool DocumentController::selectionToLayer(bool cut, QString *reason)
 {
     interruptStroke();
-    doc::Drawing *drawing = selectedDrawing(cut, reason);
-    if (!drawing)
+    const QString nothing = tr("Nothing in the selection on this frame");
+    if (!hasSelection()) {
+        if (reason)
+            *reason = tr("Nothing is selected");
+        return false;
+    }
+    doc::Layer *layer = workLayer(cut, nothing, reason);
+    if (!layer)
         return false;
     doc::Document &d = *m_document;
-    const doc::Cel &source = *d.cel(m_currentCel);
-    const doc::DrawingId sourceDrawing = source.timing().drawingAt(m_currentFrame);
-    const doc::Exposure exposure = *source.timing().exposureAt(m_currentFrame);
+    const doc::DrawingId drawingId = currentDrawingId();
     const canvas::SelectionMask mask = canvas::SelectionMask::fromPath(m_selection);
     doc::TiledImage inside, outside;
-    canvas::splitByMask(drawing->image, mask, inside, outside);
+    canvas::splitByMask(layer->image, mask, inside, outside);
     if (inside.isEmpty()) {
         if (reason)
-            *reason = tr("Nothing in the selection on this frame");
+            *reason = nothing;
         return false;
     }
 
-    // The source loses its part (cut), then a new layer above it gets the
-    // part in a drawing exposed on the same frames: applied now, recorded together.
+    // The source loses its part (cut), then a new layer above it in the same
+    // drawing gets the part: applied now, recorded together.
     std::vector<std::unique_ptr<doc::Command>> steps;
     if (cut) {
-        const doc::TiledImage before = drawing->image;
-        drawing->image = std::move(outside);
-        steps.push_back(doc::PaintCommand::capture(m_currentCel, sourceDrawing, before, drawing->image));
-        emit pixelsChanged(m_currentCel, sourceDrawing, mask.bounds);
+        const doc::TiledImage before = layer->image;
+        layer->image = std::move(outside);
+        steps.push_back(doc::PaintCommand::capture(m_currentCel, drawingId, m_currentLayer, before, layer->image));
     }
-    const QString name = QString::fromStdString(source.properties().name);
-    auto cel = std::make_unique<doc::AddCelCommand>(
-        d, d.indexOf(m_currentCel) + 1,
-        doc::CelProperties{(cut ? tr("%1 (cut)") : tr("%1 (copy)")).arg(name).toStdString()});
-    const doc::CelId celId = cel->celId();
-    publish(cel->apply(d));
-    steps.push_back(std::move(cel));
-
-    doc::NewDrawing copy = doc::makeNewDrawing(d, celId, exposure.start, exposure.length);
-    publish(copy.command->apply(d));
-    steps.push_back(std::move(copy.command));
-    doc::TiledImage &target = d.cel(celId)->drawing(copy.id)->image;
-    const doc::TiledImage empty = target;
-    target = std::move(inside);
-    steps.push_back(doc::PaintCommand::capture(celId, copy.id, empty, target));
-    emit pixelsChanged(celId, copy.id, mask.bounds);
+    const QString name = QString::fromStdString(layer->properties.name);
+    auto added = std::make_unique<doc::AddLayerCommand>(
+        d, m_currentCel, drawingId, currentDrawing()->indexOf(m_currentLayer) + 1,
+        doc::LayerProperties{(cut ? tr("%1 (cut)") : tr("%1 (copy)")).arg(name).toStdString()}, std::move(inside));
+    const doc::LayerId layerId = added->layerId();
+    publish(added->apply(d)); // `layer` may have moved: not used from here on
+    steps.push_back(std::move(added));
+    emit pixelsChanged(m_currentCel, drawingId, mask.bounds);
 
     m_history.pushApplied(std::make_unique<doc::GroupCommand>(
         cut ? doc::CommandKind::CutToLayer : doc::CommandKind::CopyToLayer, std::move(steps)));
     emit historyChanged();
-    setCurrentCel(celId);
+    setCurrentLayer(layerId);
     return true;
 }
 
@@ -393,19 +410,18 @@ QImage DocumentController::copyPixels(QPoint *origin, QString *reason)
         return QImage();
     };
     interruptStroke(); // an open edit is part of what is copied
-    const doc::Cel *cel = m_document->cel(m_currentCel);
-    if (!cel)
-        return fail(tr("No cel selected"));
-    if (!cel->properties().visible)
-        return fail(tr("Cel “%1” is hidden").arg(QString::fromStdString(cel->properties().name)));
-    const doc::Drawing *drawing = cel->drawingAt(m_currentFrame);
-    if (!drawing || drawing->image.isEmpty())
-        return fail(tr("Nothing to copy on this frame"));
+    const QString nothing = tr("Nothing to copy on this frame");
+    QString why;
+    const doc::Layer *layer = workLayer(false, nothing, &why);
+    if (!layer)
+        return fail(why);
+    if (layer->image.isEmpty())
+        return fail(nothing);
 
-    doc::TiledImage copied = drawing->image;
+    doc::TiledImage copied = layer->image;
     if (hasSelection()) {
         doc::TiledImage outside;
-        canvas::splitByMask(drawing->image, canvas::SelectionMask::fromPath(m_selection), copied, outside);
+        canvas::splitByMask(layer->image, canvas::SelectionMask::fromPath(m_selection), copied, outside);
     }
     const QRect tiles = boundsOf(copied.tileCoords());
     QRect crop;
@@ -490,8 +506,12 @@ QString DocumentController::commandName(doc::CommandKind kind)
     case doc::CommandKind::RemoveCel: return tr("delete cel");
     case doc::CommandKind::MoveCel: return tr("move cel");
     case doc::CommandKind::ChangeCelProperties: return tr("cel properties");
+    case doc::CommandKind::AddLayer: return tr("new layer");
+    case doc::CommandKind::RemoveLayer: return tr("delete layer");
+    case doc::CommandKind::MoveLayer: return tr("move layer");
+    case doc::CommandKind::ChangeLayerProperties: return tr("layer properties");
     case doc::CommandKind::ImportImage: return tr("import image");
-    case doc::CommandKind::ClearDrawing: return tr("clear");
+    case doc::CommandKind::ClearLayer: return tr("clear");
     case doc::CommandKind::Move: return tr("move");
     case doc::CommandKind::Select: return tr("selection");
     case doc::CommandKind::CutToLayer: return tr("cut to layer");
@@ -519,6 +539,7 @@ void DocumentController::publish(const doc::ChangeSet &changes)
 {
     if (changes.structure) {
         ensureValidCurrentCel();
+        resolveCurrentLayer();
         emit structureChanged();
     }
     for (const doc::ChangeSet::Pixels &p : changes.pixels)
@@ -529,12 +550,35 @@ void DocumentController::ensureValidCurrentCel()
 {
     if (m_document->cel(m_currentCel))
         return;
-    // The current layer is gone (removed or undone): pick the top one, if any.
+    // The current cel is gone (removed or undone): pick the top one, if any.
     const doc::CelId fallback = m_document->celCount() > 0
         ? m_document->celAt(m_document->celCount() - 1).id()
         : doc::kNoId;
     m_currentCel = fallback;
     emit currentCelChanged(fallback);
+}
+
+void DocumentController::resolveCurrentLayer()
+{
+    const doc::Drawing *drawing = currentDrawing();
+    doc::LayerId layer = doc::kNoId;
+    if (drawing && !drawing->layers.empty()) {
+        if (drawing->layer(m_currentLayer)) {
+            layer = m_currentLayer;
+        } else {
+            layer = drawing->layers.back().id; // the top one, unless one has the name
+            for (auto it = drawing->layers.rbegin(); it != drawing->layers.rend(); ++it)
+                if (it->properties.name == m_currentLayerName) {
+                    layer = it->id;
+                    break;
+                }
+        }
+        m_currentLayerName = drawing->layer(layer)->properties.name; // renamed, perhaps
+    }
+    if (layer == m_currentLayer)
+        return;
+    m_currentLayer = layer;
+    emit currentLayerChanged(layer);
 }
 
 // --- selection -------------------------------------------------------------------
@@ -547,6 +591,7 @@ void DocumentController::setCurrentFrame(int frame)
     interruptStroke();
     m_currentFrame = frame;
     emit currentFrameChanged(frame);
+    resolveCurrentLayer();
 }
 
 void DocumentController::setCurrentCel(doc::CelId cel)
@@ -556,6 +601,18 @@ void DocumentController::setCurrentCel(doc::CelId cel)
     interruptStroke();
     m_currentCel = cel;
     emit currentCelChanged(cel);
+    resolveCurrentLayer();
+}
+
+void DocumentController::setCurrentLayer(doc::LayerId layer)
+{
+    const doc::Drawing *drawing = currentDrawing();
+    if (layer == m_currentLayer || !drawing || !drawing->layer(layer))
+        return;
+    interruptStroke();
+    m_currentLayer = layer;
+    m_currentLayerName = drawing->layer(layer)->properties.name;
+    emit currentLayerChanged(layer);
 }
 
 // --- painting ----------------------------------------------------------------------
@@ -581,13 +638,23 @@ std::optional<DocumentController::PaintTarget> DocumentController::beginPaint(bo
     if (drawing == doc::kNoId) {
         if (!createIfEmpty)
             return fail(QString());
-        // Harmony-like: drawing on an empty frame creates a drawing there.
-        doc::NewDrawing created = doc::makeNewDrawing(*m_document, m_currentCel, m_currentFrame);
-        publish(created.command->apply(*m_document));
+        // Harmony-like: drawing on an empty frame creates a drawing there,
+        // its layer named like the one worked on before.
+        const std::string layerName = m_currentLayerName.empty() ? tr("Layer 1").toStdString() : m_currentLayerName;
+        doc::NewDrawing created = doc::makeNewDrawing(*m_document, m_currentCel, m_currentFrame, 1, layerName);
+        publish(created.command->apply(*m_document)); // the new layer becomes current
         state.createdDrawing = std::move(created.command);
         drawing = created.id;
     }
-    state.target = {m_currentCel, drawing, &cel->drawing(drawing)->image};
+    doc::Layer *layer = cel->drawing(drawing)->layer(m_currentLayer);
+    if (!layer)
+        return fail(tr("No layer selected"));
+    const QString name = QString::fromStdString(layer->properties.name);
+    if (!layer->properties.visible)
+        return fail(tr("Layer “%1” is hidden").arg(name));
+    if (layer->properties.locked)
+        return fail(tr("Layer “%1” is locked").arg(name));
+    state.target = {m_currentCel, drawing, m_currentLayer, &layer->image};
     state.selectionBefore = m_selection;
     m_paint = std::move(state);
     return m_paint->target;
@@ -608,7 +675,8 @@ void DocumentController::endPaint(const doc::TiledImage &before, doc::CommandKin
 
     // New drawing + stroke + selection change: one undo step.
     std::vector<std::unique_ptr<doc::Command>> steps;
-    auto paint = doc::PaintCommand::capture(state.target.cel, state.target.drawing, before, *state.target.image);
+    auto paint = doc::PaintCommand::capture(state.target.cel, state.target.drawing, state.target.layer, before,
+                                            *state.target.image);
     if (paint) {
         if (state.createdDrawing)
             steps.push_back(std::move(state.createdDrawing));

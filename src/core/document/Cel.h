@@ -9,8 +9,6 @@
 
 namespace mothion::doc {
 
-enum class BlendMode { Normal, Multiply, Screen, Overlay, Add };
-
 struct CelProperties
 {
     std::string name;

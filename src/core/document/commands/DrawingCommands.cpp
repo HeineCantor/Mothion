@@ -47,7 +47,7 @@ ChangeSet AddDrawingCommand::revert(Document &doc)
 
 std::size_t AddDrawingCommand::memoryBytes() const
 {
-    return sizeof(*this) + (m_drawing ? m_drawing->image.memoryBytes() : 0);
+    return sizeof(*this) + (m_drawing ? m_drawing->memoryBytes() : 0);
 }
 
 // --- RemoveDrawingCommand ---------------------------------------------------------
@@ -82,24 +82,26 @@ ChangeSet RemoveDrawingCommand::revert(Document &doc)
 
 std::size_t RemoveDrawingCommand::memoryBytes() const
 {
-    return sizeof(*this) + (m_drawing ? m_drawing->image.memoryBytes() : 0);
+    return sizeof(*this) + (m_drawing ? m_drawing->memoryBytes() : 0);
 }
 
 // --- factory ----------------------------------------------------------------------
 
-NewDrawing makeNewDrawing(Document &doc, CelId celId, int frame, int length)
+NewDrawing makeNewDrawing(Document &doc, CelId celId, int frame, int length, std::string layerName)
 {
     const Cel *cel = doc.cel(celId);
     if (!cel)
         return {};
     const DrawingId id = doc.allocateDrawingId();
+    const LayerId layer = doc.allocateLayerId();
     Timing after = cel->timing();
     after.setExposure(frame, length, id);
 
     std::vector<std::unique_ptr<Command>> steps;
-    steps.push_back(std::make_unique<AddDrawingCommand>(celId, Drawing{id, cel->nextDrawingName(), {}}));
+    steps.push_back(std::make_unique<AddDrawingCommand>(
+        celId, Drawing{id, cel->nextDrawingName(), {Layer{layer, {std::move(layerName)}, {}}}}));
     steps.push_back(std::make_unique<SetTimingCommand>(celId, cel->timing(), std::move(after)));
-    return {std::make_unique<GroupCommand>(CommandKind::AddDrawing, std::move(steps)), id};
+    return {std::make_unique<GroupCommand>(CommandKind::AddDrawing, std::move(steps)), id, layer};
 }
 
 } // namespace mothion::doc

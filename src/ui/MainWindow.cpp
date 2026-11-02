@@ -203,13 +203,14 @@ void MainWindow::createCanvasArea()
     m_clearAction->setToolTip(tr("Clear layer: erase the current layer's drawing on this frame"));
     connect(m_clearAction, &QAction::triggered, this, [this] {
         QString reason;
-        if (!m_document->clearCurrentDrawing(&reason))
+        if (!m_document->clearCurrentLayer(&reason))
             statusBar()->showMessage(reason, 4000);
     });
-    auto syncClear = [this] { m_clearAction->setEnabled(m_document->canClearCurrentDrawing()); };
+    auto syncClear = [this] { m_clearAction->setEnabled(m_document->canClearCurrentLayer()); };
     using document::DocumentController;
     connect(m_document, &DocumentController::structureChanged, this, syncClear);
     connect(m_document, &DocumentController::currentCelChanged, this, syncClear);
+    connect(m_document, &DocumentController::currentLayerChanged, this, syncClear);
     connect(m_document, &DocumentController::currentFrameChanged, this, syncClear);
     connect(m_document, &DocumentController::pixelsChanged, this, syncClear);
     connect(m_document, &DocumentController::historyChanged, this, syncClear);
@@ -348,7 +349,7 @@ void MainWindow::copyPixels(bool cut)
     if (!cut)
         return;
     const bool erased = m_document->hasSelection() ? m_document->eraseSelection(&reason)
-                                                   : m_document->clearCurrentDrawing(&reason);
+                                                   : m_document->clearCurrentLayer(&reason);
     if (!erased)
         statusBar()->showMessage(tr("Copied, not cut: %1").arg(reason), 4000);
 }

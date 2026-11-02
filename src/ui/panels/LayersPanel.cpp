@@ -1,5 +1,6 @@
 #include "ui/panels/LayersPanel.h"
 
+#include "canvas/FrameRenderer.h"
 #include "canvas/TileQt.h"
 #include "core/document/commands/GroupCommand.h"
 #include "core/document/commands/CelCommands.h"
@@ -67,8 +68,8 @@ QPixmap thumbnail(const doc::Drawing *drawing, const QSize &docSize, const QColo
         p.save();
         p.setRenderHint(QPainter::SmoothPixmapTransform);
         p.scale(double(kThumbSize.width()) / docSize.width(), double(kThumbSize.height()) / docSize.height());
-        for (const doc::TileCoord &c : drawing->image.tileCoords())
-            p.drawImage(canvas::tileRect(c).topLeft(), canvas::tileImage(*drawing->image.tile(c)));
+        const QRect bounds = canvas::drawingBounds(*drawing);
+        p.drawImage(bounds.topLeft(), canvas::composeDrawing(*drawing, bounds));
         p.restore();
     }
     p.setPen(QColor(0x18, 0x18, 0x1a));

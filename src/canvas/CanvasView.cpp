@@ -6,7 +6,6 @@
 #include "canvas/MoveTool.h"
 #include "canvas/PuppetTool.h"
 #include "canvas/SelectionTool.h"
-#include "canvas/TileQt.h"
 #include "canvas/TransformTool.h"
 #include "document/DocumentController.h"
 #include "input/TabletInputAdapter.h"
@@ -150,18 +149,10 @@ const CanvasView::OnionImage &CanvasView::onionImage(doc::DrawingId id, const QC
     cached.color = color.rgba();
     const doc::Cel *cel = m_document->document().cel(m_document->currentCel());
     const doc::Drawing *drawing = cel ? cel->drawing(id) : nullptr;
-    if (!drawing || drawing->image.isEmpty())
+    const QRect bounds = drawing ? drawingBounds(*drawing) : QRect();
+    if (bounds.isEmpty())
         return cached;
-    QRect bounds;
-    for (const doc::TileCoord &c : drawing->image.tileCoords())
-        bounds |= tileRect(c);
-    QImage image(bounds.size(), QImage::Format_ARGB32_Premultiplied);
-    image.fill(Qt::transparent);
-    {
-        QPainter p(&image);
-        for (const doc::TileCoord &c : drawing->image.tileCoords())
-            p.drawImage(tileRect(c).topLeft() - bounds.topLeft(), tileImage(*drawing->image.tile(c)));
-    }
+    QImage image = composeDrawing(*drawing, bounds); // its visible layers, as the cel shows it
     // Every pixel the color, keeping its coverage.
     const int r = color.red(), g = color.green(), b = color.blue();
     for (int y = 0; y < image.height(); ++y) {

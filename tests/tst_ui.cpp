@@ -9,6 +9,8 @@
 #include "canvas/TransformTool.h"
 #include "canvas/ViewTransform.h"
 #include "core/document/commands/CelCommands.h"
+#include "core/document/commands/DrawingCommands.h"
+#include "core/document/commands/LayerCommands.h"
 #include "document/DocumentController.h"
 #include "io/ProjectFile.h"
 #include "tools/BrushLibrary.h"
@@ -40,6 +42,7 @@
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <QScrollArea>
+#include <QSignalSpy>
 #include <QSpinBox>
 #include <QScrollBar>
 #include <QStandardPaths>
@@ -69,10 +72,10 @@ private slots:
         const QString path = dir.filePath(QStringLiteral("shot 12.mothion"));
         doc::Document saved(640, 360);
         saved.insertCel(0, std::make_unique<doc::Cel>(saved.allocateCelId(), doc::CelProperties{"BG"}));
-        doc::Cel &ink = saved.insertCel(1, std::make_unique<doc::Cel>(saved.allocateCelId(),
-                                                                             doc::CelProperties{"Ink"}));
-        doc::Drawing &drawing = ink.addDrawing({saved.allocateDrawingId(), "1", {}});
-        drawing.image.setPixel(5, 5, 0xff000000);
+        doc::Cel &ink =
+            saved.insertCel(1, std::make_unique<doc::Cel>(saved.allocateCelId(), doc::CelProperties{"Ink"}));
+        doc::Drawing &drawing = ink.addDrawing({saved.allocateDrawingId(), "1", {{saved.allocateLayerId(), {"Line"}, {}}}});
+        drawing.layers.front().image.setPixel(5, 5, 0xff000000);
         ink.timing().setExposure(0, 12, drawing.id);
         QString error;
         QVERIFY2(io::saveProject(saved, path, &error), qPrintable(error));
@@ -474,21 +477,21 @@ private slots:
         const doc::Document &d = controller.document();
         const doc::Cel &cel = *d.cel(controller.currentCel());
         const doc::DrawingId drawing = cel.timing().drawingAt(0);
-        QVERIFY(controller.canClearCurrentDrawing());
+        QVERIFY(controller.canClearCurrentLayer());
 
-        QVERIFY(controller.clearCurrentDrawing());
-        QVERIFY(cel.drawing(drawing)->image.isEmpty());
+        QVERIFY(controller.clearCurrentLayer());
+        QVERIFY(cel.drawing(drawing)->layers.front().image.isEmpty());
         QCOMPARE(cel.timing().drawingAt(0), drawing); // still exposed, just empty
-        QVERIFY(!controller.canClearCurrentDrawing());
+        QVERIFY(!controller.canClearCurrentLayer());
         QCOMPARE(controller.undoText(), QStringLiteral("Undo clear"));
 
         controller.undo();
-        QVERIFY(!cel.drawing(drawing)->image.isEmpty());
+        QVERIFY(!cel.drawing(drawing)->layers.front().image.isEmpty());
         controller.redo();
-        QVERIFY(cel.drawing(drawing)->image.isEmpty());
+        QVERIFY(cel.drawing(drawing)->layers.front().image.isEmpty());
 
         QString reason;
-        QVERIFY(!controller.clearCurrentDrawing(&reason)); // nothing left
+        QVERIFY(!controller.clearCurrentLayer(&reason)); // nothing left
         QVERIFY(!reason.isEmpty());
     }
 
@@ -507,8 +510,8 @@ private slots:
             p.visible = locked; // first locked, then hidden
             controller.execute(doc::makeSetCelProperties(controller.document(), id, p));
             QString reason;
-            QVERIFY(!controller.canClearCurrentDrawing());
-            QVERIFY(!controller.clearCurrentDrawing(&reason));
+            QVERIFY(!controller.canClearCurrentLayer());
+            QVERIFY(!controller.clearCurrentLayer(&reason));
             QVERIFY(reason.contains(locked ? QStringLiteral("locked") : QStringLiteral("hidden")));
         }
     }
@@ -516,9 +519,65 @@ private slots:
     void clearOnAnEmptyFrameDoesNothing()
     {
         document::DocumentController controller; // one layer, no drawings
-        QVERIFY(!controller.canClearCurrentDrawing());
-        QVERIFY(!controller.clearCurrentDrawing());
+        QVERIFY(!controller.canClearCurrentLayer());
+        QVERIFY(!controller.clearCurrentLayer());
         QVERIFY(!controller.canUndo());
+    }
+
+    // The layer tools work on is one of the drawing shown: going to another
+    // drawing keeps the layer of the same name, else the top one; a drawing
+    // made by painting on an empty frame names its layer after it.
+    void currentLayerFollowsTheDrawings()
+    {
+        document::DocumentController controller;
+        doc::Document &d = controller.documentForCommands();
+        const doc::CelId cel = controller.currentCel();
+        auto drawingWith = [&](int frame, std::vector<std::string> names) {
+            doc::NewDrawing nd = doc::makeNewDrawing(d, cel, frame, 1, names.front());
+            const doc::DrawingId id = nd.id;
+            controller.execute(std::move(nd.command));
+            for (std::size_t i = 1; i < names.size(); ++i)
+                controller.execute(std::make_unique<doc::AddLayerCommand>(d, cel, id, int(i),
+                                                                          doc::LayerProperties{names[i]}));
+            return d.cel(cel)->drawing(id);
+        };
+        const doc::Drawing *first = drawingWith(0, {"Line", "Color"});
+        const doc::Drawing *second = drawingWith(1, {"Color", "Line", "Shadow"});
+        QCOMPARE(controller.currentLayer(), first->layers[0].id); // the one it was made with, still there
+
+        QSignalSpy changed(&controller, &document::DocumentController::currentLayerChanged);
+        controller.setCurrentLayer(first->layers[1].id); // Color
+        controller.setCurrentLayer(first->layers[0].id); // Line
+        QCOMPARE(changed.count(), 2);
+        controller.setCurrentFrame(1);
+        QCOMPARE(controller.currentLayer(), second->layers[1].id); // Line again
+        controller.setCurrentLayer(second->layers[2].id); // Shadow: not in the first drawing
+        controller.setCurrentFrame(0);
+        QCOMPARE(controller.currentLayer(), first->layers.back().id);
+        controller.setCurrentFrame(5);
+        QCOMPARE(controller.currentLayer(), doc::kNoId); // an empty frame
+        QCOMPARE(controller.currentDrawing(), nullptr);
+
+        const auto target = controller.beginPaint(true); // the last one worked on was Color
+        QVERIFY(target);
+        const doc::Drawing *made = controller.currentDrawing();
+        QVERIFY(made);
+        QCOMPARE(made->layers.size(), std::size_t(1));
+        QCOMPARE(made->layers[0].properties.name, std::string("Color"));
+        QCOMPARE(target->layer, made->layers[0].id);
+        QCOMPARE(controller.currentLayer(), target->layer);
+        controller.cancelPaint();
+        QCOMPARE(controller.currentDrawing(), nullptr);
+
+        // A locked layer is not painted.
+        controller.setCurrentFrame(0);
+        doc::LayerProperties p = first->layers.back().properties;
+        p.locked = true;
+        controller.execute(doc::makeSetLayerProperties(d, cel, first->id, first->layers.back().id, p));
+        QString reason;
+        QVERIFY(!controller.beginPaint(true, &reason));
+        QVERIFY(reason.contains(QStringLiteral("locked")));
+        QVERIFY(!controller.canClearCurrentLayer());
     }
 
     void importedImageGetsItsOwnLayer()
@@ -536,7 +595,7 @@ private slots:
         const doc::DrawingId drawing = cel.timing().drawingAt(0);
         QVERIFY(drawing != doc::kNoId);
         QCOMPARE(cel.timing().drawingAt(d.frameCount() - 1), drawing); // held for the whole scene
-        const doc::TiledImage &pixels = cel.drawing(drawing)->image;
+        const doc::TiledImage &pixels = cel.drawing(drawing)->layers.front().image;
         QCOMPARE(pixels.pixel(960, 540), doc::Pixel(0xffff0000)); // centered
         QCOMPARE(pixels.pixel(909, 540), doc::Pixel(0));
         QCOMPARE(pixels.pixel(910, 515), doc::Pixel(0xffff0000));
@@ -552,7 +611,7 @@ private slots:
         image.fill(Qt::green);
         controller.importImage(image, QStringLiteral("dot")); // 955..964, 535..544
         const doc::Cel &cel = controller.document().celAt(1);
-        const doc::TiledImage &pixels = cel.drawing(cel.timing().drawingAt(0))->image;
+        const doc::TiledImage &pixels = cel.drawing(cel.timing().drawingAt(0))->layers.front().image;
 
         QStringList messages;
         canvas::MoveTool tool(&controller, [&](const QString &m) { messages << m; });
@@ -579,7 +638,7 @@ private slots:
         image.fill(Qt::green);
         controller.importImage(image, QStringLiteral("dot"));
         const doc::Cel &cel = controller.document().celAt(1);
-        const doc::TiledImage &pixels = cel.drawing(cel.timing().drawingAt(0))->image;
+        const doc::TiledImage &pixels = cel.drawing(cel.timing().drawingAt(0))->layers.front().image;
 
         canvas::MoveTool tool(&controller, [](const QString &) {});
         tool.press({0, 0}, Qt::NoModifier);
@@ -633,7 +692,7 @@ private slots:
         image.fill(Qt::green);
         controller.importImage(image, QStringLiteral("bar")); // x 910..1009, y 535..544
         const doc::Cel &cel = controller.document().celAt(1);
-        const doc::TiledImage &pixels = cel.drawing(cel.timing().drawingAt(0))->image;
+        const doc::TiledImage &pixels = cel.drawing(cel.timing().drawingAt(0))->layers.front().image;
 
         QPainterPath left;
         left.addRect(900, 500, 60, 100); // x 900..959: the bar's left half
@@ -658,7 +717,7 @@ private slots:
         image.fill(Qt::green);
         controller.importImage(image, QStringLiteral("bar")); // x 910..1009, y 535..544
         const doc::Cel &cel = controller.document().celAt(1);
-        const doc::TiledImage &pixels = cel.drawing(cel.timing().drawingAt(0))->image;
+        const doc::TiledImage &pixels = cel.drawing(cel.timing().drawingAt(0))->layers.front().image;
         QPainterPath left;
         left.addRect(900, 500, 60, 100);
         controller.setSelection(left);
@@ -766,7 +825,7 @@ private slots:
         }
         controller.importImage(ring, QStringLiteral("lines")); // at 910..1009, 490..589
         const doc::Cel &cel = *controller.document().cel(controller.currentCel());
-        auto pixel = [&](int x, int y) { return cel.drawingAt(0)->image.pixel(x, y); };
+        auto pixel = [&](int x, int y) { return cel.drawingAt(0)->layers.front().image.pixel(x, y); };
         canvas::FrameRenderer frame;
         QStringList messages;
         canvas::FillTool tool(&controller, &state, [&]() -> const QImage & {
@@ -805,7 +864,7 @@ private slots:
         image.fill(Qt::green);
         controller.importImage(image, QStringLiteral("bar")); // x 910..1009, y 535..544
         const doc::Cel &cel = controller.document().celAt(1);
-        auto pixel = [&](int x, int y) { return cel.drawing(cel.timing().drawingAt(0))->image.pixel(x, y); };
+        auto pixel = [&](int x, int y) { return cel.drawing(cel.timing().drawingAt(0))->layers.front().image.pixel(x, y); };
         const doc::Pixel green = pixel(930, 540);
         QPainterPath left;
         left.addRect(900, 500, 60, 100); // the bar's left half
@@ -970,7 +1029,7 @@ private slots:
         tool.release({100, 300}, Qt::NoModifier); // a square, closed by the release
         QVERIFY(!tool.isActive());
         const doc::Cel &cel = *controller.document().cel(controller.currentCel());
-        auto pixel = [&](int x, int y) { return cel.drawingAt(0)->image.pixel(x, y); };
+        auto pixel = [&](int x, int y) { return cel.drawingAt(0)->layers.front().image.pixel(x, y); };
         QCOMPARE(pixel(200, 200), doc::Pixel(0xff0000ff));
         QCOMPARE(qAlpha(pixel(350, 200)), 0);
         QCOMPARE(controller.undoText(), QStringLiteral("Undo fill"));
@@ -1021,8 +1080,8 @@ private slots:
         const doc::Cel &target = *controller.document().cel(inkId);
         QVERIFY(target.drawingAt(5));
         QVERIFY(!target.drawingAt(4)); // on this frame only
-        QCOMPARE(target.drawingAt(5)->image.pixel(930, 540), doc::Pixel(0xff00ff00));
-        QCOMPARE(qAlpha(target.drawingAt(5)->image.pixel(990, 540)), 0);
+        QCOMPARE(target.drawingAt(5)->layers.front().image.pixel(930, 540), doc::Pixel(0xff00ff00));
+        QCOMPARE(qAlpha(target.drawingAt(5)->layers.front().image.pixel(990, 540)), 0);
         QCOMPARE(controller.selection().boundingRect(), QRectF(910, 535, 50, 10));
         QCOMPARE(controller.undoText(), QStringLiteral("Undo paste"));
         controller.undo(); // all of it: the drawing it made, the selection
@@ -1072,17 +1131,17 @@ private slots:
 
         action(QKeySequence::Cut)->trigger();
         const doc::Cel &source = *controller->document().cel(bar);
-        QCOMPARE(qAlpha(source.drawingAt(0)->image.pixel(930, 540)), 0); // cut
+        QCOMPARE(qAlpha(source.drawingAt(0)->layers.front().image.pixel(930, 540)), 0); // cut
         QVERIFY(QGuiApplication::clipboard()->mimeData()->hasImage()); // for other apps too
         action(QKeySequence::Paste)->trigger(); // back onto the same layer, in place
         QCOMPARE(controller->currentCel(), bar);
-        QCOMPARE(source.drawingAt(0)->image.pixel(930, 540), doc::Pixel(0xff00ff00));
+        QCOMPARE(source.drawingAt(0)->layers.front().image.pixel(930, 540), doc::Pixel(0xff00ff00));
 
         QImage other(10, 10, QImage::Format_ARGB32); // an image from another app: centered
         other.fill(Qt::blue);
         QGuiApplication::clipboard()->setImage(other);
         action(QKeySequence::Paste)->trigger();
-        QCOMPARE(source.drawingAt(0)->image.pixel(960, 540), doc::Pixel(0xff0000ff));
+        QCOMPARE(source.drawingAt(0)->layers.front().image.pixel(960, 540), doc::Pixel(0xff0000ff));
     }
 
     // Autoplay plays the frames in a loop, the slider following; Play stops
@@ -1323,7 +1382,7 @@ private slots:
         auto pixel = [&](doc::CelId id, int x, int y) {
             const doc::Cel &cel = *controller.document().cel(id);
             const doc::Drawing *drawing = cel.drawingAt(0);
-            return drawing ? drawing->image.pixel(x, y) : doc::Pixel(0);
+            return drawing ? drawing->layers.front().image.pixel(x, y) : doc::Pixel(0);
         };
         const doc::Pixel green = pixel(bar, 930, 540);
         QString reason;
@@ -1341,34 +1400,42 @@ private slots:
         controller.undo();
         QCOMPARE(pixel(bar, 930, 540), green);
 
+        // Cut and copy go to a new layer above, in the same drawing.
+        const doc::Drawing &drawing = *controller.document().cel(bar)->drawingAt(0);
+        const doc::LayerId source = controller.currentLayer();
+        auto layerPixel = [&](doc::LayerId id, int x, int y) {
+            const doc::Layer *layer = drawing.layer(id);
+            return layer ? layer->image.pixel(x, y) : doc::Pixel(0);
+        };
         const int cels = controller.document().celCount();
         QVERIFY(controller.copySelectionToLayer());
-        QCOMPARE(controller.document().celCount(), cels + 1);
-        const doc::CelId copy = controller.currentCel();
-        QVERIFY(copy != bar);
-        QCOMPARE(controller.document().indexOf(copy), controller.document().indexOf(bar) + 1);
-        QCOMPARE(pixel(copy, 930, 540), green);
-        QCOMPARE(qAlpha(pixel(copy, 990, 540)), 0);
-        QCOMPARE(pixel(bar, 930, 540), green); // the source keeps it
-        QVERIFY(controller.document().cel(copy)->drawingAt(controller.document().frameCount() - 1));
-        controller.undo();
         QCOMPARE(controller.document().celCount(), cels);
+        QCOMPARE(drawing.layers.size(), std::size_t(2));
+        const doc::LayerId copy = controller.currentLayer();
+        QCOMPARE(controller.currentCel(), bar);
+        QCOMPARE(drawing.indexOf(copy), drawing.indexOf(source) + 1);
+        QCOMPARE(drawing.layer(copy)->properties.name, std::string("Layer 1 (copy)"));
+        QCOMPARE(layerPixel(copy, 930, 540), green);
+        QCOMPARE(qAlpha(layerPixel(copy, 990, 540)), 0);
+        QCOMPARE(layerPixel(source, 930, 540), green); // the source keeps it
+        controller.undo();
+        QCOMPARE(drawing.layers.size(), std::size_t(1));
+        QCOMPARE(controller.currentLayer(), source);
 
-        controller.setCurrentCel(bar);
         QVERIFY(controller.cutSelectionToLayer());
-        const doc::CelId cut = controller.currentCel();
-        QCOMPARE(pixel(cut, 930, 540), green);
-        QCOMPARE(qAlpha(pixel(bar, 930, 540)), 0); // the source loses it
+        const doc::LayerId cut = controller.currentLayer();
+        QCOMPARE(layerPixel(cut, 930, 540), green);
+        QCOMPARE(qAlpha(layerPixel(source, 930, 540)), 0); // the source loses it
         QCOMPARE(controller.undoText(), QStringLiteral("Undo cut to layer"));
         controller.undo();
-        QCOMPARE(controller.document().celCount(), cels);
-        QCOMPARE(pixel(bar, 930, 540), green);
+        QCOMPARE(drawing.layers.size(), std::size_t(1));
+        QCOMPARE(layerPixel(source, 930, 540), green);
 
         QPainterPath empty; // nothing under the selection
         empty.addRect(100, 100, 50, 50);
         controller.setSelection(empty);
         QVERIFY(!controller.cutSelectionToLayer(&reason));
-        QCOMPARE(controller.document().celCount(), cels);
+        QCOMPARE(drawing.layers.size(), std::size_t(1));
     }
 
     void invertSelectionSelectsTheRest()
@@ -1474,7 +1541,7 @@ private slots:
         image.fill(Qt::darkCyan);
         controller.importImage(image, QStringLiteral("bar")); // x 760..1159, y 520..559
         const doc::Cel &cel = controller.document().celAt(1);
-        auto pixel = [&](int x, int y) { return cel.drawing(cel.timing().drawingAt(0))->image.pixel(x, y); };
+        auto pixel = [&](int x, int y) { return cel.drawing(cel.timing().drawingAt(0))->layers.front().image.pixel(x, y); };
         const doc::Pixel ink = pixel(960, 540);
         tools::PuppetSettings settings = state.puppetSettings();
         settings.local = true;
@@ -1537,7 +1604,7 @@ private slots:
         image.fill(Qt::darkCyan);
         controller.importImage(image, QStringLiteral("bar")); // x 760..1159, y 520..559
         const doc::Cel &cel = controller.document().celAt(1);
-        const doc::TiledImage &pixels = cel.drawing(cel.timing().drawingAt(0))->image;
+        const doc::TiledImage &pixels = cel.drawing(cel.timing().drawingAt(0))->layers.front().image;
         const doc::TiledImage original = pixels;
         auto snapshot = [&] {
             std::vector<doc::Pixel> out(500 * 300);
@@ -1632,7 +1699,7 @@ private slots:
         undo->trigger();
         QCOMPARE(state->activeTool(), tools::ToolId::Transform); // still transforming
         const doc::Cel &cel = *controller->document().cel(controller->currentCel());
-        const doc::TiledImage &pixels = cel.drawingAt(0)->image;
+        const doc::TiledImage &pixels = cel.drawingAt(0)->layers.front().image;
         QCOMPARE(pixels.pixel(1060, 540), doc::Pixel(0xffff0000)); // back after the first drag
         QCOMPARE(qAlpha(pixels.pixel(1060, 640)), 0);
         undo->trigger();
@@ -1650,7 +1717,7 @@ private slots:
         image.fill(Qt::darkCyan);
         controller.importImage(image, QStringLiteral("bar")); // x 760..1159, y 520..559
         const doc::Cel &cel = controller.document().celAt(1);
-        auto pixel = [&](int x, int y) { return cel.drawing(cel.timing().drawingAt(0))->image.pixel(x, y); };
+        auto pixel = [&](int x, int y) { return cel.drawing(cel.timing().drawingAt(0))->layers.front().image.pixel(x, y); };
         const doc::Pixel ink = pixel(960, 540);
         canvas::PuppetTool tool(&controller, &state, [](const QString &) {}, [] {});
         auto click = [&](QPointF at, Qt::KeyboardModifiers mods) {
@@ -1716,7 +1783,7 @@ private slots:
         image.fill(Qt::darkCyan);
         controller.importImage(image, QStringLiteral("bar")); // x 760..1159, y 520..559
         const doc::Cel &cel = controller.document().celAt(1);
-        auto pixel = [&](int x, int y) { return cel.drawing(cel.timing().drawingAt(0))->image.pixel(x, y); };
+        auto pixel = [&](int x, int y) { return cel.drawing(cel.timing().drawingAt(0))->layers.front().image.pixel(x, y); };
         tools::PuppetSettings settings = state.puppetSettings();
         settings.local = true;
         settings.radius = 30;
@@ -1765,7 +1832,7 @@ private slots:
         image.fill(Qt::darkCyan);
         controller.importImage(image, QStringLiteral("bar")); // x 760..1159, y 520..559
         const doc::Cel &cel = controller.document().celAt(1);
-        const doc::TiledImage &pixels = cel.drawing(cel.timing().drawingAt(0))->image;
+        const doc::TiledImage &pixels = cel.drawing(cel.timing().drawingAt(0))->layers.front().image;
         const doc::Pixel ink = pixels.pixel(960, 540);
 
         canvas::PuppetTool tool(&controller, &state, [](const QString &) {}, [] {});
@@ -1812,7 +1879,7 @@ private slots:
         image.fill(Qt::blue);
         controller.importImage(image, QStringLiteral("wide"));
         const doc::Cel &cel = controller.document().celAt(1);
-        const doc::TiledImage &pixels = cel.drawing(cel.timing().drawingAt(0))->image;
+        const doc::TiledImage &pixels = cel.drawing(cel.timing().drawingAt(0))->layers.front().image;
         // 3840×1080 → 1920×540, centered vertically.
         QCOMPARE(qAlpha(pixels.pixel(0, 540)), 255);
         QCOMPARE(qAlpha(pixels.pixel(0, 260)), 0);

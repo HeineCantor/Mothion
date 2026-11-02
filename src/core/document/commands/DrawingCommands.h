@@ -9,7 +9,7 @@
 
 namespace mothion::doc {
 
-// Adds a drawing (with its image, possibly empty) to a cel.
+// Adds a drawing (with its layers, possibly empty) to a cel.
 // The drawing's id must come from Document::allocateDrawingId().
 class AddDrawingCommand : public Command
 {
@@ -45,14 +45,15 @@ private:
     Timing m_timingBefore;
 };
 
-// "New drawing here": a new empty drawing on `cel`, named with the
-// cel's next free number and exposed on [frame, frame+length).
-// Returns the command (not yet applied) and the new drawing's id.
+// "New drawing here": a new drawing on `cel` with one empty layer, named
+// with the cel's next free number and exposed on [frame, frame+length).
+// Returns the command (not yet applied) and the new drawing's and layer's ids.
 struct NewDrawing
 {
     std::unique_ptr<Command> command;
     DrawingId id = kNoId;
+    LayerId layer = kNoId;
 };
-NewDrawing makeNewDrawing(Document &doc, CelId cel, int frame, int length = 1);
+NewDrawing makeNewDrawing(Document &doc, CelId cel, int frame, int length = 1, std::string layerName = "Layer 1");
 
 } // namespace mothion::doc

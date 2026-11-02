@@ -15,17 +15,23 @@ namespace mothion::io {
 //   PRAGMA user_version    format version (kProjectFormatVersion)
 //   document   one row: canvas size, frame rate, scene length, paper color,
 //              next ids to allocate, version of Mothion that saved it
-//   layers     id, position (0 = bottom), name, visible, locked, opacity, blend
-//   drawings   id, layer, name
-//   exposures  layer, start, length, drawing (the Timing runs)
-//   tiles      drawing, x, y (tile units), pixels: the 64×64 premultiplied
+//   cels       id, position (0 = bottom), name, visible, locked, opacity, blend
+//   drawings   id, cel, name
+//   layers     id, drawing, position (0 = bottom), name, visible, locked,
+//              opacity, blend
+//   exposures  cel, start, length, drawing (the Timing runs)
+//   tiles      layer, x, y (tile units), pixels: the 64×64 premultiplied
 //              ARGB pixels as little-endian uint32, compressed with qCompress
 //              (zlib with a 4-byte big-endian length in front)
+//
+// Format 1 had no layers in drawings: its "layers" table held the cels and
+// its tiles belonged to drawings. Such a file opens with each drawing made
+// of one layer.
 //
 // A save writes a new file next to the target and renames it over the old
 // one at the end, so a failed save never damages the previous file.
 
-inline constexpr int kProjectFormatVersion = 1;
+inline constexpr int kProjectFormatVersion = 2;
 inline constexpr char kProjectSuffix[] = "mothion";
 
 // Writes `document` to `path`. On failure returns false and sets `error`.

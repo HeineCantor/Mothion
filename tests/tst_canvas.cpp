@@ -137,18 +137,18 @@ private slots:
         nd.command->apply(document);
         doc::Drawing *drawing = document.cel(addCel.celId())->drawing(nd.id);
 
-        canvas::StrokeSession session(drawing->image, Qt::black, 1.0, false);
+        canvas::StrokeSession session(drawing->layers.front().image, Qt::black, 1.0, false);
         brush::DabGenerator gen(roundStyle(3.0));
         session.addDabs(gen.begin(point(10, 10)));
         session.addDabs(gen.continueTo(point(150, 10)));
-        auto paint = doc::PaintCommand::capture(addCel.celId(), nd.id, session.before(), drawing->image);
+        auto paint = doc::PaintCommand::capture(addCel.celId(), nd.id, nd.layer, session.before(), drawing->layers.front().image);
         QVERIFY(paint);
         QCOMPARE(paint->swaps().size(), std::size_t(3));
 
         paint->revert(document);
-        QVERIFY(drawing->image.isEmpty());
+        QVERIFY(drawing->layers.front().image.isEmpty());
         paint->apply(document);
-        QVERIFY(doc::alphaOf(drawing->image.pixel(100, 10)) > 200);
+        QVERIFY(doc::alphaOf(drawing->layers.front().image.pixel(100, 10)) > 200);
     }
 
     void cancelRestoresTarget()
@@ -245,21 +245,21 @@ private slots:
 
     // --- FrameRenderer ---------------------------------------------------------
 
-    void frameRendererComposesVisibleLayersAtFrame()
+    void frameRendererComposesVisibleCelsAtFrame()
     {
         doc::Document document(128, 64);
-        // Bottom layer: red on frame 0, nothing on frame 1.
+        // Bottom cel: red on frame 0, nothing on frame 1.
         doc::AddCelCommand bottom(document, 0, {"B"});
         bottom.apply(document);
         doc::NewDrawing red = doc::makeNewDrawing(document, bottom.celId(), 0);
         red.command->apply(document);
-        document.cel(bottom.celId())->drawing(red.id)->image.setPixel(5, 5, 0xffff0000);
-        // Top layer, half opacity: blue on frames 0-1.
+        document.cel(bottom.celId())->drawing(red.id)->layers.front().image.setPixel(5, 5, 0xffff0000);
+        // Top cel, half opacity: blue on frames 0-1.
         doc::AddCelCommand top(document, 1, {"T", true, false, 0.5f});
         top.apply(document);
         doc::NewDrawing blue = doc::makeNewDrawing(document, top.celId(), 0, 2);
         blue.command->apply(document);
-        document.cel(top.celId())->drawing(blue.id)->image.setPixel(5, 5, 0xff0000ff);
+        document.cel(top.celId())->drawing(blue.id)->layers.front().image.setPixel(5, 5, 0xff0000ff);
 
         canvas::FrameRenderer renderer;
         renderer.renderAll(document, 0);
@@ -276,6 +276,54 @@ private slots:
         document.cel(top.celId())->setProperties(hidden);
         renderer.render(document, 0, QRect(0, 0, 10, 10)); // partial refresh
         QCOMPARE(renderer.image().pixelColor(5, 5), QColor(Qt::red));
+    }
+
+    // The layers of a drawing are composed apart, like a folder, then the
+    // result goes over the cels below with the cel's opacity and blend.
+    void drawingLayersComposeLikeAFolder()
+    {
+        doc::Document document(64, 64);
+        doc::AddCelCommand bottom(document, 0, {"B"});
+        bottom.apply(document);
+        doc::NewDrawing green = doc::makeNewDrawing(document, bottom.celId(), 0);
+        green.command->apply(document);
+        document.cel(bottom.celId())->drawing(green.id)->layers.front().image.setPixel(5, 5, 0xff00ff00);
+
+        doc::AddCelCommand top(document, 1, {"T"});
+        top.apply(document);
+        doc::NewDrawing two = doc::makeNewDrawing(document, top.celId(), 0);
+        two.command->apply(document);
+        doc::Drawing &drawing = *document.cel(top.celId())->drawing(two.id);
+        // A multiplying red layer over nothing in its own drawing: red, not
+        // red times the green of the cel below (that would be black).
+        drawing.layers.push_back({document.allocateLayerId(), {"M", true, false, 1.0f, doc::BlendMode::Multiply}, {}});
+        drawing.layers.back().image.setPixel(5, 5, 0xffff0000);
+
+        canvas::FrameRenderer renderer;
+        renderer.renderAll(document, 0);
+        QCOMPARE(renderer.image().pixelColor(5, 5), QColor(Qt::red));
+        QCOMPARE(canvas::drawingBounds(drawing), QRect(0, 0, 64, 64));
+        QCOMPARE(canvas::composeDrawing(drawing, QRect(4, 4, 4, 4)).pixelColor(1, 1), QColor(Qt::red));
+
+        // The cel's blend applies to the folder: multiplied with the green, black.
+        doc::CelProperties multiply = document.cel(top.celId())->properties();
+        multiply.blend = doc::BlendMode::Multiply;
+        document.cel(top.celId())->setProperties(multiply);
+        renderer.renderAll(document, 0);
+        QCOMPARE(renderer.image().pixelColor(5, 5), QColor(Qt::black));
+
+        // Hidden layers are left out; a lone one at half opacity in a cel at
+        // half opacity shows at a quarter.
+        drawing.layers.back().properties.visible = false;
+        drawing.layers.front().image.setPixel(20, 20, 0xff0000ff);
+        drawing.layers.front().properties.opacity = 0.5f;
+        multiply.blend = doc::BlendMode::Normal;
+        multiply.opacity = 0.5f;
+        document.cel(top.celId())->setProperties(multiply);
+        renderer.renderAll(document, 0);
+        QCOMPARE(renderer.image().pixelColor(5, 5), QColor(Qt::green));
+        const QColor quarter = renderer.image().pixelColor(20, 20);
+        QVERIFY(qAbs(quarter.red() - 191) <= 2 && quarter.blue() == 255);
     }
 
 private:

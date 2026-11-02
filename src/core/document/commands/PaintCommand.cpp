@@ -6,8 +6,8 @@
 
 namespace mothion::doc {
 
-std::unique_ptr<PaintCommand> PaintCommand::capture(CelId cel, DrawingId drawing, const TiledImage &before,
-                                                    const TiledImage &after)
+std::unique_ptr<PaintCommand> PaintCommand::capture(CelId cel, DrawingId drawing, LayerId layer,
+                                                    const TiledImage &before, const TiledImage &after)
 {
     std::set<TileCoord> coords;
     for (const TileCoord &c : before.tileCoords())
@@ -24,25 +24,25 @@ std::unique_ptr<PaintCommand> PaintCommand::capture(CelId cel, DrawingId drawing
     }
     if (swaps.empty())
         return nullptr;
-    return std::make_unique<PaintCommand>(cel, drawing, std::move(swaps));
+    return std::make_unique<PaintCommand>(cel, drawing, layer, std::move(swaps));
 }
 
-PaintCommand::PaintCommand(CelId cel, DrawingId drawing, std::vector<TileSwap> swaps)
+PaintCommand::PaintCommand(CelId cel, DrawingId drawing, LayerId layer, std::vector<TileSwap> swaps)
     : m_cel(cel)
     , m_drawing(drawing)
+    , m_layer(layer)
     , m_swaps(std::move(swaps))
 {
 }
 
 ChangeSet PaintCommand::put(Document &doc, bool after)
 {
-    Cel *cel = doc.cel(m_cel);
-    Drawing *drawing = cel ? cel->drawing(m_drawing) : nullptr;
-    if (!drawing)
+    Layer *layer = doc.layer(m_cel, m_drawing, m_layer);
+    if (!layer)
         return {};
-    ChangeSet::Pixels changed{m_cel, m_drawing, {}};
+    ChangeSet::Pixels changed{m_cel, m_drawing, m_layer, {}};
     for (const TileSwap &s : m_swaps) {
-        drawing->image.setTile(s.coord, after ? s.after : s.before);
+        layer->image.setTile(s.coord, after ? s.after : s.before);
         changed.tiles.push_back(s.coord);
     }
     ChangeSet changes;

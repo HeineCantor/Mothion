@@ -53,11 +53,17 @@ public:
     // Fresh ids; never reused within this document.
     CelId allocateCelId() { return m_nextCelId++; }
     DrawingId allocateDrawingId() { return m_nextDrawingId++; }
+    LayerId allocateLayerId() { return m_nextLayerId++; }
     // The next ids to allocate, as a saved file records them.
     CelId nextCelId() const { return m_nextCelId; }
     DrawingId nextDrawingId() const { return m_nextDrawingId; }
+    LayerId nextLayerId() const { return m_nextLayerId; }
     // For loading: never moves the counters back below an id already in use.
-    void restoreIdCounters(CelId nextCel, DrawingId nextDrawing);
+    void restoreIdCounters(CelId nextCel, DrawingId nextDrawing, LayerId nextLayer);
+
+    // The layer `layer` of drawing `drawing` of cel `cel`, or nullptr.
+    Layer *layer(CelId cel, DrawingId drawing, LayerId layer);
+    const Layer *layer(CelId cel, DrawingId drawing, LayerId layer) const;
 
 private:
     int m_width;
@@ -68,6 +74,7 @@ private:
     std::vector<std::unique_ptr<Cel>> m_cels;
     CelId m_nextCelId = 1;
     DrawingId m_nextDrawingId = 1;
+    LayerId m_nextLayerId = 1;
 };
 
 } // namespace mothion::doc

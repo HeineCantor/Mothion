@@ -39,6 +39,7 @@ add_library(mothion_core STATIC
     core/document/commands/DrawingCommands.h core/document/commands/DrawingCommands.cpp
     core/document/commands/TimingCommands.h core/document/commands/TimingCommands.cpp
     core/document/commands/CelCommands.h core/document/commands/CelCommands.cpp
+    core/document/commands/LayerCommands.h core/document/commands/LayerCommands.cpp
 )
 set_target_properties(mothion_core PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
 target_include_directories(mothion_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

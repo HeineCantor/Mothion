@@ -9,6 +9,7 @@ namespace mothion::doc {
 // when cels are reordered; ids do not, so commands and files refer to ids.
 using CelId = std::uint64_t;
 using DrawingId = std::uint64_t;
+using LayerId = std::uint64_t; // a layer of a drawing
 
 inline constexpr std::uint64_t kNoId = 0;
 

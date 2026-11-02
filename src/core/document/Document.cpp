@@ -54,17 +54,36 @@ void Document::moveCel(CelId id, int newIndex)
         insertCel(newIndex, std::move(taken));
 }
 
-void Document::restoreIdCounters(CelId nextCel, DrawingId nextDrawing)
+Layer *Document::layer(CelId celId, DrawingId drawingId, LayerId layerId)
+{
+    Cel *c = cel(celId);
+    Drawing *d = c ? c->drawing(drawingId) : nullptr;
+    return d ? d->layer(layerId) : nullptr;
+}
+
+const Layer *Document::layer(CelId celId, DrawingId drawingId, LayerId layerId) const
+{
+    const Cel *c = cel(celId);
+    const Drawing *d = c ? c->drawing(drawingId) : nullptr;
+    return d ? d->layer(layerId) : nullptr;
+}
+
+void Document::restoreIdCounters(CelId nextCel, DrawingId nextDrawing, LayerId nextLayer)
 {
     CelId celFloor = 1;
     DrawingId drawingFloor = 1;
+    LayerId layerFloor = 1;
     for (const auto &l : m_cels) {
         celFloor = std::max(celFloor, l->id() + 1);
-        if (!l->drawings().empty())
-            drawingFloor = std::max(drawingFloor, l->drawings().rbegin()->first + 1);
+        for (const auto &[id, drawing] : l->drawings()) {
+            drawingFloor = std::max(drawingFloor, id + 1);
+            for (const Layer &layer : drawing.layers)
+                layerFloor = std::max(layerFloor, layer.id + 1);
+        }
     }
     m_nextCelId = std::max(nextCel, celFloor);
     m_nextDrawingId = std::max(nextDrawing, drawingFloor);
+    m_nextLayerId = std::max(nextLayer, layerFloor);
 }
 
 } // namespace mothion::doc

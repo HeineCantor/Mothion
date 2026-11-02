@@ -8,7 +8,7 @@
 
 namespace mothion::doc {
 
-// Pixel change of one drawing, stored as tile pointers before and after.
+// Pixel change of one layer of a drawing, stored as tile pointers before and after.
 //
 // Usage for a stroke: copy the drawing's image before painting (a cheap
 // snapshot that shares all tiles), paint into the drawing, then capture().
@@ -25,10 +25,10 @@ public:
     };
 
     // nullptr if `before` and `after` share every tile (nothing was painted).
-    static std::unique_ptr<PaintCommand> capture(CelId cel, DrawingId drawing, const TiledImage &before,
-                                                 const TiledImage &after);
+    static std::unique_ptr<PaintCommand> capture(CelId cel, DrawingId drawing, LayerId layer,
+                                                 const TiledImage &before, const TiledImage &after);
 
-    PaintCommand(CelId cel, DrawingId drawing, std::vector<TileSwap> swaps);
+    PaintCommand(CelId cel, DrawingId drawing, LayerId layer, std::vector<TileSwap> swaps);
 
     CommandKind kind() const override { return CommandKind::Paint; }
     ChangeSet apply(Document &doc) override;
@@ -42,6 +42,7 @@ private:
 
     CelId m_cel;
     DrawingId m_drawing;
+    LayerId m_layer;
     std::vector<TileSwap> m_swaps;
 };
 

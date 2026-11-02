@@ -26,15 +26,18 @@ constexpr qsizetype kTileBytes = qsizetype(doc::kTilePixels) * qsizetype(sizeof(
 const char *const kSchema[] = {
     "create table document (width integer not null, height integer not null,"
     " fps_numerator integer not null, fps_denominator integer not null, frame_count integer not null,"
-    " paper_color integer not null, next_layer_id integer not null, next_drawing_id integer not null,"
-    " saved_by text)",
-    "create table layers (id integer primary key, position integer not null, name text not null,"
+    " paper_color integer not null, next_cel_id integer not null, next_drawing_id integer not null,"
+    " next_layer_id integer not null, saved_by text)",
+    "create table cels (id integer primary key, position integer not null, name text not null,"
     " visible integer not null, locked integer not null, opacity real not null, blend text not null)",
-    "create table drawings (id integer primary key, layer integer not null references layers(id), name text not null)",
-    "create table exposures (layer integer not null references layers(id), start integer not null,"
+    "create table drawings (id integer primary key, cel integer not null references cels(id), name text not null)",
+    "create table layers (id integer primary key, drawing integer not null references drawings(id),"
+    " position integer not null, name text not null, visible integer not null, locked integer not null,"
+    " opacity real not null, blend text not null)",
+    "create table exposures (cel integer not null references cels(id), start integer not null,"
     " length integer not null, drawing integer not null references drawings(id))",
-    "create table tiles (drawing integer not null references drawings(id), x integer not null,"
-    " y integer not null, pixels blob not null, primary key (drawing, x, y))",
+    "create table tiles (layer integer not null references layers(id), x integer not null,"
+    " y integer not null, pixels blob not null, primary key (layer, x, y))",
 };
 
 // Stored by name, so reordering the enum cannot change old files.
@@ -124,20 +127,22 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
         if (!run(QString::fromLatin1(statement)))
             return false;
 
-    q.prepare(QStringLiteral("insert into document values (?, ?, ?, ?, ?, ?, ?, ?, ?)"));
+    q.prepare(QStringLiteral("insert into document values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
     for (const QVariant &v : {QVariant(d.width()), QVariant(d.height()), QVariant(d.frameRate().numerator),
                               QVariant(d.frameRate().denominator), QVariant(d.frameCount()),
                               QVariant(qlonglong(d.paperColor())), idValue(d.nextCelId()),
-                              idValue(d.nextDrawingId()), QVariant(QCoreApplication::applicationVersion())})
+                              idValue(d.nextDrawingId()), idValue(d.nextLayerId()),
+                              QVariant(QCoreApplication::applicationVersion())})
         q.addBindValue(v);
     if (!q.exec()) {
         failure = sqlError(q);
         return false;
     }
 
-    QSqlQuery cel(db), drawing(db), exposure(db), tile(db);
-    cel.prepare(QStringLiteral("insert into layers values (?, ?, ?, ?, ?, ?, ?)"));
+    QSqlQuery cel(db), drawing(db), layer(db), exposure(db), tile(db);
+    cel.prepare(QStringLiteral("insert into cels values (?, ?, ?, ?, ?, ?, ?)"));
     drawing.prepare(QStringLiteral("insert into drawings values (?, ?, ?)"));
+    layer.prepare(QStringLiteral("insert into layers values (?, ?, ?, ?, ?, ?, ?, ?)"));
     exposure.prepare(QStringLiteral("insert into exposures values (?, ?, ?, ?)"));
     tile.prepare(QStringLiteral("insert into tiles values (?, ?, ?, ?)"));
     auto exec = [&](QSqlQuery &query, std::initializer_list<QVariant> values) {
@@ -158,10 +163,17 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
         for (const auto &[id, dr] : l.drawings()) {
             if (!exec(drawing, {idValue(id), idValue(l.id()), QString::fromStdString(dr.name)}))
                 return false;
-            for (const doc::TileCoord &c : dr.image.tileCoords())
-                if (const doc::TilePtr t = dr.image.tile(c))
-                    if (!exec(tile, {idValue(id), c.x, c.y, packTile(*t)}))
-                        return false;
+            for (std::size_t position = 0; position < dr.layers.size(); ++position) {
+                const doc::Layer &ly = dr.layers[position];
+                const doc::LayerProperties &lp = ly.properties;
+                if (!exec(layer, {idValue(ly.id), idValue(id), int(position), QString::fromStdString(lp.name),
+                                  lp.visible, lp.locked, double(lp.opacity), blendName(lp.blend)}))
+                    return false;
+                for (const doc::TileCoord &c : ly.image.tileCoords())
+                    if (const doc::TilePtr t = ly.image.tile(c))
+                        if (!exec(tile, {idValue(ly.id), c.x, c.y, packTile(*t)}))
+                            return false;
+            }
         }
         for (const doc::Exposure &e : l.timing().exposures())
             if (!exec(exposure, {idValue(l.id()), e.start, e.length, idValue(e.drawing)}))
@@ -185,13 +197,17 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
         failure = sqlError(q);
         return nullptr;
     }
-    if (const int version = q.value(0).toInt(); version > kProjectFormatVersion) {
+    const int version = q.value(0).toInt();
+    if (version > kProjectFormatVersion) {
         failure = QObject::tr("This project was saved by a newer version of Mothion (format %1).").arg(version);
         return nullptr;
     }
+    const bool v1 = version < 2; // cels in "layers", tiles of drawings
 
-    if (!q.exec(QStringLiteral("select width, height, fps_numerator, fps_denominator, frame_count, paper_color,"
-                               " next_layer_id, next_drawing_id from document"))
+    if (!q.exec(v1 ? QStringLiteral("select width, height, fps_numerator, fps_denominator, frame_count, paper_color,"
+                                    " next_layer_id, next_drawing_id, 1 from document")
+                   : QStringLiteral("select width, height, fps_numerator, fps_denominator, frame_count, paper_color,"
+                                    " next_cel_id, next_drawing_id, next_layer_id from document"))
         || !q.next()) {
         failure = QObject::tr("The project has no document settings.");
         return nullptr;
@@ -207,8 +223,10 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
     d->setPaperColor(doc::Pixel(q.value(5).toLongLong()));
     const doc::CelId nextCel = idFrom(q.value(6));
     const doc::DrawingId nextDrawing = idFrom(q.value(7));
+    const doc::LayerId nextLayer = idFrom(q.value(8));
 
-    if (!q.exec(QStringLiteral("select id, name, visible, locked, opacity, blend from layers order by position"))) {
+    if (!q.exec(v1 ? QStringLiteral("select id, name, visible, locked, opacity, blend from layers order by position")
+                   : QStringLiteral("select id, name, visible, locked, opacity, blend from cels order by position"))) {
         failure = sqlError(q);
         return nullptr;
     }
@@ -223,7 +241,8 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
     }
 
     std::map<doc::DrawingId, doc::Drawing *> drawings;
-    if (!q.exec(QStringLiteral("select id, layer, name from drawings order by id"))) {
+    if (!q.exec(v1 ? QStringLiteral("select id, layer, name from drawings order by id")
+                   : QStringLiteral("select id, cel, name from drawings order by id"))) {
         failure = sqlError(q);
         return nullptr;
     }
@@ -235,23 +254,65 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
         drawings[id] = &cel->addDrawing({id, q.value(2).toString().toStdString(), {}});
     }
 
-    if (!q.exec(QStringLiteral("select drawing, x, y, pixels from tiles"))) {
+    // Tiles go to layers; a format 1 drawing gets one layer for its tiles,
+    // with ids above every id the file uses (given out once all is read).
+    std::map<doc::LayerId, doc::Layer *> layers;
+    std::map<doc::DrawingId, doc::Layer *> v1Layers;
+    if (v1) {
+        for (auto &[id, drawing] : drawings)
+            v1Layers[id] = &drawing->layers.emplace_back(doc::Layer{doc::kNoId, {"Layer 1"}, {}});
+    } else {
+        if (!q.exec(QStringLiteral("select id, drawing, name, visible, locked, opacity, blend from layers"
+                                   " order by drawing, position"))) {
+            failure = sqlError(q);
+            return nullptr;
+        }
+        while (q.next()) {
+            const auto it = drawings.find(idFrom(q.value(1)));
+            const doc::LayerId id = idFrom(q.value(0));
+            if (it == drawings.end() || id == doc::kNoId || layers.count(id))
+                continue;
+            doc::LayerProperties p;
+            p.name = q.value(2).toString().toStdString();
+            p.visible = q.value(3).toBool();
+            p.locked = q.value(4).toBool();
+            p.opacity = std::clamp(q.value(5).toFloat(), 0.0f, 1.0f);
+            p.blend = blendFromName(q.value(6).toString());
+            layers[id] = &it->second->layers.emplace_back(doc::Layer{id, std::move(p), {}});
+        }
+        // Pointers into the layer vectors: taken again now that they are complete.
+        layers.clear();
+        for (auto &[id, drawing] : drawings)
+            for (doc::Layer &layer : drawing->layers)
+                layers[layer.id] = &layer;
+    }
+
+    if (!q.exec(v1 ? QStringLiteral("select drawing, x, y, pixels from tiles")
+                   : QStringLiteral("select layer, x, y, pixels from tiles"))) {
         failure = sqlError(q);
         return nullptr;
     }
     while (q.next()) {
-        const auto it = drawings.find(idFrom(q.value(0)));
-        if (it == drawings.end())
+        doc::Layer *layer = nullptr;
+        if (v1) {
+            const auto it = v1Layers.find(idFrom(q.value(0)));
+            layer = it == v1Layers.end() ? nullptr : it->second;
+        } else {
+            const auto it = layers.find(idFrom(q.value(0)));
+            layer = it == layers.end() ? nullptr : it->second;
+        }
+        if (!layer)
             continue;
         auto tile = unpackTile(q.value(3).toByteArray());
         if (!tile) {
             failure = QObject::tr("The project's pixels are damaged.");
             return nullptr;
         }
-        it->second->image.setTile({q.value(1).toInt(), q.value(2).toInt()}, std::move(tile));
+        layer->image.setTile({q.value(1).toInt(), q.value(2).toInt()}, std::move(tile));
     }
 
-    if (!q.exec(QStringLiteral("select layer, start, length, drawing from exposures order by layer, start"))) {
+    if (!q.exec(v1 ? QStringLiteral("select layer, start, length, drawing from exposures order by layer, start")
+                   : QStringLiteral("select cel, start, length, drawing from exposures order by cel, start"))) {
         failure = sqlError(q);
         return nullptr;
     }
@@ -263,7 +324,9 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
             cel->timing().setExposure(start, length, drawing);
     }
 
-    d->restoreIdCounters(nextCel, nextDrawing);
+    d->restoreIdCounters(nextCel, nextDrawing, nextLayer);
+    for (auto &[id, layer] : v1Layers)
+        layer->id = d->allocateLayerId();
     return d;
 }
 
