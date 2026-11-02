@@ -12,6 +12,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <vector>
 
 namespace mothion::document {
 class DocumentController;
@@ -33,8 +34,8 @@ namespace mothion::canvas {
 //
 // In local mode (PuppetSettings::local) there are no pins to place: all of
 // the shape is held, a drag moves the point under the pen and bends what
-// lies within the radius around it. The wheel sizes the radius, shown as a
-// circle around the pen.
+// lies within the radius around it. The wheel, or + and −, sizes the
+// radius, shown as a circle around the point a drag would take.
 class PuppetTool : public CanvasTool
 {
 public:
@@ -51,12 +52,21 @@ public:
     void commit() override;
     bool keyPress(int key) override;
     void setViewZoom(double zoom) override { m_zoom = zoom; }
+    void activated() override;
     bool hover(const QPointF &docPos) override;
     bool wheel(double steps, Qt::KeyboardModifiers modifiers) override;
     void paintOverlay(QPainter &painter, const ViewTransform &view) const override;
 
 private:
-    bool start();
+    // Meshes the drawing; `quiet`: no status message if there is nothing to.
+    bool start(bool quiet = false);
+    // Radius mode shows what a drag would take before the first one: the
+    // mesh is made as soon as it is needed, once per failed try.
+    void startForPreview();
+    // The point a drag would take (dragging: the one taken), document coordinates.
+    std::optional<QPointF> grabPoint() const;
+    // Radius mode: the radius times 1.15 per step (down for negative ones).
+    void stepRadius(double steps);
     void render();
     void settingsChanged();
 
@@ -84,7 +94,9 @@ private:
     bool m_localDrag = false;
     QPointF m_pointer; // last pen position, for the radius circle
     bool m_pointerKnown = false;
+    bool m_previewFailed = false; // nothing to mesh, as of the last try
     QMetaObject::Connection m_settingsConnection;
+    std::vector<QMetaObject::Connection> m_documentConnections; // a failed preview may work after them
 };
 
 } // namespace mothion::canvas

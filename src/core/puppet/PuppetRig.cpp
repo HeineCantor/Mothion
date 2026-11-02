@@ -185,6 +185,34 @@ void PuppetRig::pinHandles(int mesh, std::vector<int> &handles, std::vector<Vec2
         }
 }
 
+std::size_t PuppetRig::nearestVertex(int mesh, Vec2 at) const
+{
+    const Mesh &m = m_meshes[std::size_t(mesh)];
+    std::size_t nearest = 0;
+    double best = 1e300;
+    for (std::size_t v = 0; v < m.deformed.size(); ++v)
+        if (const double d = length2(m.deformed[v] - at); d < best) {
+            best = d;
+            nearest = v;
+        }
+    return nearest;
+}
+
+std::optional<Vec2> PuppetRig::localGrabPoint(Vec2 at) const
+{
+    const auto under = restPointUnder(at);
+    if (!under)
+        return std::nullopt;
+    return m_meshes[std::size_t(under->first)].deformed[nearestVertex(under->first, at)];
+}
+
+std::optional<Vec2> PuppetRig::localDragPoint() const
+{
+    if (!m_local)
+        return std::nullopt;
+    return m_meshes[std::size_t(m_local->mesh)].deformed[std::size_t(m_local->vertex)];
+}
+
 bool PuppetRig::beginLocalDrag(Vec2 at, double radius)
 {
     endLocalDrag();
@@ -192,13 +220,7 @@ bool PuppetRig::beginLocalDrag(Vec2 at, double radius)
     if (!under)
         return false;
     Mesh &mesh = m_meshes[std::size_t(under->first)];
-    std::size_t grabbed = 0;
-    double best = 1e300;
-    for (std::size_t v = 0; v < mesh.deformed.size(); ++v)
-        if (const double d = length2(mesh.deformed[v] - at); d < best) {
-            best = d;
-            grabbed = v;
-        }
+    const std::size_t grabbed = nearestVertex(under->first, at);
     const Vec2 centre = mesh.deformed[grabbed];
 
     // Held: the pins, and every vertex out of the disc, where they are now.

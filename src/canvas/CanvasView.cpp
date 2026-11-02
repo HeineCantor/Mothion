@@ -599,7 +599,8 @@ void CanvasView::wheelEvent(QWheelEvent *event)
 
 void CanvasView::keyPressEvent(QKeyEvent *event)
 {
-    if (CanvasTool *tool = canvasTool(); tool && !event->isAutoRepeat() && tool->keyPress(event->key())) {
+    // Repeats too: a held key may keep stepping (the puppet radius).
+    if (CanvasTool *tool = canvasTool(); tool && tool->keyPress(event->key())) {
         event->accept();
         return;
     }

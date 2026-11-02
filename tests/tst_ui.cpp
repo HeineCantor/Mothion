@@ -1140,6 +1140,43 @@ private slots:
                            Qt::NoButton, Qt::ControlModifier, Qt::NoScrollPhase, false);
         QApplication::sendEvent(&canvas, &ctrlUp);
         QVERIFY(canvas.view().zoom() > zoom); // Ctrl+wheel still zooms
+
+        // + and − too, held keys included.
+        canvas.setFocus();
+        double radius = state.puppetSettings().radius;
+        QTest::keyClick(&canvas, Qt::Key_Plus);
+        QVERIFY(state.puppetSettings().radius > radius);
+        radius = state.puppetSettings().radius;
+        QTest::keyClick(&canvas, Qt::Key_Minus);
+        QTest::keyPress(&canvas, Qt::Key_Minus, Qt::NoModifier); // a repeat
+        QKeyEvent repeat(QEvent::KeyPress, Qt::Key_Minus, Qt::NoModifier, QStringLiteral("-"), true);
+        QApplication::sendEvent(&canvas, &repeat);
+        QTest::keyRelease(&canvas, Qt::Key_Minus);
+        QVERIFY(state.puppetSettings().radius < radius / 1.3);
+    }
+
+    // In radius mode the mesh is there as soon as the tool is chosen, so the
+    // point a drag would take shows before the first drag.
+    void puppetRadiusModeMeshesAtOnce()
+    {
+        document::DocumentController controller;
+        tools::ToolState state;
+        QImage image(400, 40, QImage::Format_ARGB32);
+        image.fill(Qt::darkCyan);
+        controller.importImage(image, QStringLiteral("bar"));
+        tools::PuppetSettings settings = state.puppetSettings();
+        settings.local = true;
+        state.setPuppetSettings(settings);
+        canvas::PuppetTool tool(&controller, &state, [](const QString &) {}, [] {});
+        QVERIFY(tool.hover({960, 540}));
+        QVERIFY(tool.hasPendingEdit()); // meshed, nothing changed yet
+        tool.commit();
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo import image")); // no step of its own
+
+        settings.local = false; // pins: nothing until a click
+        state.setPuppetSettings(settings);
+        tool.activated();
+        QVERIFY(!tool.hasPendingEdit());
     }
 
     void puppetWarpBendsTheDrawingInOneStep()

@@ -42,19 +42,31 @@ PuppetTool::PuppetTool(document::DocumentController *document, tools::ToolState 
 {
     m_settingsConnection = QObject::connect(m_toolState, &tools::ToolState::puppetSettingsChanged, m_toolState,
                                             [this] { settingsChanged(); });
+    using document::DocumentController;
+    auto retry = [this] { m_previewFailed = false; };
+    m_documentConnections = {
+        QObject::connect(m_document, &DocumentController::pixelsChanged, m_document, retry),
+        QObject::connect(m_document, &DocumentController::structureChanged, m_document, retry),
+        QObject::connect(m_document, &DocumentController::currentLayerChanged, m_document, retry),
+        QObject::connect(m_document, &DocumentController::currentFrameChanged, m_document, retry),
+        QObject::connect(m_document, &DocumentController::selectionChanged, m_document, retry),
+    };
 }
 
 PuppetTool::~PuppetTool()
 {
     QObject::disconnect(m_settingsConnection);
+    for (const QMetaObject::Connection &c : m_documentConnections)
+        QObject::disconnect(c);
 }
 
-bool PuppetTool::start()
+bool PuppetTool::start(bool quiet)
 {
     QString reason;
     const auto target = m_document->beginPaint(false, &reason);
     if (!target) {
-        m_status(reason.isEmpty() ? QObject::tr("Nothing to warp on this frame") : reason);
+        if (!quiet)
+            m_status(reason.isEmpty() ? QObject::tr("Nothing to warp on this frame") : reason);
         return false;
     }
     auto s = std::make_unique<Session>();
@@ -70,7 +82,8 @@ bool PuppetTool::start()
     const QRect area = boundsOf(warped);
     if (area.isEmpty()) {
         m_document->cancelPaint();
-        m_status(QObject::tr("Nothing to warp here"));
+        if (!quiet)
+            m_status(QObject::tr("Nothing to warp here"));
         return false;
     }
     s->source = puppet::RasterImage(area.x(), area.y(), area.width(), area.height());
@@ -82,7 +95,8 @@ bool PuppetTool::start()
     s->rig = std::make_unique<puppet::PuppetRig>(shape, rigSettings(m_toolState->puppetSettings()));
     if (s->rig->isEmpty()) {
         m_document->cancelPaint();
-        m_status(QObject::tr("Nothing to warp here"));
+        if (!quiet)
+            m_status(QObject::tr("Nothing to warp here"));
         return false;
     }
     s->shown = area;
@@ -113,6 +127,7 @@ void PuppetTool::press(const QPointF &docPos, Qt::KeyboardModifiers modifiers)
 {
     m_pointer = docPos;
     m_pointerKnown = true;
+    m_previewFailed = false;
     if (!m_session && !start())
         return;
     puppet::PuppetRig &rig = *m_session->rig;
@@ -212,6 +227,14 @@ void PuppetTool::cancel()
 
 bool PuppetTool::keyPress(int key)
 {
+    if (m_toolState->puppetSettings().local) {
+        switch (key) {
+        case Qt::Key_Plus:
+        case Qt::Key_Equal: stepRadius(+1); return true; // + shares a key with = on some layouts
+        case Qt::Key_Minus: stepRadius(-1); return true;
+        default: break;
+        }
+    }
     if (!m_session)
         return false;
     switch (key) {
@@ -232,11 +255,40 @@ bool PuppetTool::keyPress(int key)
     }
 }
 
+void PuppetTool::activated()
+{
+    m_previewFailed = false;
+    startForPreview();
+    m_repaint();
+}
+
+void PuppetTool::startForPreview()
+{
+    if (m_session || m_previewFailed || !m_toolState->puppetSettings().local)
+        return;
+    m_previewFailed = !start(true);
+}
+
 bool PuppetTool::hover(const QPointF &docPos)
 {
     m_pointer = docPos;
     m_pointerKnown = true;
-    return m_toolState->puppetSettings().local; // the circle follows
+    if (!m_toolState->puppetSettings().local)
+        return false;
+    startForPreview();
+    return true; // the circle and the point follow
+}
+
+std::optional<QPointF> PuppetTool::grabPoint() const
+{
+    if (!m_session || !m_pointerKnown)
+        return std::nullopt;
+    const puppet::PuppetRig &rig = *m_session->rig;
+    const auto at = rig.isLocalDragging() ? rig.localDragPoint()
+                                          : rig.localGrabPoint({m_pointer.x(), m_pointer.y()});
+    if (!at)
+        return std::nullopt;
+    return QPointF(at->x, at->y);
 }
 
 bool PuppetTool::wheel(double steps, Qt::KeyboardModifiers modifiers)
@@ -244,9 +296,16 @@ bool PuppetTool::wheel(double steps, Qt::KeyboardModifiers modifiers)
     tools::PuppetSettings s = m_toolState->puppetSettings();
     if (!s.local || modifiers != Qt::NoModifier)
         return false; // Ctrl/Shift+wheel still zoom and rotate the view
+    stepRadius(steps);
+    return true;
+}
+
+void PuppetTool::stepRadius(double steps)
+{
+    tools::PuppetSettings s = m_toolState->puppetSettings();
     s.radius *= std::pow(1.15, steps);
     m_toolState->setPuppetSettings(s);
-    return true;
+    m_repaint();
 }
 
 void PuppetTool::settingsChanged()
@@ -264,15 +323,23 @@ void PuppetTool::paintOverlay(QPainter &painter, const ViewTransform &view) cons
 {
     const QTransform toView = view.documentToView();
     painter.setRenderHint(QPainter::Antialiasing);
-    // Local mode: the radius around the pen, even before the first drag.
+    // Radius mode: the point a drag takes (or has taken) and the disc that
+    // bends with it; off the drawing, just the radius around the pen.
     if (m_toolState->puppetSettings().local && m_pointerKnown) {
+        const std::optional<QPointF> grab = grabPoint();
         const double r = m_toolState->puppetSettings().radius * view.zoom();
-        const QPointF c = toView.map(m_pointer);
+        const QPointF c = toView.map(grab.value_or(m_pointer));
         painter.setBrush(Qt::NoBrush);
         painter.setPen(QPen(QColor(0, 0, 0, 160), 1.0));
         painter.drawEllipse(c, r, r);
         painter.setPen(QPen(QColor(255, 255, 255, 160), 1.0));
         painter.drawEllipse(c, r - 1, r - 1);
+        if (grab) {
+            const QPalette &palette = QApplication::palette();
+            painter.setPen(QPen(Qt::black, 1.5));
+            painter.setBrush(m_localDrag ? palette.color(QPalette::Highlight) : QColor(Qt::white));
+            painter.drawEllipse(c, kPinRadius, kPinRadius);
+        }
     }
     if (!m_session)
         return;

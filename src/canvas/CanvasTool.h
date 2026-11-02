@@ -37,7 +37,7 @@ public:
     // canvas commits it when the tool changes or the controller interrupts.
     virtual bool hasPendingEdit() const { return false; }
     virtual void commit() {}
-    // Keys while the tool is active; true if handled.
+    // Keys while the tool is active, auto-repeats included; true if handled.
     virtual bool keyPress(int key)
     {
         (void)key;

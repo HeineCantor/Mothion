@@ -65,6 +65,10 @@ public:
     // Ends the drag, the pins hold their mesh again.
     void endLocalDrag();
     bool isLocalDragging() const { return m_local.has_value(); }
+    // The point a local drag at `at` would take (where it is now), if any.
+    std::optional<Vec2> localGrabPoint(Vec2 at) const;
+    // Where the point taken by the local drag is now.
+    std::optional<Vec2> localDragPoint() const;
 
     // Rebuilds the meshes with other settings, keeping pins and deformation.
     void setSettings(RigSettings settings);
@@ -75,6 +79,8 @@ private:
     std::optional<std::pair<int, Vec2>> restPointUnder(Vec2 at) const; // (mesh, rest point)
     // The pins' vertices of a mesh, once each, and where they are.
     void pinHandles(int mesh, std::vector<int> &handles, std::vector<Vec2> &targets) const;
+    // The deformed vertex of a mesh nearest `at`.
+    std::size_t nearestVertex(int mesh, Vec2 at) const;
 
     Bitmask m_shape;
     RigSettings m_settings;
