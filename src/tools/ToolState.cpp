@@ -142,6 +142,18 @@ void ToolState::setPuppetSettings(const PuppetSettings &settings)
     emit puppetSettingsChanged();
 }
 
+void ToolState::setOnionSkin(const OnionSkinSettings &settings)
+{
+    OnionSkinSettings s = settings;
+    s.before = std::clamp(s.before, 0, kMaxOnionFrames);
+    s.after = std::clamp(s.after, 0, kMaxOnionFrames);
+    s.opacity = std::clamp(s.opacity, 0.0, 1.0);
+    if (s == m_onion)
+        return;
+    m_onion = s;
+    emit onionSkinChanged();
+}
+
 void ToolState::setFillSettings(const FillSettings &settings)
 {
     if (settings == m_fill)

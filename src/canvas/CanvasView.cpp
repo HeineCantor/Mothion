@@ -6,6 +6,7 @@
 #include "canvas/MoveTool.h"
 #include "canvas/PuppetTool.h"
 #include "canvas/SelectionTool.h"
+#include "canvas/TileQt.h"
 #include "canvas/TransformTool.h"
 #include "document/DocumentController.h"
 #include "input/TabletInputAdapter.h"
@@ -53,7 +54,14 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
 
     using document::DocumentController;
     connect(m_document, &DocumentController::pixelsChanged, this,
-            [this](doc::LayerId, doc::DrawingId, const QRect &rect) { renderDocumentRect(rect); });
+            [this](doc::LayerId, doc::DrawingId drawing, const QRect &rect) {
+                m_onionImages.erase(drawing);
+                renderDocumentRect(rect);
+            });
+    connect(m_document, &DocumentController::structureChanged, this, [this] { m_onionImages.clear(); });
+    connect(m_document, &DocumentController::documentReplaced, this, [this] { m_onionImages.clear(); });
+    connect(m_document, &DocumentController::currentLayerChanged, this, qOverload<>(&QWidget::update));
+    connect(m_toolState, &ToolState::onionSkinChanged, this, qOverload<>(&QWidget::update));
     connect(m_document, &DocumentController::structureChanged, this, &CanvasView::renderWholeFrame);
     connect(m_document, &DocumentController::currentFrameChanged, this, &CanvasView::renderWholeFrame);
     connect(m_document, &DocumentController::strokeInterrupted, this, &CanvasView::cancelStroke);
@@ -102,6 +110,92 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
     });
     connect(m_toolState, &ToolState::toolSettingsChanged, this, [this] { updateBrushOutline(m_pointerPos); });
     updateCursor();
+}
+
+// --- onion skin --------------------------------------------------------------
+
+QList<int> CanvasView::onionSkinFrames() const
+{
+    QList<int> frames;
+    const tools::OnionSkinSettings s = m_toolState->onionSkin();
+    const doc::Layer *layer = m_document->document().layer(m_document->currentLayer());
+    if (!s.enabled || !layer)
+        return frames;
+    const int current = m_document->currentFrame();
+    const int count = m_document->document().frameCount();
+    std::vector<doc::DrawingId> seen{layer->timing().drawingAt(current)}; // the current one is not a ghost
+    auto side = [&](int direction, int reach) {
+        for (int k = 1; k <= reach; ++k) {
+            const int frame = current + direction * k;
+            if (frame < 0 || frame >= count)
+                break;
+            const doc::DrawingId id = layer->timing().drawingAt(frame);
+            if (id == doc::kNoId || std::find(seen.begin(), seen.end(), id) != seen.end())
+                continue;
+            seen.push_back(id);
+            frames << direction * k;
+        }
+    };
+    side(-1, s.before);
+    side(+1, s.after);
+    return frames;
+}
+
+const CanvasView::OnionImage &CanvasView::onionImage(doc::DrawingId id, const QColor &color)
+{
+    OnionImage &cached = m_onionImages[id];
+    if (!cached.tinted.isNull() && cached.color == color.rgba())
+        return cached;
+    cached = {};
+    cached.color = color.rgba();
+    const doc::Layer *layer = m_document->document().layer(m_document->currentLayer());
+    const doc::Drawing *drawing = layer ? layer->drawing(id) : nullptr;
+    if (!drawing || drawing->image.isEmpty())
+        return cached;
+    QRect bounds;
+    for (const doc::TileCoord &c : drawing->image.tileCoords())
+        bounds |= tileRect(c);
+    QImage image(bounds.size(), QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+    {
+        QPainter p(&image);
+        for (const doc::TileCoord &c : drawing->image.tileCoords())
+            p.drawImage(tileRect(c).topLeft() - bounds.topLeft(), tileImage(*drawing->image.tile(c)));
+    }
+    // Every pixel the color, keeping its coverage.
+    const int r = color.red(), g = color.green(), b = color.blue();
+    for (int y = 0; y < image.height(); ++y) {
+        auto *line = reinterpret_cast<QRgb *>(image.scanLine(y));
+        for (int x = 0; x < image.width(); ++x) {
+            const int a = qAlpha(line[x]);
+            line[x] = a ? qRgba(r * a / 255, g * a / 255, b * a / 255, a) : 0;
+        }
+    }
+    cached.origin = bounds.topLeft();
+    cached.tinted = std::move(image);
+    return cached;
+}
+
+void CanvasView::paintOnionSkin(QPainter &p)
+{
+    const tools::OnionSkinSettings s = m_toolState->onionSkin();
+    const doc::Layer *layer = m_document->document().layer(m_document->currentLayer());
+    if (!s.enabled || !layer)
+        return;
+    QList<int> frames = onionSkinFrames();
+    // Farthest first, so the nearest lie on top; each step away fainter.
+    std::stable_sort(frames.begin(), frames.end(), [](int a, int b) { return std::abs(a) > std::abs(b); });
+    for (const int distance : frames) {
+        const int reach = distance < 0 ? s.before : s.after;
+        const double fade = 1.0 - double(std::abs(distance) - 1) / double(reach + 1);
+        const OnionImage &ghost = onionImage(layer->timing().drawingAt(m_document->currentFrame() + distance),
+                                             distance < 0 ? s.beforeColor : s.afterColor);
+        if (ghost.tinted.isNull())
+            continue;
+        p.setOpacity(s.opacity * fade);
+        p.drawImage(ghost.origin, ghost.tinted);
+    }
+    p.setOpacity(1.0);
 }
 
 // --- steps of an open edit -------------------------------------------------
@@ -227,6 +321,7 @@ void CanvasView::paintEvent(QPaintEvent *)
     p.save();
     p.setTransform(m_view.documentToView());
     p.drawImage(QPointF(0, 0), m_frame.image()); // paper included
+    paintOnionSkin(p);
     p.restore();
 
     paintSelectionOutline(p, m_view, m_document->selection(), m_antsPhase);

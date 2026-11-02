@@ -13,6 +13,7 @@
 
 #include <QWidget>
 
+#include <map>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -54,6 +55,10 @@ public:
     // The selection outline's ants march: black and white dashes swap at
     // regular intervals while there is a selection. 0 or 1.
     int selectionAntsPhase() const { return m_antsPhase; }
+
+    // The frames whose drawings the onion skin shows now, nearest first,
+    // before (negative distance) and after (positive): one per drawing.
+    QList<int> onionSkinFrames() const;
 
     // Undo and redo inside an edit left open by the active tool (the drags
     // of a puppet warp or a transform); false if there is no step to take,
@@ -181,6 +186,17 @@ private:
     QColor colorAt(const QPointF &docPos) const;
     bool *panKeyFlag(int key); // the flag of a pan key, nullptr for other keys
     bool m_fittedOnce = false;
+    // Onion skin: the current layer's drawings around the current frame,
+    // tinted (cached per drawing, made again when it or its color changes).
+    struct OnionImage
+    {
+        QPoint origin; // document coordinates of its top-left
+        QImage tinted;
+        QRgb color = 0;
+    };
+    void paintOnionSkin(QPainter &painter);
+    const OnionImage &onionImage(doc::DrawingId id, const QColor &color);
+    std::map<doc::DrawingId, OnionImage> m_onionImages;
     // Runs the ants while there is a selection, stops them otherwise.
     void updateAnts();
     QTimer *m_antsTimer;

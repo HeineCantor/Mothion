@@ -25,6 +25,7 @@
 #include "ui/panels/ToolPalettePanel.h"
 #include "ui/panels/SubToolPanel.h"
 #include "ui/panels/ToolPropertiesPanel.h"
+#include "ui/panels/timeline/TimelinePanel.h"
 
 #include <QCheckBox>
 #include <QClipboard>
@@ -44,6 +45,7 @@
 #include <QStandardPaths>
 #include <QTabletEvent>
 #include <QTemporaryDir>
+#include <QMenu>
 #include <QMenuBar>
 #include <QSlider>
 #include <QTest>
@@ -1182,6 +1184,72 @@ private slots:
         QCOMPARE(controller->currentFrame(), 3);          // not the frame
         QTest::keyClick(canvas, Qt::Key_Comma);
         QCOMPARE(controller->currentFrame(), 2); // , still steps
+    }
+
+    // The onion skin shows the current layer's drawings of the frames around
+    // this one, once each, tinted: the ones before in one color, after in another.
+    void onionSkinShowsTheFramesAround()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        QImage square(60, 60, QImage::Format_ARGB32);
+        square.fill(Qt::black);
+        for (int f : {0, 1, 2, 4}) { // drawings on 0, 1, 2 and 4, each further right
+            controller.setCurrentFrame(f);
+            QVERIFY(controller.pasteImage(square, QPoint(400 + f * 200, 500)));
+        }
+        controller.clearSelection();
+        controller.setCurrentFrame(2);
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(800, 450);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        QVERIFY(canvas.onionSkinFrames().isEmpty()); // off to begin with
+
+        tools::OnionSkinSettings onion = state.onionSkin();
+        onion.enabled = true;
+        onion.opacity = 1.0;
+        state.setOnionSkin(onion);
+        QCOMPARE(canvas.onionSkinFrames(), QList<int>({-1, -2, 2})); // frame 3 is empty
+        onion.before = 1;
+        onion.after = 0;
+        state.setOnionSkin(onion);
+        QCOMPARE(canvas.onionSkinFrames(), QList<int>({-1}));
+
+        // What the canvas shows where frame 1's square is (and nothing of frame 2 is).
+        const QPoint ghost = canvas.view().documentToView().map(QPointF(630, 530)).toPoint();
+        const QColor tinted = canvas.grab().toImage().pixelColor(ghost);
+        QVERIFY(tinted.red() > 150 && tinted.blue() < 120); // the "before" red
+        onion.enabled = false;
+        state.setOnionSkin(onion);
+        QCOMPARE(canvas.grab().toImage().pixelColor(ghost), QColor(Qt::white)); // just the paper
+    }
+
+    // The timeline's button turns it on; its settings edit the rest.
+    void timelineOnionSkinControls()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        ui::TimelinePanel panel(&controller, &state);
+        auto *button = panel.findChild<QToolButton *>(QStringLiteral("onionSkin"));
+        QVERIFY(button && button->isCheckable() && button->menu());
+        button->click();
+        QVERIFY(state.onionSkin().enabled);
+        auto *before = button->menu()->findChild<QSpinBox *>(QStringLiteral("onionBefore"));
+        auto *after = button->menu()->findChild<QSpinBox *>(QStringLiteral("onionAfter"));
+        QVERIFY(before && after);
+        before->setValue(4);
+        after->setValue(1);
+        QCOMPARE(state.onionSkin().before, 4);
+        QCOMPARE(state.onionSkin().after, 1);
+        tools::OnionSkinSettings s = state.onionSkin(); // and back from the state
+        s.enabled = false;
+        s.after = 3;
+        state.setOnionSkin(s);
+        QVERIFY(!button->isChecked());
+        QCOMPARE(after->value(), 3);
+        QVERIFY(button->menu()->findChild<QWidget *>(QStringLiteral("onionOpacity")));
+        QVERIFY(button->menu()->findChild<QToolButton *>(QStringLiteral("onionBeforeColor")));
     }
 
     void animationMenuOpensAutoplay()

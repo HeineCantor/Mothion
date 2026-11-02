@@ -44,6 +44,20 @@ struct FillSettings
     bool operator==(const FillSettings &) const = default;
 };
 
+// Onion skin: the current layer's drawings of the frames around the
+// current one, tinted and see-through over the canvas.
+struct OnionSkinSettings
+{
+    bool enabled = false;
+    int before = 2; // frames back
+    int after = 2;  // frames on
+    QColor beforeColor = QColor(230, 60, 60);
+    QColor afterColor = QColor(40, 130, 230);
+    double opacity = 0.35; // of the nearest ones; farther ones fade
+
+    bool operator==(const OnionSkinSettings &) const = default;
+};
+
 struct BrushSettings
 {
     double size = 12.0;   // diameter in document pixels at full pressure
@@ -110,6 +124,10 @@ public:
     FillSettings fillSettings() const { return m_fill; }
     void setFillSettings(const FillSettings &settings);
 
+    static constexpr int kMaxOnionFrames = 10;
+    OnionSkinSettings onionSkin() const { return m_onion; }
+    void setOnionSkin(const OnionSkinSettings &settings);
+
 signals:
     void activeToolChanged(mothion::tools::ToolId tool);
     void toolSettingsChanged(mothion::tools::ToolId tool);
@@ -120,6 +138,7 @@ signals:
     void useTiltChanged(bool use);
     void puppetSettingsChanged();
     void fillSettingsChanged();
+    void onionSkinChanged();
 
 private:
     static std::size_t index(ToolId tool) { return static_cast<std::size_t>(tool); }
@@ -135,6 +154,7 @@ private:
     bool m_useTilt = true;
     PuppetSettings m_puppet;
     FillSettings m_fill;
+    OnionSkinSettings m_onion;
 };
 
 } // namespace mothion::tools
