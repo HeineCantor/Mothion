@@ -1141,6 +1141,49 @@ private slots:
         QTRY_COMPARE(window.frameCount(), 4);
     }
 
+    // , and - step the timeline one frame back and on, from the canvas or a
+    // panel; in the puppet's radius mode - stays the radius's on the canvas.
+    void commaAndMinusStepTheFrames()
+    {
+        ui::MainWindow window;
+        window.show();
+        window.activateWindow();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+        auto *controller = window.findChild<document::DocumentController *>();
+        auto *canvas = window.findChild<canvas::CanvasView *>();
+        auto *state = window.findChild<tools::ToolState *>();
+        canvas->setFocus();
+        QCOMPARE(controller->currentFrame(), 0);
+        QTest::keyClick(canvas, Qt::Key_Minus);
+        QTest::keyClick(canvas, Qt::Key_Minus);
+        QCOMPARE(controller->currentFrame(), 2);
+        QTest::keyClick(canvas, Qt::Key_Comma);
+        QCOMPARE(controller->currentFrame(), 1);
+        QTest::keyClick(canvas, Qt::Key_Comma);
+        QTest::keyClick(canvas, Qt::Key_Comma); // stops at the start
+        QCOMPARE(controller->currentFrame(), 0);
+        auto *layers = window.findChild<ui::LayersPanel *>()->findChild<QListWidget *>();
+        layers->setFocus(); // from a panel too
+        QTest::keyClick(layers, Qt::Key_Minus);
+        QCOMPARE(controller->currentFrame(), 1);
+        controller->setCurrentFrame(controller->document().frameCount() - 1);
+        QTest::keyClick(layers, Qt::Key_Minus); // and at the end
+        QCOMPARE(controller->currentFrame(), controller->document().frameCount() - 1);
+
+        controller->setCurrentFrame(3);
+        tools::PuppetSettings settings = state->puppetSettings();
+        settings.local = true;
+        state->setPuppetSettings(settings);
+        state->setActiveTool(tools::ToolId::Puppet);
+        canvas->setFocus();
+        const double radius = state->puppetSettings().radius;
+        QTest::keyClick(canvas, Qt::Key_Minus);
+        QVERIFY(state->puppetSettings().radius < radius); // the radius
+        QCOMPARE(controller->currentFrame(), 3);          // not the frame
+        QTest::keyClick(canvas, Qt::Key_Comma);
+        QCOMPARE(controller->currentFrame(), 2); // , still steps
+    }
+
     void animationMenuOpensAutoplay()
     {
         ui::MainWindow window;

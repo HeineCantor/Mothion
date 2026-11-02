@@ -57,6 +57,7 @@ public:
     bool hasPendingEdit() const override { return m_session != nullptr; }
     void commit() override;
     bool keyPress(int key) override;
+    bool wantsKey(int key) const override;
     void setViewZoom(double zoom) override { m_zoom = zoom; }
     void activated() override;
     bool hover(const QPointF &docPos) override;

@@ -366,6 +366,13 @@ void PuppetTool::cancel()
     m_repaint();
 }
 
+bool PuppetTool::wantsKey(int key) const
+{
+    // Radius mode: + and − size the radius, before - goes to the next frame.
+    return m_toolState->puppetSettings().local
+           && (key == Qt::Key_Plus || key == Qt::Key_Equal || key == Qt::Key_Minus);
+}
+
 bool PuppetTool::keyPress(int key)
 {
     if (m_toolState->puppetSettings().local) {

@@ -630,6 +630,18 @@ void CanvasView::wheelEvent(QWheelEvent *event)
     event->accept();
 }
 
+bool CanvasView::event(QEvent *event)
+{
+    if (event->type() == QEvent::ShortcutOverride) {
+        auto *key = static_cast<QKeyEvent *>(event);
+        if (const CanvasTool *tool = canvasTool(); tool && key->modifiers() == Qt::NoModifier && tool->wantsKey(key->key())) {
+            event->accept(); // no shortcut: it comes as a key press
+            return true;
+        }
+    }
+    return QWidget::event(event);
+}
+
 void CanvasView::keyPressEvent(QKeyEvent *event)
 {
     // Repeats too: a held key may keep stepping (the puppet radius).

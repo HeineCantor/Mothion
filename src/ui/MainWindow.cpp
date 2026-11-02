@@ -52,6 +52,8 @@
 #include <QToolBar>
 #include <QVBoxLayout>
 
+#include <algorithm>
+
 namespace mothion::ui {
 
 MainWindow::MainWindow(QWidget *parent)
@@ -288,6 +290,15 @@ void MainWindow::createMenus()
         m_autoplay->raise();
         m_autoplay->activateWindow();
     });
+    animation->addSeparator();
+    // One frame back or on along the timeline, from anywhere in the window
+    // (text and number fields keep their keys); stops at the ends.
+    auto step = [this](int by) {
+        m_document->setCurrentFrame(
+            std::clamp(m_document->currentFrame() + by, 0, m_document->document().frameCount() - 1));
+    };
+    animation->addAction(tr("Previous frame"), QKeySequence(Qt::Key_Comma), this, [step] { step(-1); });
+    animation->addAction(tr("Next frame"), QKeySequence(Qt::Key_Minus), this, [step] { step(+1); });
 
     QMenu *window = menuBar()->addMenu(tr("&Window"));
     for (PanelDock *dock : m_dockLayout->docks())

@@ -44,6 +44,13 @@ public:
     // canvas commits it when the tool changes or the controller interrupts.
     virtual bool hasPendingEdit() const { return false; }
     virtual void commit() {}
+    // Keys the tool takes before the window's shortcuts would (the puppet's
+    // radius on -), while the canvas has the focus.
+    virtual bool wantsKey(int key) const
+    {
+        (void)key;
+        return false;
+    }
     // Keys while the tool is active, auto-repeats included; true if handled.
     virtual bool keyPress(int key)
     {
