@@ -45,7 +45,7 @@ private:
     QSpinBox *m_meshExpand;
     QCheckBox *m_showMesh;
     QComboBox *m_puppetMode;
-    QSpinBox *m_puppetRadius;
+    SliderField *m_puppetRadius;
     QLabel *m_puppetHelp;
 
     QWidget *m_fillControls;

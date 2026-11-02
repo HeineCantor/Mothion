@@ -35,7 +35,8 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
     , m_meshExpand(new QSpinBox(m_puppetControls))
     , m_showMesh(new QCheckBox(tr("Show mesh"), m_puppetControls))
     , m_puppetMode(new QComboBox(m_puppetControls))
-    , m_puppetRadius(new QSpinBox(m_puppetControls))
+    , m_puppetRadius(new SliderField(tr("Radius"), int(ToolState::kMinPuppetRadius),
+                                     int(ToolState::kMaxPuppetRadius), QStringLiteral(" px"), m_puppetControls))
     , m_puppetHelp(new QLabel(m_puppetControls))
     , m_fillControls(new QWidget(this))
     , m_fillOpacity(new SliderField(tr("Opacity"), 0, 100, QStringLiteral(" %"), m_fillControls))
@@ -69,15 +70,13 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
     m_puppetMode->addItems({tr("Pins"), tr("Radius")});
     m_puppetMode->setToolTip(tr("Pins: place pins, drag one to bend around the others.\n"
                                 "Radius: all is held, a drag bends what lies around the pen."));
-    m_puppetRadius->setRange(int(ToolState::kMinPuppetRadius), int(ToolState::kMaxPuppetRadius));
-    m_puppetRadius->setSuffix(QStringLiteral(" px"));
     m_puppetRadius->setToolTip(tr("What a drag bends around the pen (mouse wheel over the canvas)"));
     m_puppetHelp->setWordWrap(true);
     m_puppetHelp->setEnabled(false); // dimmed, as a hint
     auto *puppet = new QFormLayout(m_puppetControls);
     puppet->setContentsMargins(0, 0, 0, 0);
     puppet->addRow(tr("Mode"), m_puppetMode);
-    puppet->addRow(tr("Radius"), m_puppetRadius);
+    puppet->addRow(m_puppetRadius);
     puppet->addRow(tr("Mesh density"), m_meshDensity);
     puppet->addRow(tr("Mesh expansion"), m_meshExpand);
     puppet->addRow(m_showMesh);
@@ -129,7 +128,7 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
             [editPuppet](int v) { editPuppet([v](tools::PuppetSettings &s) { s.expand = v; }); });
     connect(m_puppetMode, &QComboBox::currentIndexChanged, this,
             [editPuppet](int i) { editPuppet([i](tools::PuppetSettings &s) { s.local = i == 1; }); });
-    connect(m_puppetRadius, &QSpinBox::valueChanged, this,
+    connect(m_puppetRadius, &SliderField::valueEdited, this,
             [editPuppet](int v) { editPuppet([v](tools::PuppetSettings &s) { s.radius = v; }); });
     connect(m_showMesh, &QCheckBox::toggled, this,
             [editPuppet](bool on) { editPuppet([on](tools::PuppetSettings &s) { s.showMesh = on; }); });
@@ -191,12 +190,13 @@ void ToolPropertiesPanel::syncFromState()
 void ToolPropertiesPanel::syncPuppetFromState()
 {
     const tools::PuppetSettings s = m_state->puppetSettings();
-    const QSignalBlocker b1(m_meshDensity), b2(m_meshExpand), b3(m_showMesh), b4(m_puppetMode), b5(m_puppetRadius);
+    const QSignalBlocker b1(m_meshDensity), b2(m_meshExpand), b3(m_showMesh), b4(m_puppetMode);
     m_puppetMode->setCurrentIndex(s.local ? 1 : 0);
     m_puppetRadius->setValue(int(std::lround(s.radius)));
     m_puppetRadius->setEnabled(s.local);
-    m_puppetHelp->setText(s.local ? tr("Drag the drawing to bend it: what lies within the radius follows,\n"
-                                       "the rest stays. Shift+click picks more points to move together.\n"
+    // One sentence a line; the label wraps them to the panel's width.
+    m_puppetHelp->setText(s.local ? tr("Drag the drawing to bend it: what lies within the radius follows, the rest stays.\n"
+                                       "Shift+click picks more points to move together.\n"
                                        "The mouse wheel or + and − change the radius.\n"
                                        "Enter applies, Esc cancels.")
                                   : tr("Click the drawing to add pins, drag a pin to deform.\n"

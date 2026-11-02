@@ -103,7 +103,7 @@ public:
     void setUseTilt(bool use);
 
     static constexpr double kMinPuppetRadius = 5.0;
-    static constexpr double kMaxPuppetRadius = 2000.0;
+    static constexpr double kMaxPuppetRadius = 1000.0;
     PuppetSettings puppetSettings() const { return m_puppet; }
     void setPuppetSettings(const PuppetSettings &settings);
 
