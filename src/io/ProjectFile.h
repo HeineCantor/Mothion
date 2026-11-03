@@ -20,6 +20,7 @@ namespace mothion::io {
 //   layers     id, drawing, position (0 = bottom), name, visible, locked,
 //              opacity, blend
 //   exposures  cel, start, length, drawing (the Timing runs)
+//   thumbnail  one row: the preview file managers show (ProjectThumbnail.h)
 //   tiles      layer, x, y (tile units), pixels: the 64×64 premultiplied
 //              ARGB pixels as little-endian uint32, compressed with qCompress
 //              (zlib with a 4-byte big-endian length in front)

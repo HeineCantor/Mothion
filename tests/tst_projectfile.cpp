@@ -5,6 +5,7 @@
 #include "document/DocumentController.h"
 #include "io/FrameExport.h"
 #include "io/ProjectFile.h"
+#include "io/ProjectThumbnail.h"
 
 #include <QFile>
 #include <QImage>
@@ -112,6 +113,42 @@ private slots:
         const auto loaded = io::loadProject(path, &error);
         QVERIFY2(loaded, qPrintable(error));
         compareDocuments(*original, *loaded);
+    }
+
+    // The preview for file managers, found the way the Windows thumbnail
+    // provider does: in the first bytes of the file, without SQLite.
+    void savedProjectsCarryAThumbnail()
+    {
+        QTemporaryDir dir;
+        const QString path = dir.filePath(QStringLiteral("scene.moth"));
+        const auto original = sampleDocument();
+        QString error;
+        QVERIFY2(io::saveProject(*original, path, &error), qPrintable(error));
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const QByteArray start = file.read(qint64(io::kThumbnailSearchBytes));
+        const auto span =
+            io::findThumbnail(reinterpret_cast<const unsigned char *>(start.constData()), std::size_t(start.size()));
+        QVERIFY(span);
+        const QImage thumbnail = QImage::fromData(start.mid(qsizetype(span->offset), qsizetype(span->size)), "PNG");
+        QVERIFY(!thumbnail.isNull());
+        QCOMPARE(thumbnail.size(), QSize(256, 192)); // the document's 4:3, scaled to fit
+        QCOMPARE(thumbnail.pixel(2, 2), QRgb(original->paperColor())); // the paper
+        // The icon in the bottom-right corner: something other than the paper there.
+        bool icon = false;
+        for (int y = 140; y < 190 && !icon; ++y)
+            for (int x = 200; x < 254 && !icon; ++x)
+                icon = thumbnail.pixel(x, y) != QRgb(original->paperColor());
+        QVERIFY(icon);
+        // The project itself still reads back the same.
+        const auto loaded = io::loadProject(path, &error);
+        QVERIFY2(loaded, qPrintable(error));
+        compareDocuments(*original, *loaded);
+
+        // Cut short or without the magic: nothing.
+        QVERIFY(!io::findThumbnail(reinterpret_cast<const unsigned char *>(start.constData()), span->offset + 20));
+        const QByteArray png = start.mid(qsizetype(span->offset), qsizetype(span->size));
+        QVERIFY(!io::findThumbnail(reinterpret_cast<const unsigned char *>(png.constData()), std::size_t(png.size())));
     }
 
     void saveReplacesAnExistingFile()

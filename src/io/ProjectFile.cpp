@@ -1,6 +1,12 @@
 #include "io/ProjectFile.h"
 
+#include "io/FrameExport.h"
+#include "io/ProjectThumbnail.h"
+
+#include <QBuffer>
 #include <QCoreApplication>
+#include <QImage>
+#include <QPainter>
 #include <QFile>
 #include <QFileInfo>
 #include <QSqlDatabase>
@@ -24,6 +30,8 @@ constexpr qint64 kApplicationId = 0x4D4F5448; // 'MOTH'
 constexpr qsizetype kTileBytes = qsizetype(doc::kTilePixels) * qsizetype(sizeof(doc::Pixel));
 
 const char *const kSchema[] = {
+    // First, so that its page comes right after the schema's (ProjectThumbnail.h).
+    "create table thumbnail (png blob not null)",
     "create table document (width integer not null, height integer not null,"
     " fps_numerator integer not null, fps_denominator integer not null, frame_count integer not null,"
     " paper_color integer not null, next_cel_id integer not null, next_drawing_id integer not null,"
@@ -107,6 +115,38 @@ private:
 
 QString sqlError(const QSqlQuery &q) { return q.lastError().text(); }
 
+// The preview for file managers (ProjectThumbnail.h): the first frame that
+// shows something, scaled down, the Mothion icon in its bottom-right corner,
+// after the magic. Smaller until it fits one page; empty if it never does.
+QByteArray thumbnailBlob(const doc::Document &d)
+{
+    int frame = -1;
+    for (int i = 0; i < d.celCount(); ++i)
+        if (!d.celAt(i).timing().isEmpty()) {
+            const int start = d.celAt(i).timing().exposures().front().start;
+            frame = frame < 0 ? start : std::min(frame, start);
+        }
+    const QImage full = renderFrame(d, std::max(frame, 0), false).convertToFormat(QImage::Format_RGB32);
+    const QImage icon(QStringLiteral(":/icon/mothion.png"));
+    for (int side = kThumbnailSize; side >= 64; side = side * 3 / 4) {
+        QImage image = full.scaled(side, side, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        if (!icon.isNull()) {
+            const int badge = std::max(16, std::min(image.width(), image.height()) * 3 / 10);
+            const int margin = std::max(2, badge / 12);
+            QPainter p(&image);
+            p.setRenderHint(QPainter::SmoothPixmapTransform);
+            p.drawImage(QRect(image.width() - badge - margin, image.height() - badge - margin, badge, badge), icon);
+        }
+        QByteArray blob(kThumbnailMagic, qsizetype(kThumbnailMagicSize));
+        QBuffer buffer(&blob);
+        buffer.open(QIODevice::Append);
+        image.save(&buffer, "PNG", 0); // quality 0: the smallest PNG
+        if (std::size_t(blob.size()) <= kThumbnailMaxBytes)
+            return blob;
+    }
+    return {};
+}
+
 bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
 {
     QSqlQuery q(db);
@@ -116,7 +156,9 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
         failure = sqlError(q);
         return false;
     };
-    if (!run(QStringLiteral("pragma application_id = %1").arg(kApplicationId))
+    // 64 KiB pages: the thumbnail fits in one, in one piece (ProjectThumbnail.h).
+    if (!run(QStringLiteral("pragma page_size = 65536"))
+        || !run(QStringLiteral("pragma application_id = %1").arg(kApplicationId))
         || !run(QStringLiteral("pragma user_version = %1").arg(kProjectFormatVersion)))
         return false;
     if (!db.transaction()) {
@@ -126,6 +168,16 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
     for (const char *statement : kSchema)
         if (!run(QString::fromLatin1(statement)))
             return false;
+
+    // The thumbnail's row first, so it is written into the first table page.
+    if (const QByteArray thumbnail = thumbnailBlob(d); !thumbnail.isEmpty()) {
+        q.prepare(QStringLiteral("insert into thumbnail values (?)"));
+        q.addBindValue(thumbnail);
+        if (!q.exec()) {
+            failure = sqlError(q);
+            return false;
+        }
+    }
 
     q.prepare(QStringLiteral("insert into document values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
     for (const QVariant &v : {QVariant(d.width()), QVariant(d.height()), QVariant(d.frameRate().numerator),

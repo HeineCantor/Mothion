@@ -55,6 +55,7 @@ qt_add_library(mothion_gui STATIC
     document/DocumentController.h document/DocumentController.cpp
 
     io/ProjectFile.h io/ProjectFile.cpp
+    io/ProjectThumbnail.h
     io/FrameExport.h io/FrameExport.cpp
 
     tools/ToolState.h tools/ToolState.cpp
@@ -143,6 +144,22 @@ if(WIN32)
     target_sources(mothion PRIVATE "${PROJECT_SOURCE_DIR}/resources/icon/mothion.rc")
 endif()
 mothion_set_warnings(mothion)
+
+# ---------------------------------------------------------------------------
+# mothion_thumbnails: Windows Explorer thumbnails of .moth projects, a COM
+# DLL built next to mothion.exe (register it with regsvr32). Plain Win32,
+# without Qt or the C++ runtime DLLs: Explorer loads it on its own.
+# ---------------------------------------------------------------------------
+if(WIN32)
+    add_library(mothion_thumbnails SHARED
+        shell/ThumbnailProvider.cpp shell/mothion_thumbnails.def io/ProjectThumbnail.h)
+    target_include_directories(mothion_thumbnails PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(mothion_thumbnails PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
+    target_link_libraries(mothion_thumbnails PRIVATE ole32 shlwapi shell32 windowscodecs uuid)
+    set_target_properties(mothion_thumbnails PROPERTIES
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    mothion_set_warnings(mothion_thumbnails)
+endif()
 
 # ---------------------------------------------------------------------------
 # Developer tools, off by default.
