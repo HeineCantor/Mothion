@@ -2,6 +2,8 @@
 
 Frame-by-frame 2D animation software for solo animators and small studios.
 
+[![CI](https://github.com/HeineCantor/Mothion/actions/workflows/ci.yml/badge.svg)](https://github.com/HeineCantor/Mothion/actions/workflows/ci.yml)
+
 **Status: prototype.** There is a document model (layers, drawings, Harmony-style
 exposure timing) with undo, a timeline and a layers panel, tablet input, a brush
 engine that can import Clip Studio Paint brushes, image import, move and selection
@@ -14,6 +16,24 @@ Sql reads `.sut` brushes (SQLite databases, through the `qsqlite` driver shipped
 Qt must be linked **dynamically** (LGPL): CMake stops with an error if it finds a static Qt.
 [Eigen](https://eigen.tuxfamily.org) 3.4 (MPL-2.0, header only) does the puppet warp's linear
 algebra: CMake uses a system copy if there is one, otherwise it downloads it at configure time.
+
+## Continuous integration
+
+GitHub Actions runs the Linux build and the complete CTest suite for every pull
+request, every push to `main`, and on demand through the **Run workflow** button
+in the repository's **Actions** tab. The job uses Ubuntu 24.04, Qt 6 from the
+distribution, and an offscreen Qt platform so GUI tests do not require a display.
+
+To reproduce the CI checks locally:
+
+```sh
+cmake -S . -B build-ci -G Ninja \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DMOTHION_BUILD_TESTS=ON \
+  -DMOTHION_ENABLE_WINTAB=OFF
+cmake --build build-ci --parallel
+QT_QPA_PLATFORM=offscreen ctest --test-dir build-ci --output-on-failure
+```
 
 ### Linux
 
