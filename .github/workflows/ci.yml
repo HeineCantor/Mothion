@@ -37,11 +37,17 @@ jobs:
             build-essential \
             cmake \
             ninja-build \
-            libeigen3-dev \
-            qt6-base-dev \
-            qt6-base-dev-tools \
-            qt6-wayland \
-            libqt6sql6-sqlite
+            libeigen3-dev
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: 6.8.3
+          host: linux
+          target: desktop
+          arch: gcc_64
+          modules: qtsql
+          cache: true
 
       - name: Configure
         run: >

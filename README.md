@@ -21,8 +21,8 @@ algebra: CMake uses a system copy if there is one, otherwise it downloads it at 
 
 GitHub Actions runs the Linux build and the complete CTest suite for every pull
 request, every push to `main`, and on demand through the **Run workflow** button
-in the repository's **Actions** tab. The job uses Ubuntu 24.04, Qt 6 from the
-distribution, and an offscreen Qt platform so GUI tests do not require a display.
+in the repository's **Actions** tab. The job uses Ubuntu 24.04, Qt 6.8.3, and an
+offscreen Qt platform so GUI tests do not require a display.
 
 To reproduce the CI checks locally:
 
