@@ -45,8 +45,9 @@ jobs:
           version: 6.8.3
           host: linux
           target: desktop
-          arch: gcc_64
-          modules: qtsql
+          # aqtinstall names the Linux desktop build linux_gcc_64 from Qt 6.7 on.
+          # Qt Sql (and its SQLite driver) is part of the base package: no modules.
+          arch: linux_gcc_64
           cache: true
 
       - name: Configure
