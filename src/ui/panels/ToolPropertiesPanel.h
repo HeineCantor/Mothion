@@ -38,6 +38,7 @@ private:
     void syncFromState();
     void syncPuppetFromState();
     void syncFillFromState();
+    void syncEffectFromState();
     void showAdvancedSettings();
 
     tools::ToolState *m_state;
@@ -62,6 +63,11 @@ private:
     SliderField *m_tolerance;
     QSpinBox *m_fillExpand;
     QComboBox *m_fillSource;
+
+    // Blend and liquify: the brush's size and its strength (the tool's opacity).
+    QWidget *m_effectControls;
+    SliderField *m_effectSize;
+    SliderField *m_effectStrength;
 
     QLabel *m_transformHelp;
     QWidget *m_footer;

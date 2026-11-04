@@ -2,6 +2,7 @@
 
 #include "canvas/DebugOverlay.h"
 #include "canvas/EyedropperTool.h"
+#include "canvas/EffectBrushTools.h"
 #include "canvas/FillTool.h"
 #include "canvas/MoveTool.h"
 #include "canvas/PuppetTool.h"
@@ -91,6 +92,10 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
     m_fillTool = std::make_unique<FillTool>(
         m_document, m_toolState, [this]() -> const QImage & { return m_frame.image(); },
         [this](const QString &text) { emit statusMessage(text); });
+    m_blendTool = std::make_unique<BlendTool>(m_document, m_toolState,
+                                              [this](const QString &text) { emit statusMessage(text); });
+    m_liquifyTool = std::make_unique<LiquifyTool>(m_document, m_toolState,
+                                                  [this](const QString &text) { emit statusMessage(text); });
     m_transformTool = std::make_unique<TransformTool>(
         m_document, m_toolState, [this](const QString &text) { emit statusMessage(text); },
         [this] {
@@ -713,6 +718,8 @@ CanvasTool *CanvasView::canvasTool() const
     case ToolId::Eyedropper: return m_eyedropperTool.get();
     case ToolId::Fill: return m_fillTool.get();
     case ToolId::Transform: return m_transformTool.get();
+    case ToolId::Blend: return m_blendTool.get();
+    case ToolId::Liquify: return m_liquifyTool.get();
     default: return nullptr;
     }
 }

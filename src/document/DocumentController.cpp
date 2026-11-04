@@ -827,6 +827,8 @@ QString DocumentController::commandName(doc::CommandKind kind)
     case doc::CommandKind::PasteFrames: return tr("paste frames");
     case doc::CommandKind::MergeLayers: return tr("merge layers");
     case doc::CommandKind::PasteLayers: return tr("paste layers");
+    case doc::CommandKind::Blend: return tr("blend");
+    case doc::CommandKind::Liquify: return tr("liquify");
     }
     return {};
 }

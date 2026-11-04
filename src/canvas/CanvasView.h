@@ -175,6 +175,8 @@ private:
     std::unique_ptr<CanvasTool> m_puppetTool;
     std::unique_ptr<CanvasTool> m_eyedropperTool;
     std::unique_ptr<CanvasTool> m_fillTool;
+    std::unique_ptr<CanvasTool> m_blendTool;
+    std::unique_ptr<CanvasTool> m_liquifyTool;
     std::unique_ptr<CanvasTool> m_transformTool;
     CanvasTool *m_editTool = nullptr; // the canvas tool between its press and release
     PerspectiveGizmo m_gizmo;

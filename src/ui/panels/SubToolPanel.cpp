@@ -7,6 +7,7 @@
 
 #include <QEvent>
 #include <QLabel>
+#include <QLinearGradient>
 #include <QListWidget>
 #include <QPainter>
 #include <QPainterPath>
@@ -83,6 +84,59 @@ QImage renderFillPreview(tools::FillSettings::Mode mode, const QColor &ink)
         p.setPen(dashes);
         p.setBrush(Qt::NoBrush);
         p.drawPath(loop);
+    }
+    return image;
+}
+
+// A blend or liquify sub tool: a few strokes of ink showing the effect.
+QImage renderEffectPreview(const tools::BrushPreset &preset, const QColor &ink)
+{
+    QImage image(kPreviewSize, QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+    QPainter p(&image);
+    p.setRenderHint(QPainter::Antialiasing);
+    const QRectF r(QPointF(10, 6), QPointF(kPreviewSize.width() - 10, kPreviewSize.height() - 6));
+    const QPointF c = r.center();
+    p.setBrush(Qt::NoBrush);
+    if (preset.blendMode && *preset.blendMode == tools::BlendSettings::Mode::Smudge) {
+        // a stroke whose end is dragged out and fades
+        QLinearGradient g(r.left(), 0, r.right(), 0);
+        g.setColorAt(0, ink);
+        QColor clear = ink;
+        clear.setAlpha(0);
+        g.setColorAt(1, clear);
+        p.setPen(QPen(QBrush(g), 8, Qt::SolidLine, Qt::RoundCap));
+        p.drawLine(QPointF(r.left() + 4, c.y()), QPointF(r.right() - 2, c.y() - 4));
+    } else if (preset.blendMode) {
+        // a hard edge and a soft one
+        p.setPen(QPen(ink, 2));
+        p.drawLine(QPointF(r.left(), c.y() - 6), QPointF(c.x() - 6, c.y() - 6));
+        QColor soft = ink;
+        for (int i = 0; i < 4; ++i) {
+            soft.setAlphaF(0.8 - i * 0.2);
+            p.setPen(QPen(soft, 2));
+            p.drawLine(QPointF(c.x() + i * 7, c.y() + 6), QPointF(c.x() + i * 7 + 6, c.y() + 6));
+        }
+    } else if (preset.liquifyMode && *preset.liquifyMode == tools::LiquifySettings::Mode::Push) {
+        // a line dragged by the pen
+        p.setPen(QPen(ink, 2));
+        QPainterPath line;
+        line.moveTo(r.left() + 4, c.y() + 8);
+        line.cubicTo(c.x() - 12, c.y() + 8, c.x() - 4, c.y() - 8, c.x() + 14, c.y() - 8);
+        line.lineTo(r.right() - 4, c.y() - 8);
+        p.drawPath(line);
+    } else {
+        // a circle with arrows out (expand) or in (shrink)
+        const bool out = preset.liquifyMode && *preset.liquifyMode == tools::LiquifySettings::Mode::Expand;
+        p.setPen(QPen(ink, 2));
+        p.drawEllipse(c, 7, 7);
+        for (int k = -1; k <= 1; k += 2) {
+            const double x0 = c.x() + k * (out ? 10 : 30), x1 = c.x() + k * (out ? 30 : 10);
+            p.drawLine(QPointF(x0, c.y()), QPointF(x1, c.y()));
+            const double tip = out ? x1 : x1, back = k * (out ? -5 : 5);
+            p.drawLine(QPointF(tip, c.y()), QPointF(tip + back, c.y() - 4));
+            p.drawLine(QPointF(tip, c.y()), QPointF(tip + back, c.y() + 4));
+        }
     }
     return image;
 }
@@ -205,6 +259,7 @@ void SubToolPanel::showPresetsFor(tools::ToolId tool)
         auto *item = new QListWidgetItem(preset.name, m_list);
         item->setData(kPreviewRole, preset.selectsTool ? renderSelectionPreview(*preset.selectsTool, ink)
                                     : preset.fillMode  ? renderFillPreview(*preset.fillMode, ink)
+                                    : (preset.blendMode || preset.liquifyMode) ? renderEffectPreview(preset, ink)
                                                        : renderPreview(preset, ink));
     }
     m_list->setVisible(!m_presets.isEmpty());
@@ -214,7 +269,9 @@ void SubToolPanel::showPresetsFor(tools::ToolId tool)
     int row = m_selected.count(tool) ? m_selected[tool] : 0;
     for (int i = 0; i < m_presets.size(); ++i) { // what is in use, whoever set it
         const tools::BrushPreset &p = m_presets[i];
-        if ((p.fillMode && *p.fillMode == m_state->fillSettings().mode) || (p.selectsTool && *p.selectsTool == tool))
+        if ((p.blendMode && *p.blendMode == m_state->blendSettings().mode)
+            || (p.liquifyMode && *p.liquifyMode == m_state->liquifySettings().mode)
+            || (p.fillMode && *p.fillMode == m_state->fillSettings().mode) || (p.selectsTool && *p.selectsTool == tool))
             row = i;
     }
     m_list->setCurrentRow(row);

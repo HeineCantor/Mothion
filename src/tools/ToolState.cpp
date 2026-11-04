@@ -8,6 +8,9 @@ ToolState::ToolState(QObject *parent)
     : QObject(parent)
 {
     m_settings[index(ToolId::Eraser)].size = 30.0;
+    // For the blend and liquify brushes the opacity is their strength.
+    m_settings[index(ToolId::Blend)] = {40.0, 0.6};
+    m_settings[index(ToolId::Liquify)] = {90.0, 0.5};
     m_brushes.fill(roundBrush());
 }
 
@@ -35,6 +38,8 @@ QString ToolState::displayName(ToolId tool)
     case ToolId::Eyedropper: return tr("Eyedropper");
     case ToolId::Fill: return tr("Fill");
     case ToolId::Transform: return tr("Transform");
+    case ToolId::Blend: return tr("Blend");
+    case ToolId::Liquify: return tr("Liquify");
     }
     return {};
 }
@@ -188,6 +193,22 @@ void ToolState::setFillSettings(const FillSettings &settings)
         return;
     m_fill = settings;
     emit fillSettingsChanged();
+}
+
+void ToolState::setBlendSettings(const BlendSettings &settings)
+{
+    if (settings == m_blend)
+        return;
+    m_blend = settings;
+    emit blendSettingsChanged();
+}
+
+void ToolState::setLiquifySettings(const LiquifySettings &settings)
+{
+    if (settings == m_liquify)
+        return;
+    m_liquify = settings;
+    emit liquifySettingsChanged();
 }
 
 } // namespace mothion::tools

@@ -13,8 +13,8 @@ namespace mothion::tools {
 
 // The tools in the tool palette. Not to be confused with mothion::InputTool,
 // which is the *physical* end of the pen (tip / eraser / mouse).
-enum class ToolId { Brush, Eraser, Hand, Zoom, Move, RectSelect, LassoSelect, Puppet, Eyedropper, Fill, Transform };
-inline constexpr int kToolCount = 11;
+enum class ToolId { Brush, Eraser, Hand, Zoom, Move, RectSelect, LassoSelect, Puppet, Eyedropper, Fill, Transform, Blend, Liquify };
+inline constexpr int kToolCount = 13;
 
 // Puppet warp options (see puppet::PuppetRig).
 struct PuppetSettings
@@ -42,6 +42,24 @@ struct FillSettings
     bool allLayers = true; // the area is found in everything shown, else in this layer
 
     bool operator==(const FillSettings &) const = default;
+};
+
+// Blend tool: what the brush does to the pixels under it.
+struct BlendSettings
+{
+    enum class Mode { Smudge, Blur };
+    Mode mode = Mode::Smudge;
+
+    bool operator==(const BlendSettings &) const = default;
+};
+
+// Liquify tool: how the brush moves the pixels under it.
+struct LiquifySettings
+{
+    enum class Mode { Push, Expand, Shrink };
+    Mode mode = Mode::Push;
+
+    bool operator==(const LiquifySettings &) const = default;
 };
 
 // Onion skin: the current layer's drawings of the frames around the
@@ -142,6 +160,11 @@ public:
     FillSettings fillSettings() const { return m_fill; }
     void setFillSettings(const FillSettings &settings);
 
+    BlendSettings blendSettings() const { return m_blend; }
+    void setBlendSettings(const BlendSettings &settings);
+    LiquifySettings liquifySettings() const { return m_liquify; }
+    void setLiquifySettings(const LiquifySettings &settings);
+
     static constexpr int kMaxOnionFrames = 10;
     OnionSkinSettings onionSkin() const { return m_onion; }
     void setOnionSkin(const OnionSkinSettings &settings);
@@ -159,6 +182,8 @@ signals:
     void sharpCornersChanged(bool on);
     void puppetSettingsChanged();
     void fillSettingsChanged();
+    void blendSettingsChanged();
+    void liquifySettingsChanged();
     void onionSkinChanged();
 
 private:
@@ -178,6 +203,8 @@ private:
     bool m_sharpCorners = false;
     PuppetSettings m_puppet;
     FillSettings m_fill;
+    BlendSettings m_blend;
+    LiquifySettings m_liquify;
     OnionSkinSettings m_onion;
 };
 

@@ -48,6 +48,10 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
     , m_tolerance(new SliderField(tr("Tolerance"), 0, 100, QStringLiteral(" %"), m_fillControls))
     , m_fillExpand(new QSpinBox(m_fillControls))
     , m_fillSource(new QComboBox(m_fillControls))
+    , m_effectControls(new QWidget(this))
+    , m_effectSize(new SliderField(tr("Size"), int(ToolState::kMinSize), int(ToolState::kMaxSize),
+                                   QStringLiteral(" px"), m_effectControls))
+    , m_effectStrength(new SliderField(tr("Strength"), 1, 100, QStringLiteral(" %"), m_effectControls))
     , m_footer(new QWidget(this))
     , m_transformHelp(new QLabel(tr("Drag a corner to scale (Shift keeps the proportions), a side to stretch,\n"
                                     "inside the box to move, outside it to rotate (Shift: 15° steps).\n"
@@ -116,6 +120,12 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
     fill->addRow(tr("Expand"), m_fillExpand);
     fill->addRow(tr("Refer to"), m_fillSource);
 
+    auto *effect = new QVBoxLayout(m_effectControls);
+    effect->setContentsMargins(0, 0, 0, 0);
+    effect->setSpacing(4);
+    effect->addWidget(m_effectSize);
+    effect->addWidget(m_effectStrength);
+
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(6, 6, 6, 6);
     layout->setSpacing(4);
@@ -123,6 +133,7 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
     layout->addWidget(m_brushControls, 1);
     layout->addWidget(m_puppetControls);
     layout->addWidget(m_fillControls);
+    layout->addWidget(m_effectControls);
     m_transformHelp->setWordWrap(true);
     m_transformHelp->setEnabled(false); // dimmed, as a hint
     layout->addWidget(m_transformHelp);
@@ -169,6 +180,12 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
             [editFill](int v) { editFill([v](tools::FillSettings &s) { s.expand = v; }); });
     connect(m_fillSource, &QComboBox::currentIndexChanged, this,
             [editFill](int i) { editFill([i](tools::FillSettings &s) { s.allLayers = i == 0; }); });
+    connect(m_effectSize, &SliderField::valueEdited, this,
+            [this](int v) { m_state->setSize(m_state->activeTool(), v); });
+    connect(m_effectStrength, &SliderField::valueEdited, this,
+            [this](int v) { m_state->setOpacity(m_state->activeTool(), v / 100.0); });
+    connect(m_state, &ToolState::toolSettingsChanged, this, &ToolPropertiesPanel::syncEffectFromState);
+
     connect(m_state, &ToolState::fillSettingsChanged, this, &ToolPropertiesPanel::syncFillFromState);
     connect(m_state, &ToolState::toolSettingsChanged, this, &ToolPropertiesPanel::syncFillFromState);
     syncFillFromState();
@@ -193,9 +210,13 @@ void ToolPropertiesPanel::syncFromState()
     const bool fill = tool == ToolId::Fill;
     m_toolName->setText(ToolState::displayName(tool));
     const bool transform = tool == ToolId::Transform;
-    m_brushControls->setVisible(!puppet && !fill && !transform);
+    const bool effect = tool == ToolId::Blend || tool == ToolId::Liquify;
+    const bool brush = !puppet && !fill && !transform && !effect;
+    m_brushControls->setVisible(brush);
     if (m_footer->parentWidget() != this) // in a dock: shown with the brush options
-        m_footer->setVisible(!puppet && !fill && !transform);
+        m_footer->setVisible(brush);
+    m_effectControls->setVisible(effect);
+    syncEffectFromState();
     m_transformHelp->setVisible(transform);
     m_puppetControls->setVisible(puppet);
     m_fillControls->setVisible(fill);
@@ -245,6 +266,14 @@ void ToolPropertiesPanel::syncPuppetFromState()
     m_meshDensity->setCurrentIndex(s.density);
     m_meshExpand->setValue(s.expand);
     m_showMesh->setChecked(s.showMesh);
+}
+
+void ToolPropertiesPanel::syncEffectFromState()
+{
+    const tools::BrushSettings s = m_state->settings(m_state->activeTool());
+    const QSignalBlocker b1(m_effectSize), b2(m_effectStrength);
+    m_effectSize->setValue(int(std::lround(s.size)));
+    m_effectStrength->setValue(int(std::lround(s.opacity * 100)));
 }
 
 void ToolPropertiesPanel::syncFillFromState()

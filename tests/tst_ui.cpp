@@ -1,6 +1,7 @@
 // Tests for the UI layer: panel layouts, document controller actions.
 
 #include "canvas/CanvasView.h"
+#include "canvas/EffectBrushTools.h"
 #include "canvas/FillTool.h"
 #include "canvas/FrameRenderer.h"
 #include "canvas/MoveTool.h"
@@ -2013,6 +2014,132 @@ private slots:
             if (button->text() == QStringLiteral("Go to frame"))
                 button->click();
         QCOMPARE(controller.currentFrame(), 2);
+    }
+
+    // Smudge drags the color under the pen along; Blur softens an edge; each is one undo step, and a
+    // drag that is cancelled leaves the layer as it was.
+    void blendToolSmudgesAndBlurs()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        QImage image(200, 100, QImage::Format_ARGB32);
+        image.fill(Qt::red);
+        controller.importImage(image, QStringLiteral("red")); // x 860..1059, y 490..589
+        controller.clearSelection();
+        const doc::Cel &cel = *controller.document().cel(controller.currentCel());
+        auto pixel = [&](int x, int y) { return cel.drawingAt(0)->layers.front().image.pixel(x, y); };
+        canvas::BlendTool tool(&controller, &state, [](const QString &) {});
+        state.setSize(tools::ToolId::Blend, 60);
+        state.setOpacity(tools::ToolId::Blend, 1.0);
+
+        QCOMPARE(qAlpha(pixel(1075, 540)), 0);
+        tool.press({1000, 540}, Qt::NoModifier);
+        QVERIFY(tool.isActive());
+        for (int x = 1000; x <= 1120; x += 10)
+            tool.move({double(x), 540}, Qt::NoModifier);
+        tool.release({1120, 540}, Qt::NoModifier);
+        QVERIFY(!tool.isActive());
+        QVERIFY(qAlpha(pixel(1075, 540)) > 60); // the red was pulled out past the edge
+        QVERIFY(qRed(pixel(1075, 540)) > 0);
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo blend"));
+        controller.undo();
+        QCOMPARE(qAlpha(pixel(1075, 540)), 0);
+
+        // Blur: the hard edge at x = 1059 softens on both sides.
+        tools::BlendSettings blend;
+        blend.mode = tools::BlendSettings::Mode::Blur;
+        state.setBlendSettings(blend);
+        QCOMPARE(qAlpha(pixel(1058, 540)), 255);
+        QCOMPARE(qAlpha(pixel(1060, 540)), 0);
+        tool.press({1059, 520}, Qt::NoModifier);
+        for (int y = 520; y <= 560; y += 5)
+            tool.move({1059, double(y)}, Qt::NoModifier);
+        tool.release({1059, 560}, Qt::NoModifier);
+        QVERIFY(qAlpha(pixel(1058, 540)) < 255);
+        QVERIFY(qAlpha(pixel(1060, 540)) > 0);
+        controller.undo();
+
+        // Cancelled: nothing changes and nothing is left to undo.
+        const bool couldUndo = controller.canUndo();
+        tool.press({1000, 540}, Qt::NoModifier);
+        tool.move({1100, 540}, Qt::NoModifier);
+        tool.cancel();
+        QVERIFY(!tool.isActive());
+        QCOMPARE(qAlpha(pixel(1075, 540)), 0);
+        QCOMPARE(controller.canUndo(), couldUndo);
+    }
+
+    // Liquify pushes the pixels along with the pen, and expands what is under it; the selection protects the rest.
+    void liquifyToolMovesPixels()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        QImage bar(100, 10, QImage::Format_ARGB32);
+        bar.fill(Qt::green);
+        controller.importImage(bar, QStringLiteral("bar")); // x 910..1009, y 535..544
+        controller.clearSelection();
+        const doc::Cel &cel = *controller.document().cel(controller.currentCel());
+        auto pixel = [&](int x, int y) { return cel.drawingAt(0)->layers.front().image.pixel(x, y); };
+        canvas::LiquifyTool tool(&controller, &state, [](const QString &) {});
+        state.setSize(tools::ToolId::Liquify, 80);
+        state.setOpacity(tools::ToolId::Liquify, 1.0);
+
+        QCOMPARE(qAlpha(pixel(915, 540)), 255);
+        tool.press({905, 540}, Qt::NoModifier);
+        for (int x = 905; x <= 960; x += 5)
+            tool.move({double(x), 540}, Qt::NoModifier);
+        tool.release({960, 540}, Qt::NoModifier);
+        QVERIFY(qAlpha(pixel(915, 540)) < 128); // the left end of the bar was swept to the right
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo liquify"));
+        controller.undo();
+        QCOMPARE(qAlpha(pixel(915, 540)), 255);
+
+        // Held by a selection, what lies outside does not move.
+        QPainterPath area;
+        area.addRect(900, 500, 30, 80); // x 900..929
+        controller.setSelection(area);
+        tool.press({905, 540}, Qt::NoModifier);
+        for (int x = 905; x <= 960; x += 5)
+            tool.move({double(x), 540}, Qt::NoModifier);
+        tool.release({960, 540}, Qt::NoModifier);
+        QCOMPARE(qAlpha(pixel(950, 540)), 255);
+        controller.clearSelection();
+
+        // Expand: a small square swells under the pen (in a document of its own).
+        document::DocumentController other;
+        QImage dot(20, 20, QImage::Format_ARGB32);
+        dot.fill(Qt::red);
+        other.importImage(dot, QStringLiteral("dot")); // x 950..969, y 530..549
+        other.clearSelection();
+        const doc::Cel &otherCel = *other.document().cel(other.currentCel());
+        auto dotPixel = [&](int x, int y) { return otherCel.drawingAt(0)->layers.front().image.pixel(x, y); };
+        canvas::LiquifyTool expand(&other, &state, [](const QString &) {});
+        tools::LiquifySettings liquify;
+        liquify.mode = tools::LiquifySettings::Mode::Expand;
+        state.setLiquifySettings(liquify);
+        QCOMPARE(qAlpha(dotPixel(972, 540)), 0);
+        expand.press({960, 540}, Qt::NoModifier);
+        for (int i = 0; i < 6; ++i) {
+            expand.move({980, 540}, Qt::NoModifier);
+            expand.move({960, 540}, Qt::NoModifier);
+        }
+        expand.release({960, 540}, Qt::NoModifier);
+        QVERIFY(qAlpha(dotPixel(972, 540)) > 0);
+    }
+
+    // The blend and liquify tools have their sub tools, and picking one sets the mode.
+    void blendAndLiquifyHaveSubTools()
+    {
+        tools::ToolState state;
+        const auto blend = tools::builtInPresets(tools::ToolId::Blend);
+        QCOMPARE(blend.size(), 2);
+        tools::applyPreset(state, blend[1]);
+        QCOMPARE(state.blendSettings().mode, tools::BlendSettings::Mode::Blur);
+        const auto liquify = tools::builtInPresets(tools::ToolId::Liquify);
+        QCOMPARE(liquify.size(), 3);
+        tools::applyPreset(state, liquify[2]);
+        QCOMPARE(state.liquifySettings().mode, tools::LiquifySettings::Mode::Shrink);
+        QCOMPARE(state.settings(tools::ToolId::Blend).opacity, 0.6); // a mode keeps size and strength
     }
 
     // The tool buttons are laid out in as many columns as the width allows, two to begin with.

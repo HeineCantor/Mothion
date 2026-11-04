@@ -81,6 +81,7 @@ qt_add_library(mothion_gui STATIC
     canvas/MoveTool.h canvas/MoveTool.cpp
     canvas/EyedropperTool.h canvas/EyedropperTool.cpp
     canvas/FillTool.h canvas/FillTool.cpp
+    canvas/EffectBrushTools.h canvas/EffectBrushTools.cpp
     canvas/TransformTool.h canvas/TransformTool.cpp
     canvas/SelectionMask.h canvas/SelectionMask.cpp
     canvas/SelectionTool.h canvas/SelectionTool.cpp

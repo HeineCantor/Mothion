@@ -62,6 +62,8 @@ enum class CommandKind {
     PasteFrames,
     MergeLayers,
     PasteLayers,
+    Blend,
+    Liquify,
 };
 
 // An undoable change to a Document.

@@ -161,6 +161,23 @@ void drawGlyph(QPainter &p, IconId id)
         path.quadTo(22.5, 18.5, 20, 20);
         path.quadTo(17.5, 18.5, 20, 15);
         break;
+    case IconId::Blend: // a round fingertip and the streaks it drags
+        path.addEllipse(QPointF(7.5, 12), 4.5, 4.5);
+        path.moveTo(13, 8);
+        path.lineTo(21, 8);
+        path.moveTo(13, 12);
+        path.lineTo(19, 12);
+        path.moveTo(13, 16);
+        path.lineTo(16.5, 16);
+        break;
+    case IconId::Liquify: // a wave with an arrow
+        path.moveTo(3, 9);
+        path.cubicTo(6, 4, 9, 4, 12, 9);
+        path.cubicTo(15, 14, 18, 14, 21, 9);
+        path.moveTo(3, 16);
+        path.cubicTo(6, 11, 9, 11, 12, 16);
+        path.cubicTo(15, 21, 18, 21, 21, 16);
+        break;
     case IconId::Transform: // a box with handles
         path.addRect(QRectF(6, 6, 12, 12));
         for (QPointF at : {QPointF(6, 6), QPointF(18, 6), QPointF(18, 18), QPointF(6, 18), QPointF(12, 6),

@@ -45,6 +45,22 @@ QList<BrushPreset> builtInPresets(ToolId tool)
         lasso.fillMode = FillSettings::Mode::Lasso;
         return {bucket, lasso};
     }
+    case ToolId::Blend: {
+        BrushPreset smudge{QObject::tr("Smudge"), tool};
+        smudge.blendMode = BlendSettings::Mode::Smudge;
+        BrushPreset blur{QObject::tr("Blur"), tool};
+        blur.blendMode = BlendSettings::Mode::Blur;
+        return {smudge, blur};
+    }
+    case ToolId::Liquify: {
+        BrushPreset push{QObject::tr("Push"), tool};
+        push.liquifyMode = LiquifySettings::Mode::Push;
+        BrushPreset expand{QObject::tr("Expand"), tool};
+        expand.liquifyMode = LiquifySettings::Mode::Expand;
+        BrushPreset shrink{QObject::tr("Shrink"), tool};
+        shrink.liquifyMode = LiquifySettings::Mode::Shrink;
+        return {push, expand, shrink};
+    }
     case ToolId::Hand:
     case ToolId::Zoom:
     case ToolId::Move:
@@ -66,6 +82,18 @@ void applyPreset(ToolState &state, const BrushPreset &preset)
         FillSettings fill = state.fillSettings();
         fill.mode = *preset.fillMode;
         state.setFillSettings(fill);
+        return;
+    }
+    if (preset.blendMode) {
+        BlendSettings blend = state.blendSettings();
+        blend.mode = *preset.blendMode;
+        state.setBlendSettings(blend);
+        return;
+    }
+    if (preset.liquifyMode) {
+        LiquifySettings liquify = state.liquifySettings();
+        liquify.mode = *preset.liquifyMode;
+        state.setLiquifySettings(liquify);
         return;
     }
     state.setSize(preset.tool, preset.size);
