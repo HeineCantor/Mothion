@@ -36,7 +36,7 @@ DockLayout::DockLayout(QMainWindow *window, const WorkspacePanels &panels)
     m_tools = addDock(QStringLiteral("dock.tools"), tr("Tools"), panels.tools);
     m_subTools = addDock(QStringLiteral("dock.subTools"), tr("Sub tool"), panels.subTools);
     m_toolProperties = addDock(QStringLiteral("dock.toolProperties"), tr("Tool properties"),
-                               panels.toolProperties);
+                               panels.toolProperties, panels.toolPropertiesFooter);
     m_brushSliders = addDock(QStringLiteral("dock.brushSliders"), tr("Size and opacity"),
                              panels.brushSliders);
     m_brushSize = addDock(QStringLiteral("dock.brushSize"), tr("Brush size"), panels.brushSize);
@@ -49,9 +49,9 @@ DockLayout::DockLayout(QMainWindow *window, const WorkspacePanels &panels)
     applyDefault();
 }
 
-PanelDock *DockLayout::addDock(const QString &id, const QString &title, QWidget *content)
+PanelDock *DockLayout::addDock(const QString &id, const QString &title, QWidget *content, QWidget *footer)
 {
-    auto *dock = new PanelDock(title, id, content, m_window);
+    auto *dock = new PanelDock(title, id, content, m_window, footer);
     m_docks.append(dock);
     return dock;
 }

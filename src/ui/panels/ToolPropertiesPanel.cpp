@@ -1,15 +1,20 @@
 #include "ui/panels/ToolPropertiesPanel.h"
 
+#include "ui/AdvancedToolSettings.h"
+#include "ui/IconFactory.h"
 #include "ui/panels/PressureCurveEditor.h"
 #include "ui/panels/SliderField.h"
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QEvent>
 #include <QFormLayout>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
 #include <QSignalBlocker>
 #include <QSpinBox>
+#include <QToolButton>
 #include <QVBoxLayout>
 
 #include <cmath>
@@ -29,7 +34,6 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
     , m_opacity(new SliderField(tr("Opacity"), 0, 100, QStringLiteral(" %"), m_brushControls))
     , m_smoothing(new SliderField(tr("Stabilizer"), 0, 95, QStringLiteral(" %"), m_brushControls))
     , m_useTilt(new QCheckBox(tr("Use pen tilt"), m_brushControls))
-    , m_correctStart(new QCheckBox(tr("Correct the start after the stroke"), m_brushControls))
     , m_curveEditor(new PressureCurveEditor(m_brushControls))
     , m_puppetControls(new QWidget(this))
     , m_meshDensity(new QComboBox(m_puppetControls))
@@ -44,6 +48,7 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
     , m_tolerance(new SliderField(tr("Tolerance"), 0, 100, QStringLiteral(" %"), m_fillControls))
     , m_fillExpand(new QSpinBox(m_fillControls))
     , m_fillSource(new QComboBox(m_fillControls))
+    , m_footer(new QWidget(this))
     , m_transformHelp(new QLabel(tr("Drag a corner to scale (Shift keeps the proportions), a side to stretch,\n"
                                     "inside the box to move, outside it to rotate (Shift: 15° steps).\n"
                                     "Enter applies, Esc cancels."),
@@ -60,14 +65,25 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
     brush->addWidget(m_smoothing);
     m_useTilt->setToolTip(tr("Off: the pen's tilt changes nothing, whatever the brush's tilt dynamics say"));
     brush->addWidget(m_useTilt);
-    m_correctStart->setObjectName(QStringLiteral("correctStart"));
-    m_correctStart->setToolTip(tr("On: the brush's start correction thins the start once the pen lifts, as in "
-                                  "Clip Studio; off: the start thins while drawing"));
-    brush->addWidget(m_correctStart);
     brush->addSpacing(6);
     brush->addWidget(new QLabel(tr("Pressure curve"), m_brushControls));
     brush->addWidget(m_curveEditor, 1); // takes the panel's spare height
     brush->addWidget(resetCurve, 0, Qt::AlignRight);
+
+    // Not in the panel's layout: the dock puts it under the panel.
+    m_footer->hide();
+    m_footer->installEventFilter(this); // shown once a dock takes it
+    auto *advanced = new QToolButton(m_footer);
+    advanced->setObjectName(QStringLiteral("advancedToolSettings"));
+    advanced->setIcon(icon(IconId::Wrench));
+    advanced->setIconSize(QSize(20, 20));
+    advanced->setAutoRaise(true);
+    advanced->setToolTip(tr("Advanced Tool Settings"));
+    auto *footer = new QHBoxLayout(m_footer);
+    footer->setContentsMargins(6, 2, 6, 4);
+    footer->addStretch(1);
+    footer->addWidget(advanced);
+    connect(advanced, &QToolButton::clicked, this, &ToolPropertiesPanel::showAdvancedSettings);
 
     m_meshDensity->addItems({tr("Coarse"), tr("Normal"), tr("Fine")});
     m_meshExpand->setRange(0, 50);
@@ -119,7 +135,6 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
     connect(m_smoothing, &SliderField::valueEdited, this,
             [this](int v) { m_state->setSmoothing(v / 100.0); });
     connect(m_useTilt, &QCheckBox::toggled, m_state, &ToolState::setUseTilt);
-    connect(m_correctStart, &QCheckBox::toggled, m_state, &ToolState::setCorrectStartAfterStroke);
     connect(m_curveEditor, &PressureCurveEditor::curveEdited, m_state, &ToolState::setPressureCurve);
     connect(resetCurve, &QPushButton::clicked, this, [this] { m_state->setPressureCurve(PressureCurve()); });
 
@@ -162,7 +177,6 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
     connect(m_state, &ToolState::toolSettingsChanged, this, &ToolPropertiesPanel::syncFromState);
     connect(m_state, &ToolState::smoothingChanged, this, &ToolPropertiesPanel::syncFromState);
     connect(m_state, &ToolState::useTiltChanged, this, &ToolPropertiesPanel::syncFromState);
-    connect(m_state, &ToolState::correctStartAfterStrokeChanged, this, &ToolPropertiesPanel::syncFromState);
     connect(m_state, &ToolState::puppetSettingsChanged, this, &ToolPropertiesPanel::syncPuppetFromState);
     connect(m_state, &ToolState::pressureCurveChanged, this,
             [this] { m_curveEditor->setCurve(m_state->pressureCurve()); });
@@ -180,6 +194,8 @@ void ToolPropertiesPanel::syncFromState()
     m_toolName->setText(ToolState::displayName(tool));
     const bool transform = tool == ToolId::Transform;
     m_brushControls->setVisible(!puppet && !fill && !transform);
+    if (m_footer->parentWidget() != this) // in a dock: shown with the brush options
+        m_footer->setVisible(!puppet && !fill && !transform);
     m_transformHelp->setVisible(transform);
     m_puppetControls->setVisible(puppet);
     m_fillControls->setVisible(fill);
@@ -190,9 +206,24 @@ void ToolPropertiesPanel::syncFromState()
     m_size->setValue(int(std::lround(s.size)));
     m_opacity->setValue(int(std::lround(s.opacity * 100)));
     m_smoothing->setValue(int(std::lround(m_state->smoothing() * 100)));
-    const QSignalBlocker block(m_useTilt), block2(m_correctStart);
+    const QSignalBlocker block(m_useTilt);
     m_useTilt->setChecked(m_state->usesTilt());
-    m_correctStart->setChecked(m_state->correctsStartAfterStroke());
+}
+
+bool ToolPropertiesPanel::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched == m_footer && event->type() == QEvent::ParentChange)
+        syncFromState();
+    return QWidget::eventFilter(watched, event);
+}
+
+void ToolPropertiesPanel::showAdvancedSettings()
+{
+    if (!m_advanced)
+        m_advanced = new AdvancedToolSettings(m_state, this);
+    m_advanced->show();
+    m_advanced->raise();
+    m_advanced->activateWindow();
 }
 
 void ToolPropertiesPanel::syncPuppetFromState()

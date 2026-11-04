@@ -6,6 +6,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QScrollArea>
+#include <QVBoxLayout>
 #include <QToolButton>
 
 namespace mothion::ui {
@@ -72,12 +73,23 @@ private:
 } // namespace
 
 PanelDock::PanelDock(const QString &title, const QString &objectName, QWidget *content,
-                     QWidget *parent)
+                     QWidget *parent, QWidget *footer)
     : QDockWidget(title, parent)
 {
     setObjectName(objectName);
     // Scrolls when the dock area has less room than the panel needs.
-    setWidget(new PanelScrollArea(content, this));
+    auto *scroll = new PanelScrollArea(content, this);
+    if (footer) {
+        auto *holder = new QWidget(this);
+        auto *layout = new QVBoxLayout(holder);
+        layout->setContentsMargins(0, 0, 0, 0);
+        layout->setSpacing(0);
+        layout->addWidget(scroll, 1);
+        layout->addWidget(footer);
+        setWidget(holder);
+    } else {
+        setWidget(scroll);
+    }
     setFeatures(DockWidgetMovable | DockWidgetFloatable | DockWidgetClosable);
 
     // Custom title bar. Mouse presses that the buttons don't take fall through

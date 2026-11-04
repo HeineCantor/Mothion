@@ -16,6 +16,7 @@ struct WorkspacePanels
     QWidget *tools = nullptr;
     QWidget *subTools = nullptr;
     QWidget *toolProperties = nullptr;
+    QWidget *toolPropertiesFooter = nullptr; // fixed under it, not scrolled
     QWidget *brushSliders = nullptr;
     QWidget *brushSize = nullptr;
     QWidget *colorWheel = nullptr;
@@ -49,7 +50,7 @@ public:
     void resetToDefault();
 
 private:
-    PanelDock *addDock(const QString &id, const QString &title, QWidget *content);
+    PanelDock *addDock(const QString &id, const QString &title, QWidget *content, QWidget *footer = nullptr);
     void applyDefault();
 
     QMainWindow *m_window;

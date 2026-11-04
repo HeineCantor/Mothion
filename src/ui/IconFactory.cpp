@@ -10,6 +10,8 @@
 #include <QTransform>
 
 #include <algorithm>
+#include <cmath>
+#include <numbers>
 
 namespace mothion::ui {
 
@@ -344,6 +346,24 @@ void drawGlyph(QPainter &p, IconId id)
         path.moveTo(17, 6);
         path.lineTo(17, 18);
         break;
+    case IconId::Wrench: { // an open-ended wrench, head up-right
+        p.translate(12, 12);
+        p.rotate(-45);
+        const double w = 1.6, r = 4.5, cx = 6.5, dx = std::sqrt(r * r - w * w);
+        const double a = std::atan2(w, dx) * 180 / std::numbers::pi; // where the handle and the jaw meet the head
+        const QRectF head(cx - r, -r, 2 * r, 2 * r);
+        path.moveTo(-10, -w);
+        path.lineTo(cx - dx, -w);
+        path.arcTo(head, 180 - a, -(180 - 2 * a));
+        path.lineTo(cx, -w); // the jaw
+        path.lineTo(cx, w);
+        path.lineTo(cx + dx, w);
+        path.arcTo(head, -a, -(180 - 2 * a));
+        path.lineTo(-10, w);
+        path.arcTo(QRectF(-10 - w, -w, 2 * w, 2 * w), 270, -180);
+        path.closeSubpath();
+        break;
+    }
     case IconId::Add:
         path.moveTo(12, 5);
         path.lineTo(12, 19);

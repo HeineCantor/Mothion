@@ -18,8 +18,10 @@ class PanelDock : public QDockWidget
 
 public:
     // objectName must be unique and stable: QMainWindow::saveState() keys on it.
+    // `footer`, if any, stays at the bottom, under the content, and does not
+    // scroll with it.
     PanelDock(const QString &title, const QString &objectName, QWidget *content,
-              QWidget *parent = nullptr);
+              QWidget *parent = nullptr, QWidget *footer = nullptr);
 
     bool isCollapsed() const { return m_collapsed; }
     void setCollapsed(bool collapsed);

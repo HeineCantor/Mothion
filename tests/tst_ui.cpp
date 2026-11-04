@@ -24,6 +24,7 @@
 #include "ui/panels/BlendModes.h"
 #include "ui/panels/BrushSizePanel.h"
 #include "ui/panels/LayersPanel.h"
+#include "ui/AdvancedToolSettings.h"
 #include "ui/SplashScreen.h"
 #include "ui/panels/ToolPalettePanel.h"
 #include "ui/panels/SubToolPanel.h"
@@ -245,6 +246,68 @@ private slots:
         QVERIFY(!state.usesTilt());
         state.setUseTilt(true);
         QVERIFY(tilt->isChecked());
+    }
+
+    // The wrench sits under the panel, outside the scrolling: visible however
+    // short the dock is.
+    void wrenchStaysUnderTheScrollingPanel()
+    {
+        tools::ToolState state;
+        auto *panel = new ui::ToolPropertiesPanel(&state);
+        ui::PanelDock dock(QStringLiteral("Tool properties"), QStringLiteral("dock.test"), panel, nullptr,
+                           panel->footer());
+        auto *wrench = dock.findChild<QToolButton *>(QStringLiteral("advancedToolSettings"));
+        auto *scroll = dock.findChild<QScrollArea *>();
+        QVERIFY(wrench && scroll);
+        QVERIFY(!scroll->isAncestorOf(wrench));
+
+        dock.resize(260, 160);
+        dock.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&dock));
+        QTRY_VERIFY(scroll->verticalScrollBar()->maximum() > 0);
+        QVERIFY(wrench->isVisible());
+        QVERIFY(dock.rect().contains(QRect(wrench->mapTo(&dock, QPoint()), wrench->size())));
+
+        state.setActiveTool(tools::ToolId::Puppet); // no brush options, no wrench
+        QVERIFY(!wrench->isVisible());
+    }
+
+    // The wrench opens Advanced Tool Settings, whose correction options edit
+    // ToolState and the active brush, and follow them back.
+    void advancedSettingsEditTheBrush()
+    {
+        tools::ToolState state;
+        ui::ToolPropertiesPanel panel(&state);
+        auto *wrench = panel.findChild<QToolButton *>(QStringLiteral("advancedToolSettings"));
+        QVERIFY(wrench);
+        wrench->click();
+        auto *dialog = panel.findChild<ui::AdvancedToolSettings *>();
+        QVERIFY(dialog);
+        QVERIFY(dialog->isVisible());
+        auto box = [dialog](const QString &text) -> QCheckBox * {
+            for (QCheckBox *b : dialog->findChildren<QCheckBox *>())
+                if (b->text() == text)
+                    return b;
+            return nullptr;
+        };
+        QCheckBox *sharp = box(QStringLiteral("Sharp angles"));
+        QCheckBox *post = box(QStringLiteral("Post correction"));
+        QCheckBox *bezier = box(QStringLiteral("Bezier curve"));
+        QVERIFY(sharp && post && bezier);
+
+        sharp->click();
+        QVERIFY(state.sharpCorners());
+        QVERIFY(!bezier->isEnabled());
+        post->click();
+        QCOMPARE(state.brush(tools::ToolId::Brush)->style.revision, 10);
+        QVERIFY(bezier->isEnabled());
+        bezier->click();
+        QVERIFY(state.brush(tools::ToolId::Brush)->style.revisionCurves);
+        QVERIFY(!tools::roundBrush()->style.revisionCurves); // a copy was edited, not the shared brush
+
+        state.setBrush(tools::ToolId::Brush, tools::roundBrush());
+        QVERIFY(!post->isChecked());
+        dialog->close();
     }
 
     // Shrinking the brush repaints where the old, larger outline was drawn,

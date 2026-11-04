@@ -71,6 +71,7 @@ MainWindow::MainWindow(QWidget *parent)
     panels.tools = new ToolPalettePanel(m_toolState, this);
     panels.subTools = new SubToolPanel(m_toolState, m_brushes, this);
     panels.toolProperties = properties;
+    panels.toolPropertiesFooter = properties->footer();
     panels.brushSliders = new BrushSlidersPanel(m_toolState, this);
     panels.brushSize = new BrushSizePanel(m_toolState, this);
     panels.colorWheel = new ColorWheelPanel(m_toolState, this);
