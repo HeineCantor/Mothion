@@ -2015,6 +2015,34 @@ private slots:
         QCOMPARE(controller.currentFrame(), 2);
     }
 
+    // The tool buttons are laid out in as many columns as the width allows, two to begin with.
+    void toolPaletteReflowsWithItsWidth()
+    {
+        tools::ToolState state;
+        ui::ToolPalettePanel palette(&state);
+        auto columns = [&palette] {
+            std::set<int> xs;
+            for (auto *b : palette.findChildren<QToolButton *>())
+                xs.insert(b->x());
+            return int(xs.size());
+        };
+        palette.resize(palette.sizeHint());
+        palette.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&palette));
+        QCOMPARE(columns(), 2); // by default
+        palette.resize(40, 600);
+        QCOMPARE(columns(), 1);
+        palette.resize(140, 600);
+        QVERIFY(columns() >= 3);
+        // Narrower, the buttons need more height; the panel asks for it (it scrolls in its dock).
+        palette.resize(40, 100);
+        const int tall = palette.minimumHeight();
+        palette.resize(140, 100);
+        QVERIFY(palette.minimumHeight() < tall);
+        for (auto *b : palette.findChildren<QToolButton *>())
+            QVERIFY(b->geometry().right() < palette.width()); // none spills over the side
+    }
+
     // The loop can be narrowed to a range of frames with the two handles under the slider.
     void autoplayLoopsOnlyARange()
     {

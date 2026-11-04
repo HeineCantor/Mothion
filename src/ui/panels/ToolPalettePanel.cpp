@@ -9,8 +9,9 @@
 #include <QKeyEvent>
 #include <QPainter>
 #include <QShortcut>
+#include <QLayout>
 #include <QToolButton>
-#include <QVBoxLayout>
+#include <QWidgetItem>
 
 #include <algorithm>
 #include <vector>
@@ -34,6 +35,123 @@ protected:
         const bool dark = palette().color(QPalette::Window).lightness() < 128;
         QPainter(this).fillRect(rect().adjusted(kInset, 0, -kInset, 0), dark ? QColor(0xa5, 0xa5, 0xab) : QColor(0x55, 0x55, 0x5b));
     }
+};
+
+
+// Lays the buttons out in a grid whose columns follow the width it is given (as many as fit,
+// at least one), the block of columns centered; a line takes a row of its own and the buttons
+// after it start a new row. Asked for its preferred size it wants two columns.
+class ToolGridLayout : public QLayout
+{
+public:
+    static constexpr int kPreferredColumns = 2;
+    static constexpr int kLineGap = 4; // above and below a line
+
+    explicit ToolGridLayout(QWidget *parent) : QLayout(parent) { setContentsMargins(4, 4, 4, 4); }
+    ~ToolGridLayout() override
+    {
+        while (QLayoutItem *item = takeAt(0))
+            delete item;
+    }
+
+    void addButton(QWidget *button) { add(button, false); }
+    void addLine(QWidget *line) { add(line, true); }
+
+    void addItem(QLayoutItem *item) override
+    {
+        m_items.push_back(item);
+        m_lines.push_back(false);
+    }
+    int count() const override { return int(m_items.size()); }
+    QLayoutItem *itemAt(int index) const override
+    {
+        return index >= 0 && index < count() ? m_items[std::size_t(index)] : nullptr;
+    }
+    QLayoutItem *takeAt(int index) override
+    {
+        if (index < 0 || index >= count())
+            return nullptr;
+        QLayoutItem *item = m_items[std::size_t(index)];
+        m_items.erase(m_items.begin() + index);
+        m_lines.erase(m_lines.begin() + index);
+        return item;
+    }
+
+    Qt::Orientations expandingDirections() const override { return {}; }
+    bool hasHeightForWidth() const override { return true; }
+    int heightForWidth(int width) const override { return arrange(QRect(0, 0, width, 0), false); }
+    QSize sizeHint() const override
+    {
+        const int gap = spacing() < 0 ? 2 : spacing();
+        const int width = contentsMargins().left() + contentsMargins().right()
+                          + kPreferredColumns * cell().width() + (kPreferredColumns - 1) * gap;
+        return {width, heightForWidth(width)};
+    }
+    QSize minimumSize() const override
+    {
+        return {contentsMargins().left() + contentsMargins().right() + cell().width(),
+                contentsMargins().top() + contentsMargins().bottom() + cell().height()};
+    }
+    void setGeometry(const QRect &rect) override
+    {
+        QLayout::setGeometry(rect);
+        arrange(rect, true);
+    }
+
+private:
+    void add(QWidget *widget, bool line)
+    {
+        addChildWidget(widget);
+        m_items.push_back(new QWidgetItem(widget));
+        m_lines.push_back(line);
+    }
+    // The size of a button's cell: the largest button.
+    QSize cell() const
+    {
+        QSize size(1, 1);
+        for (std::size_t i = 0; i < m_items.size(); ++i)
+            if (!m_lines[i])
+                size = size.expandedTo(m_items[i]->sizeHint());
+        return size;
+    }
+    // Places the items for `rect` (when `place`) and returns the height they need.
+    int arrange(const QRect &rect, bool place) const
+    {
+        const QMargins m = contentsMargins();
+        const QSize cellSize = cell();
+        const int gap = spacing() < 0 ? 2 : spacing();
+        const int available = rect.width() - m.left() - m.right();
+        const int columns = std::max(1, (available + gap) / (cellSize.width() + gap));
+        const int block = columns * cellSize.width() + (columns - 1) * gap;
+        const int left = rect.x() + m.left() + std::max(0, (available - block) / 2);
+        int y = rect.y() + m.top();
+        int column = 0;
+        for (std::size_t i = 0; i < m_items.size(); ++i) {
+            if (m_lines[i]) {
+                if (column > 0) // the row in progress is closed
+                    y += cellSize.height();
+                y += kLineGap;
+                if (place)
+                    m_items[i]->setGeometry(QRect(left, y, block, 1));
+                y += 1 + kLineGap;
+                column = 0;
+                continue;
+            }
+            if (column == columns) { // the row is full
+                y += cellSize.height() + gap;
+                column = 0;
+            }
+            if (place)
+                m_items[i]->setGeometry(QRect(QPoint(left + column * (cellSize.width() + gap), y), cellSize));
+            ++column;
+        }
+        if (column > 0)
+            y += cellSize.height();
+        return y + m.bottom() - rect.y();
+    }
+
+    std::vector<QLayoutItem *> m_items;
+    std::vector<bool> m_lines;
 };
 
 }
@@ -70,15 +188,12 @@ ToolPalettePanel::ToolPalettePanel(tools::ToolState *state, QWidget *parent)
         },
     };
 
-    auto *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(4, 4, 4, 4);
+    auto *layout = new ToolGridLayout(this);
     layout->setSpacing(2);
     for (std::size_t g = 0; g < groups.size(); ++g) {
         if (g > 0) {
             auto *line = new GroupLine(this);
-            layout->addSpacing(2);
-            layout->addWidget(line);
-            layout->addSpacing(2);
+            layout->addLine(line);
         }
         for (const Entry &e : groups[g]) {
             // The key is a shortcut of its own, not the button's: pressed while the
@@ -110,10 +225,9 @@ ToolPalettePanel::ToolPalettePanel(tools::ToolState *state, QWidget *parent)
             button->setToolTip(toggles ? tr("%1 (%2; again to go back)").arg(name, e.shortcut.toString())
                                        : QStringLiteral("%1 (%2)").arg(name, e.shortcut.toString()));
             m_group->addButton(button, static_cast<int>(e.tool));
-            layout->addWidget(button, 0, Qt::AlignHCenter);
+            layout->addButton(button);
         }
     }
-    layout->addStretch(1);
 
     auto *swap = new QShortcut(QKeySequence(Qt::Key_X), this);
     connect(swap, &QShortcut::activated, state, &tools::ToolState::swapColors);
@@ -150,6 +264,18 @@ QAbstractButton *ToolPalettePanel::buttonFor(ToolId tool) const
 ToolId ToolPalettePanel::target(ToolId tool) const
 {
     return tool == ToolId::RectSelect ? m_lastSelection : tool;
+}
+
+void ToolPalettePanel::resizeEvent(QResizeEvent *event)
+{
+    QWidget::resizeEvent(event);
+    // The rows the buttons make depend on the width: the height they need becomes the minimum,
+    // so that the panel scrolls (see PanelDock) instead of cutting the last row off.
+    if (layout()) {
+        const int needed = layout()->heightForWidth(width());
+        if (needed != minimumHeight())
+            setMinimumHeight(needed);
+    }
 }
 
 bool ToolPalettePanel::eventFilter(QObject *watched, QEvent *event)

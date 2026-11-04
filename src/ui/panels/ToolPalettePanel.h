@@ -10,7 +10,8 @@ class QButtonGroup;
 
 namespace mothion::ui {
 
-// Vertical column of tool buttons, each with its key.
+// The tool buttons, each with its key, in groups with a line between them. They are laid out in
+// as many columns as the width allows (two to begin with).
 // Selecting a button sets ToolState::activeTool; external changes are mirrored.
 //
 // The selection button stands for both selection tools (rectangle, lasso:
@@ -30,6 +31,7 @@ public:
     static constexpr int kHoldMs = 300;
 
 protected:
+    void resizeEvent(QResizeEvent *event) override;
     bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:

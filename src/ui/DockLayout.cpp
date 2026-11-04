@@ -4,6 +4,8 @@
 
 #include <QMainWindow>
 #include <QSettings>
+#include <QLayout>
+#include <QScrollArea>
 #include <QTimer>
 
 namespace mothion::ui {
@@ -92,8 +94,25 @@ void DockLayout::applyDefault()
         if (!m_defaultSizesPending) // a saved layout was restored meanwhile
             return;
         m_defaultSizesPending = false;
-        m_window->resizeDocks({m_tools, m_subTools, m_brushSliders, m_navigator}, {48, 240, 52, 280},
-                              Qt::Horizontal);
+        // The tool palette starts with room for its preferred two columns of buttons: asked once the
+        // panels are styled, since the buttons are larger then.
+        m_tools->widget()->ensurePolished();
+        if (QWidget *palette = static_cast<QScrollArea *>(m_tools->widget())->widget()) {
+            palette->ensurePolished();
+            palette->layout()->invalidate();
+        }
+        const int wanted = m_tools->widget()->sizeHint().width();
+        auto resizeHorizontally = [this](int toolsWidth) {
+            m_window->resizeDocks({m_tools, m_subTools, m_brushSliders, m_navigator},
+                                  {toolsWidth, 240, 52, 280}, Qt::Horizontal);
+        };
+        resizeHorizontally(wanted);
+        // What the main window gives is a few pixels less than asked (its separators): ask for the
+        // difference as well, so that the palette really has the room for its two columns.
+        m_window->layout()->activate();
+        const int missing = wanted - m_tools->widget()->width();
+        if (missing > 0)
+            resizeHorizontally(wanted + missing);
         m_window->resizeDocks({m_subTools, m_colorWheel, m_brushSize}, {330, 270, 150}, Qt::Vertical);
         m_window->resizeDocks({m_navigator, m_layers, m_timeline}, {300, 400, 210}, Qt::Vertical);
     });
