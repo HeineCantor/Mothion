@@ -349,6 +349,14 @@ const QString kPixelsMime = QStringLiteral("application/x-mothion-pixels");
 
 void MainWindow::copyPixels(bool cut)
 {
+    // With the Layers panel's rows in focus, Ctrl+C and Ctrl+X take layers.
+    if (auto *layers = findChild<LayersPanel *>(); layers && layers->hasRowFocus()) {
+        if (cut)
+            layers->cutLayers();
+        else
+            layers->copyLayers();
+        return;
+    }
     QString reason;
     QPoint origin;
     const QImage image = m_document->copyPixels(&origin, &reason);
@@ -373,6 +381,10 @@ void MainWindow::copyPixels(bool cut)
 
 void MainWindow::pastePixels()
 {
+    if (auto *layers = findChild<LayersPanel *>(); layers && layers->hasRowFocus() && m_document->hasCopiedLayers()) {
+        layers->pasteLayers(false);
+        return;
+    }
     const QMimeData *mime = QGuiApplication::clipboard()->mimeData();
     QImage image;
     std::optional<QPoint> origin;

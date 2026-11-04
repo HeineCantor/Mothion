@@ -178,6 +178,19 @@ public:
     // `before`, then `after` executed as one undo step (nothing if equal).
     void commitLayerProperties(const LayerRef &layer, const doc::LayerProperties &before,
                                const doc::LayerProperties &after);
+    // --- layer clipboard ------------------------------------------------------------
+    // Layers copied from the Layers panel (of any frames, in the order they
+    // are drawn): their pixels and looks, kept apart from the picture clipboard.
+    bool copyLayers(const std::vector<LayerRef> &layers, QString *reason = nullptr);
+    bool hasCopiedLayers() const { return !m_copiedLayers.empty(); }
+    // Puts the copied layers on top of the current frame (one is made when the cel shows
+    // none there): each as a layer of its own, or, `merged`, as the one layer of what they
+    // show together. One undo step; the pasted layer (the top one) becomes current.
+    // With `replace` (layers of the current frame, as chosen in the panel) the pasted layers
+    // take their place, at the lowest of them, and they go (locked ones stay) - unless these
+    // are the very layers that were copied, which are not overwritten by their own copy.
+    bool pasteLayers(bool merged, const std::vector<doc::LayerId> &replace = {}, QString *reason = nullptr);
+
     void setLayerSelection(std::vector<LayerRef> layers);
     const std::vector<LayerRef> &layerSelection() const { return m_layerSelection; }
     // Like beginPaint(false), for every layer of layerSelection() (or the
@@ -245,6 +258,7 @@ private:
     std::string m_currentLayerName; // looked for when the drawing changes
     QPainterPath m_selection;
     std::vector<LayerRef> m_layerSelection;
+    std::vector<doc::Layer> m_copiedLayers; // bottom to top
     std::vector<const doc::Layer *> mergeableLayers(const std::vector<doc::LayerId> &ids) const;
 
     struct PaintState

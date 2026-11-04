@@ -1597,6 +1597,186 @@ private slots:
         QCOMPARE(layer(c)->image.pixel(50, 50), doc::Pixel(0xff00ff00u));
     }
 
+    // Delete takes every selected layer row, whichever frames they are in; a frame keeps one layer.
+    void deleteTakesSeveralLayers()
+    {
+        document::DocumentController controller;
+        ui::LayersPanel panel(&controller);
+        panel.resize(320, 800);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        doc::Document &d = controller.documentForCommands();
+        const doc::CelId cel = controller.currentCel();
+        controller.execute(doc::makeNewDrawing(d, cel, 0, 1, "Line").command);
+        for (int i = 0; i < 3; ++i)
+            QVERIFY(controller.addLayer(true));
+        const doc::Drawing &first = *controller.currentDrawing();
+        controller.execute(doc::makeNewDrawing(d, cel, 1, 1, "Line").command);
+        controller.setCurrentFrame(1);
+        for (int i = 0; i < 2; ++i)
+            QVERIFY(controller.addLayer(true));
+        const doc::Drawing &second = *controller.currentDrawing();
+        QCOMPARE(first.layers.size(), std::size_t(4));
+        QCOMPARE(second.layers.size(), std::size_t(3));
+        QCoreApplication::processEvents();
+
+        auto *tree = panel.findChild<QTreeWidget *>();
+        QToolButton *del = nullptr;
+        for (QToolButton *b : panel.findChildren<QToolButton *>())
+            if (b->toolTip().startsWith(QStringLiteral("Delete")))
+                del = b;
+        QVERIFY(tree && del);
+        // Two layers of the first frame, one of the second.
+        const doc::LayerId keepSecond = second.layers[2].id;
+        tree->setCurrentItem(panel.layerItem(first.layers[1].id));
+        panel.layerItem(first.layers[3].id)->setSelected(true);
+        panel.layerItem(second.layers[1].id)->setSelected(true);
+        QCoreApplication::processEvents();
+        QVERIFY(del->isEnabled());
+        QTest::mouseClick(del, Qt::LeftButton);
+        QCOMPARE(first.layers.size(), std::size_t(2));
+        QCOMPARE(second.layers.size(), std::size_t(2));
+        QVERIFY(second.layer(keepSecond));
+        controller.undo(); // one step for all of them
+        QCOMPARE(first.layers.size(), std::size_t(4));
+        QCOMPARE(second.layers.size(), std::size_t(3));
+
+        // All the layers of a frame chosen: the lowest stays.
+        QCoreApplication::processEvents();
+        const doc::LayerId lowest = second.layers[0].id;
+        tree->setCurrentItem(panel.layerItem(second.layers[0].id));
+        panel.layerItem(second.layers[1].id)->setSelected(true);
+        panel.layerItem(second.layers[2].id)->setSelected(true);
+        QCoreApplication::processEvents();
+        QVERIFY(del->isEnabled());
+        QTest::mouseClick(del, Qt::LeftButton);
+        QCOMPARE(second.layers.size(), std::size_t(1));
+        QCOMPARE(second.layers[0].id, lowest);
+    }
+
+    // Layers copied from the panel are pasted on top of another frame, each on its own or merged.
+    void layersCopyAndPaste()
+    {
+        document::DocumentController controller;
+        ui::LayersPanel panel(&controller);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        doc::Document &d = controller.documentForCommands();
+        const doc::CelId cel = controller.currentCel();
+        controller.execute(doc::makeNewDrawing(d, cel, 0, 1, "Line").command);
+        QVERIFY(controller.addLayer(true));
+        const doc::Drawing &source = *controller.currentDrawing();
+        const doc::LayerId a = source.layers[0].id, b = source.layers[1].id;
+        d.layer(cel, source.id, a)->image.setPixel(10, 10, 0xffff0000u);
+        d.layer(cel, source.id, b)->image.setPixel(20, 20, 0xff0000ffu);
+        d.layer(cel, source.id, b)->properties.name = "Top";
+        QCoreApplication::processEvents();
+        QVERIFY(!controller.hasCopiedLayers());
+        QString reason;
+        QVERIFY(!controller.pasteLayers(false, {}, &reason)); // nothing copied yet
+        QVERIFY(!reason.isEmpty());
+
+        auto *tree = panel.findChild<QTreeWidget *>();
+        tree->setCurrentItem(panel.layerItem(a));
+        panel.layerItem(b)->setSelected(true);
+        QCoreApplication::processEvents();
+        QSignalSpy status(&panel, &ui::LayersPanel::statusMessage);
+        panel.copyLayers();
+        QVERIFY(controller.hasCopiedLayers());
+
+        // To another frame: separate layers on top, in order, with their pixels, as one step.
+        controller.execute(doc::makeNewDrawing(d, cel, 1, 1, "Line").command);
+        controller.setCurrentFrame(1);
+        const doc::Drawing &target = *controller.currentDrawing();
+        QCOMPARE(target.layers.size(), std::size_t(1));
+        QCoreApplication::processEvents();
+        tree->setCurrentItem(panel.frameItem(target.id)); // the frame chosen, no layer: they go on top
+        QCOMPARE(panel.focus(), ui::LayersPanel::Focus::Frame);
+        panel.pasteLayers(false);
+        QCOMPARE(target.layers.size(), std::size_t(3));
+        QCOMPARE(target.layers[1].image.pixel(10, 10), doc::Pixel(0xffff0000u));
+        QCOMPARE(target.layers[2].image.pixel(20, 20), doc::Pixel(0xff0000ffu));
+        QCOMPARE(target.layers[2].properties.name, std::string("Top"));
+        QCOMPARE(controller.currentLayer(), target.layers[2].id);
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo paste layers"));
+        controller.undo();
+        QCOMPARE(target.layers.size(), std::size_t(1));
+
+        // Merged: one layer of what they show together.
+        QCoreApplication::processEvents();
+        tree->setCurrentItem(panel.frameItem(target.id));
+        panel.pasteLayers(true);
+        QCOMPARE(target.layers.size(), std::size_t(2));
+        QCOMPARE(target.layers[1].image.pixel(10, 10), doc::Pixel(0xffff0000u));
+        QCOMPARE(target.layers[1].image.pixel(20, 20), doc::Pixel(0xff0000ffu));
+
+        // With layers of the frame selected, what is pasted takes their place, in either way.
+        QCoreApplication::processEvents();
+        controller.execute(doc::makeNewDrawing(d, cel, 3, 1, "Line").command);
+        controller.setCurrentFrame(3);
+        QVERIFY(controller.addLayer(true));
+        QVERIFY(controller.addLayer(true));
+        const doc::Drawing &over = *controller.currentDrawing();
+        QCOMPARE(over.layers.size(), std::size_t(3));
+        const doc::LayerId low = over.layers[0].id, mid = over.layers[1].id, high = over.layers[2].id;
+        QCoreApplication::processEvents();
+        tree->setCurrentItem(panel.layerItem(mid));
+        panel.layerItem(high)->setSelected(true); // the middle and the top ones
+        QCoreApplication::processEvents();
+        panel.pasteLayers(false);
+        QCOMPARE(over.layers.size(), std::size_t(3)); // low, then the two pasted
+        QCOMPARE(over.layers[0].id, low);
+        QVERIFY(!over.layer(mid) && !over.layer(high));
+        QCOMPARE(over.layers[1].image.pixel(10, 10), doc::Pixel(0xffff0000u));
+        QCOMPARE(over.layers[2].properties.name, std::string("Top"));
+        controller.undo();
+        QCOMPARE(over.layers.size(), std::size_t(3));
+        QVERIFY(over.layer(mid) && over.layer(high));
+        QCoreApplication::processEvents();
+        tree->setCurrentItem(panel.layerItem(low));
+        panel.layerItem(mid)->setSelected(true);
+        QCoreApplication::processEvents();
+        panel.pasteLayers(true); // merged, over the two lower ones
+        QCOMPARE(over.layers.size(), std::size_t(2)); // the merged one, and the top one
+        QVERIFY(!over.layer(low) && !over.layer(mid) && over.layer(high));
+        QCOMPARE(over.layers[0].image.pixel(20, 20), doc::Pixel(0xff0000ffu));
+        controller.undo();
+        // Selecting the very layers that were copied does not overwrite them with themselves.
+        controller.setCurrentFrame(0);
+        QCoreApplication::processEvents();
+        tree->setCurrentItem(panel.layerItem(a));
+        panel.layerItem(b)->setSelected(true);
+        QCoreApplication::processEvents();
+        panel.pasteLayers(false);
+        QCOMPARE(source.layers.size(), std::size_t(4));
+        QVERIFY(source.layer(a) && source.layer(b));
+        controller.undo();
+
+        // Cut takes the layers and they can be pasted elsewhere.
+        QCoreApplication::processEvents();
+        tree->setCurrentItem(panel.layerItem(b));
+        QCoreApplication::processEvents();
+        panel.cutLayers();
+        QCOMPARE(source.layers.size(), std::size_t(1)); // a stays: a frame keeps one layer
+        QVERIFY(!source.layer(b));
+        QVERIFY(controller.hasCopiedLayers());
+        controller.setCurrentFrame(5);
+        panel.pasteLayers(false);
+        QCOMPARE(controller.currentDrawing()->layers.size(), std::size_t(1));
+        QCOMPARE(controller.currentDrawing()->layers[0].image.pixel(20, 20), doc::Pixel(0xff0000ffu));
+        controller.undo();
+
+        // Where the cel shows nothing yet, a frame is made for them (without an empty layer).
+        controller.setCurrentFrame(5);
+        QVERIFY(!controller.currentDrawing());
+        panel.pasteLayers(false);
+        QVERIFY(controller.currentDrawing());
+        QCOMPARE(controller.currentDrawing()->layers.size(), std::size_t(1)); // what the cut took
+        QCOMPARE(controller.currentDrawing()->layers[0].image.pixel(20, 20), doc::Pixel(0xff0000ffu));
+        controller.undo(); // frame and layers together
+        QVERIFY(!controller.currentDrawing());
+    }
+
     // Only the tools that have sub tools list any: Hand, Zoom, Move, Puppet, Eyedropper and
     // Transform show none (they once fell into the Fill's two).
     void toolsWithoutSubToolsListNone()

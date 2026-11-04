@@ -260,6 +260,124 @@ bool DocumentController::mergeLayers(const std::vector<doc::LayerId> &ids, QStri
     return true;
 }
 
+bool DocumentController::copyLayers(const std::vector<LayerRef> &layers, QString *reason)
+{
+    std::vector<doc::Layer> copied;
+    // In the order the document draws them: cels bottom to top, layers bottom to top.
+    for (int i = 0; i < m_document->celCount(); ++i) {
+        const doc::Cel &cel = m_document->celAt(i);
+        std::vector<const doc::Drawing *> seen;
+        for (const LayerRef &ref : layers) {
+            if (ref.cel != cel.id())
+                continue;
+            const doc::Drawing *drawing = cel.drawing(ref.drawing);
+            if (!drawing || std::find(seen.begin(), seen.end(), drawing) != seen.end())
+                continue;
+            seen.push_back(drawing);
+            for (const doc::Layer &layer : drawing->layers)
+                if (std::find(layers.begin(), layers.end(), LayerRef{cel.id(), drawing->id, layer.id}) != layers.end())
+                    copied.push_back(layer);
+        }
+    }
+    if (copied.empty()) {
+        if (reason)
+            *reason = tr("No layers to copy");
+        return false;
+    }
+    m_copiedLayers = std::move(copied); // the pixels shared with the originals until one is painted
+    return true;
+}
+
+bool DocumentController::pasteLayers(bool merged, const std::vector<doc::LayerId> &replace, QString *reason)
+{
+    auto fail = [reason](const QString &why) {
+        if (reason)
+            *reason = why;
+        return false;
+    };
+    if (m_copiedLayers.empty())
+        return fail(tr("No layers copied"));
+    const doc::Cel *cel = m_document->cel(m_currentCel);
+    if (!cel)
+        return fail(tr("No cel selected"));
+    if (cel->properties().locked)
+        return fail(tr("Cel “%1” is locked").arg(QString::fromStdString(cel->properties().name)));
+    interruptStroke();
+
+    // The new layers' pixels: each copied layer, or all of them as one.
+    struct Piece
+    {
+        doc::LayerProperties properties;
+        doc::TiledImage image;
+        doc::LayerKind kind;
+    };
+    std::vector<Piece> pieces;
+    if (merged) {
+        doc::Drawing together;
+        for (const doc::Layer &layer : m_copiedLayers)
+            together.layers.push_back(layer);
+        const QRect bounds = canvas::drawingBounds(together, false);
+        if (bounds.isEmpty())
+            return fail(tr("The copied layers show nothing to paste"));
+        const QImage image = canvas::composeDrawing(together, bounds, false);
+        Piece piece{doc::LayerProperties{m_copiedLayers.back().properties.name}, {}, doc::LayerKind::Raster};
+        piece.properties.name = tr("Merged layers").toStdString();
+        piece.image.write(bounds.x(), bounds.y(), bounds.width(), bounds.height(),
+                          reinterpret_cast<const doc::Pixel *>(image.constBits()), image.bytesPerLine() / 4);
+        pieces.push_back(std::move(piece));
+    } else {
+        for (const doc::Layer &layer : m_copiedLayers)
+            pieces.push_back({layer.properties, layer.image, layer.kind});
+    }
+
+    std::vector<std::unique_ptr<doc::Command>> steps;
+    doc::DrawingId drawingId = currentDrawingId();
+    int index = 0;
+    doc::LayerId unwanted = doc::kNoId;
+    if (drawingId == doc::kNoId) { // nothing here yet: a frame is made, without its empty layer
+        doc::NewDrawing created = doc::makeNewDrawing(*m_document, m_currentCel, m_currentFrame);
+        drawingId = created.id;
+        unwanted = created.layer;
+        index = 1;
+        steps.push_back(std::move(created.command));
+    } else {
+        index = int(currentDrawing()->layers.size());
+        // Layers chosen to be overwritten: the new ones go where the lowest of them was.
+        const doc::Drawing *drawing = currentDrawing();
+        const bool theCopied =
+            replace.size() == m_copiedLayers.size()
+            && std::all_of(replace.begin(), replace.end(), [this](doc::LayerId id) {
+                   return std::any_of(m_copiedLayers.begin(), m_copiedLayers.end(),
+                                      [id](const doc::Layer &l) { return l.id == id; });
+               });
+        int lowest = index;
+        std::vector<doc::LayerId> going;
+        for (const doc::Layer &layer : drawing->layers)
+            if (!theCopied && !layer.properties.locked
+                && std::find(replace.begin(), replace.end(), layer.id) != replace.end()) {
+                going.push_back(layer.id);
+                lowest = std::min(lowest, drawing->indexOf(layer.id));
+            }
+        if (!going.empty()) {
+            for (auto it = going.rbegin(); it != going.rend(); ++it) // top first
+                steps.push_back(std::make_unique<doc::RemoveLayerCommand>(m_currentCel, drawingId, *it));
+            index = lowest;
+        }
+    }
+    doc::LayerId last = doc::kNoId;
+    for (Piece &piece : pieces) {
+        auto add = std::make_unique<doc::AddLayerCommand>(*m_document, m_currentCel, drawingId, index++,
+                                                          std::move(piece.properties), std::move(piece.image), piece.kind);
+        last = add->layerId();
+        steps.push_back(std::move(add));
+    }
+    if (unwanted != doc::kNoId)
+        steps.push_back(std::make_unique<doc::RemoveLayerCommand>(m_currentCel, drawingId, unwanted));
+    execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::PasteLayers, std::move(steps)));
+    setCurrentLayer(last);
+    return true;
+}
+
 bool DocumentController::previewLayerProperties(const LayerRef &ref, const doc::LayerProperties &properties)
 {
     doc::Layer *layer = m_document->layer(ref.cel, ref.drawing, ref.layer);
@@ -708,6 +826,7 @@ QString DocumentController::commandName(doc::CommandKind kind)
     case doc::CommandKind::MoveFrames: return tr("move frames");
     case doc::CommandKind::PasteFrames: return tr("paste frames");
     case doc::CommandKind::MergeLayers: return tr("merge layers");
+    case doc::CommandKind::PasteLayers: return tr("paste layers");
     }
     return {};
 }

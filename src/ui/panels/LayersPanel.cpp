@@ -849,15 +849,43 @@ void LayersPanel::removeSelected()
                 std::make_unique<doc::GroupCommand>(doc::CommandKind::RemoveDrawing, std::move(steps)));
         return;
     }
-    const doc::Drawing *drawing = m_document->currentDrawing();
-    const QList<doc::LayerId> layers = selectedLayers();
-    if (m_focus != Focus::Layer || !drawing || layers.isEmpty() || layers.size() >= int(drawing->layers.size()))
-        return; // keep at least one layer
+    if (m_focus != Focus::Layer)
+        return;
     std::vector<std::unique_ptr<doc::Command>> steps;
-    for (doc::LayerId id : layers)
-        steps.push_back(std::make_unique<doc::RemoveLayerCommand>(m_document->currentCel(), drawing->id, id));
+    for (const auto &[drawing, layers] : removableLayers())
+        for (const LayerRow &row : layers)
+            steps.push_back(std::make_unique<doc::RemoveLayerCommand>(row.cel, drawing.second, row.layer));
+    if (steps.empty())
+        return;
     m_selected.clear();
     m_document->execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::RemoveLayer, std::move(steps)));
+}
+
+std::map<std::pair<doc::CelId, doc::DrawingId>, std::vector<LayersPanel::LayerRow>> LayersPanel::removableLayers() const
+{
+    // The selected layer rows, of whichever frames, grouped by frame: every
+    // frame keeps at least one layer (its lowest chosen one stays when all go).
+    std::map<std::pair<doc::CelId, doc::DrawingId>, std::vector<LayerRow>> chosen;
+    for (const QTreeWidgetItem *item : m_tree->selectedItems())
+        if (kindOf(item) == Row::Layer)
+            chosen[{celOf(item), drawingOf(item)}].push_back({celOf(item), layerOf(item)});
+    const doc::Document &d = m_document->document();
+    for (auto it = chosen.begin(); it != chosen.end();) {
+        const doc::Drawing *drawing = d.cel(it->first.first) ? d.cel(it->first.first)->drawing(it->first.second) : nullptr;
+        auto &rows = it->second;
+        if (!drawing) {
+            it = chosen.erase(it);
+            continue;
+        }
+        if (rows.size() >= drawing->layers.size()) {
+            auto lowest = std::min_element(rows.begin(), rows.end(), [drawing](const LayerRow &a, const LayerRow &b) {
+                return drawing->indexOf(a.layer) < drawing->indexOf(b.layer);
+            });
+            rows.erase(lowest);
+        }
+        it = rows.empty() ? chosen.erase(it) : std::next(it);
+    }
+    return chosen;
 }
 
 void LayersPanel::mergeSelected()
@@ -869,6 +897,48 @@ void LayersPanel::mergeSelected()
     m_selected.clear(); // the result is chosen when it becomes the current layer
     if (!m_document->mergeLayers(std::vector<doc::LayerId>(layers.begin(), layers.end()), &reason))
         emit statusMessage(reason);
+}
+
+void LayersPanel::copyLayers()
+{
+    if (copySelected())
+        emit statusMessage(tr("Layers copied"));
+}
+
+bool LayersPanel::copySelected()
+{
+    std::vector<DocumentController::LayerRef> refs;
+    for (const QTreeWidgetItem *item : m_tree->selectedItems())
+        if (kindOf(item) == Row::Layer)
+            refs.push_back({celOf(item), drawingOf(item), layerOf(item)});
+    QString reason;
+    if (!m_document->copyLayers(refs, &reason)) {
+        emit statusMessage(reason);
+        return false;
+    }
+    return true;
+}
+
+void LayersPanel::cutLayers()
+{
+    if (copySelected())
+        removeSelected();
+}
+
+void LayersPanel::pasteLayers(bool merged)
+{
+    // Layers of the frame that are selected give way to what is pasted.
+    QList<doc::LayerId> chosen;
+    if (m_focus == Focus::Layer)
+        chosen = selectedLayers();
+    QString reason;
+    if (!m_document->pasteLayers(merged, std::vector<doc::LayerId>(chosen.begin(), chosen.end()), &reason))
+        emit statusMessage(reason);
+}
+
+bool LayersPanel::hasRowFocus() const
+{
+    return m_tree->hasFocus();
 }
 
 void LayersPanel::showContextMenu(const QPoint &at)
@@ -883,6 +953,18 @@ void LayersPanel::showContextMenu(const QPoint &at)
         QAction *merge = menu.addAction(icon(IconId::MergeLayers), tr("Merge layers"), this, &LayersPanel::mergeSelected);
         merge->setEnabled(m_merge->isEnabled());
     }
+    if (kindOf(item) == Row::Layer) {
+        menu.addAction(tr("Cut layers"), this, &LayersPanel::cutLayers);
+        menu.addAction(tr("Copy layers"), this, &LayersPanel::copyLayers);
+    }
+    if (kindOf(item) != Row::Cel) {
+        // Pasted on top of the current frame: each layer on its own (the usual), or as one.
+        QAction *separate = menu.addAction(tr("Paste layers"), this, [this] { pasteLayers(false); });
+        QAction *merged = menu.addAction(tr("Paste layers merged"), this, [this] { pasteLayers(true); });
+        separate->setEnabled(m_document->hasCopiedLayers());
+        merged->setEnabled(m_document->hasCopiedLayers());
+    }
+    menu.addSeparator();
     QAction *remove = menu.addAction(icon(IconId::Delete), m_remove->toolTip(), this, &LayersPanel::removeSelected);
     remove->setEnabled(m_remove->isEnabled());
     menu.exec(m_tree->viewport()->mapToGlobal(at));
@@ -1143,7 +1225,7 @@ void LayersPanel::syncHeader()
         }
         header = layer != nullptr;
         canAdd = drawing != nullptr;
-        canRemove = layer && selected.size() < n; // keep at least one layer
+        canRemove = !removableLayers().empty();
         canMerge = drawing
                    && m_document->canMergeLayers(std::vector<doc::LayerId>(selected.begin(), selected.end()));
         canUp = layer && canUp;

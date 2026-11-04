@@ -8,6 +8,10 @@
 #include <QTimer>
 #include <QWidget>
 
+#include <map>
+#include <utility>
+#include <vector>
+
 class QComboBox;
 class QMenu;
 class QSlider;
@@ -52,6 +56,17 @@ class LayersPanel : public QWidget
 public:
     explicit LayersPanel(document::DocumentController *document, QWidget *parent = nullptr);
 
+    // The layer clipboard (Ctrl+C and Ctrl+V while the rows have the focus, and the
+    // right click menu): copies the selected layers, of whichever frames; pastes them on
+    // top of the current frame, as layers of their own or, `merged`, as one.
+    // Cut: the same, and the layers go. Pasting with layers of the frame selected puts the
+    // pasted ones in their place (see DocumentController::pasteLayers).
+    void copyLayers();
+    void cutLayers();
+    void pasteLayers(bool merged);
+    // True when a row of the panel has the keyboard focus.
+    bool hasRowFocus() const;
+
     enum class Focus { Cel, Frame, Layer };
     Focus focus() const { return m_focus; }
 
@@ -91,7 +106,15 @@ private:
     void commitOpacity();
     void addClicked(doc::LayerKind kind);
     void removeSelected();
+    struct LayerRow
+    {
+        doc::CelId cel;
+        doc::LayerId layer;
+    };
+    // The layers Delete would take, by (cel, frame): all the selected layer rows.
+    std::map<std::pair<doc::CelId, doc::DrawingId>, std::vector<LayerRow>> removableLayers() const;
     void mergeSelected();
+    bool copySelected(); // to the layer clipboard; false (and a message) if none
     void showContextMenu(const QPoint &at);
     void moveSelected(int direction); // +1 up, -1 down, each by one place
     void moveCurrentCel(int index);
