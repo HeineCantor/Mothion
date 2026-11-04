@@ -8,9 +8,9 @@
 
 #include <vector>
 
-class QCheckBox;
 class QComboBox;
 class QLabel;
+class QPushButton;
 class QSlider;
 
 namespace mothion::document {
@@ -25,7 +25,7 @@ namespace mothion::ui {
 // handles under the slider (double click to bring them back out) narrow the
 // loop to the frames between them. "Play" starts and stops it; the
 // slider under the picture follows the playback and, dragged, picks the
-// frame; the speed is chosen in frames per second (the document's rate to
+// frame; "Go to frame" sets the timeline's current time slot to the one shown; the speed is chosen in frames per second (the document's rate to
 // begin with). Space plays and stops too. It plays on its own, apart from
 // the canvas's current frame, and follows the document as it is edited.
 class AutoplayWindow : public QWidget
@@ -59,6 +59,7 @@ private:
     void updateRange();
     void updateLoopBar();
     void updateTimer();
+    void updatePlayButton();
     // What a frame shows: each layer's drawing, if visible. Frames that show
     // the same are not composed again.
     std::vector<doc::DrawingId> exposedAt(int frame) const;
@@ -70,7 +71,8 @@ private:
     QLabel *m_position;
     QWidget *m_loopBar;
     QLabel *m_loopLabel;
-    QCheckBox *m_play;
+    QPushButton *m_play; // checked while playing: then it offers Stop
+    QPushButton *m_goTo;
     QComboBox *m_speed;
     QTimer m_timer;
     QTimer m_refresh; // edits come in bursts (a stroke): composed again once after them

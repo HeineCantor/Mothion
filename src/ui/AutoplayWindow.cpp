@@ -1,12 +1,13 @@
 #include "ui/AutoplayWindow.h"
 
 #include "document/DocumentController.h"
+#include "ui/IconFactory.h"
 
-#include <QCheckBox>
 #include <QComboBox>
 #include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QPushButton>
 #include <QPainter>
 #include <QSignalBlocker>
 #include <QMouseEvent>
@@ -157,7 +158,8 @@ AutoplayWindow::AutoplayWindow(document::DocumentController *document, QWidget *
     , m_position(new QLabel(this))
     , m_loopBar(new LoopBar(this))
     , m_loopLabel(new QLabel(this))
-    , m_play(new QCheckBox(tr("Play"), this))
+    , m_play(new QPushButton(this))
+    , m_goTo(new QPushButton(tr("Go to frame"), this))
     , m_speed(new QComboBox(this))
 {
     setWindowTitle(tr("Autoplay"));
@@ -176,7 +178,12 @@ AutoplayWindow::AutoplayWindow(document::DocumentController *document, QWidget *
     for (int i = 0; i < m_speed->count(); ++i)
         if (std::abs(m_speed->itemData(i).toDouble() - rate) < 0.01)
             m_speed->setCurrentIndex(i);
+    m_play->setObjectName(QStringLiteral("autoplayPlay"));
+    m_play->setCheckable(true);
+    m_play->setFocusPolicy(Qt::NoFocus); // Space plays and stops from the window
+    m_play->setMinimumWidth(90); // the same room for "Play" and "Stop"
     m_play->setChecked(true);
+    updatePlayButton();
     m_position->setMinimumWidth(m_position->fontMetrics().horizontalAdvance(QStringLiteral("0000 / 0000")));
     m_position->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
 
@@ -189,6 +196,7 @@ AutoplayWindow::AutoplayWindow(document::DocumentController *document, QWidget *
     track->addWidget(m_position, 0, Qt::AlignTop);
     auto *controls = new QHBoxLayout;
     controls->addWidget(m_play);
+    controls->addWidget(m_goTo);
     controls->addWidget(m_loopLabel);
     controls->addStretch(1);
     controls->addWidget(new QLabel(tr("Speed"), this));
@@ -208,7 +216,11 @@ AutoplayWindow::AutoplayWindow(document::DocumentController *document, QWidget *
         updateRange();
         showFrame(std::min(m_frame, m_frameCount - 1));
     });
-    connect(m_play, &QCheckBox::toggled, this, &AutoplayWindow::updateTimer);
+    m_goTo->setToolTip(tr("Set the timeline to the time slot shown now"));
+    m_goTo->setFocusPolicy(Qt::NoFocus); // Space keeps playing and stopping
+    connect(m_goTo, &QPushButton::clicked, this, [this] { m_document->setCurrentFrame(m_frame); });
+    connect(m_play, &QPushButton::toggled, this, &AutoplayWindow::updatePlayButton);
+    connect(m_play, &QPushButton::toggled, this, &AutoplayWindow::updateTimer);
     connect(m_speed, &QComboBox::currentIndexChanged, this, &AutoplayWindow::updateTimer);
     // Dragged (or clicked, or keys): that frame, and the playback goes on from it.
     connect(m_slider, &QSlider::valueChanged, this, &AutoplayWindow::showFrame);
@@ -247,6 +259,14 @@ void AutoplayWindow::showEvent(QShowEvent *event)
 {
     QWidget::showEvent(event);
     updateTimer();
+}
+
+void AutoplayWindow::updatePlayButton()
+{
+    const bool playing = m_play->isChecked();
+    m_play->setText(playing ? tr("Stop") : tr("Play"));
+    m_play->setIcon(icon(playing ? IconId::Stop : IconId::Play));
+    m_play->setToolTip(playing ? tr("Stop (Space)") : tr("Play (Space)"));
 }
 
 void AutoplayWindow::hideEvent(QHideEvent *event)

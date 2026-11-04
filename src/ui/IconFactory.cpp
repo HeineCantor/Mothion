@@ -97,6 +97,19 @@ void drawGlyph(QPainter &p, IconId id)
         p.drawPath(tip);
         return;
     }
+    case IconId::Play: { // a filled triangle
+        path.moveTo(7, 4.5);
+        path.lineTo(19, 12);
+        path.lineTo(7, 19.5);
+        path.closeSubpath();
+        p.setBrush(p.pen().color());
+        p.drawPath(path);
+        return;
+    }
+    case IconId::Stop: // a filled square
+        p.setBrush(p.pen().color());
+        p.drawRoundedRect(QRectF(6, 6, 12, 12), 1.5, 1.5);
+        return;
     case IconId::Eraser:
         p.translate(12, 12);
         p.rotate(-45);

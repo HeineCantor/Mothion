@@ -59,6 +59,7 @@
 #include <QTemporaryDir>
 #include <QMenu>
 #include <QMenuBar>
+#include <QPushButton>
 #include <QSlider>
 #include <QTest>
 #include <QWheelEvent>
@@ -1948,7 +1949,7 @@ private slots:
         ui::AutoplayWindow window(&controller);
         window.show();
         QVERIFY(QTest::qWaitForWindowExposed(&window));
-        auto *play = window.findChild<QCheckBox *>();
+        auto *play = window.findChild<QPushButton *>(QStringLiteral("autoplayPlay"));
         auto *slider = window.findChild<QSlider *>();
         auto *speed = window.findChild<QComboBox *>();
         QVERIFY(play && slider && speed);
@@ -1989,6 +1990,31 @@ private slots:
         QTRY_COMPARE(window.frameCount(), 4);
     }
 
+    // "Go to frame" puts the timeline on the time slot the autoplay shows.
+    void autoplayGoesToItsFrame()
+    {
+        document::DocumentController controller;
+        for (int f = 0; f < 4; ++f) {
+            QImage image(40, 40, QImage::Format_ARGB32);
+            image.fill(Qt::red);
+            controller.setCurrentFrame(f);
+            QVERIFY(controller.pasteImage(image, QPoint(940, 520)));
+        }
+        controller.setCurrentFrame(0);
+        ui::AutoplayWindow window(&controller);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        window.findChild<QPushButton *>(QStringLiteral("autoplayPlay"))->setChecked(false);
+        auto *slider = window.findChild<QSlider *>();
+        slider->setValue(2);
+        QCOMPARE(window.frame(), 2);
+        QCOMPARE(controller.currentFrame(), 0); // the autoplay plays apart from the timeline
+        for (auto *button : window.findChildren<QPushButton *>())
+            if (button->text() == QStringLiteral("Go to frame"))
+                button->click();
+        QCOMPARE(controller.currentFrame(), 2);
+    }
+
     // The loop can be narrowed to a range of frames with the two handles under the slider.
     void autoplayLoopsOnlyARange()
     {
@@ -2004,7 +2030,7 @@ private slots:
         window.resize(720, 500);
         window.show();
         QVERIFY(QTest::qWaitForWindowExposed(&window));
-        auto *play = window.findChild<QCheckBox *>();
+        auto *play = window.findChild<QPushButton *>(QStringLiteral("autoplayPlay"));
         auto *speed = window.findChild<QComboBox *>();
         speed->setCurrentIndex(speed->findData(60.0));
         QCOMPARE(window.frameCount(), 6);
