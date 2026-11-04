@@ -9,11 +9,14 @@
 #include <QLabel>
 #include <QPainter>
 #include <QSignalBlocker>
+#include <QMouseEvent>
 #include <QSlider>
+#include <QStyle>
 #include <QVBoxLayout>
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 
 namespace mothion::ui {
 
@@ -51,6 +54,93 @@ private:
     const QImage *m_image;
 };
 
+// The loop's two handles, under the slider: a bar of the frames with the
+// looped ones lit. Dragging a handle narrows the loop; double click widens it.
+class LoopBar : public QWidget
+{
+public:
+    explicit LoopBar(QWidget *parent)
+        : QWidget(parent)
+    {
+        setFixedHeight(16);
+        setCursor(Qt::SizeHorCursor);
+        setToolTip(AutoplayWindow::tr("Loop range: drag the handles to loop only the frames between them (double click: all)"));
+    }
+
+    // `inset`: half the slider's handle, so frames line up with the slider's.
+    void setState(int count, int first, int last, int inset)
+    {
+        m_count = count;
+        m_first = first;
+        m_last = last;
+        m_inset = inset;
+        update();
+    }
+    std::function<void(int, int)> changed; // the range the user dragged to
+    std::function<void()> reset;
+
+protected:
+    void paintEvent(QPaintEvent *) override
+    {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing);
+        const QRectF groove(m_inset, height() / 2.0 - 2.0, width() - 2.0 * m_inset, 4.0);
+        p.setPen(Qt::NoPen);
+        p.setBrush(palette().color(QPalette::Mid));
+        p.drawRoundedRect(groove, 2, 2);
+        const double a = xOf(m_first), b = xOf(m_last);
+        p.setBrush(palette().color(QPalette::Highlight));
+        p.drawRoundedRect(QRectF(a, groove.top(), std::max(b - a, 1.0), groove.height()), 2, 2);
+        p.setPen(QPen(palette().color(QPalette::Window).darker(160), 1));
+        p.setBrush(palette().color(QPalette::Highlight).lighter(130));
+        for (double x : {a, b})
+            p.drawRoundedRect(QRectF(x - 4, 1, 8, height() - 2), 2, 2);
+    }
+    void mousePressEvent(QMouseEvent *e) override
+    {
+        if (e->button() != Qt::LeftButton)
+            return;
+        // The handle nearer the pointer (the first, when they lie together and it is to the left).
+        const double x = e->position().x();
+        const double da = std::abs(x - xOf(m_first)), db = std::abs(x - xOf(m_last));
+        m_dragged = da < db || (da == db && x < xOf(m_first)) ? 0 : 1;
+        drag(x);
+    }
+    void mouseMoveEvent(QMouseEvent *e) override
+    {
+        if (m_dragged >= 0)
+            drag(e->position().x());
+    }
+    void mouseReleaseEvent(QMouseEvent *) override { m_dragged = -1; }
+    void mouseDoubleClickEvent(QMouseEvent *) override
+    {
+        if (reset)
+            reset();
+    }
+
+private:
+    double xOf(int frame) const
+    {
+        const double span = std::max(1, m_count - 1);
+        return m_inset + frame * (width() - 2.0 * m_inset) / span;
+    }
+    void drag(double x)
+    {
+        const double span = std::max(1, m_count - 1);
+        const int frame = std::clamp(int(std::lround((x - m_inset) * span / std::max(1.0, width() - 2.0 * m_inset))),
+                                     0, m_count - 1);
+        int first = m_first, last = m_last;
+        if (m_dragged == 0)
+            first = std::min(frame, last);
+        else
+            last = std::max(frame, first);
+        if (changed && (first != m_first || last != m_last))
+            changed(first, last);
+    }
+
+    int m_count = 1, m_first = 0, m_last = 0, m_inset = 8, m_dragged = -1;
+};
+
 } // namespace
 
 const QList<double> &AutoplayWindow::speeds()
@@ -65,6 +155,8 @@ AutoplayWindow::AutoplayWindow(document::DocumentController *document, QWidget *
     , m_picture(new FramePicture(&m_renderer.image(), this))
     , m_slider(new QSlider(Qt::Horizontal, this))
     , m_position(new QLabel(this))
+    , m_loopBar(new LoopBar(this))
+    , m_loopLabel(new QLabel(this))
     , m_play(new QCheckBox(tr("Play"), this))
     , m_speed(new QComboBox(this))
 {
@@ -88,11 +180,16 @@ AutoplayWindow::AutoplayWindow(document::DocumentController *document, QWidget *
     m_position->setMinimumWidth(m_position->fontMetrics().horizontalAdvance(QStringLiteral("0000 / 0000")));
     m_position->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
 
+    auto *bars = new QVBoxLayout;
+    bars->setSpacing(0);
+    bars->addWidget(m_slider);
+    bars->addWidget(m_loopBar);
     auto *track = new QHBoxLayout;
-    track->addWidget(m_slider, 1);
-    track->addWidget(m_position);
+    track->addLayout(bars, 1);
+    track->addWidget(m_position, 0, Qt::AlignTop);
     auto *controls = new QHBoxLayout;
     controls->addWidget(m_play);
+    controls->addWidget(m_loopLabel);
     controls->addStretch(1);
     controls->addWidget(new QLabel(tr("Speed"), this));
     controls->addWidget(m_speed);
@@ -101,6 +198,9 @@ AutoplayWindow::AutoplayWindow(document::DocumentController *document, QWidget *
     layout->addLayout(track);
     layout->addLayout(controls);
 
+    auto *loopBar = static_cast<LoopBar *>(m_loopBar);
+    loopBar->changed = [this](int first, int last) { setLoopRange(first, last); };
+    loopBar->reset = [this] { setLoopRange(0, m_frameCount - 1); };
     connect(&m_timer, &QTimer::timeout, this, &AutoplayWindow::advance);
     m_refresh.setSingleShot(true);
     m_refresh.setInterval(100);
@@ -175,6 +275,33 @@ void AutoplayWindow::updateRange()
     const QSignalBlocker block(m_slider);
     m_slider->setRange(0, m_frameCount - 1);
     m_slider->setValue(std::min(m_frame, m_frameCount - 1));
+    updateLoopBar();
+}
+
+int AutoplayWindow::loopEnd() const
+{
+    return m_loopLast < 0 ? m_frameCount - 1 : std::min(m_loopLast, m_frameCount - 1);
+}
+
+int AutoplayWindow::loopStart() const
+{
+    return std::min(m_loopFirst, loopEnd());
+}
+
+void AutoplayWindow::setLoopRange(int first, int last)
+{
+    last = std::clamp(last, 0, m_frameCount - 1);
+    m_loopFirst = std::clamp(first, 0, last);
+    m_loopLast = last >= m_frameCount - 1 ? -1 : last; // at the end: follows it as it grows
+    updateLoopBar();
+}
+
+void AutoplayWindow::updateLoopBar()
+{
+    static_cast<LoopBar *>(m_loopBar)
+        ->setState(m_frameCount, loopStart(), loopEnd(), m_slider->style()->pixelMetric(QStyle::PM_SliderLength, nullptr, m_slider) / 2);
+    const bool narrowed = loopStart() > 0 || loopEnd() < m_frameCount - 1;
+    m_loopLabel->setText(narrowed ? tr("Loop %1–%2").arg(loopStart() + 1).arg(loopEnd() + 1) : QString());
 }
 
 void AutoplayWindow::documentChanged()
@@ -186,7 +313,10 @@ void AutoplayWindow::documentChanged()
 
 void AutoplayWindow::advance()
 {
-    showFrame((m_frame + 1) % m_frameCount);
+    // Round the looped frames: past the last (or before the first, when the
+    // slider was left outside them) it goes back to the first.
+    const int next = m_frame >= loopEnd() ? loopStart() : std::max(m_frame + 1, loopStart());
+    showFrame(next);
 }
 
 std::vector<doc::DrawingId> AutoplayWindow::exposedAt(int frame) const

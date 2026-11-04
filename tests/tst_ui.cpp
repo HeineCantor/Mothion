@@ -34,6 +34,7 @@
 #include "ui/panels/timeline/TimelinePanel.h"
 #include "ui/panels/timeline/TimelineView.h"
 
+#include <set>
 #include <QCheckBox>
 #include <QClipboard>
 #include <QMimeData>
@@ -1665,6 +1666,77 @@ private slots:
         controller.setCurrentFrame(3);
         QVERIFY(controller.pasteImage(more, QPoint(940, 520)));
         QTRY_COMPARE(window.frameCount(), 4);
+    }
+
+    // The loop can be narrowed to a range of frames with the two handles under the slider.
+    void autoplayLoopsOnlyARange()
+    {
+        document::DocumentController controller;
+        for (int f = 0; f < 6; ++f) {
+            QImage image(40, 40, QImage::Format_ARGB32);
+            image.fill(QColor::fromHsv(f * 50, 255, 255));
+            controller.setCurrentFrame(f);
+            QVERIFY(controller.pasteImage(image, QPoint(940, 520)));
+        }
+        controller.clearSelection();
+        ui::AutoplayWindow window(&controller);
+        window.resize(720, 500);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *play = window.findChild<QCheckBox *>();
+        auto *speed = window.findChild<QComboBox *>();
+        speed->setCurrentIndex(speed->findData(60.0));
+        QCOMPARE(window.frameCount(), 6);
+        QCOMPARE(window.loopStart(), 0);
+        QCOMPARE(window.loopEnd(), 5);
+
+        window.setLoopRange(2, 4);
+        QCOMPARE(window.loopStart(), 2);
+        QCOMPARE(window.loopEnd(), 4);
+        QTRY_VERIFY(window.frame() >= 2 && window.frame() <= 4); // from wherever it was, into the range
+        std::set<int> seen;
+        for (int i = 0; i < 40; ++i) {
+            QTest::qWait(20);
+            seen.insert(window.frame());
+        }
+        QVERIFY(seen.count(2) && seen.count(3) && seen.count(4)); // the range is played, and only it
+        QVERIFY(!seen.count(0) && !seen.count(1) && !seen.count(5));
+
+        // The handles: a drag of the right one, from its place to the left.
+        play->setChecked(false);
+        window.setLoopRange(0, 5);
+        auto *bar = window.findChildren<QWidget *>().back();
+        for (QWidget *w : window.findChildren<QWidget *>())
+            if (w->height() == 16 && w->cursor().shape() == Qt::SizeHorCursor)
+                bar = w;
+        QCOMPARE(bar->cursor().shape(), Qt::SizeHorCursor);
+        const int inset = 8;
+        auto xOf = [&](int frame) { return int(inset + frame * (bar->width() - 2.0 * inset) / 5); };
+        QTest::mousePress(bar, Qt::LeftButton, {}, QPoint(xOf(5), 8));
+        QTest::mouseMove(bar, QPoint(xOf(3), 8));
+        QTest::mouseRelease(bar, Qt::LeftButton, {}, QPoint(xOf(3), 8));
+        QCOMPARE(window.loopEnd(), 3);
+        QCOMPARE(window.loopStart(), 0);
+        QTest::mousePress(bar, Qt::LeftButton, {}, QPoint(xOf(0), 8)); // the left one
+        QTest::mouseMove(bar, QPoint(xOf(2), 8));
+        QTest::mouseRelease(bar, Qt::LeftButton, {}, QPoint(xOf(2), 8));
+        QCOMPARE(window.loopStart(), 2);
+        QTest::mousePress(bar, Qt::LeftButton, {}, QPoint(xOf(3), 8)); // never past the other
+        QTest::mouseMove(bar, QPoint(xOf(0), 8));
+        QTest::mouseRelease(bar, Qt::LeftButton, {}, QPoint(xOf(0), 8));
+        QVERIFY(window.loopStart() <= window.loopEnd());
+        QTest::mouseDClick(bar, Qt::LeftButton, {}, QPoint(xOf(2), 8)); // all again
+        QCOMPARE(window.loopStart(), 0);
+        QCOMPARE(window.loopEnd(), 5);
+
+        // A range that reaches the end follows it as the animation grows.
+        window.setLoopRange(1, 5);
+        QImage more(40, 40, QImage::Format_ARGB32);
+        more.fill(Qt::yellow);
+        controller.setCurrentFrame(6);
+        QVERIFY(controller.pasteImage(more, QPoint(940, 520)));
+        QTRY_COMPARE(window.loopEnd(), 6);
+        QCOMPARE(window.loopStart(), 1);
     }
 
     // , and . step the timeline one time slot back and on, from the canvas or

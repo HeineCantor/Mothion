@@ -21,7 +21,9 @@ namespace mothion::ui {
 
 // A window playing the animation in a loop, frame by frame, as the canvas
 // shows it (the visible layers over the paper), from the first frame to
-// the last one anything is exposed on. "Play" starts and stops it; the
+// the last one anything is exposed on, or only over a range of them: two
+// handles under the slider (double click to bring them back out) narrow the
+// loop to the frames between them. "Play" starts and stops it; the
 // slider under the picture follows the playback and, dragged, picks the
 // frame; the speed is chosen in frames per second (the document's rate to
 // begin with). Space plays and stops too. It plays on its own, apart from
@@ -35,6 +37,10 @@ public:
 
     int frame() const { return m_frame; }
     int frameCount() const { return m_frameCount; } // of the loop
+    // The frames looped, first and last (all of them unless narrowed).
+    int loopStart() const;
+    int loopEnd() const;
+    void setLoopRange(int first, int last);
     bool isPlaying() const;
     double fps() const;
     const QImage &image() const { return m_renderer.image(); } // the frame shown
@@ -51,6 +57,7 @@ private:
     void advance();
     void documentChanged();
     void updateRange();
+    void updateLoopBar();
     void updateTimer();
     // What a frame shows: each layer's drawing, if visible. Frames that show
     // the same are not composed again.
@@ -61,12 +68,16 @@ private:
     QWidget *m_picture;
     QSlider *m_slider;
     QLabel *m_position;
+    QWidget *m_loopBar;
+    QLabel *m_loopLabel;
     QCheckBox *m_play;
     QComboBox *m_speed;
     QTimer m_timer;
     QTimer m_refresh; // edits come in bursts (a stroke): composed again once after them
     int m_frame = 0;
     int m_frameCount = 1;
+    int m_loopFirst = 0;
+    int m_loopLast = -1; // -1: to the end, whatever it becomes
     std::vector<doc::DrawingId> m_shown; // what the composed image shows
     bool m_stale = true;                 // the document changed since it was composed
 };
