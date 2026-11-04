@@ -32,6 +32,29 @@ QToolButton:hover   { border-color: palette(light); }
 QToolButton:checked { background: palette(highlight); }
 QToolButton#LayerEye:checked { background: transparent; }
 
+/* Horizontal sliders: a thin groove, filled up to the value, and a tall vertical
+   bar for the handle (the negative margin lets it stand out of the groove). */
+QSlider::groove:horizontal {
+    height: 4px;
+    border-radius: 2px;
+    background: palette(mid);
+}
+QSlider::sub-page:horizontal {
+    height: 4px;
+    border-radius: 2px;
+    background: palette(highlight);
+}
+QSlider::handle:horizontal {
+    width: 5px;
+    margin: -7px 0;
+    border-radius: 2px;
+    background: palette(text);
+}
+QSlider::handle:horizontal:hover,
+QSlider::handle:horizontal:pressed { background: palette(highlight); }
+QSlider::handle:horizontal:disabled { background: palette(mid); }
+QSlider::sub-page:horizontal:disabled { background: palette(mid); }
+
 QTabBar::tab {
     padding: 2px 8px;
     min-width: 40px;
