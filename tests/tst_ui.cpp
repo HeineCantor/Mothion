@@ -1506,6 +1506,97 @@ private slots:
         QCOMPARE(count(), 5);
     }
 
+    // The panel's merge button (and the right click menu with it, beside delete) fuses the
+    // chosen layers into the lowest one, as one undo step.
+    void layersMerge()
+    {
+        document::DocumentController controller;
+        ui::LayersPanel panel(&controller);
+        panel.resize(320, 800);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 1, "Line").command);
+        QVERIFY(controller.addLayer(true));
+        QVERIFY(controller.addLayer(true));
+        const doc::CelId cel = controller.currentCel();
+        const doc::Drawing &drawing = *controller.currentDrawing();
+        QCOMPARE(drawing.layers.size(), std::size_t(3));
+        const doc::LayerId bottom = drawing.layers[0].id, middle = drawing.layers[1].id, top = drawing.layers[2].id;
+        auto layer = [&](doc::LayerId id) { return d.layer(cel, drawing.id, id); };
+        layer(bottom)->image.setPixel(10, 10, 0xffff0000u);
+        layer(middle)->image.setPixel(20, 20, 0xff00ff00u);
+        layer(top)->image.setPixel(30, 30, 0xff0000ffu);
+        QCoreApplication::processEvents();
+
+        auto *tree = panel.findChild<QTreeWidget *>();
+        QToolButton *merge = nullptr;
+        for (QToolButton *b : panel.findChildren<QToolButton *>())
+            if (b->toolTip() == QStringLiteral("Merge the selected layers"))
+                merge = b;
+        QVERIFY(tree && merge);
+        auto rowOf = [&](doc::LayerId id) { return panel.layerItem(id); };
+        QVERIFY(rowOf(top) && rowOf(middle));
+        tree->setCurrentItem(rowOf(top));
+        QCoreApplication::processEvents();
+        QVERIFY(!merge->isEnabled()); // one layer: nothing to merge
+        rowOf(middle)->setSelected(true);
+        QCoreApplication::processEvents();
+        QVERIFY(merge->isEnabled());
+
+        QTest::mouseClick(merge, Qt::LeftButton);
+        QCOMPARE(drawing.layers.size(), std::size_t(2));
+        QCOMPARE(drawing.layers[0].id, bottom);
+        QCOMPARE(drawing.layers[1].id, middle); // the lower of the two keeps the result
+        QCOMPARE(layer(middle)->image.pixel(20, 20), doc::Pixel(0xff00ff00u));
+        QCOMPARE(layer(middle)->image.pixel(30, 30), doc::Pixel(0xff0000ffu));
+        QCOMPARE(layer(bottom)->image.pixel(10, 10), doc::Pixel(0xffff0000u)); // untouched
+        QCOMPARE(controller.currentLayer(), middle);
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo merge layers"));
+        controller.undo();
+        QCOMPARE(drawing.layers.size(), std::size_t(3));
+        QCOMPARE(layer(top)->image.pixel(30, 30), doc::Pixel(0xff0000ffu));
+        QCOMPARE(qAlpha(layer(middle)->image.pixel(30, 30)), 0);
+    }
+
+    // What a merge takes, and what it makes of the look of the layers.
+    void mergeLayersKeepsTheLookAndSkipsWhatItCannotTake()
+    {
+        document::DocumentController controller;
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 1, "Line").command);
+        QVERIFY(controller.addLayer(true));
+        QVERIFY(controller.addLayer(true));
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Perspective));
+        const doc::CelId cel = controller.currentCel();
+        const doc::Drawing &drawing = *controller.currentDrawing();
+        const doc::LayerId a = drawing.layers[0].id, b = drawing.layers[1].id, c = drawing.layers[2].id,
+                           grid = drawing.layers[3].id;
+        auto layer = [&](doc::LayerId id) { return d.layer(cel, drawing.id, id); };
+        for (doc::LayerId id : {a, b})
+            for (int y = 0; y < 4; ++y)
+                for (int x = 0; x < 4; ++x)
+                    layer(id)->image.setPixel(x, y, 0xffff0000u);
+        layer(a)->properties.opacity = 0.5f;
+        layer(a)->properties.blend = doc::BlendMode::Multiply;
+        layer(c)->image.setPixel(50, 50, 0xff00ff00u);
+        layer(c)->properties.locked = true;
+
+        QString reason;
+        QVERIFY(!controller.mergeLayers({a, grid}, &reason)); // a grid has no pixels to merge
+        QVERIFY(!reason.isEmpty());
+        QVERIFY(!controller.canMergeLayers({a, c})); // a locked one is not taken
+        QVERIFY(controller.canMergeLayers({a, b, c, grid}));
+        QVERIFY(controller.mergeLayers({a, b, c, grid}, &reason)); // a and b only
+        QCOMPARE(drawing.layers.size(), std::size_t(3));
+        QCOMPARE(layer(a)->properties.opacity, 1.0f); // the look is in the pixels now
+        QCOMPARE(layer(a)->properties.blend, doc::BlendMode::Normal);
+        QVERIFY(layer(c) && layer(grid));
+        // a (half, multiplied over nothing) under b (opaque red): red.
+        QCOMPARE(layer(a)->image.pixel(1, 1), doc::Pixel(0xffff0000u));
+        QCOMPARE(layer(c)->image.pixel(50, 50), doc::Pixel(0xff00ff00u));
+    }
+
     // Only the tools that have sub tools list any: Hand, Zoom, Move, Puppet, Eyedropper and
     // Transform show none (they once fell into the Fill's two).
     void toolsWithoutSubToolsListNone()

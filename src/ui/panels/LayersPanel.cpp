@@ -244,6 +244,7 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     , m_opacity(new QSlider(Qt::Horizontal, this))
     , m_opacityValue(new QSpinBox(this))
     , m_add(actionButton(IconId::Add, tr("New layer"), this))
+    , m_merge(actionButton(IconId::MergeLayers, tr("Merge the selected layers"), this))
     , m_remove(actionButton(IconId::Delete, tr("Delete layer"), this))
     , m_up(actionButton(IconId::ArrowUp, tr("Move up"), this))
     , m_down(actionButton(IconId::ArrowDown, tr("Move down"), this))
@@ -291,6 +292,7 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     auto *buttons = new QHBoxLayout;
     buttons->setSpacing(0);
     buttons->addWidget(m_add);
+    buttons->addWidget(m_merge);
     buttons->addWidget(m_remove);
     buttons->addStretch(1);
     buttons->addWidget(m_up);
@@ -332,6 +334,10 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     m_addMenu->addAction(tr("Layer"), this, [this] { addClicked(doc::LayerKind::Raster); });
     m_addMenu->addAction(tr("Perspective Layer"), this, [this] { addClicked(doc::LayerKind::Perspective); });
     connect(m_remove, &QToolButton::clicked, this, &LayersPanel::removeSelected);
+    connect(m_merge, &QToolButton::clicked, this, &LayersPanel::mergeSelected);
+    // Right click on a row: the same commands, where the pointer is.
+    m_tree->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_tree, &QWidget::customContextMenuRequested, this, &LayersPanel::showContextMenu);
     // Delete in the tree: the same as the bin.
     auto *remove = new QShortcut(QKeySequence::Delete, m_tree, this, [this] {
         if (m_remove->isEnabled())
@@ -854,6 +860,34 @@ void LayersPanel::removeSelected()
     m_document->execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::RemoveLayer, std::move(steps)));
 }
 
+void LayersPanel::mergeSelected()
+{
+    if (m_focus != Focus::Layer)
+        return;
+    const QList<doc::LayerId> layers = selectedLayers();
+    QString reason;
+    m_selected.clear(); // the result is chosen when it becomes the current layer
+    if (!m_document->mergeLayers(std::vector<doc::LayerId>(layers.begin(), layers.end()), &reason))
+        emit statusMessage(reason);
+}
+
+void LayersPanel::showContextMenu(const QPoint &at)
+{
+    QTreeWidgetItem *item = m_tree->itemAt(at);
+    if (!item)
+        return;
+    if (!item->isSelected()) // the row under the pointer, unless it is one of the chosen
+        m_tree->setCurrentItem(item);
+    QMenu menu(this);
+    if (kindOf(item) == Row::Layer) {
+        QAction *merge = menu.addAction(icon(IconId::MergeLayers), tr("Merge layers"), this, &LayersPanel::mergeSelected);
+        merge->setEnabled(m_merge->isEnabled());
+    }
+    QAction *remove = menu.addAction(icon(IconId::Delete), m_remove->toolTip(), this, &LayersPanel::removeSelected);
+    remove->setEnabled(m_remove->isEnabled());
+    menu.exec(m_tree->viewport()->mapToGlobal(at));
+}
+
 void LayersPanel::moveCurrentCel(int index)
 {
     const doc::Document &d = m_document->document();
@@ -1069,7 +1103,7 @@ void LayersPanel::syncHeader()
     const doc::Drawing *drawing = m_focus == Focus::Cel || shownNow ? m_document->currentDrawing() : nullptr;
     const doc::Layer *layer = drawing ? drawing->layer(m_document->currentLayer()) : nullptr;
 
-    bool header = false, canAdd = false, canRemove = false, canUp = false, canDown = false;
+    bool header = false, canAdd = false, canRemove = false, canUp = false, canDown = false, canMerge = false;
     float opacity = 1.0f;
     doc::BlendMode blend = doc::BlendMode::Normal;
     switch (m_focus) {
@@ -1110,6 +1144,8 @@ void LayersPanel::syncHeader()
         header = layer != nullptr;
         canAdd = drawing != nullptr;
         canRemove = layer && selected.size() < n; // keep at least one layer
+        canMerge = drawing
+                   && m_document->canMergeLayers(std::vector<doc::LayerId>(selected.begin(), selected.end()));
         canUp = layer && canUp;
         canDown = layer && canDown;
         if (layer) {
@@ -1130,6 +1166,7 @@ void LayersPanel::syncHeader()
     m_add->setMenu(m_focus == Focus::Cel ? nullptr : m_addMenu);
     m_add->setPopupMode(m_focus == Focus::Cel ? QToolButton::DelayedPopup : QToolButton::MenuButtonPopup);
     m_remove->setEnabled(canRemove);
+    m_merge->setEnabled(canMerge);
     m_up->setEnabled(canUp);
     m_down->setEnabled(canDown);
     if (!header)

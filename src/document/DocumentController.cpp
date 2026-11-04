@@ -1,5 +1,6 @@
 #include "document/DocumentController.h"
 
+#include "canvas/FrameRenderer.h"
 #include "canvas/SelectionMask.h"
 #include "canvas/TileQt.h"
 #include "core/document/commands/DrawingCommands.h"
@@ -198,6 +199,64 @@ bool DocumentController::addLayer(bool onTop, doc::LayerKind kind)
     const doc::LayerId id = command->layerId();
     execute(std::move(command));
     setCurrentLayer(id);
+    return true;
+}
+
+std::vector<const doc::Layer *> DocumentController::mergeableLayers(const std::vector<doc::LayerId> &ids) const
+{
+    // Raster layers, shown and not locked, of the current drawing, bottom to top.
+    std::vector<const doc::Layer *> found;
+    const doc::Cel *cel = m_document->cel(m_currentCel);
+    const doc::Drawing *drawing = currentDrawing();
+    if (!cel || !drawing || !cel->properties().visible || cel->properties().locked)
+        return found;
+    for (const doc::Layer &layer : drawing->layers)
+        if (std::find(ids.begin(), ids.end(), layer.id) != ids.end() && layer.kind == doc::LayerKind::Raster
+            && layer.properties.visible && !layer.properties.locked)
+            found.push_back(&layer);
+    return found;
+}
+
+bool DocumentController::canMergeLayers(const std::vector<doc::LayerId> &ids) const
+{
+    return mergeableLayers(ids).size() >= 2;
+}
+
+bool DocumentController::mergeLayers(const std::vector<doc::LayerId> &ids, QString *reason)
+{
+    interruptStroke();
+    const auto layers = mergeableLayers(ids);
+    if (layers.size() < 2) {
+        if (reason)
+            *reason = tr("Choose at least two shown, unlocked layers to merge");
+        return false;
+    }
+    const doc::Drawing *drawing = currentDrawing();
+    // What they show together, as one image (each with its own opacity and blend).
+    doc::Drawing together;
+    for (const doc::Layer *layer : layers)
+        together.layers.push_back(*layer);
+    doc::TiledImage merged;
+    if (const QRect bounds = canvas::drawingBounds(together, false); !bounds.isEmpty()) {
+        const QImage image = canvas::composeDrawing(together, bounds, false);
+        merged.write(bounds.x(), bounds.y(), bounds.width(), bounds.height(),
+                     reinterpret_cast<const doc::Pixel *>(image.constBits()), image.bytesPerLine() / 4);
+    }
+    // The lowest of them keeps the result, drawn plainly (its look is in the pixels now).
+    const doc::Layer &bottom = *layers.front();
+    std::vector<std::unique_ptr<doc::Command>> steps;
+    if (auto paint = doc::PaintCommand::capture(m_currentCel, drawing->id, bottom.id, bottom.image, merged))
+        steps.push_back(std::move(paint));
+    doc::LayerProperties plain = bottom.properties;
+    plain.opacity = 1.0f;
+    plain.blend = doc::BlendMode::Normal;
+    if (auto look = doc::makeSetLayerProperties(*m_document, m_currentCel, drawing->id, bottom.id, plain))
+        steps.push_back(std::move(look));
+    for (std::size_t i = 1; i < layers.size(); ++i)
+        steps.push_back(std::make_unique<doc::RemoveLayerCommand>(m_currentCel, drawing->id, layers[i]->id));
+    const doc::LayerId result = bottom.id;
+    execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::MergeLayers, std::move(steps)));
+    setCurrentLayer(result);
     return true;
 }
 
@@ -648,6 +707,7 @@ QString DocumentController::commandName(doc::CommandKind kind)
     case doc::CommandKind::InsertInbetween: return tr("insert inbetween");
     case doc::CommandKind::MoveFrames: return tr("move frames");
     case doc::CommandKind::PasteFrames: return tr("paste frames");
+    case doc::CommandKind::MergeLayers: return tr("merge layers");
     }
     return {};
 }

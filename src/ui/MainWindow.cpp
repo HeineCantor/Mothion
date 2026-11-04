@@ -98,6 +98,8 @@ MainWindow::MainWindow(QWidget *parent)
     statusBar()->showMessage(tr("Ready"));
     connect(m_canvas, &canvas::CanvasView::statusMessage, this,
             [this](const QString &text) { statusBar()->showMessage(text, 4000); });
+    connect(static_cast<LayersPanel *>(panels.layers), &LayersPanel::statusMessage, this,
+            [this](const QString &text) { statusBar()->showMessage(text, 4000); });
     auto *selectionBar = new SelectionBar(m_canvas, m_document, m_toolState);
     connect(selectionBar, &SelectionBar::statusMessage, this,
             [this](const QString &text) { statusBar()->showMessage(text, 4000); });

@@ -70,6 +70,13 @@ public:
     // layer (on top if `onTop`), named "Layer N" (or "Perspective N") with the
     // first free N; it becomes current. A perspective layer starts with a grid
     // fit to the document. One undo step; false on an empty frame.
+    // Merges layers of the current drawing into the lowest of them (it keeps
+    // its name and place; the rest go): what they show together, each with
+    // its own opacity and blend mode, as one undo step. Only raster layers
+    // that are shown and not locked are taken; false, with `reason`, when
+    // fewer than two are left. The result becomes the current layer.
+    bool mergeLayers(const std::vector<doc::LayerId> &layers, QString *reason = nullptr);
+    bool canMergeLayers(const std::vector<doc::LayerId> &layers) const;
     bool addLayer(bool onTop = false, doc::LayerKind kind = doc::LayerKind::Raster);
     // Puts a new frame (a drawing with one empty layer, named like the layer
     // worked on) at `frame` of `cel`, the frames from there on moving one
@@ -238,6 +245,7 @@ private:
     std::string m_currentLayerName; // looked for when the drawing changes
     QPainterPath m_selection;
     std::vector<LayerRef> m_layerSelection;
+    std::vector<const doc::Layer *> mergeableLayers(const std::vector<doc::LayerId> &ids) const;
 
     struct PaintState
     {

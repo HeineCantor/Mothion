@@ -208,6 +208,15 @@ void drawGlyph(QPainter &p, IconId id)
         path.lineTo(10.5, 6.5);
         addLayerSheet(path);
         break;
+    case IconId::MergeLayers: // two sheets, an arrow, one sheet
+        path.addRect(QRectF(5.5, 3.5, 13, 4));
+        path.addRect(QRectF(5.5, 9.5, 13, 4));
+        path.moveTo(12, 15);
+        path.lineTo(12, 20);
+        path.moveTo(9, 17.5);
+        path.lineTo(12, 20.5);
+        path.lineTo(15, 17.5);
+        break;
     case IconId::LassoSelect: // loop with a tail
         path.moveTo(9, 17);
         path.cubicTo(1, 15, 3, 4, 13, 4);

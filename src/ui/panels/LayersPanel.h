@@ -36,7 +36,8 @@ namespace mothion::ui {
 //    (Ctrl and Shift select several, of any cel);
 //  - a layer: the blend mode and opacity of the selected layers (of that
 //    frame: Ctrl+click adds or takes away one, Shift+click a range); new
-//    layer above (of either kind), delete, up and down. A perspective
+//    layer above (of either kind), merge (into the lowest), delete, up and
+//    down; right click on a row offers merge and delete. A perspective
 //    layer is set on the canvas (canvas::PerspectiveGizmo).
 // The tools that act on several layers at once (the move) take every layer
 // of the selected rows: a frame stands for its layers, a cel for all the
@@ -73,6 +74,10 @@ public:
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
 
+signals:
+    // A command could not be done; the text says why.
+    void statusMessage(const QString &text);
+
 private:
     void rebuildTree();       // structure changed: recreate the rows
     void syncHeader();        // current row changed: blend / opacity / buttons, publishSelection()
@@ -86,6 +91,8 @@ private:
     void commitOpacity();
     void addClicked(doc::LayerKind kind);
     void removeSelected();
+    void mergeSelected();
+    void showContextMenu(const QPoint &at);
     void moveSelected(int direction); // +1 up, -1 down, each by one place
     void moveCurrentCel(int index);
     bool dropAt(const QPoint &pos);   // a drop from the tree itself
@@ -102,6 +109,7 @@ private:
     QTreeWidget *m_tree;
     QToolButton *m_add;
     QMenu *m_addMenu = nullptr; // the kinds of layer, from the arrow next to +
+    QToolButton *m_merge;
     QToolButton *m_remove;
     QToolButton *m_up;
     QToolButton *m_down;
