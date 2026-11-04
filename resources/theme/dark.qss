@@ -18,6 +18,16 @@ QToolButton {
     border: 1px solid transparent;
     border-radius: 3px;
 }
+/* With a split arrow (Onion skin, "+") the arrow gets its own room: without
+   it the stylesheet draws it over the text or icon. */
+QToolButton[popupMode="1"] { padding-right: 18px; }
+QToolButton::menu-button {
+    border: none;
+    border-left: 1px solid palette(mid);
+    border-top-right-radius: 3px;
+    border-bottom-right-radius: 3px;
+    width: 14px;
+}
 QToolButton:hover   { border-color: palette(light); }
 QToolButton:checked { background: palette(highlight); }
 QToolButton#LayerEye:checked { background: transparent; }
