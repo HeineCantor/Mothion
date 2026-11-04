@@ -64,6 +64,29 @@ bool PerspectiveSnap::update(const QPointF &pen)
     return decided();
 }
 
+int PerspectiveSnap::cycle()
+{
+    for (int step = 1; step <= 3; ++step) {
+        const int axis = ((m_axis < 0 ? -1 : m_axis) + step + 3) % 3;
+        if (m_directions[std::size_t(axis)]) {
+            m_axis = axis;
+            return axis;
+        }
+    }
+    return -1;
+}
+
+QColor PerspectiveSnap::axisColor(int axis)
+{
+    static const QColor colors[3] = {QColor(230, 70, 70), QColor(80, 190, 90), QColor(70, 130, 235)};
+    return colors[std::clamp(axis, 0, 2)];
+}
+
+QChar PerspectiveSnap::axisLetter(int axis)
+{
+    return QChar(u"XYZ"[std::clamp(axis, 0, 2)]);
+}
+
 QPointF PerspectiveSnap::snapped(const QPointF &pen) const
 {
     if (!decided())

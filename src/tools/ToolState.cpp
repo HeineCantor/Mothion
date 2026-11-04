@@ -219,12 +219,11 @@ void ToolState::setPerspectiveSnap(bool on)
     emit perspectiveSnapChanged();
 }
 
-void ToolState::setPerspectiveSnapLayer(doc::LayerId layer, const QString &name)
+void ToolState::setPerspectiveSnapLayer(doc::LayerId layer)
 {
-    if (layer == m_snapLayer && name == m_snapLayerName)
+    if (layer == m_snapLayer)
         return;
     m_snapLayer = layer;
-    m_snapLayerName = name;
     emit perspectiveSnapChanged();
 }
 

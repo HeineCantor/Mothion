@@ -494,41 +494,18 @@ void DocumentController::importImage(const QImage &image, const QString &name)
     setCurrentCel(celId);
 }
 
-std::vector<DocumentController::PerspectiveLayerInfo> DocumentController::perspectiveLayers() const
+std::optional<DocumentController::PerspectiveLayerInfo> DocumentController::perspectiveLayerById(doc::LayerId id) const
 {
-    std::vector<PerspectiveLayerInfo> found;
-    const int cels = m_document->celCount();
-    for (int i = cels - 1; i >= 0; --i) { // the top cel is the last one
-        const doc::Cel &cel = m_document->celAt(i);
-        const doc::Drawing *drawing = cel.drawingAt(m_currentFrame);
-        if (!drawing)
-            continue;
-        for (auto layer = drawing->layers.rbegin(); layer != drawing->layers.rend(); ++layer) {
-            if (layer->kind != doc::LayerKind::Perspective)
-                continue;
-            QString name = QString::fromStdString(layer->properties.name);
-            if (cels > 1)
-                name += QStringLiteral(" (%1)").arg(QString::fromStdString(cel.properties().name));
-            found.push_back({{cel.id(), drawing->id, layer->id}, name, layer->properties.perspective});
-        }
-    }
-    return found;
-}
-
-std::optional<DocumentController::PerspectiveLayerInfo>
-DocumentController::perspectiveLayerFor(doc::LayerId preferred, const QString &name) const
-{
-    const std::vector<PerspectiveLayerInfo> all = perspectiveLayers();
-    if (all.empty())
+    if (id == doc::kNoId)
         return std::nullopt;
-    for (const PerspectiveLayerInfo &info : all)
-        if (preferred != doc::kNoId && info.ref.layer == preferred)
-            return info;
-    if (!name.isEmpty())
-        for (const PerspectiveLayerInfo &info : all)
-            if (info.name == name)
-                return info;
-    return all.front();
+    for (int i = 0; i < m_document->celCount(); ++i) {
+        const doc::Cel &cel = m_document->celAt(i);
+        for (const auto &[drawingId, drawing] : cel.drawings())
+            for (const doc::Layer &layer : drawing.layers)
+                if (layer.id == id && layer.kind == doc::LayerKind::Perspective)
+                    return PerspectiveLayerInfo{{cel.id(), drawingId, layer.id}, layer.properties.perspective};
+    }
+    return std::nullopt;
 }
 
 const doc::Drawing *DocumentController::currentDrawing() const

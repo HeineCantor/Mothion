@@ -335,6 +335,7 @@ void CanvasView::paintEvent(QPaintEvent *)
         p.restore();
     }
     m_gizmo.paint(p, m_view);
+    paintSnapGuide(p);
 
     m_paintedOutline = QRect();
     if (m_pointerVisible && ToolState::isPaintTool(m_toolState->activeTool()) && !m_gesture.isActive()
@@ -486,8 +487,6 @@ void CanvasView::handleSample(const PenSample &sample)
             break; // a second button during a drag: keep doing what we do
         if (const Mode mode = navigationModeFor(sample); mode != Mode::None) {
             m_gesture.begin(mode, QPointF(sample.x, sample.y), m_view);
-        } else if (m_pickingSnap && sample.tipDown()) {
-            pickSnapLayer(docPos);
         } else if (sample.tipDown() && m_gizmo.press(docPos, m_view)) {
             update(); // a handle of the perspective layer, whatever the tool
         } else if (picksColor() && sample.tipDown() && sample.tool != InputTool::Eraser) {
@@ -623,14 +622,14 @@ void CanvasView::beginStroke(const PenSample &sample)
     m_corners.reset();
     m_heldSamples.clear();
     m_snapHeld.clear();
+    m_snapRaw.clear();
     m_snapping = false;
     if (m_toolState->perspectiveSnap()) {
-        if (const auto layer = m_document->perspectiveLayerFor(m_toolState->perspectiveSnapLayer(),
-                                                               m_toolState->perspectiveSnapLayerName())) {
+        if (const auto layer = m_document->perspectiveLayerById(m_toolState->perspectiveSnapLayer())) {
             m_snap.begin(layer->grid, m_view.mapToDocument(QPointF(sample.x, sample.y)), 6.0 / m_view.zoom());
             m_snapping = true;
         } else {
-            emit statusMessage(tr("No perspective layer on this frame to snap to"));
+            emit statusMessage(tr("No perspective layer to snap to: choose one with “Snap to” in the Layers panel"));
         }
     }
     takeSample(sample);
@@ -659,12 +658,78 @@ void CanvasView::takeSample(const PenSample &sample)
     }
     // Snapping: the first samples wait until the pen has shown which axis it follows, then
     // they and every later one are put on that axis's line.
+    m_snapRaw.push_back(sample);
     m_snapHeld.push_back(sample);
-    if (!m_snap.update(m_view.mapToDocument(QPointF(sample.x, sample.y))))
+    m_snapPen = m_view.mapToDocument(QPointF(sample.x, sample.y));
+    update(); // the guide follows the pen
+    if (!m_snap.update(m_snapPen))
         return;
     for (const PenSample &held : m_snapHeld)
         takeRawSample(snappedSample(held));
     m_snapHeld.clear();
+}
+
+void CanvasView::cycleSnapAxis()
+{
+    if (!m_stroke || !m_snapping || m_snap.cycle() < 0)
+        return;
+    // The stroke is drawn again from its first sample, on the new axis: what was drawn on the old one goes.
+    const brush::BrushStyle style = m_dabs->style();
+    const QRect area = m_stroke->restart();
+    m_dabs.emplace(style, m_seed);
+    m_points.clear();
+    m_drawnPoints = 0;
+    m_smoother.reset();
+    m_velocity.reset();
+    m_corners.reset();
+    m_heldSamples.clear();
+    m_document->notifyPainted(area);
+    for (const PenSample &raw : m_snapRaw)
+        takeRawSample(snappedSample(raw));
+    m_snapHeld.clear();
+    update();
+}
+
+void CanvasView::paintSnapGuide(QPainter &p) const
+{
+    if (!m_stroke || !m_snapping || !m_snap.decided())
+        return;
+    const int axis = m_snap.axis();
+    const QColor color = PerspectiveSnap::axisColor(axis);
+    const QTransform toView = m_view.documentToView();
+    const QPointF from = toView.map(m_snap.anchor()), to = toView.map(m_snap.snapped(m_snapPen));
+    const ToolId tool = m_eraseStroke ? ToolId::Eraser : ToolId::Brush;
+    const double half = std::max(2.0, m_toolState->settings(tool).size / 2.0 * m_view.zoom()) + 2.0;
+
+    p.save();
+    p.setRenderHint(QPainter::Antialiasing);
+    // An outline around the stroke: a pill the width of the brush, along the line.
+    QPainterPath line;
+    line.moveTo(from);
+    line.lineTo(to + QPointF(0.01, 0)); // a dot, not nothing, when it has not moved
+    QPainterPathStroker stroker;
+    stroker.setWidth(2.0 * half);
+    stroker.setCapStyle(Qt::RoundCap);
+    const QPainterPath outline = stroker.createStroke(line);
+    p.setBrush(Qt::NoBrush);
+    p.setPen(QPen(QColor(255, 255, 255, 170), 4.0));
+    p.drawPath(outline);
+    p.setPen(QPen(color, 2.0));
+    p.drawPath(outline);
+    // The letter, following the pen: white halo, then the color.
+    QFont font = p.font();
+    font.setBold(true);
+    font.setPixelSize(15);
+    QPainterPath letter;
+    const QPointF at = to + QPointF(half + 8.0, -half - 6.0);
+    letter.addText(at, font, QString(PerspectiveSnap::axisLetter(axis)));
+    p.setPen(QPen(QColor(255, 255, 255, 220), 3.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    p.setBrush(Qt::NoBrush);
+    p.drawPath(letter);
+    p.setPen(Qt::NoPen);
+    p.setBrush(color);
+    p.drawPath(letter);
+    p.restore();
 }
 
 void CanvasView::takeRawSample(const PenSample &sample)
@@ -730,7 +795,9 @@ void CanvasView::endStroke()
         for (const PenSample &held : m_snapHeld)
             takeRawSample(held);
         m_snapHeld.clear();
+        m_snapRaw.clear();
         m_snapping = false;
+        update(); // the guide goes
     }
     if (m_sharpCorners)
         releaseHeldSamples(true);
@@ -803,6 +870,7 @@ void CanvasView::cancelStroke()
     // Restore pixels first: cancelPaint() may remove the drawing they live in.
     m_stroke->cancel();
     m_snapHeld.clear();
+    m_snapRaw.clear();
     m_snapping = false;
     m_stroke.reset();
     m_dabs.reset();
@@ -890,6 +958,12 @@ void CanvasView::keyPressEvent(QKeyEvent *event)
         }
         return;
     }
+    // A, during a snapped stroke: the next axis (X, Y, Z...).
+    if (event->key() == Qt::Key_A && !event->isAutoRepeat() && m_snapping && m_stroke) {
+        cycleSnapAxis();
+        event->accept();
+        return;
+    }
     if (event->key() == Qt::Key_Alt && !m_altHeld) {
         m_altHeld = true;
         updateCursor();
@@ -957,54 +1031,6 @@ void CanvasView::focusOutEvent(QFocusEvent *event)
     QWidget::focusOutEvent(event);
 }
 
-void CanvasView::setSnapPicking(bool on)
-{
-    if (on == m_pickingSnap)
-        return;
-    m_pickingSnap = on;
-    updateCursor();
-    emit snapPickingChanged(on);
-}
-
-namespace {
-
-double distanceToSegment(const QPointF &p, const perspective::Segment &s)
-{
-    const QPointF a(s.a.x, s.a.y), b(s.b.x, s.b.y), ab = b - a;
-    const double length2 = ab.x() * ab.x() + ab.y() * ab.y();
-    const double t = length2 > 0 ? std::clamp(((p - a).x() * ab.x() + (p - a).y() * ab.y()) / length2, 0.0, 1.0) : 0.0;
-    return std::hypot(p.x() - (a.x() + ab.x() * t), p.y() - (a.y() + ab.y() * t));
-}
-
-} // namespace
-
-void CanvasView::pickSnapLayer(const QPointF &docPos)
-{
-    const auto layers = m_document->perspectiveLayers();
-    if (layers.empty()) {
-        emit statusMessage(tr("No perspective layer on this frame"));
-        setSnapPicking(false);
-        return;
-    }
-    // The layer whose guides pass nearest the click.
-    const document::DocumentController::PerspectiveLayerInfo *nearest = nullptr;
-    double best = 0.0;
-    for (const auto &layer : layers) {
-        double distance = std::numeric_limits<double>::max();
-        for (const perspective::Segment &s : perspective::gridSegments(layer.grid))
-            distance = std::min(distance, distanceToSegment(docPos, s));
-        if (const auto horizon = perspective::horizonLine(layer.grid, layer.grid.frameWidth * 4.0))
-            distance = std::min(distance, distanceToSegment(docPos, *horizon));
-        if (!nearest || distance < best) {
-            nearest = &layer;
-            best = distance;
-        }
-    }
-    m_toolState->setPerspectiveSnapLayer(nearest->ref.layer, nearest->name);
-    m_toolState->setPerspectiveSnap(true);
-    setSnapPicking(false);
-}
-
 void CanvasView::updateGizmoCursor()
 {
     if (m_gizmo.hovered() != PerspectiveGizmo::Handle::None && !panKeyHeld())
@@ -1019,7 +1045,7 @@ void CanvasView::updateCursor()
         setCursor(Qt::OpenHandCursor);
     else if (m_toolState->activeTool() == ToolId::Zoom)
         setCursor(Qt::SizeHorCursor);
-    else if (picksColor() || m_pickingSnap)
+    else if (picksColor())
         setCursor(Qt::CrossCursor);
     else if (const CanvasTool *tool = canvasTool())
         setCursor(tool->cursor());

@@ -98,7 +98,9 @@ std::vector<Segment> gridSegments(const Grid &grid)
 {
     std::vector<Segment> segments;
     const double focal = focalLength(grid);
-    const double nearDepth = kNearFraction * focal;
+    // Cut a hair in front of the limit projectCamera() holds to: a point cut exactly on it can round to
+    // just behind it, and the whole line would then be lost.
+    const double nearDepth = kNearFraction * focal * (1.0 + 1e-6);
     const int n = std::max(1, grid.cells);
     const double extent = n * grid.cell;
     // A line of the plane, clipped to what lies in front of the eye.

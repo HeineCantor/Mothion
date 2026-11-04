@@ -2197,8 +2197,9 @@ private slots:
         stroke({100, 100}, {120, 100}); // makes the drawing, and its layer
         const doc::LayerId raster = controller.currentLayer();
         QVERIFY(controller.addLayer(true, doc::LayerKind::Perspective));
+        const doc::LayerId gridLayer = controller.currentLayer();
         controller.setCurrentLayer(raster);
-        QCOMPARE(controller.perspectiveLayers().size(), std::size_t(1));
+        QVERIFY(controller.perspectiveLayerById(gridLayer));
         const doc::Layer *drawn = nullptr;
         for (const doc::Layer &l : controller.currentDrawing()->layers)
             if (l.id == raster)
@@ -2206,7 +2207,7 @@ private slots:
         QVERIFY(drawn);
         auto alpha = [&](const QPointF &p) { return qAlpha(drawn->image.pixel(int(p.x()), int(p.y()))); };
 
-        const perspective::Grid grid = controller.perspectiveLayers().front().grid;
+        const perspective::Grid grid = controller.perspectiveLayerById(gridLayer)->grid;
         const QPointF start(900, 500);
         const auto dirs = canvas::PerspectiveSnap::directions(grid, start);
         QVERIFY(dirs[0]);
@@ -2223,28 +2224,217 @@ private slots:
 
         // With it: along the axis; where the pen went is left clear.
         state.setPerspectiveSnap(true);
-        state.setPerspectiveSnapLayer(controller.perspectiveLayers().front().ref.layer, QString());
+        state.setPerspectiveSnapLayer(gridLayer);
         stroke(start, end);
         QVERIFY(alpha(start + u * 150) > 0);
         QCOMPARE(alpha(start + off * 150), 0); // 16 px off the axis
         QVERIFY(alpha(start + u * 5) > 0);     // and from the start
     }
 
-    // The perspective layers of a frame, and the one to snap to when the wanted one is not there.
-    void perspectiveLayersOfTheFrame()
+    // "Snap to" in the Layers panel: on a perspective layer it makes that layer the reference of the
+    // pen's snapping, shown by a sight on its row; pressed again it lets go.
+    void layersPanelSnapsToAPerspectiveLayer()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        ui::LayersPanel panel(&controller);
+        panel.setToolState(&state);
+        panel.resize(320, 800);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        QImage image(10, 10, QImage::Format_ARGB32);
+        image.fill(Qt::red);
+        controller.importImage(image, QStringLiteral("x"));
+        const doc::LayerId raster = controller.currentLayer();
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Perspective));
+        const doc::LayerId grid = controller.currentLayer();
+        QCoreApplication::processEvents();
+        auto *snapTo = panel.findChild<QToolButton *>(QStringLiteral("snapTo"));
+        QVERIFY(snapTo);
+        auto sight = [&](doc::LayerId layer) {
+            auto *row = panel.layerItem(layer) ? panel.findChild<QTreeWidget *>()->itemWidget(panel.layerItem(layer), 0)
+                                               : nullptr;
+            auto *mark = row ? row->findChild<QLabel *>(QStringLiteral("snapMark")) : nullptr;
+            return mark && !mark->isHidden();
+        };
+
+        QCOMPARE(controller.currentLayer(), grid);
+        QVERIFY(snapTo->isEnabled());
+        QVERIFY(!snapTo->isChecked());
+        QVERIFY(!sight(grid));
+        snapTo->click();
+        QCOMPARE(state.perspectiveSnapLayer(), grid);
+        QVERIFY(snapTo->isChecked());
+        QVERIFY(sight(grid));
+
+        controller.setCurrentLayer(raster); // a layer that cannot be snapped to: the button rests
+        QCoreApplication::processEvents();
+        QVERIFY(!snapTo->isEnabled());
+        QVERIFY(sight(grid)); // the sight stays on the reference
+
+        controller.setCurrentLayer(grid);
+        QCoreApplication::processEvents();
+        QVERIFY(snapTo->isChecked());
+        snapTo->click(); // pressed again
+        QCOMPARE(state.perspectiveSnapLayer(), doc::kNoId);
+        QVERIFY(!sight(grid));
+
+        // At most one layer is snapped to: snapping to another lets go of the first.
+        snapTo->click();
+        QVERIFY(sight(grid));
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Perspective));
+        const doc::LayerId second = controller.currentLayer();
+        QVERIFY(second != grid);
+        QCoreApplication::processEvents();
+        QVERIFY(!snapTo->isChecked()); // not this one
+        QVERIFY(sight(grid) && !sight(second));
+        snapTo->click();
+        QCOMPARE(state.perspectiveSnapLayer(), second);
+        QVERIFY(sight(second));
+        QVERIFY(!sight(grid));
+        controller.setCurrentLayer(grid);
+        QCoreApplication::processEvents();
+        QVERIFY(!snapTo->isChecked());
+        snapTo->click();
+        QCOMPARE(state.perspectiveSnapLayer(), grid);
+        QVERIFY(sight(grid) && !sight(second));
+    }
+
+    // Lines of the grid partly behind the eye are cut at the near limit; the cut point used to round to just
+    // behind it and the whole line was lost (seen with a 120° lens).
+    void perspectiveGridKeepsLinesCutByTheNearLimit()
+    {
+        for (double tilt : {45.0, 60.0, 75.0})
+            for (double turn = 0; turn < 360; turn += 15) {
+                perspective::Grid grid = perspective::defaultGrid(1920, 1080);
+                grid.fov = 120.0;
+                grid.orientation = perspective::fromAngles(turn, tilt, 0.0);
+                const auto segments = perspective::gridSegments(grid);
+                // A line is kept when any part of it is in front of the eye: count them the slow way.
+                int expected = 0;
+                const int n = grid.cells;
+                const double f = perspective::focalLength(grid), extent = n * grid.cell;
+                auto in_front = [&](double x0, double y0, double x1, double y1) {
+                    for (int s = 0; s <= 2000; ++s) {
+                        const double t = s / 2000.0;
+                        if (perspective::project(grid, x0 + (x1 - x0) * t, y0 + (y1 - y0) * t))
+                            return true;
+                    }
+                    return false;
+                };
+                for (int i = -n; i <= n; ++i) {
+                    expected += in_front(i * grid.cell, -extent, i * grid.cell, extent);
+                    expected += in_front(-extent, i * grid.cell, extent, i * grid.cell);
+                }
+                (void)f;
+                QCOMPARE(int(segments.size()), expected);
+            }
+    }
+
+    // The next axis, in order, and the stroke in progress drawn again on it: the A key. The guide (an outline
+    // and a letter) is in the color of the axis the stroke is on.
+    void perspectiveSnapAxisCanBeCycledMidStroke()
+    {
+        const perspective::Grid grid = perspective::defaultGrid(1920, 1080);
+        canvas::PerspectiveSnap snap;
+        snap.begin(grid, QPointF(900, 500), 10.0);
+        QCOMPARE(snap.cycle(), 0); // undecided: the first
+        QCOMPARE(snap.axis(), 0);
+        QCOMPARE(snap.cycle(), 1);
+        QCOMPARE(snap.cycle(), 2);
+        QCOMPARE(snap.cycle(), 0);
+        QVERIFY(canvas::PerspectiveSnap::axisColor(0) != canvas::PerspectiveSnap::axisColor(1));
+        QCOMPARE(canvas::PerspectiveSnap::axisLetter(2), QChar('Z'));
+
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(900, 700);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        state.setColor(Qt::black);
+        state.setSize(tools::ToolId::Brush, 12.0);
+        auto toView = [&](const QPointF &p) { return canvas.view().documentToView().map(p).toPoint(); };
+        auto drag = [&](const QPointF &from, const QPointF &to, int steps) {
+            const QPoint a = toView(from), b = toView(to);
+            for (int i = 1; i <= steps; ++i)
+                QTest::mouseMove(&canvas, a + (b - a) * i / steps);
+        };
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, toView({100, 100}));
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, toView({120, 100}));
+        const doc::LayerId raster = controller.currentLayer();
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Perspective));
+        const doc::LayerId gridLayer = controller.currentLayer();
+        controller.setCurrentLayer(raster);
+        const perspective::Grid g = controller.perspectiveLayerById(gridLayer)->grid;
+        state.setPerspectiveSnap(true);
+        state.setPerspectiveSnapLayer(gridLayer);
+        const doc::Layer *drawn = nullptr;
+        for (const doc::Layer &l : controller.currentDrawing()->layers)
+            if (l.id == raster)
+                drawn = &l;
+        QVERIFY(drawn);
+        auto alpha = [&](const QPointF &p) { return qAlpha(drawn->image.pixel(int(p.x()), int(p.y()))); };
+        // Pixels of the guide in the color of an axis (the grabbed canvas, the sign of the color is enough).
+        auto guidePixels = [&](int axis) {
+            const QImage shot = canvas.grab().toImage();
+            const QColor c = canvas::PerspectiveSnap::axisColor(axis);
+            int n = 0;
+            for (int y = 0; y < shot.height(); ++y)
+                for (int x = 0; x < shot.width(); ++x) {
+                    const QColor p = shot.pixelColor(x, y);
+                    n += std::abs(p.red() - c.red()) + std::abs(p.green() - c.green()) + std::abs(p.blue() - c.blue()) < 40;
+                }
+            return n;
+        };
+
+        const QPointF start(900, 500);
+        const auto dirs = canvas::PerspectiveSnap::directions(g, start);
+        QVERIFY(dirs[0] && dirs[1]);
+        const QPointF u0 = *dirs[0], u1 = *dirs[1];
+        QVERIFY(std::abs(u0.x() * u1.y() - u0.y() * u1.x()) > 0.3); // the axes are well apart here
+        const double a = 4 * std::numbers::pi / 180;
+        const QPointF off(u0.x() * std::cos(a) - u0.y() * std::sin(a), u0.x() * std::sin(a) + u0.y() * std::cos(a));
+
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, toView(start));
+        drag(start, start + off * 120, 8);
+        QVERIFY(alpha(start + u0 * 60) > 0); // on the first axis
+        QVERIFY(guidePixels(0) > 20);        // in its color
+        QCOMPARE(guidePixels(1), 0);
+
+        QTest::keyClick(&canvas, Qt::Key_A); // the next axis
+        QCOMPARE(alpha(start + u0 * 60), 0);  // what was drawn on the first is gone
+        QVERIFY(guidePixels(1) > 20);
+        QCOMPARE(guidePixels(0), 0);
+        drag(start + off * 120, start + off * 200, 4);
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, toView(start + off * 200));
+        // The stroke ends along the second axis, from the start (either way along it).
+        bool inked = false;
+        for (double t = -200; t <= 200; t += 5)
+            inked = inked || alpha(start + u1 * t) > 0;
+        QVERIFY(inked);
+        QCOMPARE(alpha(start + u0 * 60), 0);
+        QCOMPARE(guidePixels(1), 0); // the guide is gone with the stroke
+    }
+
+    // A perspective layer is found by its id, in any frame.
+    void perspectiveLayersAreFoundById()
     {
         document::DocumentController controller;
         QImage image(10, 10, QImage::Format_ARGB32);
         image.fill(Qt::red);
         controller.importImage(image, QStringLiteral("x"));
-        QVERIFY(controller.perspectiveLayers().empty());
-        QVERIFY(!controller.perspectiveLayerFor(doc::kNoId));
+        const doc::LayerId raster = controller.currentLayer();
+        QVERIFY(!controller.perspectiveLayerById(doc::kNoId));
+        QVERIFY(!controller.perspectiveLayerById(raster)); // a layer of pixels is not one
         QVERIFY(controller.addLayer(true, doc::LayerKind::Perspective));
-        const auto all = controller.perspectiveLayers();
-        QCOMPARE(all.size(), std::size_t(1));
-        QCOMPARE(controller.perspectiveLayerFor(all[0].ref.layer)->ref.layer, all[0].ref.layer);
-        QCOMPARE(controller.perspectiveLayerFor(99999, all[0].name)->ref.layer, all[0].ref.layer); // by name
-        QCOMPARE(controller.perspectiveLayerFor(99999)->ref.layer, all[0].ref.layer);               // the first
+        const doc::LayerId grid = controller.currentLayer();
+        const auto found = controller.perspectiveLayerById(grid);
+        QVERIFY(found);
+        QCOMPARE(found->ref.layer, grid);
+        controller.setCurrentFrame(5); // wherever the timeline is
+        QVERIFY(controller.perspectiveLayerById(grid));
+        QVERIFY(!controller.perspectiveLayerById(99999));
     }
 
     // The tool buttons are laid out in as many columns as the width allows, two to begin with.

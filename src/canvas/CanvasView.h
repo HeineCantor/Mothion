@@ -81,11 +81,6 @@ public:
     bool canUndoInEdit() const;
     bool canRedoInEdit() const;
 
-    // Choose the perspective layer to snap to by clicking on the canvas (the one whose lines are
-    // nearest the click); the click also turns snapping on. Off again after the click.
-    void setSnapPicking(bool on);
-    bool isSnapPicking() const { return m_pickingSnap; }
-
 public slots:
     void zoomIn();
     void zoomOut();
@@ -117,8 +112,6 @@ signals:
     void editStepsChanged();
     // The transform box came up, moved or went away (see transformBounds()).
     void transformChanged();
-    // Picking the layer to snap to began or ended (see setSnapPicking()).
-    void snapPickingChanged(bool picking);
 
 protected:
     void paintEvent(QPaintEvent *event) override;
@@ -160,8 +153,10 @@ private:
     // The same once perspective snapping has had its say.
     void takeRawSample(const PenSample &sample);
     PenSample snappedSample(const PenSample &sample) const;
-    // The click that picks the layer to snap to.
-    void pickSnapLayer(const QPointF &docPos);
+    // Takes the next axis for the snapped stroke in progress (the A key) and draws the whole stroke again on it.
+    void cycleSnapAxis();
+    // The outline and the letter of the axis the stroke in progress is snapped to.
+    void paintSnapGuide(QPainter &p) const;
     // The held samples now judged (all of them at the end of the stroke): a
     // corner restarts the stabilizer from itself and gets its point painted.
     void releaseHeldSamples(bool end);
@@ -206,7 +201,8 @@ private:
     PerspectiveSnap m_snap;
     bool m_snapping = false;             // the stroke in progress is snapped
     std::vector<PenSample> m_snapHeld;   // its first samples, until the axis is chosen
-    bool m_pickingSnap = false;
+    std::vector<PenSample> m_snapRaw;    // all its samples, to draw it again on another axis
+    QPointF m_snapPen;                   // where the pen is, document coordinates
     bool m_eraseStroke = false; // current stroke erases (eraser tool or eraser end)
     DebugOverlay *m_overlay;
 

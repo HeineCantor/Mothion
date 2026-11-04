@@ -23,6 +23,9 @@ class QTreeWidgetItem;
 namespace mothion::document {
 class DocumentController;
 }
+namespace mothion::tools {
+class ToolState;
+}
 
 namespace mothion::ui {
 
@@ -41,7 +44,8 @@ namespace mothion::ui {
 //  - a layer: the blend mode and opacity of the selected layers (of that
 //    frame: Ctrl+click adds or takes away one, Shift+click a range); new
 //    layer above (of either kind), merge (into the lowest), delete, up and
-//    down; right click on a row offers merge and delete. A perspective
+//    down; right click on a row offers merge and delete; "Snap to" (on a perspective layer) makes
+//    it the reference of the pen's snapping. A perspective
 //    layer is set on the canvas (canvas::PerspectiveGizmo).
 // The tools that act on several layers at once (the move) take every layer
 // of the selected rows: a frame stands for its layers, a cel for all the
@@ -64,6 +68,9 @@ public:
     void copyLayers();
     void cutLayers();
     void pasteLayers(bool merged);
+    // The tool state, for the snap reference: "Snap to" makes the selected perspective layer the one
+    // strokes snap to (shown by a sight on its row).
+    void setToolState(tools::ToolState *state);
     // True when a row of the panel has the keyboard focus.
     bool hasRowFocus() const;
 
@@ -116,6 +123,10 @@ private:
     void mergeSelected();
     bool copySelected(); // to the layer clipboard; false (and a message) if none
     void showContextMenu(const QPoint &at);
+    void snapToClicked(bool on);
+    // Shows the sight on the perspective layer(s) strokes snap to.
+    void refreshSnapMarks();
+    bool isSnapReference(doc::LayerId layer) const;
     void moveSelected(int direction); // +1 up, -1 down, each by one place
     void moveCurrentCel(int index);
     bool dropAt(const QPoint &pos);   // a drop from the tree itself
@@ -136,6 +147,8 @@ private:
     QToolButton *m_remove;
     QToolButton *m_up;
     QToolButton *m_down;
+    QToolButton *m_snapTo;  // the layer actions' second row
+    tools::ToolState *m_toolState = nullptr;
     QTimer m_thumbnailTimer;
     Focus m_focus = Focus::Layer;
     bool m_choosing = false;        // a row click is making its cel and layer current

@@ -167,14 +167,12 @@ public:
     void setLiquifySettings(const LiquifySettings &settings);
 
     // Snapping the pen to the axes of a perspective layer: while on, a stroke follows one of the
-    // three axes of the chosen layer (see canvas::PerspectiveSnap). The layer is by id; the
-    // one used is looked up on the current frame (DocumentController::perspectiveLayerFor).
+    // three axes of the layer snapped to (see canvas::PerspectiveSnap). There is none, or exactly one
+    // (kNoId: none); the Layers panel's "Snap to" sets it.
     bool perspectiveSnap() const { return m_perspectiveSnap; }
     void setPerspectiveSnap(bool on);
     doc::LayerId perspectiveSnapLayer() const { return m_snapLayer; }
-    // `name` is looked for when the layer is not on the frame shown (see perspectiveLayerFor()).
-    QString perspectiveSnapLayerName() const { return m_snapLayerName; }
-    void setPerspectiveSnapLayer(doc::LayerId layer, const QString &name);
+    void setPerspectiveSnapLayer(doc::LayerId layer);
 
     static constexpr int kMaxOnionFrames = 10;
     OnionSkinSettings onionSkin() const { return m_onion; }
@@ -217,7 +215,6 @@ private:
     FillSettings m_fill;
     bool m_perspectiveSnap = false;
     doc::LayerId m_snapLayer = doc::kNoId;
-    QString m_snapLayerName;
     BlendSettings m_blend;
     LiquifySettings m_liquify;
     OnionSkinSettings m_onion;

@@ -7,6 +7,7 @@
 #include "core/document/commands/GroupCommand.h"
 #include "core/document/commands/LayerCommands.h"
 #include "document/DocumentController.h"
+#include "tools/ToolState.h"
 #include "ui/IconFactory.h"
 #include "ui/panels/BlendModes.h"
 
@@ -248,6 +249,8 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     , m_remove(actionButton(IconId::Delete, tr("Delete layer"), this))
     , m_up(actionButton(IconId::ArrowUp, tr("Move up"), this))
     , m_down(actionButton(IconId::ArrowDown, tr("Move down"), this))
+    , m_snapTo(actionButton(IconId::Crosshair,
+                            tr("Snap to: make the selected perspective layer the one strokes snap to"), this))
 {
     auto moving = [this] {
         QList<QTreeWidgetItem *> items;
@@ -298,10 +301,21 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     buttons->addWidget(m_up);
     buttons->addWidget(m_down);
 
+    // A row above the add and delete one: actions on the selected layer's kind (for now, snapping to a
+    // perspective layer), from the right.
+    m_snapTo->setObjectName(QStringLiteral("snapTo"));
+    m_snapTo->setCheckable(true);
+    m_snapTo->setEnabled(false);
+    auto *layerActions = new QHBoxLayout;
+    layerActions->setSpacing(0);
+    layerActions->addStretch(1); // these start from the right
+    layerActions->addWidget(m_snapTo);
+
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(4, 4, 4, 4);
     layout->setSpacing(4);
     layout->addLayout(header);
+    layout->addLayout(layerActions);
     layout->addLayout(buttons);
     layout->addWidget(m_tree, 1);
 
@@ -335,6 +349,7 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     m_addMenu->addAction(tr("Perspective Layer"), this, [this] { addClicked(doc::LayerKind::Perspective); });
     connect(m_remove, &QToolButton::clicked, this, &LayersPanel::removeSelected);
     connect(m_merge, &QToolButton::clicked, this, &LayersPanel::mergeSelected);
+    connect(m_snapTo, &QToolButton::clicked, this, &LayersPanel::snapToClicked);
     // Right click on a row: the same commands, where the pointer is.
     m_tree->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(m_tree, &QWidget::customContextMenuRequested, this, &LayersPanel::showContextMenu);
@@ -383,6 +398,7 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     // Another point of the timeline may show other frames.
     connect(m_document, &DocumentController::currentFrameChanged, this, [this] {
         markCurrentFrames();
+        refreshSnapMarks();
         selectCurrentRow();
         if (!m_thumbnailTimer.isActive()) // the cels' thumbnails
             m_thumbnailTimer.start();
@@ -564,6 +580,14 @@ void LayersPanel::rebuildTree()
                                                         layer.properties.name),
                                          layerRow),
                               1);
+                if (layer.kind == doc::LayerKind::Perspective) {
+                    // The sight of the layer strokes snap to (shown by refreshSnapMarks()).
+                    auto *snapMark = iconLabel(IconId::Crosshair, layerRow);
+                    snapMark->setObjectName(QStringLiteral("snapMark"));
+                    snapMark->setToolTip(tr("Strokes snap to this layer"));
+                    snapMark->setVisible(false);
+                    lh->addWidget(snapMark);
+                }
                 auto toggle = [this, celId, drawingId, id](auto change) {
                     const doc::Layer *l = m_document->document().layer(celId, drawingId, id);
                     if (!l)
@@ -595,6 +619,7 @@ void LayersPanel::rebuildTree()
     addRow(nullptr, Row::Paper, doc::kNoId, doc::kNoId, doc::kNoId, paperRow);
 
     markCurrentFrames();
+    refreshSnapMarks();
     restoreSelection();
     m_tree->verticalScrollBar()->setValue(scroll);
     syncHeader();
@@ -1146,6 +1171,52 @@ bool LayersPanel::dropAt(const QPoint &pos)
     return true;
 }
 
+// --- snapping ------------------------------------------------------------------------------
+
+void LayersPanel::setToolState(tools::ToolState *state)
+{
+    m_toolState = state;
+    if (!state)
+        return;
+    connect(state, &tools::ToolState::perspectiveSnapChanged, this, [this] {
+        refreshSnapMarks();
+        syncHeader();
+    });
+    refreshSnapMarks();
+    syncHeader();
+}
+
+bool LayersPanel::isSnapReference(doc::LayerId layer) const
+{
+    // One layer at most, exactly the one chosen.
+    return m_toolState && m_toolState->perspectiveSnapLayer() != doc::kNoId
+           && layer == m_toolState->perspectiveSnapLayer();
+}
+
+void LayersPanel::refreshSnapMarks()
+{
+    std::function<void(QTreeWidgetItem *)> visit = [&](QTreeWidgetItem *item) {
+        if (kindOf(item) == Row::Layer)
+            if (QWidget *row = m_tree->itemWidget(item, 0))
+                if (auto *mark = row->findChild<QLabel *>(QStringLiteral("snapMark")))
+                    mark->setVisible(isSnapReference(layerOf(item)));
+        for (int i = 0; i < item->childCount(); ++i)
+            visit(item->child(i));
+    };
+    for (int i = 0; i < m_tree->topLevelItemCount(); ++i)
+        visit(m_tree->topLevelItem(i));
+}
+
+void LayersPanel::snapToClicked(bool on)
+{
+    const doc::Layer *layer = m_document->currentDrawing() ? m_document->currentDrawing()->layer(m_document->currentLayer())
+                                                          : nullptr;
+    if (!m_toolState || !layer || layer->kind != doc::LayerKind::Perspective)
+        return;
+    // On a layer not snapped to: it is, and any other is not any more. On the one snapped to: none.
+    m_toolState->setPerspectiveSnapLayer(on ? layer->id : doc::kNoId);
+}
+
 // --- header ------------------------------------------------------------------------------
 
 void LayersPanel::publishSelection()
@@ -1251,6 +1322,13 @@ void LayersPanel::syncHeader()
     m_merge->setEnabled(canMerge);
     m_up->setEnabled(canUp);
     m_down->setEnabled(canDown);
+    // Snap to: on a perspective layer; pressed while strokes snap to it.
+    const bool snappable = m_toolState && m_focus == Focus::Layer && layer && layer->kind == doc::LayerKind::Perspective;
+    {
+        const QSignalBlocker block(m_snapTo);
+        m_snapTo->setEnabled(snappable);
+        m_snapTo->setChecked(snappable && isSnapReference(layer->id));
+    }
     if (!header)
         return;
 

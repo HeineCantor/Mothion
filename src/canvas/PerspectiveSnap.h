@@ -2,6 +2,8 @@
 
 #include "core/perspective/PerspectiveGrid.h"
 
+#include <QChar>
+#include <QColor>
 #include <QPointF>
 
 #include <array>
@@ -30,6 +32,14 @@ public:
     bool decided() const { return m_axis >= 0; }
     // 0, 1, 2: the plane's x, y and normal. -1 while undecided.
     int axis() const { return m_axis; }
+    // Takes the next axis (x, y, normal, x...) in place of the chosen one, deciding it if it was not
+    // yet: the line is then on that axis, from the same start. Returns it (-1 if none has a line).
+    int cycle();
+    // Where the line starts.
+    QPointF anchor() const { return m_start; }
+    // The color and letter that tell the axes apart (the colors of the perspective layer's handles).
+    static QColor axisColor(int axis);
+    static QChar axisLetter(int axis);
     // `pen` put on the chosen line (as is while undecided).
     QPointF snapped(const QPointF &pen) const;
 
