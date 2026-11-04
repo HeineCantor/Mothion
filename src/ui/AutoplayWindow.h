@@ -25,7 +25,7 @@ namespace mothion::ui {
 // handles under the slider (double click to bring them back out) narrow the
 // loop to the frames between them. "Play" starts and stops it; the
 // slider under the picture follows the playback and, dragged, picks the
-// frame; "Go to frame" sets the timeline's current time slot to the one shown; the speed is chosen in frames per second (the document's rate to
+// frame; "Flip" shows it mirrored left to right; "Go to frame" sets the timeline's current time slot to the one shown; the speed is chosen in frames per second (the document's rate to
 // begin with). Space plays and stops too. It plays on its own, apart from
 // the canvas's current frame, and follows the document as it is edited.
 class AutoplayWindow : public QWidget
@@ -73,6 +73,7 @@ private:
     QLabel *m_loopLabel;
     QPushButton *m_play; // checked while playing: then it offers Stop
     QPushButton *m_goTo;
+    QPushButton *m_flip; // mirrors the picture
     QComboBox *m_speed;
     QTimer m_timer;
     QTimer m_refresh; // edits come in bursts (a stroke): composed again once after them

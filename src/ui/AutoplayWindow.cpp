@@ -36,6 +36,11 @@ public:
     }
 
     QSize sizeHint() const override { return {640, 360}; }
+    void setFlipped(bool flipped)
+    {
+        m_flipped = flipped;
+        update();
+    }
 
 protected:
     void paintEvent(QPaintEvent *) override
@@ -48,11 +53,16 @@ protected:
         const QSize fitted = m_image->size().scaled(size(), Qt::KeepAspectRatio);
         const QRect target(QPoint((width() - fitted.width()) / 2, (height() - fitted.height()) / 2), fitted);
         p.setRenderHint(QPainter::SmoothPixmapTransform);
+        if (m_flipped) { // mirrored about the middle of the window: the frame stays where it is
+            p.translate(width(), 0);
+            p.scale(-1, 1);
+        }
         p.drawImage(target, *m_image);
     }
 
 private:
     const QImage *m_image;
+    bool m_flipped = false;
 };
 
 // The loop's two handles, under the slider: a bar of the frames with the
@@ -160,6 +170,7 @@ AutoplayWindow::AutoplayWindow(document::DocumentController *document, QWidget *
     , m_loopLabel(new QLabel(this))
     , m_play(new QPushButton(this))
     , m_goTo(new QPushButton(tr("Go to frame"), this))
+    , m_flip(new QPushButton(icon(IconId::FlipHorizontal), tr("Flip"), this))
     , m_speed(new QComboBox(this))
 {
     setWindowTitle(tr("Autoplay"));
@@ -197,6 +208,7 @@ AutoplayWindow::AutoplayWindow(document::DocumentController *document, QWidget *
     auto *controls = new QHBoxLayout;
     controls->addWidget(m_play);
     controls->addWidget(m_goTo);
+    controls->addWidget(m_flip);
     controls->addWidget(m_loopLabel);
     controls->addStretch(1);
     controls->addWidget(new QLabel(tr("Speed"), this));
@@ -218,6 +230,11 @@ AutoplayWindow::AutoplayWindow(document::DocumentController *document, QWidget *
     });
     m_goTo->setToolTip(tr("Set the timeline to the time slot shown now"));
     m_goTo->setFocusPolicy(Qt::NoFocus); // Space keeps playing and stopping
+    m_flip->setCheckable(true);
+    m_flip->setToolTip(tr("Show the animation flipped horizontally (only here: the drawing is not changed)"));
+    m_flip->setFocusPolicy(Qt::NoFocus);
+    connect(m_flip, &QPushButton::toggled, this,
+            [this](bool flipped) { static_cast<FramePicture *>(m_picture)->setFlipped(flipped); });
     connect(m_goTo, &QPushButton::clicked, this, [this] { m_document->setCurrentFrame(m_frame); });
     connect(m_play, &QPushButton::toggled, this, &AutoplayWindow::updatePlayButton);
     connect(m_play, &QPushButton::toggled, this, &AutoplayWindow::updateTimer);

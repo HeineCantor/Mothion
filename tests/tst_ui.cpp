@@ -2465,6 +2465,55 @@ private slots:
             QVERIFY(b->geometry().right() < palette.width()); // none spills over the side
     }
 
+    // "Flip" shows the animation mirrored left to right, in the window only.
+    void autoplayFlipsHorizontally()
+    {
+        document::DocumentController controller;
+        QImage image(200, 100, QImage::Format_ARGB32);
+        image.fill(Qt::red);
+        controller.importImage(image, QStringLiteral("red"));
+        controller.clearSelection();
+        // The red is moved to the left of the sheet: nothing is symmetric.
+        QImage bar(100, 100, QImage::Format_ARGB32);
+        bar.fill(Qt::blue);
+        controller.setCurrentFrame(0);
+        QVERIFY(controller.pasteImage(bar, QPoint(100, 450)));
+        controller.clearSelection();
+
+        ui::AutoplayWindow window(&controller);
+        window.resize(720, 500);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        window.findChild<QPushButton *>(QStringLiteral("autoplayPlay"))->setChecked(false);
+        QPushButton *flip = nullptr;
+        for (auto *button : window.findChildren<QPushButton *>())
+            if (button->text() == QStringLiteral("Flip"))
+                flip = button;
+        QVERIFY(flip && flip->isCheckable());
+
+        // Where the blue is, seen from the window: left of the middle, then right of it.
+        auto blueSide = [&] {
+            const QImage shot = window.grab().toImage();
+            long left = 0, right = 0;
+            for (int y = 0; y < shot.height(); ++y)
+                for (int x = 0; x < shot.width(); ++x) {
+                    const QColor c = shot.pixelColor(x, y);
+                    if (c.blue() > 200 && c.red() < 60 && c.green() < 60)
+                        (x < shot.width() / 2 ? left : right) += 1;
+                }
+            return std::pair{left, right};
+        };
+        const auto before = blueSide();
+        QVERIFY(before.first > 100 && before.second == 0);
+        flip->click();
+        const auto flipped = blueSide();
+        QVERIFY(flipped.second > 100 && flipped.first == 0);
+        QCOMPARE(controller.document().cel(controller.currentCel())->drawingAt(0)->layers.front().image.pixel(150, 500),
+                 doc::Pixel(0xff0000ff)); // the drawing is as it was
+        flip->click();
+        QCOMPARE(blueSide(), before);
+    }
+
     // The loop can be narrowed to a range of frames with the two handles under the slider.
     void autoplayLoopsOnlyARange()
     {
