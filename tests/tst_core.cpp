@@ -19,46 +19,68 @@ class TestCore : public QObject
 
 private slots:
     // The perspective grid: facing the viewer it is a flat square grid; tilted
-    // its far side shrinks towards the horizon; nothing behind the eye.
+    // its far side shrinks towards the horizon; moved away it gets smaller,
+    // moved aside it shifts; nothing behind the eye.
     void perspectiveGridProjects()
     {
+        // Rotations: right-handed in a space with y down, so x turns to y (clockwise on screen).
+        const perspective::Vec3 turned = perspective::rotate(perspective::axisAngle({0, 0, 1}, 90.0), {1, 0, 0});
+        QVERIFY(qAbs(turned.x) < 1e-12 && qAbs(turned.y - 1.0) < 1e-12 && qAbs(turned.z) < 1e-12);
+        const perspective::Rotation a = perspective::axisAngle({0, 0, 1}, 30.0);
+        const perspective::Rotation twice = a * a, sixty = perspective::axisAngle({0, 0, 1}, 60.0);
+        QVERIFY(qAbs(twice.w - sixty.w) < 1e-12 && qAbs(twice.z - sixty.z) < 1e-12);
+        const perspective::Vec3 tipped = perspective::rotate(perspective::fromAngles(0, 90, 0), {0, -1, 0});
+        QVERIFY(qAbs(tipped.z - 1.0) < 1e-12); // tilted 90°, the top lies away
+
         perspective::Grid g = perspective::defaultGrid(1000, 600);
-        g.turn = g.tilt = g.roll = 0.0;
+        g.orientation = {}; // facing
         g.cell = 50.0;
         g.cells = 2;
-        QCOMPARE(g.centerX, 500.0);
+        QCOMPARE(g.originX, 500.0);
         const auto c = perspective::project(g, 0, 0);
         QVERIFY(c && qAbs(c->x - 500.0) < 1e-9 && qAbs(c->y - 300.0) < 1e-9);
-        const auto corner = perspective::project(g, 100, -50); // facing: 1 unit = 1 px
+        const auto corner = perspective::project(g, 100, -50); // facing, on the picture: 1 unit = 1 px
         QVERIFY(qAbs(corner->x - 600.0) < 1e-9 && qAbs(corner->y - 250.0) < 1e-9);
         QCOMPARE(perspective::gridSegments(g).size(), std::size_t(10)); // 5 lines each way
         QVERIFY(!perspective::horizonLine(g, 100.0));                  // at infinity
 
-        g.tilt = 60.0;
-        const auto top = perspective::project(g, 0, -100), bottom = perspective::project(g, 0, 100);
-        QVERIFY(top->y > 200.0 && bottom->y < 400.0);      // foreshortened, both halves
-        QVERIFY(300.0 - top->y < bottom->y - 300.0);       // the far one more than the near one
-        const auto left = perspective::project(g, -100, -100), right = perspective::project(g, 100, -100);
-        QVERIFY(right->x - left->x < 200.0);               // the far side is narrower
+        // Moved: aside it shifts, away it shrinks around where the camera looks.
         const double focal = perspective::focalLength(g);
         QVERIFY(qAbs(focal - 500.0 / std::tan(std::numbers::pi / 6.0)) < 1e-9);
+        g.position = {200, 0, 0};
+        QVERIFY(qAbs(perspective::project(g, 0, 0)->x - 700.0) < 1e-9);
+        g.position = {0, 0, focal}; // twice as far
+        const auto far2 = perspective::project(g, 100, -50);
+        QVERIFY(qAbs(far2->x - 550.0) < 1e-9 && qAbs(far2->y - 275.0) < 1e-9);
+        g.position = {};
+
+        g.orientation = perspective::fromAngles(0, 60, 0);
+        const auto top = perspective::project(g, 0, -100), bottom = perspective::project(g, 0, 100);
+        QVERIFY(top->y > 200.0 && bottom->y < 400.0); // foreshortened, both halves
+        QVERIFY(300.0 - top->y < bottom->y - 300.0);  // the far one more than the near one
+        const auto left = perspective::project(g, -100, -100), right = perspective::project(g, 100, -100);
+        QVERIFY(right->x - left->x < 200.0); // the far side is narrower
         const auto h = perspective::horizonLine(g, 100.0);
         QVERIFY(h);
         const double horizonY = 300.0 - focal / std::tan(std::numbers::pi / 3.0);
         QVERIFY(qAbs(h->a.y - horizonY) < 1e-9 && qAbs(h->b.y - horizonY) < 1e-9);
-        QVERIFY(qAbs(h->b.x - h->a.x - 200.0) < 1e-9);
+        QVERIFY(qAbs(std::abs(h->b.x - h->a.x) - 200.0) < 1e-9);
         // Far points of the plane fall towards the horizon, never past it.
         const auto far = perspective::project(g, 0, -1e6);
         QVERIFY(far->y > horizonY && far->y - horizonY < 1.0);
+        // Moving the plane does not move its horizon.
+        g.position = {300, -120, 500};
+        const auto same = perspective::horizonLine(g, 100.0);
+        QVERIFY(qAbs(same->a.y - horizonY) < 1e-9);
+        g.position = {};
 
         // Rolled a quarter turn the horizon stands upright.
-        g.roll = 90.0;
+        g.orientation = perspective::fromAngles(0, 60, 90);
         const auto upright = perspective::horizonLine(g, 100.0);
         QVERIFY(qAbs(upright->a.x - upright->b.x) < 1e-9);
 
         // Near the eye a line is cut where it would pass behind it.
-        g.roll = 0.0;
-        g.tilt = 80.0;
+        g.orientation = perspective::fromAngles(0, 80, 0);
         g.cells = 40;
         g.cell = 200.0; // up to 8000 px towards the eye: far behind it
         for (const perspective::Segment &s : perspective::gridSegments(g))

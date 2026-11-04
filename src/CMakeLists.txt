@@ -74,6 +74,7 @@ qt_add_library(mothion_gui STATIC
     canvas/TileQt.h canvas/TileQt.cpp
     canvas/StrokeSession.h canvas/StrokeSession.cpp
     canvas/FrameRenderer.h canvas/FrameRenderer.cpp
+    canvas/PerspectiveGizmo.h canvas/PerspectiveGizmo.cpp
     canvas/ViewTransform.h canvas/ViewTransform.cpp
     canvas/NavigationGesture.h canvas/NavigationGesture.cpp
     canvas/CanvasTool.h
@@ -110,7 +111,6 @@ qt_add_library(mothion_gui STATIC
     ui/panels/NavigatorPanel.h ui/panels/NavigatorPanel.cpp
     ui/panels/BlendModes.h
     ui/panels/LayersPanel.h ui/panels/LayersPanel.cpp
-    ui/panels/PerspectiveControls.h ui/panels/PerspectiveControls.cpp
     ui/panels/timeline/TimelineMetrics.h
     ui/panels/timeline/TimelineView.h ui/panels/timeline/TimelineView.cpp
     ui/panels/timeline/TimelinePanel.h ui/panels/timeline/TimelinePanel.cpp

@@ -167,6 +167,10 @@ public:
     // nothing (a slider being dragged); the edit is then executed as a command
     // from the properties it had before. False if there is no such layer.
     bool previewLayerProperties(const LayerRef &layer, const doc::LayerProperties &properties);
+    // Records an edit shown with previewLayerProperties(): the layer back to
+    // `before`, then `after` executed as one undo step (nothing if equal).
+    void commitLayerProperties(const LayerRef &layer, const doc::LayerProperties &before,
+                               const doc::LayerProperties &after);
     void setLayerSelection(std::vector<LayerRef> layers);
     const std::vector<LayerRef> &layerSelection() const { return m_layerSelection; }
     // Like beginPaint(false), for every layer of layerSelection() (or the

@@ -211,6 +211,14 @@ bool DocumentController::previewLayerProperties(const LayerRef &ref, const doc::
     return true;
 }
 
+void DocumentController::commitLayerProperties(const LayerRef &ref, const doc::LayerProperties &before,
+                                               const doc::LayerProperties &after)
+{
+    if (!previewLayerProperties(ref, before))
+        return;
+    execute(doc::makeSetLayerProperties(*m_document, ref.cel, ref.drawing, ref.layer, after));
+}
+
 void DocumentController::insertFrame(doc::CelId cel, int frame, bool after)
 {
     if (!m_document->cel(cel))

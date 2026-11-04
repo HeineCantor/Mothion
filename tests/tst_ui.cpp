@@ -4,6 +4,7 @@
 #include "canvas/FillTool.h"
 #include "canvas/FrameRenderer.h"
 #include "canvas/MoveTool.h"
+#include "canvas/PerspectiveGizmo.h"
 #include "canvas/PuppetTool.h"
 #include "canvas/SelectionTool.h"
 #include "canvas/TransformTool.h"
@@ -1045,12 +1046,8 @@ private slots:
         QCOMPARE(controller.undoText(), QStringLiteral("Undo transform"));
     }
 
-    // The panel shows each cel as a folder holding all its frames, and each
-    // frame its layers; the one shown now is current, and on an empty point
-    // no layer can be added. Choosing another frame goes to where it is shown.
     // The arrow next to + adds a perspective layer: a grid that cannot be
-    // drawn on, set from the controls under the header; a slider dragged
-    // shows it live and makes one undo step.
+    // drawn on, and that the panel has no controls for (it is set on the canvas).
     void perspectiveLayers()
     {
         document::DocumentController controller;
@@ -1061,8 +1058,6 @@ private slots:
         doc::Document &d = controller.documentForCommands();
         controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 1, "Line").command);
         QCoreApplication::processEvents();
-        auto *controls = panel.findChild<QWidget *>(QStringLiteral("perspectiveControls"));
-        QVERIFY(controls && !controls->isVisible()); // a raster layer is current
 
         QToolButton *add = nullptr;
         for (QToolButton *b : panel.findChildren<QToolButton *>())
@@ -1079,8 +1074,9 @@ private slots:
         const doc::Layer *grid = drawing.layer(controller.currentLayer());
         QVERIFY(grid && grid->kind == doc::LayerKind::Perspective);
         QCOMPARE(grid->properties.name, std::string("Perspective 1"));
-        QCOMPARE(grid->properties.perspective.centerX, d.width() / 2.0); // fit to the document
-        QVERIFY(controls->isVisible());
+        QCOMPARE(grid->properties.perspective.originX, d.width() / 2.0); // fit to the document
+        QCOMPARE(grid->properties.perspective.position, perspective::Vec3());
+        QVERIFY(!panel.findChild<QSlider *>(QStringLiteral("perspectiveTilt"))); // no controls in the panel
 
         // Not drawn on, nor worked on with the selection tools.
         QString reason;
@@ -1089,34 +1085,143 @@ private slots:
         controller.selectAll();
         QVERIFY(!controller.eraseSelection(&reason));
         QVERIFY(reason.contains(QStringLiteral("perspective")));
-        controller.clearSelection();
-
-        // A drag on the tilt: live, then one undo step.
-        const QString undoBefore = controller.undoText();
-        auto *tilt = controls->findChild<QSlider *>(QStringLiteral("perspectiveTilt"));
-        QVERIFY(tilt);
-        tilt->setSliderDown(true);
-        tilt->setValue(40);
-        tilt->setValue(30);
-        QCOMPARE(drawing.layer(grid->id)->properties.perspective.tilt, 30.0);
-        QCOMPARE(controller.undoText(), undoBefore); // nothing recorded yet
-        tilt->setSliderDown(false);
-        QCOMPARE(controller.undoText(), QStringLiteral("Undo layer properties"));
-        controller.undo();
-        QCOMPARE(drawing.layer(grid->id)->properties.perspective.tilt, 60.0);
-        QCOMPARE(tilt->value(), 60);
-
-        // A typed value is a step of its own.
-        controls->findChild<QSpinBox *>(QStringLiteral("perspectiveTurnValue"))->setValue(-45);
-        QCOMPARE(drawing.layer(grid->id)->properties.perspective.turn, -45.0);
-        controller.undo();
-        QCOMPARE(drawing.layer(grid->id)->properties.perspective.turn, 30.0);
-
-        // Back on the raster layer, the controls go.
-        controller.setCurrentLayer(drawing.layers.front().id);
-        QVERIFY(!controls->isVisible());
     }
 
+    // The handles of a perspective layer on the canvas, whatever the tool: the
+    // middle square moves the plane, the arrows move it along its axes, the
+    // rings turn it around them, the corner sizes the cells, the button opens
+    // the settings. Each drag is live and one undo step.
+    void perspectiveGizmo()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(1000, 700);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 1, "Line").command);
+        using Handle = canvas::PerspectiveGizmo::Handle;
+        const canvas::PerspectiveGizmo &gizmo = canvas.perspectiveGizmo();
+        QVERIFY(!gizmo.target()); // a raster layer is current
+        QVERIFY(controller.addLayer(false, doc::LayerKind::Perspective));
+        QVERIFY(gizmo.target());
+        const doc::Drawing &drawing = *controller.currentDrawing();
+        const doc::LayerId id = controller.currentLayer();
+        auto grid = [&] { return drawing.layer(id)->properties.perspective; };
+        auto at = [&](Handle h) {
+            const auto p = gizmo.handlePoint(h, canvas.view());
+            return p ? canvas.view().documentToView().map(*p) : QPointF(-1000, -1000);
+        };
+        for (Handle h : {Handle::Move, Handle::AxisX, Handle::AxisY, Handle::AxisZ, Handle::RingX, Handle::RingY,
+                         Handle::RingZ, Handle::Scale, Handle::Menu}) {
+            const auto p = gizmo.handlePoint(h, canvas.view());
+            QVERIFY2(p, qPrintable(QStringLiteral("handle %1 shown").arg(int(h))));
+            QCOMPARE(gizmo.handleAt(*p, canvas.view()), h);
+        }
+        auto drag = [&](QPointF from, QPointF by) {
+            QTest::mousePress(&canvas, Qt::LeftButton, {}, from.toPoint());
+            QTest::mouseMove(&canvas, (from + by * 0.5).toPoint());
+            QTest::mouseMove(&canvas, (from + by).toPoint());
+            QTest::mouseRelease(&canvas, Qt::LeftButton, {}, (from + by).toPoint());
+        };
+        auto near = [](double a, double b, double tolerance) { return std::abs(a - b) <= tolerance; };
+        const double zoom = canvas.view().zoom();
+        const QString undoBefore = controller.undoText();
+
+        // The middle square: as far as the pointer went, on the sheet (the brush is the tool).
+        QVERIFY(tools::ToolState::isPaintTool(state.activeTool()));
+        drag(at(Handle::Move), QPointF(60, -30));
+        QVERIFY(near(grid().position.x, 60.0 / zoom, 2.0 / zoom));
+        QVERIFY(near(grid().position.y, -30.0 / zoom, 2.0 / zoom));
+        QCOMPARE(grid().position.z, 0.0);
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo layer properties"));
+        QVERIFY(drawing.layers.front().image.isEmpty()); // the brush drew nothing
+        controller.undo();
+        QCOMPARE(grid().position, perspective::Vec3());
+        QCOMPARE(controller.undoText(), undoBefore);
+
+        // The blue arrow: along the plane's normal, the orientation left alone.
+        const perspective::Rotation orientation = grid().orientation;
+        const QPointF blue = at(Handle::AxisZ) - at(Handle::Move);
+        drag(at(Handle::AxisZ), blue / std::hypot(blue.x(), blue.y()) * 40.0);
+        const perspective::Vec3 normal = perspective::axis(grid(), {0, 0, -1});
+        QVERIFY(perspective::dot(grid().position, normal) > 1.0);
+        const perspective::Vec3 rest = grid().position - normal * perspective::dot(grid().position, normal);
+        QVERIFY(std::sqrt(perspective::dot(rest, rest)) < 1e-6); // only along it
+        QCOMPARE(grid().orientation, orientation);
+        controller.undo();
+
+        // The blue ring: around the normal, which stays put; the grid's lines turn.
+        const perspective::Vec3 xBefore = perspective::axis(grid(), {1, 0, 0});
+        QPointF from = at(Handle::RingZ);
+        drag(from, QPointF(25, 25));
+        const perspective::Vec3 normalAfter = perspective::axis(grid(), {0, 0, -1});
+        QVERIFY(perspective::dot(normalAfter, normal) > 1.0 - 1e-9);
+        QVERIFY(perspective::dot(perspective::axis(grid(), {1, 0, 0}), xBefore) < 0.999);
+        QCOMPARE(grid().position, perspective::Vec3());
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo layer properties"));
+        controller.undo();
+        QCOMPARE(grid().orientation, orientation);
+
+        // The red ring: around the grid's x axis, which stays put.
+        drag(at(Handle::RingX), QPointF(0, 30));
+        QVERIFY(perspective::dot(perspective::axis(grid(), {1, 0, 0}), xBefore) > 1.0 - 1e-9);
+        QVERIFY(perspective::dot(perspective::axis(grid(), {0, 0, -1}), normal) < 0.999);
+        controller.undo();
+
+        // The corner: away from the middle, bigger cells.
+        const double cell = grid().cell;
+        const QPointF out = at(Handle::Scale) - at(Handle::Move);
+        drag(at(Handle::Scale), out * 0.5);
+        QVERIFY(grid().cell > cell * 1.3);
+        controller.undo();
+        QCOMPARE(grid().cell, cell);
+
+        // The settings menu: each choice an undo step.
+        QMenu *menu = const_cast<canvas::PerspectiveGizmo &>(gizmo).createMenu(&canvas);
+        auto find = [](QMenu *m, const QString &text) -> QAction * {
+            for (QAction *a : m->actions())
+                if (a->text() == text)
+                    return a;
+            return nullptr;
+        };
+        QMenu *cells = find(menu, QStringLiteral("Cells"))->menu();
+        QAction *four = nullptr;
+        for (QAction *a : cells->actions())
+            if (a->data().toInt() == 4)
+                four = a;
+        QVERIFY(four);
+        four->trigger();
+        QCOMPARE(grid().cells, 4);
+        find(menu, QStringLiteral("Show horizon"))->toggle();
+        QVERIFY(!grid().horizon);
+        drag(at(Handle::RingY), QPointF(30, 0));
+        QVERIFY(!(grid().orientation == orientation));
+        find(menu, QStringLiteral("Reset rotation"))->trigger();
+        QCOMPARE(grid().orientation, perspective::Grid().orientation);
+        delete menu;
+
+        // Locked: shown, but no handle takes the pointer.
+        doc::LayerProperties locked = drawing.layer(id)->properties;
+        locked.locked = true;
+        controller.execute(doc::makeSetLayerProperties(d, controller.currentCel(), drawing.id, id, locked));
+        const auto middle = gizmo.handlePoint(Handle::Move, canvas.view());
+        QVERIFY(middle);
+        QCOMPARE(gizmo.handleAt(*middle, canvas.view()), Handle::None);
+        const perspective::Vec3 position = grid().position;
+        drag(at(Handle::Move), QPointF(50, 0));
+        QCOMPARE(grid().position, position);
+
+        // Another layer current: no handles.
+        controller.setCurrentLayer(drawing.layers.front().id);
+        QVERIFY(!gizmo.target());
+        QCOMPARE(gizmo.handleAt(*middle, canvas.view()), Handle::None);
+    }
+
+    // The panel shows each cel as a folder holding all its frames, and each
+    // frame its layers; the one shown now is current, and on an empty point
+    // no layer can be added. Choosing another frame goes to where it is shown.
     void layersPanelFollowsTheFrame()
     {
         document::DocumentController controller;

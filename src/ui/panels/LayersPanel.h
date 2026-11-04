@@ -36,8 +36,8 @@ namespace mothion::ui {
 //    (Ctrl and Shift select several, of any cel);
 //  - a layer: the blend mode and opacity of the selected layers (of that
 //    frame: Ctrl+click adds or takes away one, Shift+click a range); new
-//    layer above (of either kind), delete, up and down. Under the header,
-//    the settings of a perspective layer when it is the current one.
+//    layer above (of either kind), delete, up and down. A perspective
+//    layer is set on the canvas (canvas::PerspectiveGizmo).
 // The tools that act on several layers at once (the move) take every layer
 // of the selected rows: a frame stands for its layers, a cel for all the
 // layers of its frames.

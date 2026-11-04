@@ -50,9 +50,9 @@ std::unique_ptr<doc::Document> sampleDocument()
     doc::Drawing &b = ink.addDrawing({d->allocateDrawingId(), "B", {{d->allocateLayerId(), {"Line"}, {}}}});
     doc::LayerProperties grid{"Perspective ✓"};
     grid.perspective = perspective::defaultGrid(320, 240);
-    grid.perspective.turn = -12.5;
-    grid.perspective.tilt = 71.0;
-    grid.perspective.roll = 3.0;
+    grid.perspective.orientation = perspective::fromAngles(-12.5, 71.0, 3.0);
+    grid.perspective.position = {15.0, -30.0, 400.0};
+    grid.perspective.fov = 45.0;
     grid.perspective.cells = 5;
     grid.perspective.color = 0x80ff8000;
     grid.perspective.horizon = false;

@@ -85,7 +85,7 @@ QRect drawingBounds(const doc::Drawing &drawing, bool guides)
                 if (const auto h = perspective::horizonLine(g, g.frameWidth * 4.0))
                     lines |= QRectF(QPointF(h->a.x, h->a.y), QPointF(h->b.x, h->b.y)).normalized();
             const double reach = g.frameWidth * 4.0, pad = lineWidth(g) * 2.0;
-            const QRectF limit(g.centerX - reach, g.centerY - reach, 2.0 * reach, 2.0 * reach);
+            const QRectF limit(g.originX - reach, g.originY - reach, 2.0 * reach, 2.0 * reach);
             bounds |= lines.adjusted(-pad, -pad, pad, pad).intersected(limit).toAlignedRect();
             continue;
         }

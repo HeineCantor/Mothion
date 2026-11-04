@@ -338,7 +338,7 @@ private slots:
         doc::Drawing &drawing = *document.cel(cel.celId())->drawing(nd.id);
         doc::LayerProperties props{"P"};
         props.perspective = perspective::defaultGrid(400, 300);
-        props.perspective.turn = props.perspective.tilt = 0.0; // a flat grid, lines every 25 px from the center
+        props.perspective.orientation = {}; // a flat grid, lines every 25 px from the center
         props.perspective.color = 0xff0000ff;
         drawing.layers.push_back({document.allocateLayerId(), props, {}, doc::LayerKind::Perspective});
 

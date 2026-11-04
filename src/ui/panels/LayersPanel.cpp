@@ -9,7 +9,6 @@
 #include "document/DocumentController.h"
 #include "ui/IconFactory.h"
 #include "ui/panels/BlendModes.h"
-#include "ui/panels/PerspectiveControls.h"
 
 #include <QComboBox>
 #include <QDrag>
@@ -125,8 +124,10 @@ QPixmap layerThumbnail(const doc::Layer &layer, const QSize &docSize)
     perspective::Grid small = layer.properties.perspective;
     const double k = std::min(double(kThumbSize.width()) / docSize.width(),
                               double(kThumbSize.height()) / docSize.height());
-    small.centerX *= k;
-    small.centerY *= k;
+    // The whole scene smaller: what the camera sees keeps its shape.
+    small.originX *= k;
+    small.originY *= k;
+    small.position = small.position * k;
     small.frameWidth *= k;
     small.cell *= k;
     QPainter p(&pixmap);
@@ -298,7 +299,6 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     layout->setContentsMargins(4, 4, 4, 4);
     layout->setSpacing(4);
     layout->addLayout(header);
-    layout->addWidget(new PerspectiveControls(m_document, this)); // shown for a perspective layer
     layout->addLayout(buttons);
     layout->addWidget(m_tree, 1);
 

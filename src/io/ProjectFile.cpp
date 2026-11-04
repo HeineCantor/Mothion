@@ -7,6 +7,7 @@
 #include <QCoreApplication>
 #include <QColor>
 #include <QImage>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QPainter>
@@ -76,17 +77,18 @@ doc::BlendMode blendFromName(const QString &text)
     return doc::BlendMode::Normal; // a mode from a newer version: the closest we have
 }
 
-// A perspective layer's grid as JSON, names as in perspective::Grid.
+// A perspective layer's grid as JSON, names as in perspective::Grid (the
+// orientation as its quaternion, the position as x, y, z).
 QString gridToJson(const perspective::Grid &g)
 {
     const QJsonObject o{
-        {QStringLiteral("turn"), g.turn},
-        {QStringLiteral("tilt"), g.tilt},
-        {QStringLiteral("roll"), g.roll},
+        {QStringLiteral("orientation"),
+         QJsonArray{g.orientation.w, g.orientation.x, g.orientation.y, g.orientation.z}},
+        {QStringLiteral("position"), QJsonArray{g.position.x, g.position.y, g.position.z}},
         {QStringLiteral("fov"), g.fov},
         {QStringLiteral("frameWidth"), g.frameWidth},
-        {QStringLiteral("centerX"), g.centerX},
-        {QStringLiteral("centerY"), g.centerY},
+        {QStringLiteral("originX"), g.originX},
+        {QStringLiteral("originY"), g.originY},
         {QStringLiteral("cell"), g.cell},
         {QStringLiteral("cells"), g.cells},
         {QStringLiteral("color"), QColor::fromRgba(g.color).name(QColor::HexArgb)},
@@ -95,7 +97,8 @@ QString gridToJson(const perspective::Grid &g)
     return QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));
 }
 
-// Missing or damaged values keep the defaults.
+// Missing or damaged values keep the defaults. The first perspective layers
+// had turn / tilt / roll angles and their center on the camera's axis.
 perspective::Grid gridFromJson(const QString &text)
 {
     const QJsonObject o = QJsonDocument::fromJson(text.toUtf8()).object();
@@ -104,13 +107,24 @@ perspective::Grid gridFromJson(const QString &text)
         if (o.value(QLatin1String(key)).isDouble())
             value = o.value(QLatin1String(key)).toDouble();
     };
-    number("turn", g.turn);
-    number("tilt", g.tilt);
-    number("roll", g.roll);
+    if (const QJsonArray q = o.value(QStringLiteral("orientation")).toArray(); q.size() == 4) {
+        g.orientation =
+            perspective::normalized({q[0].toDouble(1.0), q[1].toDouble(), q[2].toDouble(), q[3].toDouble()});
+    } else if (o.contains(QStringLiteral("tilt"))) {
+        double turn = 30.0, tilt = 60.0, roll = 0.0;
+        number("turn", turn);
+        number("tilt", tilt);
+        number("roll", roll);
+        g.orientation = perspective::fromAngles(turn, tilt, roll);
+    }
+    if (const QJsonArray p = o.value(QStringLiteral("position")).toArray(); p.size() == 3)
+        g.position = {p[0].toDouble(), p[1].toDouble(), p[2].toDouble()};
     number("fov", g.fov);
     number("frameWidth", g.frameWidth);
-    number("centerX", g.centerX);
-    number("centerY", g.centerY);
+    number("centerX", g.originX); // the first ones
+    number("centerY", g.originY);
+    number("originX", g.originX);
+    number("originY", g.originY);
     number("cell", g.cell);
     g.cells = std::max(1, o.value(QStringLiteral("cells")).toInt(g.cells));
     if (const QColor color = QColor::fromString(o.value(QStringLiteral("color")).toString()); color.isValid())

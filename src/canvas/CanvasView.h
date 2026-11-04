@@ -3,6 +3,7 @@
 #include "canvas/CanvasTool.h"
 #include "canvas/FrameRenderer.h"
 #include "canvas/NavigationGesture.h"
+#include "canvas/PerspectiveGizmo.h"
 #include "canvas/StrokeSession.h"
 #include "canvas/ViewTransform.h"
 #include "core/PenSample.h"
@@ -37,7 +38,9 @@ class DebugOverlay;
 //
 // Input path: Qt tablet/mouse event -> input::toPenSample() -> handleSample().
 // From handleSample() on, only PenSamples are used. A sample either drives a
-// NavigationGesture (hand / zoom / rotate), a CanvasTool (move...) or a stroke:
+// NavigationGesture (hand / zoom / rotate), the handles of the current
+// perspective layer (PerspectiveGizmo, when pressed on one), a CanvasTool
+// (move...) or a stroke:
 //   sample -> StrokeSmoother -> brush::BrushInput (pressure curve, velocity, tilt)
 //          -> brush::DabGenerator -> StrokeSession (DabStamper),
 // painting into the drawing the DocumentController picks for the current
@@ -60,6 +63,9 @@ public:
     // The frames whose drawings the onion skin shows now, nearest first,
     // before (negative distance) and after (positive): one per drawing.
     QList<int> onionSkinFrames() const;
+
+    // The handles of the current perspective layer.
+    const PerspectiveGizmo &perspectiveGizmo() const { return m_gizmo; }
 
     // Undo and redo inside an edit left open by the active tool (the drags
     // of a puppet warp or a transform); false if there is no step to take,
@@ -164,6 +170,8 @@ private:
     std::unique_ptr<CanvasTool> m_fillTool;
     std::unique_ptr<CanvasTool> m_transformTool;
     CanvasTool *m_editTool = nullptr; // the canvas tool between its press and release
+    PerspectiveGizmo m_gizmo;
+    void updateGizmoCursor(); // over a handle: the hand
     std::optional<brush::DabGenerator> m_dabs;
     std::vector<brush::BrushInput> m_points; // the stroke so far, for the final pass
     std::size_t m_drawnPoints = 0;           // points already given to m_dabs
