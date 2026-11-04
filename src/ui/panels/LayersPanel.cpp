@@ -9,6 +9,7 @@
 #include "document/DocumentController.h"
 #include "ui/IconFactory.h"
 #include "ui/panels/BlendModes.h"
+#include "ui/panels/PerspectiveControls.h"
 
 #include <QComboBox>
 #include <QDrag>
@@ -17,6 +18,7 @@
 #include <QHBoxLayout>
 #include <QInputDialog>
 #include <QLabel>
+#include <QMenu>
 #include <QPainter>
 #include <QPointer>
 #include <QScrollBar>
@@ -111,6 +113,26 @@ QPixmap thumbnail(const doc::TiledImage *image, const doc::Drawing *drawing, con
     p.setPen(QColor(0x18, 0x18, 0x1a));
     p.drawRect(img.rect().adjusted(0, 0, -1, -1));
     return QPixmap::fromImage(img);
+}
+
+// A layer's thumbnail: its pixels, or a perspective layer's grid drawn small
+// (scaled as a grid, so its lines stay visible).
+QPixmap layerThumbnail(const doc::Layer &layer, const QSize &docSize)
+{
+    if (layer.kind != doc::LayerKind::Perspective)
+        return thumbnail(&layer.image, nullptr, docSize, nullptr);
+    QPixmap pixmap = thumbnail(nullptr, nullptr, docSize, nullptr);
+    perspective::Grid small = layer.properties.perspective;
+    const double k = std::min(double(kThumbSize.width()) / docSize.width(),
+                              double(kThumbSize.height()) / docSize.height());
+    small.centerX *= k;
+    small.centerY *= k;
+    small.frameWidth *= k;
+    small.cell *= k;
+    QPainter p(&pixmap);
+    p.setClipRect(pixmap.rect().adjusted(1, 1, -1, -1));
+    canvas::paintPerspective(p, small);
+    return pixmap;
 }
 
 QToolButton *toggleButton(IconId id, const QString &tip, bool on, QWidget *parent)
@@ -276,6 +298,7 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     layout->setContentsMargins(4, 4, 4, 4);
     layout->setSpacing(4);
     layout->addLayout(header);
+    layout->addWidget(new PerspectiveControls(m_document, this)); // shown for a perspective layer
     layout->addLayout(buttons);
     layout->addWidget(m_tree, 1);
 
@@ -302,7 +325,11 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
         commitOpacity();
     });
 
-    connect(m_add, &QToolButton::clicked, this, &LayersPanel::addClicked);
+    connect(m_add, &QToolButton::clicked, this, [this] { addClicked(doc::LayerKind::Raster); });
+    // The arrow next to +: which kind of layer.
+    m_addMenu = new QMenu(m_add);
+    m_addMenu->addAction(tr("Layer"), this, [this] { addClicked(doc::LayerKind::Raster); });
+    m_addMenu->addAction(tr("Perspective Layer"), this, [this] { addClicked(doc::LayerKind::Perspective); });
     connect(m_remove, &QToolButton::clicked, this, &LayersPanel::removeSelected);
     // Delete in the tree: the same as the bin.
     auto *remove = new QShortcut(QKeySequence::Delete, m_tree, this, [this] {
@@ -522,7 +549,7 @@ void LayersPanel::rebuildTree()
                 auto *layerLock = toggleButton(IconId::Lock, tr("Lock / unlock"), layer.properties.locked, layerRow);
                 auto *layerThumb = new QLabel(layerRow);
                 layerThumb->setObjectName(QStringLiteral("thumbnail"));
-                layerThumb->setPixmap(thumbnail(&layer.image, nullptr, docSize, nullptr));
+                layerThumb->setPixmap(layerThumbnail(layer, docSize));
                 lh->addWidget(layerEye);
                 lh->addWidget(layerLock);
                 lh->addWidget(layerThumb);
@@ -582,7 +609,7 @@ void LayersPanel::refreshThumbnails()
         for (const auto &[id, drawing] : cel.drawings()) {
             set(frameItem(id), thumbnail(nullptr, &drawing, docSize, nullptr));
             for (const doc::Layer &layer : drawing.layers)
-                set(layerItem(layer.id), thumbnail(&layer.image, nullptr, docSize, nullptr));
+                set(layerItem(layer.id), layerThumbnail(layer, docSize));
         }
     }
 }
@@ -785,15 +812,15 @@ void LayersPanel::commitOpacity()
         editSelectedLayers([opacity](doc::LayerProperties &p) { p.opacity = opacity; });
 }
 
-void LayersPanel::addClicked()
+void LayersPanel::addClicked(doc::LayerKind kind)
 {
     switch (m_focus) {
     case Focus::Cel: m_document->addCel(); break;
     case Focus::Frame:
         m_focus = Focus::Layer; // the new layer is shown as current
-        m_document->addLayer(true);
+        m_document->addLayer(true, kind);
         break;
-    case Focus::Layer: m_document->addLayer(); break;
+    case Focus::Layer: m_document->addLayer(false, kind); break;
     }
 }
 
@@ -1098,6 +1125,9 @@ void LayersPanel::syncHeader()
     for (QWidget *w : std::initializer_list<QWidget *>{m_blend, m_opacity, m_opacityValue})
         w->setEnabled(header);
     m_add->setEnabled(canAdd);
+    // The kinds of layer to add, unless + adds a cel.
+    m_add->setMenu(m_focus == Focus::Cel ? nullptr : m_addMenu);
+    m_add->setPopupMode(m_focus == Focus::Cel ? QToolButton::DelayedPopup : QToolButton::MenuButtonPopup);
     m_remove->setEnabled(canRemove);
     m_up->setEnabled(canUp);
     m_down->setEnabled(canDown);

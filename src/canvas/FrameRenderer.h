@@ -5,14 +5,22 @@
 #include <QImage>
 #include <QRect>
 
+class QPainter;
+
 namespace mothion::canvas {
 
-// The part of the document the drawing's visible layers cover (tile bounds).
-QRect drawingBounds(const doc::Drawing &drawing);
+// The part of the document the drawing's visible layers cover (tile bounds;
+// for a perspective layer, its lines). Without `guides`, perspective layers
+// are left out, here and in composeDrawing().
+QRect drawingBounds(const doc::Drawing &drawing, bool guides = true);
 // The drawing's visible layers composed over transparency in `area`
 // (document coordinates), as an image of that size: what its cel shows,
 // before the cel's own opacity and blend mode.
-QImage composeDrawing(const doc::Drawing &drawing, const QRect &area);
+QImage composeDrawing(const doc::Drawing &drawing, const QRect &area, bool guides = true);
+
+// Draws a perspective layer's grid (and horizon) in document coordinates,
+// with the painter's opacity and composition mode.
+void paintPerspective(QPainter &p, const perspective::Grid &grid);
 
 // Composes what a frame looks like: paper, then the visible cels from
 // bottom to top, each one the drawing it exposes at that frame. A drawing's
@@ -30,6 +38,8 @@ public:
 
     // Without paper the frame starts transparent (PNG export).
     void setPaperVisible(bool visible) { m_paper = visible; }
+    // Without guides perspective layers are left out (export, playback).
+    void setGuidesVisible(bool visible) { m_guides = visible; }
 
     // Whole frame (frame changed, cels changed, document resized...).
     void renderAll(const doc::Document &doc, int frame);
@@ -39,6 +49,7 @@ public:
 private:
     QImage m_image;
     bool m_paper = true;
+    bool m_guides = true;
 };
 
 } // namespace mothion::canvas

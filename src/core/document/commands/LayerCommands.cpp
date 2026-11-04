@@ -26,12 +26,12 @@ Drawing *drawingOf(Document &doc, CelId celId, DrawingId drawing)
 // --- AddLayerCommand ----------------------------------------------------------------
 
 AddLayerCommand::AddLayerCommand(Document &doc, CelId cel, DrawingId drawing, int index,
-                                 LayerProperties properties, TiledImage image)
+                                 LayerProperties properties, TiledImage image, LayerKind kind)
     : m_cel(cel)
     , m_drawing(drawing)
     , m_id(doc.allocateLayerId())
     , m_index(index)
-    , m_layer(Layer{m_id, std::move(properties), std::move(image)})
+    , m_layer(Layer{m_id, std::move(properties), std::move(image), kind})
 {
 }
 

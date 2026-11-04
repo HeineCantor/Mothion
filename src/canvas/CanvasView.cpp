@@ -149,10 +149,10 @@ const CanvasView::OnionImage &CanvasView::onionImage(doc::DrawingId id, const QC
     cached.color = color.rgba();
     const doc::Cel *cel = m_document->document().cel(m_document->currentCel());
     const doc::Drawing *drawing = cel ? cel->drawing(id) : nullptr;
-    const QRect bounds = drawing ? drawingBounds(*drawing) : QRect();
+    const QRect bounds = drawing ? drawingBounds(*drawing, false) : QRect(); // no guides in ghosts
     if (bounds.isEmpty())
         return cached;
-    QImage image = composeDrawing(*drawing, bounds); // its visible layers, as the cel shows it
+    QImage image = composeDrawing(*drawing, bounds, false); // its visible layers, as the cel shows it
     // Every pixel the color, keeping its coverage.
     const int r = color.red(), g = color.green(), b = color.blue();
     for (int y = 0; y < image.height(); ++y) {

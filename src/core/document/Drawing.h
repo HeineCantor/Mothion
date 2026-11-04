@@ -2,6 +2,7 @@
 
 #include "core/document/Ids.h"
 #include "core/document/TiledImage.h"
+#include "core/perspective/PerspectiveGrid.h"
 
 #include <cstddef>
 #include <string>
@@ -18,16 +19,23 @@ struct LayerProperties
     bool locked = false;
     float opacity = 1.0f; // 0..1
     BlendMode blend = BlendMode::Normal;
+    perspective::Grid perspective = {}; // what a perspective layer shows
 
     bool operator==(const LayerProperties &) const = default;
 };
 
-// One layer of a drawing: pixels stacked with the drawing's other layers.
+// What a layer is: pixels drawn on it, or a perspective grid (a guide that
+// cannot be drawn on: its image stays empty, its look comes from
+// LayerProperties::perspective).
+enum class LayerKind { Raster, Perspective };
+
+// One layer of a drawing, stacked with the drawing's other layers.
 struct Layer
 {
     LayerId id = kNoId;
     LayerProperties properties;
     TiledImage image;
+    LayerKind kind = LayerKind::Raster;
 };
 
 // One drawing of a cel, a "frame" in the interface. It exists independently

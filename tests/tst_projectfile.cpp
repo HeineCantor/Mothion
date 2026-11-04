@@ -48,6 +48,15 @@ std::unique_ptr<doc::Document> sampleDocument()
     a.layers[0].image.setPixel(100, 100, kHalfBlue);
     a.layers[1].image.setPixel(-1, 300, kRed);
     doc::Drawing &b = ink.addDrawing({d->allocateDrawingId(), "B", {{d->allocateLayerId(), {"Line"}, {}}}});
+    doc::LayerProperties grid{"Perspective ✓"};
+    grid.perspective = perspective::defaultGrid(320, 240);
+    grid.perspective.turn = -12.5;
+    grid.perspective.tilt = 71.0;
+    grid.perspective.roll = 3.0;
+    grid.perspective.cells = 5;
+    grid.perspective.color = 0x80ff8000;
+    grid.perspective.horizon = false;
+    b.layers.push_back({d->allocateLayerId(), grid, {}, doc::LayerKind::Perspective});
     b.layers[0].image.setPixel(200, 150, kRed);
     ink.timing().setExposure(0, 3, a.id);
     ink.timing().setExposure(5, 2, b.id);
@@ -82,6 +91,7 @@ void compareDocuments(const doc::Document &x, const doc::Document &y)
             for (std::size_t k = 0; k < dx.layers.size(); ++k) {
                 const doc::Layer &kx = dx.layers[k], &ky = dy->layers[k];
                 QCOMPARE(ky.id, kx.id);
+                QVERIFY(ky.kind == kx.kind);
                 QVERIFY(ky.properties == kx.properties);
                 auto cx = kx.image.tileCoords(), cy = ky.image.tileCoords();
                 std::sort(cx.begin(), cx.end());

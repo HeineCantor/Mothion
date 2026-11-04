@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/document/Drawing.h"
 #include "core/document/Ids.h"
 
 #include <QList>
@@ -8,6 +9,7 @@
 #include <QWidget>
 
 class QComboBox;
+class QMenu;
 class QSlider;
 class QSpinBox;
 class QToolButton;
@@ -29,11 +31,13 @@ namespace mothion::ui {
 //
 // The current row says what the header and the buttons act on:
 //  - a cel: its blend mode and opacity; new cel, delete, up and down;
-//  - a frame: new layer on top of it; delete removes every selected frame
+//  - a frame: new layer on top of it (the arrow next to +: a layer or a
+//    perspective layer); delete removes every selected frame
 //    (Ctrl and Shift select several, of any cel);
 //  - a layer: the blend mode and opacity of the selected layers (of that
 //    frame: Ctrl+click adds or takes away one, Shift+click a range); new
-//    layer above, delete, up and down.
+//    layer above (of either kind), delete, up and down. Under the header,
+//    the settings of a perspective layer when it is the current one.
 // The tools that act on several layers at once (the move) take every layer
 // of the selected rows: a frame stands for its layers, a cel for all the
 // layers of its frames.
@@ -80,7 +84,7 @@ private:
     void rowChosen(QTreeWidgetItem *item);
     void rename(QTreeWidgetItem *item);
     void commitOpacity();
-    void addClicked();
+    void addClicked(doc::LayerKind kind);
     void removeSelected();
     void moveSelected(int direction); // +1 up, -1 down, each by one place
     void moveCurrentCel(int index);
@@ -97,6 +101,7 @@ private:
     QSpinBox *m_opacityValue;
     QTreeWidget *m_tree;
     QToolButton *m_add;
+    QMenu *m_addMenu = nullptr; // the kinds of layer, from the arrow next to +
     QToolButton *m_remove;
     QToolButton *m_up;
     QToolButton *m_down;

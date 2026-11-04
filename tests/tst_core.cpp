@@ -4,8 +4,12 @@
 #include "core/RateMeter.h"
 #include "core/StrokeSmoother.h"
 #include "core/fill/FloodFill.h"
+#include "core/perspective/PerspectiveGrid.h"
 
 #include <QTest>
+
+#include <cmath>
+#include <numbers>
 
 using namespace mothion;
 
@@ -14,6 +18,54 @@ class TestCore : public QObject
     Q_OBJECT
 
 private slots:
+    // The perspective grid: facing the viewer it is a flat square grid; tilted
+    // its far side shrinks towards the horizon; nothing behind the eye.
+    void perspectiveGridProjects()
+    {
+        perspective::Grid g = perspective::defaultGrid(1000, 600);
+        g.turn = g.tilt = g.roll = 0.0;
+        g.cell = 50.0;
+        g.cells = 2;
+        QCOMPARE(g.centerX, 500.0);
+        const auto c = perspective::project(g, 0, 0);
+        QVERIFY(c && qAbs(c->x - 500.0) < 1e-9 && qAbs(c->y - 300.0) < 1e-9);
+        const auto corner = perspective::project(g, 100, -50); // facing: 1 unit = 1 px
+        QVERIFY(qAbs(corner->x - 600.0) < 1e-9 && qAbs(corner->y - 250.0) < 1e-9);
+        QCOMPARE(perspective::gridSegments(g).size(), std::size_t(10)); // 5 lines each way
+        QVERIFY(!perspective::horizonLine(g, 100.0));                  // at infinity
+
+        g.tilt = 60.0;
+        const auto top = perspective::project(g, 0, -100), bottom = perspective::project(g, 0, 100);
+        QVERIFY(top->y > 200.0 && bottom->y < 400.0);      // foreshortened, both halves
+        QVERIFY(300.0 - top->y < bottom->y - 300.0);       // the far one more than the near one
+        const auto left = perspective::project(g, -100, -100), right = perspective::project(g, 100, -100);
+        QVERIFY(right->x - left->x < 200.0);               // the far side is narrower
+        const double focal = perspective::focalLength(g);
+        QVERIFY(qAbs(focal - 500.0 / std::tan(std::numbers::pi / 6.0)) < 1e-9);
+        const auto h = perspective::horizonLine(g, 100.0);
+        QVERIFY(h);
+        const double horizonY = 300.0 - focal / std::tan(std::numbers::pi / 3.0);
+        QVERIFY(qAbs(h->a.y - horizonY) < 1e-9 && qAbs(h->b.y - horizonY) < 1e-9);
+        QVERIFY(qAbs(h->b.x - h->a.x - 200.0) < 1e-9);
+        // Far points of the plane fall towards the horizon, never past it.
+        const auto far = perspective::project(g, 0, -1e6);
+        QVERIFY(far->y > horizonY && far->y - horizonY < 1.0);
+
+        // Rolled a quarter turn the horizon stands upright.
+        g.roll = 90.0;
+        const auto upright = perspective::horizonLine(g, 100.0);
+        QVERIFY(qAbs(upright->a.x - upright->b.x) < 1e-9);
+
+        // Near the eye a line is cut where it would pass behind it.
+        g.roll = 0.0;
+        g.tilt = 80.0;
+        g.cells = 40;
+        g.cell = 200.0; // up to 8000 px towards the eye: far behind it
+        for (const perspective::Segment &s : perspective::gridSegments(g))
+            QVERIFY(std::isfinite(s.a.x) && std::isfinite(s.a.y) && std::isfinite(s.b.x) && std::isfinite(s.b.y));
+        QVERIFY(!perspective::project(g, 0, 8000));
+    }
+
     // A closed outline stops the fill; growing slips it under the line.
     void floodFillStopsAtLinesAndGrows()
     {

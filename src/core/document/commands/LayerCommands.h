@@ -8,13 +8,14 @@
 
 namespace mothion::doc {
 
-// Adds a layer at `index` (0 = bottom) of a drawing, empty or with `image`.
+// Adds a layer of `kind` at `index` (0 = bottom) of a drawing, empty or with
+// `image`.
 // The id is allocated at construction, so redo recreates the same layer.
 class AddLayerCommand : public Command
 {
 public:
     AddLayerCommand(Document &doc, CelId cel, DrawingId drawing, int index, LayerProperties properties,
-                    TiledImage image = {});
+                    TiledImage image = {}, LayerKind kind = LayerKind::Raster);
 
     LayerId layerId() const { return m_id; }
 

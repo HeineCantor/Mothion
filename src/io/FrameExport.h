@@ -24,7 +24,7 @@ std::optional<ImageFormat> formatForFile(const QString &path);
 QString suffixOf(ImageFormat format); // "png", "jpg"
 
 // What `frame` (0-based) looks like, document-sized: the visible layers
-// over the paper, or over transparency.
+// over the paper, or over transparency; perspective layers (guides) left out.
 QImage renderFrame(const doc::Document &document, int frame, bool transparent);
 
 // Writes one frame to `path`.

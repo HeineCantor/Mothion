@@ -18,7 +18,8 @@ namespace mothion::io {
 //   cels       id, position (0 = bottom), name, visible, locked, opacity, blend
 //   drawings   id, cel, name
 //   layers     id, drawing, position (0 = bottom), name, visible, locked,
-//              opacity, blend
+//              opacity, blend, kind ("raster" or "perspective"), perspective
+//              (a perspective layer's grid, as a JSON object; else empty)
 //   exposures  cel, start, length, drawing (the Timing runs)
 //   thumbnail  one row: the preview file managers show (ProjectThumbnail.h)
 //   tiles      layer, x, y (tile units), pixels: the 64×64 premultiplied
@@ -27,12 +28,12 @@ namespace mothion::io {
 //
 // Format 1 had no layers in drawings: its "layers" table held the cels and
 // its tiles belonged to drawings. Such a file opens with each drawing made
-// of one layer.
+// of one layer. Format 2 had no kinds of layers: all of them are raster.
 //
 // A save writes a new file next to the target and renames it over the old
 // one at the end, so a failed save never damages the previous file.
 
-inline constexpr int kProjectFormatVersion = 2;
+inline constexpr int kProjectFormatVersion = 3;
 inline constexpr char kProjectSuffix[] = "moth";
 inline constexpr char kOldProjectSuffix[] = "mothion"; // what projects were named before; they still open
 

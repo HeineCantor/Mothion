@@ -66,10 +66,11 @@ public:
     // Adds an empty cel above the current one, named "Cel N" with the first
     // free N; it becomes current. One undo step.
     void addCel();
-    // Adds an empty layer to the current drawing, above the current layer
-    // (on top if `onTop`), named "Layer N" with the first free N; it becomes
-    // current. One undo step; false on an empty frame.
-    bool addLayer(bool onTop = false);
+    // Adds an empty layer of `kind` to the current drawing, above the current
+    // layer (on top if `onTop`), named "Layer N" (or "Perspective N") with the
+    // first free N; it becomes current. A perspective layer starts with a grid
+    // fit to the document. One undo step; false on an empty frame.
+    bool addLayer(bool onTop = false, doc::LayerKind kind = doc::LayerKind::Raster);
     // Puts a new frame (a drawing with one empty layer, named like the layer
     // worked on) at `frame` of `cel`, the frames from there on moving one
     // place to the right, and makes it current. "New frame" puts it at the
@@ -162,6 +163,10 @@ public:
     // The layers chosen in the Layers panel, for the edits that act on several
     // at once (a move): every layer of a chosen frame or cel is in it. Empty
     // when that is just the current layer.
+    // Shows `properties` on the layer at once, as a preview, recording
+    // nothing (a slider being dragged); the edit is then executed as a command
+    // from the properties it had before. False if there is no such layer.
+    bool previewLayerProperties(const LayerRef &layer, const doc::LayerProperties &properties);
     void setLayerSelection(std::vector<LayerRef> layers);
     const std::vector<LayerRef> &layerSelection() const { return m_layerSelection; }
     // Like beginPaint(false), for every layer of layerSelection() (or the

@@ -17,6 +17,7 @@ add_library(mothion_core STATIC
     core/brush/VelocityMeter.h core/brush/VelocityMeter.cpp
 
     core/fill/FloodFill.h core/fill/FloodFill.cpp
+    core/perspective/PerspectiveGrid.h core/perspective/PerspectiveGrid.cpp
 
     core/puppet/Geometry.h
     core/puppet/Contour.h core/puppet/Contour.cpp
@@ -109,6 +110,7 @@ qt_add_library(mothion_gui STATIC
     ui/panels/NavigatorPanel.h ui/panels/NavigatorPanel.cpp
     ui/panels/BlendModes.h
     ui/panels/LayersPanel.h ui/panels/LayersPanel.cpp
+    ui/panels/PerspectiveControls.h ui/panels/PerspectiveControls.cpp
     ui/panels/timeline/TimelineMetrics.h
     ui/panels/timeline/TimelineView.h ui/panels/timeline/TimelineView.cpp
     ui/panels/timeline/TimelinePanel.h ui/panels/timeline/TimelinePanel.cpp

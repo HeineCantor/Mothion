@@ -326,6 +326,36 @@ private slots:
         QVERIFY(qAbs(quarter.red() - 191) <= 2 && quarter.blue() == 255);
     }
 
+    // A perspective layer draws its grid where the plane is; without guides
+    // (export) it is left out.
+    void perspectiveLayerDrawsItsGrid()
+    {
+        doc::Document document(400, 300);
+        doc::AddCelCommand cel(document, 0, {"C"});
+        cel.apply(document);
+        doc::NewDrawing nd = doc::makeNewDrawing(document, cel.celId(), 0);
+        nd.command->apply(document);
+        doc::Drawing &drawing = *document.cel(cel.celId())->drawing(nd.id);
+        doc::LayerProperties props{"P"};
+        props.perspective = perspective::defaultGrid(400, 300);
+        props.perspective.turn = props.perspective.tilt = 0.0; // a flat grid, lines every 25 px from the center
+        props.perspective.color = 0xff0000ff;
+        drawing.layers.push_back({document.allocateLayerId(), props, {}, doc::LayerKind::Perspective});
+
+        canvas::FrameRenderer renderer;
+        renderer.renderAll(document, 0);
+        // The vertical line through the center (1 px wide, antialiased over two columns).
+        const QColor onLine = renderer.image().pixelColor(200, 150 + 12);
+        QVERIFY(onLine.blue() > 200 && onLine.blue() - onLine.red() > 80);
+        QCOMPARE(renderer.image().pixelColor(212, 162), QColor(Qt::white)); // inside a cell: paper
+        QVERIFY(canvas::drawingBounds(drawing).contains(QRect(100, 50, 200, 200)));
+        QVERIFY(canvas::drawingBounds(drawing, false).isEmpty());
+
+        renderer.setGuidesVisible(false);
+        renderer.renderAll(document, 0);
+        QCOMPARE(renderer.image().pixelColor(200, 162), QColor(Qt::white));
+    }
+
 private:
     // Hard round dabs of a constant radius, densely spaced (the default brush without pressure).
     static brush::BrushStyle roundStyle(double radius)

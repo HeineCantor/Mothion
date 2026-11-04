@@ -1048,6 +1048,75 @@ private slots:
     // The panel shows each cel as a folder holding all its frames, and each
     // frame its layers; the one shown now is current, and on an empty point
     // no layer can be added. Choosing another frame goes to where it is shown.
+    // The arrow next to + adds a perspective layer: a grid that cannot be
+    // drawn on, set from the controls under the header; a slider dragged
+    // shows it live and makes one undo step.
+    void perspectiveLayers()
+    {
+        document::DocumentController controller;
+        ui::LayersPanel panel(&controller);
+        panel.resize(320, 800);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 1, "Line").command);
+        QCoreApplication::processEvents();
+        auto *controls = panel.findChild<QWidget *>(QStringLiteral("perspectiveControls"));
+        QVERIFY(controls && !controls->isVisible()); // a raster layer is current
+
+        QToolButton *add = nullptr;
+        for (QToolButton *b : panel.findChildren<QToolButton *>())
+            if (b->toolTip() == QStringLiteral("New layer"))
+                add = b;
+        QVERIFY(add && add->menu());
+        QStringList kinds;
+        for (QAction *a : add->menu()->actions())
+            kinds << a->text();
+        QCOMPARE(kinds, (QStringList{QStringLiteral("Layer"), QStringLiteral("Perspective Layer")}));
+        add->menu()->actions()[1]->trigger();
+        QCoreApplication::processEvents();
+        const doc::Drawing &drawing = *controller.currentDrawing();
+        const doc::Layer *grid = drawing.layer(controller.currentLayer());
+        QVERIFY(grid && grid->kind == doc::LayerKind::Perspective);
+        QCOMPARE(grid->properties.name, std::string("Perspective 1"));
+        QCOMPARE(grid->properties.perspective.centerX, d.width() / 2.0); // fit to the document
+        QVERIFY(controls->isVisible());
+
+        // Not drawn on, nor worked on with the selection tools.
+        QString reason;
+        QVERIFY(!controller.beginPaint(true, &reason));
+        QVERIFY(reason.contains(QStringLiteral("perspective")));
+        controller.selectAll();
+        QVERIFY(!controller.eraseSelection(&reason));
+        QVERIFY(reason.contains(QStringLiteral("perspective")));
+        controller.clearSelection();
+
+        // A drag on the tilt: live, then one undo step.
+        const QString undoBefore = controller.undoText();
+        auto *tilt = controls->findChild<QSlider *>(QStringLiteral("perspectiveTilt"));
+        QVERIFY(tilt);
+        tilt->setSliderDown(true);
+        tilt->setValue(40);
+        tilt->setValue(30);
+        QCOMPARE(drawing.layer(grid->id)->properties.perspective.tilt, 30.0);
+        QCOMPARE(controller.undoText(), undoBefore); // nothing recorded yet
+        tilt->setSliderDown(false);
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo layer properties"));
+        controller.undo();
+        QCOMPARE(drawing.layer(grid->id)->properties.perspective.tilt, 60.0);
+        QCOMPARE(tilt->value(), 60);
+
+        // A typed value is a step of its own.
+        controls->findChild<QSpinBox *>(QStringLiteral("perspectiveTurnValue"))->setValue(-45);
+        QCOMPARE(drawing.layer(grid->id)->properties.perspective.turn, -45.0);
+        controller.undo();
+        QCOMPARE(drawing.layer(grid->id)->properties.perspective.turn, 30.0);
+
+        // Back on the raster layer, the controls go.
+        controller.setCurrentLayer(drawing.layers.front().id);
+        QVERIFY(!controls->isVisible());
+    }
+
     void layersPanelFollowsTheFrame()
     {
         document::DocumentController controller;

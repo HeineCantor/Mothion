@@ -69,6 +69,7 @@ AutoplayWindow::AutoplayWindow(document::DocumentController *document, QWidget *
     , m_speed(new QComboBox(this))
 {
     setWindowTitle(tr("Autoplay"));
+    m_renderer.setGuidesVisible(false); // the animation, without perspective guides
     setObjectName(QStringLiteral("AutoplayWindow"));
 
     // The speeds, with the document's own among them, chosen to begin with.

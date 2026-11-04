@@ -59,6 +59,7 @@ QImage renderFrame(const doc::Document &document, int frame, bool transparent)
 {
     canvas::FrameRenderer renderer;
     renderer.setPaperVisible(!transparent);
+    renderer.setGuidesVisible(false); // perspective layers are guides, not the picture
     renderer.renderAll(document, frame);
     return renderer.image();
 }
@@ -86,6 +87,7 @@ bool exportSequence(const doc::Document &document, int first, int last, const QS
     const bool transparent = options.transparent && options.format == ImageFormat::Png;
     canvas::FrameRenderer renderer;
     renderer.setPaperVisible(!transparent);
+    renderer.setGuidesVisible(false); // perspective layers are guides, not the picture
     const int total = last - first + 1;
     for (int frame = first; frame <= last; ++frame) {
         renderer.renderAll(document, frame);

@@ -4,6 +4,8 @@
 
 #include <QPainter>
 
+#include <algorithm>
+
 namespace mothion::canvas {
 
 namespace {
@@ -20,35 +22,80 @@ QPainter::CompositionMode compositionFor(doc::BlendMode blend)
     return QPainter::CompositionMode_SourceOver;
 }
 
-bool shows(const doc::Layer &layer)
+bool shows(const doc::Layer &layer, bool guides)
 {
-    return layer.properties.visible && layer.properties.opacity > 0.0f && !layer.image.isEmpty();
+    if (!layer.properties.visible || layer.properties.opacity <= 0.0f)
+        return false;
+    return layer.kind == doc::LayerKind::Perspective ? guides : !layer.image.isEmpty();
 }
 
-// Draws the layer's tiles among `tiles` with its opacity and blend mode.
+// Draws the layer (its tiles among `tiles`, or its grid) with its opacity
+// and blend mode.
 void drawLayer(QPainter &p, const doc::Layer &layer, const std::vector<doc::TileCoord> &tiles, double opacity,
                doc::BlendMode blend)
 {
     p.setOpacity(opacity);
     p.setCompositionMode(compositionFor(blend));
+    if (layer.kind == doc::LayerKind::Perspective) {
+        paintPerspective(p, layer.properties.perspective);
+        return;
+    }
     for (const doc::TileCoord &c : tiles)
         if (const doc::TilePtr tile = layer.image.tile(c))
             p.drawImage(tileRect(c).topLeft(), tileImage(*tile));
 }
 
+double lineWidth(const perspective::Grid &grid)
+{
+    return std::max(1.0, grid.frameWidth / 960.0); // 2 px on an HD sheet
+}
+
 } // namespace
 
-QRect drawingBounds(const doc::Drawing &drawing)
+void paintPerspective(QPainter &p, const perspective::Grid &grid)
+{
+    p.save();
+    p.setRenderHint(QPainter::Antialiasing);
+    const QColor color = QColor::fromRgba(grid.color);
+    const double width = lineWidth(grid);
+    p.setPen(QPen(color, width, Qt::SolidLine, Qt::FlatCap));
+    for (const perspective::Segment &s : perspective::gridSegments(grid))
+        p.drawLine(QPointF(s.a.x, s.a.y), QPointF(s.b.x, s.b.y));
+    if (grid.horizon)
+        if (const auto h = perspective::horizonLine(grid, grid.frameWidth * 4.0)) {
+            p.setPen(QPen(color, width * 1.5, Qt::DashLine, Qt::FlatCap));
+            p.drawLine(QPointF(h->a.x, h->a.y), QPointF(h->b.x, h->b.y));
+        }
+    p.restore();
+}
+
+QRect drawingBounds(const doc::Drawing &drawing, bool guides)
 {
     QRect bounds;
-    for (const doc::Layer &layer : drawing.layers)
-        if (shows(layer))
-            for (const doc::TileCoord &c : layer.image.tileCoords())
-                bounds |= tileRect(c);
+    for (const doc::Layer &layer : drawing.layers) {
+        if (!shows(layer, guides))
+            continue;
+        if (layer.kind == doc::LayerKind::Perspective) {
+            // Its lines, within reason around the plane (the horizon has no end).
+            const perspective::Grid &g = layer.properties.perspective;
+            QRectF lines;
+            for (const perspective::Segment &s : perspective::gridSegments(g))
+                lines |= QRectF(QPointF(s.a.x, s.a.y), QPointF(s.b.x, s.b.y)).normalized();
+            if (g.horizon)
+                if (const auto h = perspective::horizonLine(g, g.frameWidth * 4.0))
+                    lines |= QRectF(QPointF(h->a.x, h->a.y), QPointF(h->b.x, h->b.y)).normalized();
+            const double reach = g.frameWidth * 4.0, pad = lineWidth(g) * 2.0;
+            const QRectF limit(g.centerX - reach, g.centerY - reach, 2.0 * reach, 2.0 * reach);
+            bounds |= lines.adjusted(-pad, -pad, pad, pad).intersected(limit).toAlignedRect();
+            continue;
+        }
+        for (const doc::TileCoord &c : layer.image.tileCoords())
+            bounds |= tileRect(c);
+    }
     return bounds;
 }
 
-QImage composeDrawing(const doc::Drawing &drawing, const QRect &area)
+QImage composeDrawing(const doc::Drawing &drawing, const QRect &area, bool guides)
 {
     QImage image(area.size(), QImage::Format_ARGB32_Premultiplied);
     image.fill(Qt::transparent);
@@ -58,7 +105,7 @@ QImage composeDrawing(const doc::Drawing &drawing, const QRect &area)
     p.translate(-area.topLeft());
     const std::vector<doc::TileCoord> tiles = tilesIn(area);
     for (const doc::Layer &layer : drawing.layers)
-        if (shows(layer))
+        if (shows(layer, guides))
             drawLayer(p, layer, tiles, layer.properties.opacity, layer.properties.blend);
     return image;
 }
@@ -92,7 +139,7 @@ void FrameRenderer::render(const doc::Document &doc, int frame, const QRect &rec
         const doc::Layer *only = nullptr; // the one layer shown, if there is just one
         int shown = 0;
         for (const doc::Layer &layer : drawing->layers)
-            if (shows(layer)) {
+            if (shows(layer, m_guides)) {
                 only = &layer;
                 ++shown;
             }
@@ -105,7 +152,7 @@ void FrameRenderer::render(const doc::Document &doc, int frame, const QRect &rec
         }
         p.setOpacity(props.opacity);
         p.setCompositionMode(compositionFor(props.blend));
-        p.drawImage(area.topLeft(), composeDrawing(*drawing, area));
+        p.drawImage(area.topLeft(), composeDrawing(*drawing, area, m_guides));
     }
 }
 

@@ -5,7 +5,10 @@
 
 #include <QBuffer>
 #include <QCoreApplication>
+#include <QColor>
 #include <QImage>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QPainter>
 #include <QFile>
 #include <QFileInfo>
@@ -41,7 +44,7 @@ const char *const kSchema[] = {
     "create table drawings (id integer primary key, cel integer not null references cels(id), name text not null)",
     "create table layers (id integer primary key, drawing integer not null references drawings(id),"
     " position integer not null, name text not null, visible integer not null, locked integer not null,"
-    " opacity real not null, blend text not null)",
+    " opacity real not null, blend text not null, kind text not null, perspective text not null)",
     "create table exposures (cel integer not null references cels(id), start integer not null,"
     " length integer not null, drawing integer not null references drawings(id))",
     "create table tiles (layer integer not null references layers(id), x integer not null,"
@@ -71,6 +74,49 @@ doc::BlendMode blendFromName(const QString &text)
         if (text == QLatin1String(name))
             return mode;
     return doc::BlendMode::Normal; // a mode from a newer version: the closest we have
+}
+
+// A perspective layer's grid as JSON, names as in perspective::Grid.
+QString gridToJson(const perspective::Grid &g)
+{
+    const QJsonObject o{
+        {QStringLiteral("turn"), g.turn},
+        {QStringLiteral("tilt"), g.tilt},
+        {QStringLiteral("roll"), g.roll},
+        {QStringLiteral("fov"), g.fov},
+        {QStringLiteral("frameWidth"), g.frameWidth},
+        {QStringLiteral("centerX"), g.centerX},
+        {QStringLiteral("centerY"), g.centerY},
+        {QStringLiteral("cell"), g.cell},
+        {QStringLiteral("cells"), g.cells},
+        {QStringLiteral("color"), QColor::fromRgba(g.color).name(QColor::HexArgb)},
+        {QStringLiteral("horizon"), g.horizon},
+    };
+    return QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));
+}
+
+// Missing or damaged values keep the defaults.
+perspective::Grid gridFromJson(const QString &text)
+{
+    const QJsonObject o = QJsonDocument::fromJson(text.toUtf8()).object();
+    perspective::Grid g;
+    auto number = [&o](const char *key, double &value) {
+        if (o.value(QLatin1String(key)).isDouble())
+            value = o.value(QLatin1String(key)).toDouble();
+    };
+    number("turn", g.turn);
+    number("tilt", g.tilt);
+    number("roll", g.roll);
+    number("fov", g.fov);
+    number("frameWidth", g.frameWidth);
+    number("centerX", g.centerX);
+    number("centerY", g.centerY);
+    number("cell", g.cell);
+    g.cells = std::max(1, o.value(QStringLiteral("cells")).toInt(g.cells));
+    if (const QColor color = QColor::fromString(o.value(QStringLiteral("color")).toString()); color.isValid())
+        g.color = color.rgba();
+    g.horizon = o.value(QStringLiteral("horizon")).toBool(g.horizon);
+    return g;
 }
 
 // Ids are uint64 in the model, signed 64-bit integers in SQLite.
@@ -194,7 +240,7 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
     QSqlQuery cel(db), drawing(db), layer(db), exposure(db), tile(db);
     cel.prepare(QStringLiteral("insert into cels values (?, ?, ?, ?, ?, ?, ?)"));
     drawing.prepare(QStringLiteral("insert into drawings values (?, ?, ?)"));
-    layer.prepare(QStringLiteral("insert into layers values (?, ?, ?, ?, ?, ?, ?, ?)"));
+    layer.prepare(QStringLiteral("insert into layers values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
     exposure.prepare(QStringLiteral("insert into exposures values (?, ?, ?, ?)"));
     tile.prepare(QStringLiteral("insert into tiles values (?, ?, ?, ?)"));
     auto exec = [&](QSqlQuery &query, std::initializer_list<QVariant> values) {
@@ -218,8 +264,11 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
             for (std::size_t position = 0; position < dr.layers.size(); ++position) {
                 const doc::Layer &ly = dr.layers[position];
                 const doc::LayerProperties &lp = ly.properties;
+                const bool perspective = ly.kind == doc::LayerKind::Perspective;
                 if (!exec(layer, {idValue(ly.id), idValue(id), int(position), QString::fromStdString(lp.name),
-                                  lp.visible, lp.locked, double(lp.opacity), blendName(lp.blend)}))
+                                  lp.visible, lp.locked, double(lp.opacity), blendName(lp.blend),
+                                  perspective ? QStringLiteral("perspective") : QStringLiteral("raster"),
+                                  perspective ? gridToJson(lp.perspective) : QStringLiteral("")}))
                     return false;
                 for (const doc::TileCoord &c : ly.image.tileCoords())
                     if (const doc::TilePtr t = ly.image.tile(c))
@@ -314,8 +363,11 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
         for (auto &[id, drawing] : drawings)
             v1Layers[id] = &drawing->layers.emplace_back(doc::Layer{doc::kNoId, {"Layer 1"}, {}});
     } else {
-        if (!q.exec(QStringLiteral("select id, drawing, name, visible, locked, opacity, blend from layers"
-                                   " order by drawing, position"))) {
+        const bool kinds = version >= 3; // before, all raster
+        QString columns = QStringLiteral("id, drawing, name, visible, locked, opacity, blend");
+        if (kinds)
+            columns += QStringLiteral(", kind, perspective");
+        if (!q.exec(QStringLiteral("select %1 from layers order by drawing, position").arg(columns))) {
             failure = sqlError(q);
             return nullptr;
         }
@@ -330,7 +382,12 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
             p.locked = q.value(4).toBool();
             p.opacity = std::clamp(q.value(5).toFloat(), 0.0f, 1.0f);
             p.blend = blendFromName(q.value(6).toString());
-            layers[id] = &it->second->layers.emplace_back(doc::Layer{id, std::move(p), {}});
+            doc::LayerKind kind = doc::LayerKind::Raster;
+            if (kinds && q.value(7).toString() == QLatin1String("perspective")) {
+                kind = doc::LayerKind::Perspective;
+                p.perspective = gridFromJson(q.value(8).toString());
+            }
+            layers[id] = &it->second->layers.emplace_back(doc::Layer{id, std::move(p), {}, kind});
         }
         // Pointers into the layer vectors: taken again now that they are complete.
         layers.clear();

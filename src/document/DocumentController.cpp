@@ -176,24 +176,38 @@ void DocumentController::addCel()
     setCurrentCel(id);
 }
 
-bool DocumentController::addLayer(bool onTop)
+bool DocumentController::addLayer(bool onTop, doc::LayerKind kind)
 {
     const doc::Drawing *drawing = currentDrawing();
     if (!drawing)
         return false;
+    const bool perspective = kind == doc::LayerKind::Perspective;
     QString name; // the first free number
-    for (int n = int(drawing->layers.size()) + 1;; ++n) {
-        name = tr("Layer %1").arg(n);
+    for (int n = perspective ? 1 : int(drawing->layers.size()) + 1;; ++n) {
+        name = perspective ? tr("Perspective %1").arg(n) : tr("Layer %1").arg(n);
         if (std::none_of(drawing->layers.begin(), drawing->layers.end(),
                          [&](const doc::Layer &l) { return l.properties.name == name.toStdString(); }))
             break;
     }
     const int index = onTop ? int(drawing->layers.size()) : drawing->indexOf(m_currentLayer) + 1;
+    doc::LayerProperties properties{name.toStdString()};
+    if (perspective)
+        properties.perspective = perspective::defaultGrid(m_document->width(), m_document->height());
     auto command = std::make_unique<doc::AddLayerCommand>(*m_document, m_currentCel, drawing->id, index,
-                                                          doc::LayerProperties{name.toStdString()});
+                                                          std::move(properties), doc::TiledImage(), kind);
     const doc::LayerId id = command->layerId();
     execute(std::move(command));
     setCurrentLayer(id);
+    return true;
+}
+
+bool DocumentController::previewLayerProperties(const LayerRef &ref, const doc::LayerProperties &properties)
+{
+    doc::Layer *layer = m_document->layer(ref.cel, ref.drawing, ref.layer);
+    if (!layer)
+        return false;
+    layer->properties = properties;
+    emit pixelsChanged(ref.cel, ref.drawing, QRect(0, 0, m_document->width(), m_document->height()));
     return true;
 }
 
@@ -330,6 +344,8 @@ doc::Layer *DocumentController::workLayer(bool changesIt, const QString &nothing
         return fail(tr("Layer “%1” is hidden").arg(name));
     if (changesIt && layer->properties.locked)
         return fail(tr("Layer “%1” is locked").arg(name));
+    if (layer->kind == doc::LayerKind::Perspective)
+        return fail(tr("“%1” is a perspective layer: it has no pixels to work on").arg(name));
     return layer;
 }
 
@@ -759,6 +775,8 @@ std::optional<DocumentController::PaintTarget> DocumentController::beginPaint(bo
         return fail(tr("Layer “%1” is hidden").arg(name));
     if (layer->properties.locked)
         return fail(tr("Layer “%1” is locked").arg(name));
+    if (layer->kind == doc::LayerKind::Perspective)
+        return fail(tr("“%1” is a perspective layer: it can't be drawn on").arg(name));
     state.target = {m_currentCel, drawing, m_currentLayer, &layer->image};
     state.selectionBefore = m_selection;
     m_paint = std::move(state);
@@ -784,7 +802,7 @@ std::vector<DocumentController::PaintTarget> DocumentController::beginPaintLayer
         const doc::Cel *cel = m_document->cel(ref.cel);
         doc::Layer *layer = m_document->layer(ref.cel, ref.drawing, ref.layer);
         if (!layer || !cel->properties().visible || cel->properties().locked || !layer->properties.visible
-            || layer->properties.locked)
+            || layer->properties.locked || layer->kind == doc::LayerKind::Perspective)
             continue;
         const PaintTarget target{ref.cel, ref.drawing, ref.layer, &layer->image};
         if (ref.layer == m_currentLayer)
