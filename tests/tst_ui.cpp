@@ -1470,6 +1470,20 @@ private slots:
         QCOMPARE(count(), 5);
     }
 
+    // Only the tools that have sub tools list any: Hand, Zoom, Move, Puppet, Eyedropper and
+    // Transform show none (they once fell into the Fill's two).
+    void toolsWithoutSubToolsListNone()
+    {
+        using tools::ToolId;
+        for (ToolId t : {ToolId::Hand, ToolId::Zoom, ToolId::Move, ToolId::Puppet, ToolId::Eyedropper,
+                         ToolId::Transform})
+            QVERIFY(tools::builtInPresets(t).isEmpty());
+        QCOMPARE(tools::builtInPresets(ToolId::Fill).size(), 2);
+        QVERIFY(!tools::builtInPresets(ToolId::Brush).isEmpty());
+        QVERIFY(!tools::builtInPresets(ToolId::Eraser).isEmpty());
+        QCOMPARE(tools::builtInPresets(ToolId::RectSelect).size(), 2);
+    }
+
     // The lasso fill sub tool: an outline drawn freehand, its inside filled
     // over what is there, within the selection, as one undo step.
     void lassoFillFillsTheOutline()

@@ -38,10 +38,6 @@ QList<BrushPreset> builtInPresets(ToolId tool)
         lasso.selectsTool = ToolId::LassoSelect;
         return {rectangle, lasso};
     }
-    case ToolId::Hand:
-    case ToolId::Zoom:
-    case ToolId::Move:
-    case ToolId::Puppet:
     case ToolId::Fill: {
         BrushPreset bucket{QObject::tr("Fill"), tool};
         bucket.fillMode = FillSettings::Mode::Bucket;
@@ -49,9 +45,13 @@ QList<BrushPreset> builtInPresets(ToolId tool)
         lasso.fillMode = FillSettings::Mode::Lasso;
         return {bucket, lasso};
     }
+    case ToolId::Hand:
+    case ToolId::Zoom:
+    case ToolId::Move:
+    case ToolId::Puppet:
     case ToolId::Eyedropper:
     case ToolId::Transform:
-        return {};
+        return {}; // no sub tools
     }
     return {};
 }
