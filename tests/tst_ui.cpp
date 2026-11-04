@@ -24,6 +24,7 @@
 #include "ui/SelectionBar.h"
 #include "ui/panels/BlendModes.h"
 #include "ui/panels/BrushSizePanel.h"
+#include "ui/panels/ColorWheelPanel.h"
 #include "ui/panels/LayersPanel.h"
 #include "ui/AdvancedToolSettings.h"
 #include "ui/SplashScreen.h"
@@ -1091,6 +1092,56 @@ private slots:
     // middle square moves the plane, the arrows move it along its axes, the
     // rings turn it around them, the corner sizes the cells, the button opens
     // the settings. Each drag is live and one undo step.
+    void transparentColorErasesWithTheBrush()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(900, 700);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        state.setColor(Qt::red);
+        state.setSize(tools::ToolId::Brush, 24.0);
+        auto stroke = [&](double y) {
+            const QTransform toView = canvas.view().documentToView();
+            const QPoint a = toView.map(QPointF(100, y)).toPoint(), b = toView.map(QPointF(300, y)).toPoint();
+            QTest::mousePress(&canvas, Qt::LeftButton, {}, a);
+            QTest::mouseMove(&canvas, (a + b) / 2);
+            QTest::mouseMove(&canvas, b);
+            QTest::mouseRelease(&canvas, Qt::LeftButton, {}, b);
+        };
+        auto alpha = [&](int x, int y) {
+            return qAlpha(controller.currentDrawing()->layers.front().image.pixel(x, y));
+        };
+        stroke(200);
+        QVERIFY(alpha(200, 200) > 0);
+
+        // The panel's bar selects it; the wheel's colors (and the swap) select the main color back.
+        ui::ColorWheelPanel panel(&state);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        auto *swatches = panel.findChild<ui::ColorSwatchPair *>();
+        QVERIFY(swatches);
+        QVERIFY(!state.transparentSelected());
+        QTest::mouseClick(swatches, Qt::LeftButton, {}, QPoint(swatches->width() / 2, swatches->height() - 4));
+        QVERIFY(state.transparentSelected());
+
+        // The brush now erases (its tip, its size), and stays erasing stroke after stroke.
+        stroke(200);
+        QCOMPARE(alpha(200, 200), 0);
+        QCOMPARE(state.activeTool(), tools::ToolId::Brush);
+        stroke(300);
+        QVERIFY(controller.currentDrawing()->layers.front().image.pixel(200, 300) == 0);
+
+        state.setColor(Qt::red); // choosing a color, even the same one
+        QVERIFY(!state.transparentSelected());
+        stroke(300);
+        QVERIFY(alpha(200, 300) > 0);
+        state.setTransparentSelected(true);
+        state.swapColors();
+        QVERIFY(!state.transparentSelected());
+    }
+
     void perspectiveGizmo()
     {
         tools::ToolState state;

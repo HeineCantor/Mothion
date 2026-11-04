@@ -84,9 +84,20 @@ void ToolState::setBrush(ToolId tool, BrushDefinitionPtr brush)
     emit toolSettingsChanged(tool);
 }
 
+void ToolState::setTransparentSelected(bool on)
+{
+    if (on == m_transparentSelected)
+        return;
+    m_transparentSelected = on;
+    emit transparentSelectedChanged(on);
+}
+
 void ToolState::setColor(const QColor &color)
 {
-    if (!color.isValid() || color == m_color)
+    if (!color.isValid())
+        return;
+    setTransparentSelected(false); // choosing a color is leaving the transparent one
+    if (color == m_color)
         return;
     m_color = color;
     emit colorChanged(color);
@@ -102,6 +113,7 @@ void ToolState::setSecondaryColor(const QColor &color)
 
 void ToolState::swapColors()
 {
+    setTransparentSelected(false);
     std::swap(m_color, m_secondaryColor);
     emit colorChanged(m_color);
     emit secondaryColorChanged(m_secondaryColor);

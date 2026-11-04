@@ -564,7 +564,11 @@ Mode CanvasView::navigationModeFor(const PenSample &sample) const
 
 void CanvasView::beginStroke(const PenSample &sample)
 {
-    m_eraseStroke = sample.tool == InputTool::Eraser || m_toolState->activeTool() == ToolId::Eraser;
+    // The transparent color makes the brush erase, with the brush's own tip and settings.
+    const bool transparentBrush = m_toolState->transparentSelected() && m_toolState->activeTool() != ToolId::Eraser
+                                  && sample.tool != InputTool::Eraser;
+    m_eraseStroke = sample.tool == InputTool::Eraser || m_toolState->activeTool() == ToolId::Eraser
+                    || transparentBrush;
     // Erasing an empty frame has nothing to act on, so only the brush creates drawings.
     QString reason;
     const auto target = m_document->beginPaint(!m_eraseStroke, &reason);
@@ -573,7 +577,7 @@ void CanvasView::beginStroke(const PenSample &sample)
             emit statusMessage(reason);
         return;
     }
-    const ToolId tool = m_eraseStroke ? ToolId::Eraser : ToolId::Brush;
+    const ToolId tool = m_eraseStroke && !transparentBrush ? ToolId::Eraser : ToolId::Brush;
     const tools::BrushSettings settings = m_toolState->settings(tool);
     const tools::BrushDefinitionPtr definition = m_toolState->brush(tool);
     brush::BrushStyle style = definition->style;

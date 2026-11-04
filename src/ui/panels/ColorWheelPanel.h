@@ -30,8 +30,9 @@ private:
     QLineEdit *m_hex;
 };
 
-// Two overlapping squares: main color in front, secondary behind.
-// Clicking the back one swaps them.
+// Two overlapping squares: main color in front, secondary behind (clicking
+// the back one swaps them), and under them a rounded bar with the checkerboard
+// of the transparent color (clicking it selects it: the brush then erases).
 class ColorSwatchPair : public QWidget
 {
     Q_OBJECT
@@ -39,11 +40,17 @@ class ColorSwatchPair : public QWidget
 public:
     explicit ColorSwatchPair(QWidget *parent = nullptr);
     void setColors(const QColor &main, const QColor &secondary);
-    QSize sizeHint() const override { return {44, 44}; }
+    void setTransparentSelected(bool on);
+    QSize sizeHint() const override { return {kSquares, kSquares + kBarGap + kBarHeight}; }
+
+    static constexpr int kSquares = 44;  // the two squares' area
+    static constexpr int kBarGap = 4;
+    static constexpr int kBarHeight = 14;
 
 signals:
     void swapRequested();
     void mainClicked();
+    void transparentClicked();
 
 protected:
     void paintEvent(QPaintEvent *event) override;
@@ -52,6 +59,8 @@ protected:
 private:
     QRectF mainRect() const;
     QRectF secondaryRect() const;
+    QRectF transparentRect() const;
+    bool m_transparentSelected = false;
     QColor m_main;
     QColor m_secondary;
 };

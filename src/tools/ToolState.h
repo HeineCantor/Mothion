@@ -104,6 +104,12 @@ public:
     void setSecondaryColor(const QColor &color);
     void swapColors();
 
+    // The transparent "color", under the other two: while it is selected the
+    // brush erases, with its own tip, size and opacity. It cannot be edited;
+    // choosing any color (wheel, hex, eyedropper, swap) selects that one again.
+    bool transparentSelected() const { return m_transparentSelected; }
+    void setTransparentSelected(bool on);
+
     const PressureCurve &pressureCurve() const { return m_pressureCurve; }
     void setPressureCurve(const PressureCurve &curve);
 
@@ -145,6 +151,7 @@ signals:
     void toolSettingsChanged(mothion::tools::ToolId tool);
     void colorChanged(const QColor &color);
     void secondaryColorChanged(const QColor &color);
+    void transparentSelectedChanged(bool on);
     void pressureCurveChanged();
     void smoothingChanged(double amount);
     void useTiltChanged(bool use);
@@ -163,6 +170,7 @@ private:
     std::array<BrushDefinitionPtr, kToolCount> m_brushes;
     QColor m_color = QColor(0x20, 0x20, 0x24);
     QColor m_secondaryColor = Qt::white;
+    bool m_transparentSelected = false;
     PressureCurve m_pressureCurve;
     double m_smoothing = 0.3;
     bool m_useTilt = true;

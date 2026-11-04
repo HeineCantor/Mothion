@@ -8,6 +8,7 @@
 #include <QLineEdit>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPainterPath>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -20,7 +21,8 @@ ColorSwatchPair::ColorSwatchPair(QWidget *parent)
     : QWidget(parent)
 {
     setFixedSize(sizeHint());
-    setToolTip(tr("Main / secondary color (click the secondary to swap them)"));
+    setToolTip(tr("Main / secondary color (click the secondary to swap them); the bar below is the "
+                  "transparent color: the brush erases with it"));
 }
 
 void ColorSwatchPair::setColors(const QColor &main, const QColor &secondary)
@@ -30,14 +32,25 @@ void ColorSwatchPair::setColors(const QColor &main, const QColor &secondary)
     update();
 }
 
+void ColorSwatchPair::setTransparentSelected(bool on)
+{
+    m_transparentSelected = on;
+    update();
+}
+
 QRectF ColorSwatchPair::mainRect() const
 {
-    return {1, 1, width() * 0.62, height() * 0.62};
+    return {1, 1, kSquares * 0.62, kSquares * 0.62};
 }
 
 QRectF ColorSwatchPair::secondaryRect() const
 {
-    return {width() * 0.37, height() * 0.37, width() * 0.62, height() * 0.62};
+    return {kSquares * 0.37, kSquares * 0.37, kSquares * 0.62, kSquares * 0.62};
+}
+
+QRectF ColorSwatchPair::transparentRect() const
+{
+    return {1.0, double(kSquares + kBarGap), width() - 2.0, double(kBarHeight) - 1.0};
 }
 
 void ColorSwatchPair::paintEvent(QPaintEvent *)
@@ -48,14 +61,32 @@ void ColorSwatchPair::paintEvent(QPaintEvent *)
     p.setPen(QPen(border, 1));
     p.setBrush(m_secondary);
     p.drawRoundedRect(secondaryRect(), 3, 3);
-    p.setPen(QPen(palette().light().color(), 1.5));
+    p.setPen(QPen(m_transparentSelected ? border : palette().light().color(), 1.5));
     p.setBrush(m_main);
     p.drawRoundedRect(mainRect(), 3, 3);
+
+    // The transparent color: a checkerboard in a rounded bar.
+    const QRectF bar = transparentRect();
+    QPainterPath shape;
+    shape.addRoundedRect(bar, 3, 3);
+    p.save();
+    p.setClipPath(shape);
+    constexpr int cell = 5;
+    for (int y = 0; y * cell < bar.height(); ++y)
+        for (int x = 0; x * cell < bar.width(); ++x)
+            p.fillRect(QRectF(bar.left() + x * cell, bar.top() + y * cell, cell, cell),
+                       (x + y) % 2 ? QColor(0xcc, 0xcc, 0xcc) : QColor(Qt::white));
+    p.restore();
+    p.setBrush(Qt::NoBrush);
+    p.setPen(QPen(m_transparentSelected ? palette().highlight().color() : border, m_transparentSelected ? 2.0 : 1.0));
+    p.drawRoundedRect(bar, 3, 3);
 }
 
 void ColorSwatchPair::mousePressEvent(QMouseEvent *event)
 {
-    if (mainRect().contains(event->position()))
+    if (transparentRect().contains(event->position()))
+        emit transparentClicked();
+    else if (mainRect().contains(event->position()))
         emit mainClicked();
     else if (secondaryRect().contains(event->position()))
         emit swapRequested();
@@ -91,7 +122,15 @@ ColorWheelPanel::ColorWheelPanel(tools::ToolState *state, QWidget *parent)
 
     connect(m_wheel, &ColorWheel::colorEdited, m_state, &tools::ToolState::setColor);
     connect(m_swatches, &ColorSwatchPair::swapRequested, m_state, &tools::ToolState::swapColors);
+    connect(m_swatches, &ColorSwatchPair::transparentClicked, this,
+            [this] { m_state->setTransparentSelected(true); });
+    connect(m_state, &tools::ToolState::transparentSelectedChanged, m_swatches,
+            &ColorSwatchPair::setTransparentSelected);
     connect(m_swatches, &ColorSwatchPair::mainClicked, this, [this] {
+        if (m_state->transparentSelected()) { // back to the main color
+            m_state->setTransparentSelected(false);
+            return;
+        }
         const QColor c = QColorDialog::getColor(m_state->color(), this, tr("Choose color"));
         m_state->setColor(c); // an invalid (cancelled) color is ignored by ToolState
     });
