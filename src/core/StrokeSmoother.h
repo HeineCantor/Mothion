@@ -19,6 +19,13 @@ public:
 
     // Forget the previous stroke; the next sample passes through unchanged.
     void reset() { m_hasState = false; }
+    // Go on from `sample` as if it had been the last output (a sharp corner:
+    // the line reaches it instead of cutting across).
+    void restartAt(const PenSample &sample)
+    {
+        m_state = sample;
+        m_hasState = true;
+    }
 
     PenSample filter(const PenSample &in);
 

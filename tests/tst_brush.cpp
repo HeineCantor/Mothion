@@ -495,12 +495,149 @@ private slots:
         QVERIFY(maxTurn < 0.05);
     }
 
-    void jitterFilterDropsZigzags()
+    void cornersAreSharpTurns()
     {
-        QVERIFY(isJitter(at(0, 0), at(10, 0), at(8, 1)));    // back on itself
-        QVERIFY(!isJitter(at(0, 0), at(10, 0), at(20, 0.5))); // carrying on
-        QVERIFY(isJitter(at(0, 0), at(10, 0), at(15, 15)));   // a sharp turn over a few px is smoothed away
-        QVERIFY(!isJitter(at(0, 0), at(10, 0), at(18, 4)));   // a gentle bend is kept
+        QVERIFY(isCorner(0, 0, 10, 0, 10, 10, 1.0));    // a right angle
+        QVERIFY(isCorner(0, 0, 10, 0, 8, 1, 1.0));      // back on itself
+        QVERIFY(!isCorner(0, 0, 10, 0, 20, 0.5, 1.0));  // carrying on
+        QVERIFY(!isCorner(0, 0, 10, 0, 18, 4, 1.0));    // a gentle bend
+        // 50°: a corner on short sides (threshold 37° below a length of 1),
+        // not on long ones (66° from 30).
+        const double c = std::cos(50 * std::numbers::pi / 180), s = std::sin(50 * std::numbers::pi / 180);
+        QVERIFY(isCorner(0, 0, 0.4, 0, 0.4 + 0.4 * c, 0.4 * s, 0.0));
+        QVERIFY(!isCorner(0, 0, 20, 0, 20 + 20 * c, 20 * s, 0.0));
+        // A 53° step whose middle point is 0.45 from the chord: a wobble within a tolerance of 1.
+        QVERIFY(isCorner(0, 0, 1, 0, 1.6, 0.8, 0.0));
+        QVERIFY(!isCorner(0, 0, 1, 0, 1.6, 0.8, 1.0));
+    }
+
+    void cornerTipMeetsTheOuterEdges()
+    {
+        // Right turn on screen at (10, 0): in along +x, out along +y; radius 2.
+        const auto tip = cornerTip(10, 0, 1, 0, 0, 1, 2.0);
+        QVERIFY(tip.has_value());
+        QCOMPARE(tip->x[1], 10.0);  // outer edge of the way in: above the corner
+        QCOMPARE(tip->y[1], -2.0);
+        QCOMPARE(tip->x[3], 12.0);  // outer edge of the way out: right of it
+        QCOMPARE(tip->y[3], 0.0);
+        QVERIFY(qAbs(tip->x[2] - 12.0) < 1e-12 && qAbs(tip->y[2] + 2.0) < 1e-12); // where they meet
+        QVERIFY(!cornerTip(0, 0, 1, 0, 1, 0.3, 2.0).has_value());                  // turning < 30°
+        // A hairpin: the point is capped at 2 radii.
+        const auto sharp = cornerTip(0, 0, 1, 0, -1, 0.05, 1.0);
+        QVERIFY(sharp.has_value());
+        QVERIFY(std::hypot(sharp->x[2], sharp->y[2]) <= 2.0 + 1e-9);
+    }
+
+    void cornerDetectorFindsTheCornerLive()
+    {
+        // Close points along x, then down: one corner, at (30, 0), however
+        // the turn is spread over the points.
+        CornerDetector detector(4.0, 1.0);
+        std::vector<CornerDetector::Point> points;
+        for (int x = 0; x <= 30; x += 2)
+            points.push_back({double(x), 0});
+        for (int y = 2; y <= 30; y += 2)
+            points.push_back({30, double(y)});
+        std::vector<CornerDetector::Decision> decisions;
+        for (const auto &p : points) {
+            detector.add(p.x, p.y);
+            for (const auto &d : detector.take())
+                decisions.push_back(d);
+        }
+        QVERIFY(decisions.size() < points.size()); // the last ones wait for the path to go on
+        for (const auto &d : detector.take(true))
+            decisions.push_back(d);
+        QCOMPARE(decisions.size(), points.size()); // one decision per point, in order
+        int corners = 0;
+        for (std::size_t i = 0; i < decisions.size(); ++i)
+            if (decisions[i].corner) {
+                ++corners;
+                QCOMPARE(points[i].x, 30.0);
+                QCOMPARE(points[i].y, 0.0);
+            }
+        QCOMPARE(corners, 1);
+
+        // A gentle arc has none.
+        detector.reset();
+        int arcCorners = 0;
+        for (int k = 0; k <= 60; ++k) {
+            const double a = k * std::numbers::pi / 120;
+            detector.add(200 * std::cos(a), 200 * std::sin(a));
+        }
+        for (const auto &d : detector.take(true))
+            arcCorners += d.corner ? 1 : 0;
+        QCOMPARE(arcCorners, 0);
+    }
+
+    void postCorrectionSharpensQuickZigzagsOnly()
+    {
+        // A zigzag whose turns the hand rounds a little, as drawn: the
+        // polyline smoothed over about 30 px of path.
+        std::vector<BrushInput> dense;
+        const double xs[] = {0, 120, 240, 360, 480};
+        for (int k = 0; k + 1 < 5; ++k)
+            for (int j = 0; j < 400; ++j) {
+                const double t = j / 400.0;
+                dense.push_back(at(xs[k] + 120 * t, (k % 2 ? 150 - 150 * t : 150 * t)));
+            }
+        std::vector<BrushInput> rounded(dense.size());
+        for (std::size_t i = 0; i < dense.size(); ++i) {
+            double x = 0, y = 0;
+            int count = 0;
+            for (std::size_t j = i >= 50 ? i - 50 : 0; j < std::min(dense.size(), i + 51); ++j, ++count) {
+                x += dense[j].x;
+                y += dense[j].y;
+            }
+            rounded[i] = at(x / count, y / count);
+        }
+        // The same path as a slow pen (a point every 1.5 px) and a quick one (every 25 px).
+        auto sampled = [&](double step) {
+            std::vector<BrushInput> out{rounded.front()};
+            double travelled = 0;
+            for (std::size_t i = 1; i < rounded.size(); ++i) {
+                travelled += std::hypot(rounded[i].x - rounded[i - 1].x, rounded[i].y - rounded[i - 1].y);
+                if (travelled >= step) {
+                    out.push_back(rounded[i]);
+                    travelled = 0;
+                }
+            }
+            out.push_back(rounded.back());
+            return out;
+        };
+        auto corners = [](const std::vector<BrushInput> &points) {
+            int c = 0;
+            for (const BrushInput &p : points)
+                c += p.corner ? 1 : 0;
+            return c;
+        };
+        const auto slow = sampled(1.5), quick = sampled(25.0);
+        QCOMPARE(corners(postCorrect(quick, 25, true)), 3); // the three turns
+        QCOMPARE(corners(postCorrect(slow, 25, true)), 0);  // smooth
+        // Without "adjust by speed" the tolerance is the same for both.
+        QCOMPARE(corners(postCorrect(slow, 25, false)), corners(postCorrect(quick, 25, false)));
+        // The curve starts and ends where the stroke does.
+        const auto out = postCorrect(quick, 25, true);
+        QCOMPARE(out.front().x, quick.front().x);
+        QCOMPARE(out.back().x, quick.back().x);
+    }
+
+    void correctionKeepsCorners()
+    {
+        // An L drawn with a corner: the correction may simplify, never round it.
+        std::vector<BrushInput> points;
+        for (int x = 0; x <= 100; x += 2)
+            points.push_back(at(x, 0));
+        points.back().corner = true;
+        for (int y = 2; y <= 100; y += 2)
+            points.push_back(at(100, y));
+        const auto simple = simplify(points, 25);
+        bool cornerKept = false;
+        for (const BrushInput &p : simple) {
+            cornerKept = cornerKept || (p.corner && p.x == 100 && p.y == 0);
+            // Not rounded: every point stays on one of the two sides.
+            QVERIFY(std::abs(p.y) < 1e-9 || std::abs(p.x - 100) < 1e-9);
+        }
+        QVERIFY(cornerKept);
     }
 
     void colorShiftsFollowTheirEffectors()

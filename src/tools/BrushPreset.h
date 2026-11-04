@@ -22,6 +22,7 @@ struct BrushPreset
     double opacity = 1.0;
     PressureCurve curve;
     double smoothing = 0.3;
+    bool sharpCorners = false; // see ToolState::sharpCorners()
     BrushDefinitionPtr brush; // null = round brush
     // A fill sub tool: sets only the fill mode, none of the brush values above.
     std::optional<FillSettings::Mode> fillMode;

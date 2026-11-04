@@ -208,6 +208,38 @@ QRect StrokeSession::addDabs(std::span<const brush::BrushDab> dabs)
     return bounds;
 }
 
+QRect StrokeSession::addCornerTip(const brush::CornerTip &tip, const brush::BrushDab &dab)
+{
+    if (dab.alpha <= 0.0)
+        return {};
+    QPolygonF quad;
+    for (int k = 0; k < 4; ++k)
+        quad << QPointF(tip.x[k], tip.y[k]);
+    QRect bounds = quad.boundingRect().toAlignedRect().adjusted(-1, -1, 1, 1);
+    if (!m_clip.isEmpty())
+        bounds &= m_clip;
+    if (bounds.isEmpty())
+        return {};
+    const QColor color = m_stamper->colorFor(dab.color);
+    for (const doc::TileCoord &c : tilesIn(bounds)) {
+        QImage mask = tileImage(m_mask.writableTile(c));
+        {
+            QPainter p(&mask);
+            p.setRenderHint(QPainter::Antialiasing);
+            p.translate(-c.x * doc::kTileSize, -c.y * doc::kTileSize);
+            if (!m_clip.isEmpty())
+                p.setClipRect(m_clip);
+            p.setOpacity(std::clamp(dab.alpha, 0.0, 1.0));
+            p.setPen(Qt::NoPen);
+            p.setBrush(QColor(color.rgb()));
+            p.drawPolygon(quad);
+        }
+        m_touched.insert(c);
+        recomposeTile(c);
+    }
+    return bounds;
+}
+
 QRect StrokeSession::paintStroke(const brush::BrushStyle &style, std::uint32_t seed,
                                  std::vector<brush::BrushInput> points)
 {
@@ -215,10 +247,22 @@ QRect StrokeSession::paintStroke(const brush::BrushStyle &style, std::uint32_t s
     points = brush::finalPoints(style, std::move(points));
     brush::DabGenerator generator(style, seed);
     generator.setStrokeLength(brush::strokeLength(points));
+    return drawPoints(generator, points) | finish();
+}
+
+QRect StrokeSession::drawPoints(brush::DabGenerator &generator, const std::vector<brush::BrushInput> &points,
+                                bool cornerTips)
+{
     QRect changed;
-    for (std::size_t i = 0; i < points.size(); ++i)
+    for (std::size_t i = 0; i < points.size(); ++i) {
         changed |= addDabs(i == 0 ? generator.begin(points[i]) : generator.continueTo(points[i]));
-    return changed | finish();
+        if (!cornerTips || !points[i].corner)
+            continue;
+        const brush::BrushDab dab = generator.dabHere(points[i]);
+        if (const auto tip = brush::cornerTipAt(points, i, dab.radius))
+            changed |= addCornerTip(*tip, dab);
+    }
+    return changed;
 }
 
 void StrokeSession::recomposeTile(doc::TileCoord c)

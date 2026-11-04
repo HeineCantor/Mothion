@@ -575,29 +575,63 @@ void CanvasView::beginStroke(const PenSample &sample)
     m_smoother.setStrength(m_toolState->smoothing());
     m_smoother.reset();
     m_velocity.reset();
-    addStrokePoint(brushInput(m_smoother.filter(sample)));
+    // With the correction after the stroke, corners are found when the pen lifts.
+    m_sharpCorners = m_toolState->sharpCorners() && style.revision == 0;
+    m_corners.reset();
+    m_heldSamples.clear();
+    takeSample(sample);
 }
 
 void CanvasView::continueStroke(const PenSample &sample)
 {
-    addStrokePoint(brushInput(m_smoother.filter(sample)));
+    takeSample(sample);
+}
+
+void CanvasView::takeSample(const PenSample &sample)
+{
+    if (!m_sharpCorners) {
+        addStrokePoint(brushInput(m_smoother.filter(sample)));
+        return;
+    }
+    // Corners are found on the pen's own path, before the stabilizer rounds them.
+    m_heldSamples.push_back(sample);
+    m_corners.add(sample.x, sample.y);
+    releaseHeldSamples(false);
+}
+
+void CanvasView::releaseHeldSamples(bool end)
+{
+    for (const brush::CornerDetector::Decision &d : m_corners.take(end)) {
+        const PenSample sample = m_heldSamples.front();
+        m_heldSamples.pop_front();
+        if (!d.corner) {
+            addStrokePoint(brushInput(m_smoother.filter(sample)));
+            continue;
+        }
+        // The line goes to the corner itself, then on from there.
+        m_smoother.restartAt(sample);
+        brush::BrushInput corner = brushInput(sample);
+        corner.corner = true;
+        addStrokePoint(corner);
+        // Its point, between the ways in and out.
+        const QPointF in = m_view.mapToDocument(QPointF(d.before.x, d.before.y));
+        const QPointF out = m_view.mapToDocument(QPointF(d.after.x, d.after.y));
+        const brush::BrushDab dab = m_dabs->dabHere(corner);
+        if (const auto tip = brush::cornerTip(corner.x, corner.y, corner.x - in.x(), corner.y - in.y(),
+                                              out.x() - corner.x, out.y() - corner.y, dab.radius))
+            m_document->notifyPainted(m_stroke->addCornerTip(*tip, dab));
+    }
 }
 
 void CanvasView::addStrokePoint(const brush::BrushInput &in)
 {
-    const std::size_t n = m_points.size();
-    // A wobble replaces the last point, which is why that one is not drawn yet.
-    if (m_dabs->style().flickerFilter && n >= 2 && m_drawnPoints < n
-        && brush::isJitter(m_points[n - 2], m_points[n - 1], in, 0.05 / m_view.zoom()))
-        m_points.back() = in;
-    else
-        m_points.push_back(in);
-    drawPendingPoints(!m_dabs->style().flickerFilter);
+    m_points.push_back(in);
+    drawPendingPoints();
 }
 
-void CanvasView::drawPendingPoints(bool all)
+void CanvasView::drawPendingPoints()
 {
-    const std::size_t end = all ? m_points.size() : m_points.size() - std::min<std::size_t>(1, m_points.size());
+    const std::size_t end = m_points.size();
     QRect changed;
     for (; m_drawnPoints < end; ++m_drawnPoints) {
         const brush::BrushInput &in = m_points[m_drawnPoints];
@@ -612,7 +646,9 @@ void CanvasView::endStroke()
     // The release sample itself is not drawn: its pressure is often already 0.
     if (!m_stroke)
         return;
-    drawPendingPoints(true);
+    if (m_sharpCorners)
+        releaseHeldSamples(true);
+    drawPendingPoints();
     const brush::BrushStyle style = m_dabs->style();
     if (brush::needsFinalPass(style)) {
         // Redraw the whole stroke as it is drawn for good: same seed, its
@@ -621,8 +657,8 @@ void CanvasView::endStroke()
         const std::vector<brush::BrushInput> points = brush::finalPoints(style, m_points);
         brush::DabGenerator generator(style, m_seed);
         generator.setStrokeLength(brush::strokeLength(points));
-        for (std::size_t i = 0; i < points.size(); ++i)
-            changed |= m_stroke->addDabs(i == 0 ? generator.begin(points[i]) : generator.continueTo(points[i]));
+        // Dabs, and the points of sharp corners with the option on.
+        changed |= m_stroke->drawPoints(generator, points, m_toolState->sharpCorners());
         m_document->notifyPainted(changed);
     }
     m_document->notifyPainted(m_stroke->finish());
@@ -679,6 +715,7 @@ void CanvasView::cancelStroke()
     m_stroke->cancel();
     m_stroke.reset();
     m_dabs.reset();
+    m_heldSamples.clear();
     m_document->cancelPaint();
     renderWholeFrame();
 }

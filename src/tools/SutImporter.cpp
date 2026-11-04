@@ -245,8 +245,9 @@ brush::BrushStyle styleFrom(const Params &p, int tipCount)
     // stroke over that many points (the canvas picks one).
     s.startTaper = std::clamp(number(p, "FlickerReduction"), 0.0, 100.0) * 0.25;
     s.startCorrection = std::max(0, int(number(p, "FlickerReduction")));
-    s.flickerFilter = flag(p, "FlickerReductionBySpeed");
     s.revision = flag(p, "BrushUseRevision") ? std::max(1, int(number(p, "BrushRevision", 10.0))) : 0;
+    s.revisionCurves = flag(p, "BrushRevisionBezier");
+    s.revisionBySpeed = flag(p, "BrushRevisionBySpeed");
 
     // Color: secondary color blend and H/S/V shifts, per dab and per stroke.
     brush::ColorStyle &c = s.color;
@@ -480,6 +481,7 @@ std::optional<SutImport> importSut(const QString &path, QString *error)
     preset.opacity = std::clamp(number(params, "Opacity", 100.0) / 100.0, 0.0, 1.0);
     preset.curve = PressureCurve(); // the brush's own dynamics carry its pressure response
     preset.smoothing = std::clamp(number(params, "FlickerReduction") * 0.05, 0.0, 0.6);
+    preset.sharpCorners = flag(params, "BrushSharpenCorner");
     preset.brush = std::move(definition);
     return result;
 }

@@ -132,6 +132,14 @@ void ToolState::setUseTilt(bool use)
     emit useTiltChanged(use);
 }
 
+void ToolState::setSharpCorners(bool on)
+{
+    if (on == m_sharpCorners)
+        return;
+    m_sharpCorners = on;
+    emit sharpCornersChanged(on);
+}
+
 void ToolState::setCorrectStartAfterStroke(bool on)
 {
     if (on == m_correctStartAfterStroke)

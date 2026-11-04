@@ -2,10 +2,15 @@
 
 #include "canvas/DabStamper.h"
 #include "core/brush/BrushStyle.h"
+#include "core/brush/StrokeShaper.h"
 #include "core/document/TiledImage.h"
 
 #include <QColor>
 #include <QRect>
+
+namespace mothion::brush {
+class DabGenerator;
+}
 
 #include <cstdint>
 #include <memory>
@@ -49,6 +54,13 @@ public:
 
     // Paints the dabs; returns the changed document rect.
     QRect addDabs(std::span<const brush::BrushDab> dabs);
+    // Paints the point of a sharp corner in the color and alpha of `dab`
+    // (the dab at the corner); returns the changed document rect.
+    QRect addCornerTip(const brush::CornerTip &tip, const brush::BrushDab &dab);
+    // Feeds `points` to `generator` from the start and paints the dabs, and
+    // with `cornerTips` a tip at each corner point (BrushInput::corner).
+    QRect drawPoints(brush::DabGenerator &generator, const std::vector<brush::BrushInput> &points,
+                     bool cornerTips = true);
 
     // Paints a whole stroke at once, as it is drawn for good (its final
     // points, then finish()), with setStyle(style) applied. For previews and

@@ -122,6 +122,12 @@ public:
     bool correctsStartAfterStroke() const { return m_correctStartAfterStroke; }
     void setCorrectStartAfterStroke(bool on);
 
+    // Sharp angles: where the stroke turns sharply it keeps a pointed corner
+    // (the stabilizer and the correction after the stroke do not round it,
+    // and the outer side gets a mitered point).
+    bool sharpCorners() const { return m_sharpCorners; }
+    void setSharpCorners(bool on);
+
     static constexpr double kMinPuppetRadius = 5.0;
     static constexpr double kMaxPuppetRadius = 1000.0;
     PuppetSettings puppetSettings() const { return m_puppet; }
@@ -143,6 +149,7 @@ signals:
     void smoothingChanged(double amount);
     void useTiltChanged(bool use);
     void correctStartAfterStrokeChanged(bool on);
+    void sharpCornersChanged(bool on);
     void puppetSettingsChanged();
     void fillSettingsChanged();
     void onionSkinChanged();
@@ -160,6 +167,7 @@ private:
     double m_smoothing = 0.3;
     bool m_useTilt = true;
     bool m_correctStartAfterStroke = false;
+    bool m_sharpCorners = false;
     PuppetSettings m_puppet;
     FillSettings m_fill;
     OnionSkinSettings m_onion;

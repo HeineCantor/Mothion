@@ -15,6 +15,7 @@
 
 #include <map>
 #include <memory>
+#include <deque>
 #include <optional>
 #include <vector>
 
@@ -130,12 +131,16 @@ private:
     CanvasTool *canvasTool() const;
     void commitPendingEdits(); // of the canvas tools that are no longer active
     brush::BrushInput brushInput(const PenSample &smoothed);
-    // Records a stroke point (the anti-jitter filter may replace the last
-    // one instead) and draws the points that are settled.
+    // Records a stroke point and draws it.
     void addStrokePoint(const brush::BrushInput &in);
-    // Draws the recorded points not drawn yet; `all` includes the last,
-    // which the anti-jitter filter otherwise holds back.
-    void drawPendingPoints(bool all);
+    // A pen sample of the stroke: straight to the stabilizer, or with sharp
+    // angles held until the corner detector has judged it.
+    void takeSample(const PenSample &sample);
+    // The held samples now judged (all of them at the end of the stroke): a
+    // corner restarts the stabilizer from itself and gets its point painted.
+    void releaseHeldSamples(bool end);
+    // Draws the recorded points not drawn yet.
+    void drawPendingPoints();
 
     void renderWholeFrame();                     // frame, layers or timing changed
     void renderDocumentRect(const QRect &docRect); // pixels changed
@@ -165,6 +170,9 @@ private:
     std::uint32_t m_seed = 0;                // the stroke's random seed, reused by the final pass
     brush::VelocityMeter m_velocity;
     StrokeSmoother m_smoother;
+    brush::CornerDetector m_corners; // on the raw pen points, screen pixels
+    std::deque<PenSample> m_heldSamples; // waiting for the corner detector
+    bool m_sharpCorners = false;     // for the stroke in progress
     bool m_eraseStroke = false; // current stroke erases (eraser tool or eraser end)
     DebugOverlay *m_overlay;
 

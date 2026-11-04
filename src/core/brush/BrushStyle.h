@@ -22,6 +22,7 @@ struct BrushInput
     double sizeScale = 1.0;   // multiplies the size
     double flowScale = 1.0;   // multiplies the flow
     double direction = 0.0;   // degrees, direction of travel (document, y down)
+    bool corner = false;      // a sharp corner of the stroke (see isCorner): kept by the corrections
 };
 
 // The tilt input from the pen's X and Y tilt (degrees from vertical, as
@@ -191,10 +192,15 @@ struct BrushStyle
     // quarter sine and the stroke is drawn again so. The canvas uses either
     // this or the live start taper (ToolState::correctsStartAfterStroke()).
     int startCorrection = 0;
-    bool flickerFilter = false; // drop small back-and-forth jitter between points
     // Correction after the stroke (0 = off): simplifies the finished stroke
     // into fewer, smoothly joined points.
     int revision = 0;
+    // With quadratic curves (BrushRevisionBezier) the correction is
+    // postCorrect(): corners found on the simplified stroke stay sharp.
+    bool revisionCurves = false;
+    // Its tolerance follows the pen's speed (BrushRevisionBySpeed): a quick
+    // zigzag gets corners, a slow one stays smooth.
+    bool revisionBySpeed = false;
 
     ColorStyle color;
     MixStyle mix;

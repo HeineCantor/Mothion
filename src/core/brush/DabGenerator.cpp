@@ -148,6 +148,26 @@ double DabGenerator::place(const BrushInput &in, std::vector<BrushDab> &out)
     return main.spacing;
 }
 
+BrushDab DabGenerator::dabHere(const BrushInput &input) const
+{
+    const BrushStyle &s = m_style;
+    const BrushInput in = shaped(input, m_travelled);
+    BrushDab dab;
+    dab.x = in.x;
+    dab.y = in.y;
+    double radius = s.sizeEffector.evaluate(s.size, in, nullptr) * in.sizeScale;
+    radius = std::max(radius, s.atLeastOnePixel ? 0.51 : 0.1);
+    if (isSoft(s))
+        radius *= 1.5 - 0.5 * std::clamp(s.hardness, 0.0, 1.0);
+    dab.radius = radius;
+    const double opacity = std::min(1.0, s.dabOpacityEffector.evaluate(s.dabOpacity, in, nullptr));
+    double flow = s.flowEffector.evaluate(s.flow, in, nullptr) * in.flowScale;
+    if (radius < 1.0)
+        flow *= radius;
+    dab.alpha = std::clamp(flow, 0.0, 1.0) * std::clamp(opacity, 0.0, 1.0);
+    return dab;
+}
+
 DabGenerator::Single DabGenerator::computeDab(const BrushInput &in, bool applyRandom)
 {
     const BrushStyle &s = m_style;

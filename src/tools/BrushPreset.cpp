@@ -72,6 +72,7 @@ void applyPreset(ToolState &state, const BrushPreset &preset)
     state.setOpacity(preset.tool, preset.opacity);
     state.setPressureCurve(preset.curve);
     state.setSmoothing(preset.smoothing);
+    state.setSharpCorners(preset.sharpCorners);
     state.setBrush(preset.tool, preset.brush);
 }
 

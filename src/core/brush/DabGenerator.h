@@ -47,6 +47,12 @@ public:
     };
     Single computeDab(const BrushInput &in, bool applyRandom);
 
+    // Size and alpha of a dab at `in`, taken as the point the stroke has
+    // reached (start/end factor and start taper there), without randomness
+    // and without touching the generator's state: for what is drawn beside
+    // the dabs, such as the tip of a sharp corner.
+    BrushDab dabHere(const BrushInput &in) const;
+
     // Interpolates two pen states (positions linearly, angles the short way round).
     static BrushInput interpolate(const BrushInput &a, const BrushInput &b, double t);
 
