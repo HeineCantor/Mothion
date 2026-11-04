@@ -4,7 +4,11 @@
 
 #include <QPainter>
 
+#include <QLineF>
+
 #include <algorithm>
+#include <optional>
+#include <utility>
 
 namespace mothion::canvas {
 
@@ -50,6 +54,43 @@ double lineWidth(const perspective::Grid &grid)
     return std::max(1.0, grid.frameWidth / 960.0); // 2 px on an HD sheet
 }
 
+// What the painter can still draw on, in its own coordinates: its clip, or
+// else its whole device.
+QRectF paintable(const QPainter &p)
+{
+    QRectF area;
+    if (const QPaintDevice *device = p.device())
+        area = p.transform().inverted().mapRect(QRectF(0, 0, device->width(), device->height()));
+    if (p.hasClipping())
+        area = area.isNull() ? p.clipBoundingRect() : area & p.clipBoundingRect();
+    return area;
+}
+
+// The part of a→b inside `r` (Liang–Barsky), as the fractions [t0, t1] of
+// it; nothing if it misses.
+std::optional<std::pair<double, double>> clipped(const QPointF &a, const QPointF &b, const QRectF &r)
+{
+    double t0 = 0.0, t1 = 1.0;
+    const QPointF d = b - a;
+    const double p[4] = {-d.x(), d.x(), -d.y(), d.y()};
+    const double q[4] = {a.x() - r.left(), r.right() - a.x(), a.y() - r.top(), r.bottom() - a.y()};
+    for (int i = 0; i < 4; ++i) {
+        if (p[i] == 0.0) {
+            if (q[i] < 0.0)
+                return std::nullopt;
+            continue;
+        }
+        const double t = q[i] / p[i];
+        if (p[i] < 0.0)
+            t0 = std::max(t0, t);
+        else
+            t1 = std::min(t1, t);
+        if (t0 > t1)
+            return std::nullopt;
+    }
+    return std::pair{t0, t1};
+}
+
 } // namespace
 
 void paintPerspective(QPainter &p, const perspective::Grid &grid)
@@ -58,13 +99,25 @@ void paintPerspective(QPainter &p, const perspective::Grid &grid)
     p.setRenderHint(QPainter::Antialiasing);
     const QColor color = QColor::fromRgba(grid.color);
     const double width = lineWidth(grid);
+    // Only the lines' parts that can show are drawn: an update of a few
+    // pixels does not stroke the whole grid, nor dash the whole horizon.
+    const QRectF area = paintable(p).adjusted(-4.0 * width, -4.0 * width, 4.0 * width, 4.0 * width);
     p.setPen(QPen(color, width, Qt::SolidLine, Qt::FlatCap));
-    for (const perspective::Segment &s : perspective::gridSegments(grid))
-        p.drawLine(QPointF(s.a.x, s.a.y), QPointF(s.b.x, s.b.y));
+    for (const perspective::Segment &s : perspective::gridSegments(grid)) {
+        const QPointF a(s.a.x, s.a.y), b(s.b.x, s.b.y);
+        if (const auto t = clipped(a, b, area))
+            p.drawLine(a + (b - a) * t->first, a + (b - a) * t->second);
+    }
     if (grid.horizon)
         if (const auto h = perspective::horizonLine(grid, grid.frameWidth * 4.0)) {
-            p.setPen(QPen(color, width * 1.5, Qt::DashLine, Qt::FlatCap));
-            p.drawLine(QPointF(h->a.x, h->a.y), QPointF(h->b.x, h->b.y));
+            const QPointF a(h->a.x, h->a.y), b(h->b.x, h->b.y);
+            if (const auto t = clipped(a, b, area)) {
+                QPen pen(color, width * 1.5, Qt::DashLine, Qt::FlatCap);
+                // The dashes where they would be on the whole line (offset in pen widths).
+                pen.setDashOffset(t->first * QLineF(a, b).length() / pen.widthF());
+                p.setPen(pen);
+                p.drawLine(a + (b - a) * t->first, a + (b - a) * t->second);
+            }
         }
     p.restore();
 }

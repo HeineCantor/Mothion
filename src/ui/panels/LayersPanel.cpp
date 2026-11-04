@@ -105,7 +105,8 @@ QPixmap thumbnail(const doc::TiledImage *image, const doc::Drawing *drawing, con
         for (const doc::TileCoord &c : image->tileCoords())
             p.drawImage(canvas::tileRect(c).topLeft(), canvas::tileImage(*image->tile(c)));
     if (drawing) {
-        const QRect bounds = canvas::drawingBounds(*drawing);
+        // Only the sheet is shown: a perspective layer's lines reach far out of it.
+        const QRect bounds = canvas::drawingBounds(*drawing) & QRect(QPoint(0, 0), docSize);
         p.drawImage(bounds.topLeft(), canvas::composeDrawing(*drawing, bounds));
     }
     p.restore();
