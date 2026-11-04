@@ -26,8 +26,8 @@ namespace mothion::canvas {
 // Free transform of the selected pixels (all of them when nothing is
 // selected) of the current layer, or of every layer chosen in the Layers
 // panel (all those of a chosen frame or cel) together, in one box with eight
-// handles:
-// a corner scales (Shift keeps the proportions), a side scales one way,
+// handles around the selection's bounding box (the bounds of the pixels when
+// nothing is selected): a corner scales (Shift keeps the proportions), a side scales one way,
 // inside the box moves, outside rotates (Shift: 15° steps). The selection
 // follows.
 //
@@ -58,7 +58,9 @@ public:
     bool canRedoStep() const override { return m_session && !m_session->redo.empty() && !m_drag; }
     void setViewZoom(double zoom) override { m_zoom = zoom; }
     void paintOverlay(QPainter &painter, const ViewTransform &view) const override;
-    Qt::CursorShape cursor() const override { return Qt::SizeAllCursor; }
+    // Under the pointer: the arrows of a handle, all four inside the box, a turning arrow out of it.
+    bool hover(const QPointF &docPos) override;
+    QCursor cursor() const override;
 
     // The transform so far, from the pixels' place to where they are shown.
     QTransform transform() const { return m_session ? m_session->transform : QTransform(); }
@@ -76,6 +78,14 @@ private:
         QPointF anchor;     // the point that stays put, in box coordinates
         bool horizontal = false; // a side handle: which way it scales
     };
+
+    struct Pick
+    {
+        Grip grip = Grip::Move;
+        int handle = -1; // 0..7 for a corner or side
+    };
+    // What a press at `docPos` would grab.
+    Pick pick(const QPointF &docPos) const;
 
     bool start();
     void render();
@@ -101,7 +111,7 @@ private:
     struct Session
     {
         std::vector<Part> parts;
-        QRect box;                        // tight bounds of the pixels of all the parts
+        QRect box;                        // the selection's bounding box (the pixels' bounds when nothing is selected)
         QPainterPath selection;           // as it was, empty if none
         QTransform transform;
         QRect shown; // area last drawn by the transform
@@ -111,6 +121,7 @@ private:
     };
     std::unique_ptr<Session> m_session;
     std::optional<Drag> m_drag;
+    std::optional<Pick> m_hover; // under the pointer, between drags
 };
 
 } // namespace mothion::canvas

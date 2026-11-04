@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QCursor>
 #include <QPointF>
 #include <Qt>
 
@@ -81,7 +82,7 @@ public:
         (void)painter;
         (void)view;
     }
-    virtual Qt::CursorShape cursor() const { return Qt::CrossCursor; }
+    virtual QCursor cursor() const { return Qt::CrossCursor; }
 };
 
 } // namespace mothion::canvas

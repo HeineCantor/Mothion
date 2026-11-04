@@ -8,6 +8,8 @@
 
 #include <QLineF>
 #include <QPainter>
+#include <QPainterPath>
+#include <QPixmap>
 
 #include <algorithm>
 #include <cmath>
@@ -18,7 +20,7 @@ namespace mothion::canvas {
 namespace {
 
 constexpr double kHandleSize = 8.0;  // screen px, as drawn
-constexpr double kGrabRadius = 10.0; // screen px, to pick a handle
+constexpr double kGrabRadius = 6.0;  // screen px, to pick a handle: just outside it is the turn
 constexpr double kMinScale = 0.01;
 constexpr double kRotateSnap = 15.0; // degrees, with Shift
 
@@ -119,6 +121,14 @@ bool TransformTool::start()
         m_status(QObject::tr("Nothing to transform here"));
         return false;
     }
+    // The frame is the selection's own bounding box, not that of the pixels in it.
+    if (!s->selection.isEmpty()) {
+        const doc::Document &d = m_document->document();
+        const QRect selected = s->selection.boundingRect().toAlignedRect() & QRect(0, 0, d.width(), d.height());
+        if (!selected.isEmpty()) {
+            box = selected;
+        }
+    }
     for (std::size_t i = 0; i < s->parts.size(); ++i) {
         QImage &source = s->parts[i].source;
         source = QImage(box.size(), QImage::Format_ARGB32_Premultiplied);
@@ -146,17 +156,9 @@ QPointF TransformTool::handlePoint(int index) const
     }
 }
 
-void TransformTool::press(const QPointF &docPos, Qt::KeyboardModifiers)
+TransformTool::Pick TransformTool::pick(const QPointF &docPos) const
 {
-    if (!m_session && !start()) {
-        m_repaint();
-        return;
-    }
     const Session &s = *m_session;
-    Drag d;
-    d.start = s.transform;
-    d.pressDoc = docPos;
-
     // The handle nearest the pen, if close enough on screen; on a small box
     // less close, so there is room inside it to move.
     const QPolygonF corners = s.transform.map(QPolygonF(QRectF(s.box)));
@@ -170,16 +172,95 @@ void TransformTool::press(const QPointF &docPos, Qt::KeyboardModifiers)
             nearest = i;
         }
     }
-    if (nearest >= 0) {
+    if (nearest >= 0)
+        return {nearest < 4 ? Grip::Corner : Grip::Side, nearest};
+    return {corners.containsPoint(docPos, Qt::OddEvenFill) ? Grip::Move : Grip::Rotate, -1};
+}
+
+void TransformTool::press(const QPointF &docPos, Qt::KeyboardModifiers)
+{
+    if (!m_session && !start()) {
+        m_repaint();
+        return;
+    }
+    const Session &s = *m_session;
+    Drag d;
+    d.start = s.transform;
+    d.pressDoc = docPos;
+    const Pick picked = pick(docPos);
+    d.grip = picked.grip;
+    if (picked.handle >= 0) {
+        const int nearest = picked.handle;
         d.handle = handlePoint(nearest);
         // The opposite corner, or the middle of the opposite side.
         d.anchor = handlePoint(nearest < 4 ? (nearest + 2) % 4 : 4 + (nearest - 4 + 2) % 4);
-        d.grip = nearest < 4 ? Grip::Corner : Grip::Side;
         d.horizontal = nearest == 5 || nearest == 7;
-    } else {
-        d.grip = corners.containsPoint(docPos, Qt::OddEvenFill) ? Grip::Move : Grip::Rotate;
     }
+    m_hover = picked; // what the pointer stays over during the drag
     m_drag = d;
+}
+
+bool TransformTool::hover(const QPointF &docPos)
+{
+    if (!m_session) {
+        m_hover.reset();
+        return false;
+    }
+    m_hover = pick(docPos);
+    return false;
+}
+
+QCursor TransformTool::cursor() const
+{
+    if (!m_session || !m_hover)
+        return Qt::SizeAllCursor;
+    switch (m_hover->grip) {
+    case Grip::Move: return Qt::SizeAllCursor;
+    case Grip::Rotate: {
+        // A turning arrow, drawn once: dark with a white edge to show on any paper.
+        static const QCursor turning = [] {
+            QPixmap pixmap(28, 28);
+            pixmap.fill(Qt::transparent);
+            QPainter p(&pixmap);
+            p.setRenderHint(QPainter::Antialiasing);
+            QPainterPath arc;
+            arc.arcMoveTo(QRectF(5, 5, 18, 18), 40);
+            arc.arcTo(QRectF(5, 5, 18, 18), 40, 260);
+            QPainterPath head;
+            head.moveTo(23.5, 6.5);
+            head.lineTo(24, 14.5);
+            head.lineTo(16.5, 11.5);
+            head.closeSubpath();
+            p.setBrush(Qt::NoBrush);
+            p.setPen(QPen(Qt::white, 4.5, Qt::SolidLine, Qt::RoundCap));
+            p.drawPath(arc);
+            p.setPen(QPen(Qt::white, 2.5, Qt::SolidLine, Qt::FlatCap, Qt::RoundJoin));
+            p.setBrush(Qt::white);
+            p.drawPath(head);
+            p.setPen(QPen(Qt::black, 2, Qt::SolidLine, Qt::RoundCap));
+            p.setBrush(Qt::NoBrush);
+            p.drawPath(arc);
+            p.setBrush(Qt::black);
+            p.setPen(Qt::NoPen);
+            p.drawPath(head);
+            return QCursor(pixmap, 14, 14);
+        }();
+        return turning;
+    }
+    default: break;
+    }
+    // A handle: the arrows along the way from the middle of the box to it.
+    const QPointF from = m_session->transform.map(QRectF(m_session->box).center());
+    const QPointF to = m_session->transform.map(handlePoint(m_hover->handle));
+    double degrees = std::atan2(to.y() - from.y(), to.x() - from.x()) * 180.0 / std::numbers::pi;
+    degrees = std::fmod(std::fmod(degrees, 180.0) + 180.0, 180.0); // 0..180, y points down
+    if (degrees < 22.5 || degrees >= 157.5)
+        return Qt::SizeHorCursor;
+    if (degrees < 67.5)
+        return Qt::SizeFDiagCursor;
+    if (degrees < 112.5)
+        return Qt::SizeVerCursor;
+    return Qt::SizeBDiagCursor;
 }
 
 void TransformTool::move(const QPointF &docPos, Qt::KeyboardModifiers modifiers)

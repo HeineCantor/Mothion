@@ -92,7 +92,11 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
         m_document, m_toolState, [this]() -> const QImage & { return m_frame.image(); },
         [this](const QString &text) { emit statusMessage(text); });
     m_transformTool = std::make_unique<TransformTool>(
-        m_document, m_toolState, [this](const QString &text) { emit statusMessage(text); }, [this] { update(); });
+        m_document, m_toolState, [this](const QString &text) { emit statusMessage(text); },
+        [this] {
+            update();
+            emit transformChanged();
+        });
     m_antsTimer = new QTimer(this);
     m_antsTimer->setInterval(kAntsIntervalMs);
     connect(m_antsTimer, &QTimer::timeout, this, [this] {
@@ -533,8 +537,12 @@ void CanvasView::handleSample(const PenSample &sample)
             updateGizmoCursor();
             update();
         }
-        if (CanvasTool *tool = canvasTool(); tool && !busy && tool->hover(docPos))
-            update();
+        if (CanvasTool *tool = canvasTool(); tool && !busy) {
+            if (tool->hover(docPos))
+                update();
+            if (tool == m_transformTool.get() && m_gizmo.hovered() == PerspectiveGizmo::Handle::None)
+                setCursor(tool->cursor()); // the handle or turn under the pointer
+        }
         break;
     }
 }
@@ -796,6 +804,20 @@ bool CanvasView::event(QEvent *event)
         }
     }
     return QWidget::event(event);
+}
+
+QRectF CanvasView::transformBounds() const
+{
+    const auto *tool = static_cast<const TransformTool *>(m_transformTool.get());
+    if (!tool->hasPendingEdit())
+        return {};
+    return tool->transform().mapRect(QRectF(tool->box()));
+}
+
+void CanvasView::finishTransform(bool apply)
+{
+    if (m_transformTool->keyPress(apply ? Qt::Key_Return : Qt::Key_Escape))
+        emit editStepsChanged();
 }
 
 void CanvasView::keyPressEvent(QKeyEvent *event)

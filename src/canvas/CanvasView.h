@@ -66,6 +66,11 @@ public:
 
     // The handles of the current perspective layer.
     const PerspectiveGizmo &perspectiveGizmo() const { return m_gizmo; }
+    // Where the open transform's box is now (document coordinates, the box
+    // after the transform); a null rect when no transform is open.
+    QRectF transformBounds() const;
+    // Applies (true) or drops the open transform, as Enter and Esc do.
+    void finishTransform(bool apply);
 
     // Undo and redo inside an edit left open by the active tool (the drags
     // of a puppet warp or a transform); false if there is no step to take,
@@ -104,6 +109,8 @@ signals:
     void statusMessage(const QString &text);
     // The steps of an open edit may have changed (see undoInEdit()).
     void editStepsChanged();
+    // The transform box came up, moved or went away (see transformBounds()).
+    void transformChanged();
 
 protected:
     void paintEvent(QPaintEvent *event) override;

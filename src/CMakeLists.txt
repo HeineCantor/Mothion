@@ -93,6 +93,7 @@ qt_add_library(mothion_gui STATIC
     ui/PanelDock.h ui/PanelDock.cpp
     ui/SplashScreen.h ui/SplashScreen.cpp
     ui/SelectionBar.h ui/SelectionBar.cpp
+    ui/TransformBar.h ui/TransformBar.cpp
     ui/AutoplayWindow.h ui/AutoplayWindow.cpp
     ui/AdvancedToolSettings.h ui/AdvancedToolSettings.cpp
     ui/IconFactory.h ui/IconFactory.cpp

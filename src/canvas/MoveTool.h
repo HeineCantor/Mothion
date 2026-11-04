@@ -34,7 +34,7 @@ public:
     void release(const QPointF &docPos, Qt::KeyboardModifiers modifiers) override;
     void cancel() override;
     bool isActive() const override { return m_session.has_value(); }
-    Qt::CursorShape cursor() const override { return Qt::SizeAllCursor; }
+    QCursor cursor() const override { return Qt::SizeAllCursor; }
 
 private:
     void moveTo(QPoint offset);

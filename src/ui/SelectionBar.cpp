@@ -74,6 +74,7 @@ SelectionBar::SelectionBar(canvas::CanvasView *canvas, document::DocumentControl
     connect(m_document, &Controller::selectionChanged, this, &SelectionBar::place);
     connect(m_document, &Controller::documentReplaced, this, &SelectionBar::place);
     connect(m_canvas, &canvas::CanvasView::viewChanged, this, &SelectionBar::place);
+    connect(m_canvas, &canvas::CanvasView::transformChanged, this, &SelectionBar::place);
     m_canvas->installEventFilter(this); // its resizes
     place();
 }
@@ -87,7 +88,8 @@ bool SelectionBar::eventFilter(QObject *watched, QEvent *event)
 
 void SelectionBar::place()
 {
-    if (!m_document->hasSelection()) {
+    // While a transform is open its own bar (OK / Cancel) takes this place.
+    if (!m_document->hasSelection() || !m_canvas->transformBounds().isNull()) {
         hide();
         return;
     }

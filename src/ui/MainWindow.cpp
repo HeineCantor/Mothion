@@ -13,6 +13,7 @@
 #include "ui/IconFactory.h"
 #include "ui/PanelDock.h"
 #include "ui/SelectionBar.h"
+#include "ui/TransformBar.h"
 #include "ui/Theme.h"
 #include "ui/panels/BrushSizePanel.h"
 #include "ui/panels/BrushSlidersPanel.h"
@@ -100,6 +101,7 @@ MainWindow::MainWindow(QWidget *parent)
     auto *selectionBar = new SelectionBar(m_canvas, m_document, m_toolState);
     connect(selectionBar, &SelectionBar::statusMessage, this,
             [this](const QString &text) { statusBar()->showMessage(text, 4000); });
+    new TransformBar(m_canvas);
     auto *viewInfo = new QLabel(this);
     statusBar()->addPermanentWidget(viewInfo);
     connect(m_canvas, &canvas::CanvasView::viewChanged, viewInfo, [viewInfo](double zoom, double rot) {

@@ -22,6 +22,7 @@
 #include "ui/MainWindow.h"
 #include "ui/PanelDock.h"
 #include "ui/SelectionBar.h"
+#include "ui/TransformBar.h"
 #include "ui/panels/BlendModes.h"
 #include "ui/panels/BrushSizePanel.h"
 #include "ui/panels/ColorWheelPanel.h"
@@ -1010,7 +1011,7 @@ private slots:
         canvas::TransformTool tool(&controller, &state, [](const QString &) {}, [] {});
         tool.activated();
         QVERIFY(tool.hasPendingEdit());
-        QCOMPARE(tool.box(), QRect(910, 535, 50, 10)); // tight around the pixels
+        QCOMPARE(tool.box(), QRect(900, 500, 60, 100)); // the selection's own box, not the pixels'
 
         tool.press({930, 540}, Qt::NoModifier); // inside: moves
         tool.move({930, 590}, Qt::NoModifier);
@@ -1028,24 +1029,59 @@ private slots:
         QCOMPARE(controller.selection().boundingRect(), QRectF(900, 500, 60, 100));
 
         tool.activated(); // the bottom-right corner, twice as far from the top-left one
-        tool.press({960, 545}, Qt::NoModifier);
-        tool.release({1010, 555}, Qt::NoModifier);
-        QCOMPARE(tool.transform().mapRect(QRectF(tool.box())), QRectF(910, 535, 100, 20));
-        QCOMPARE(pixel(1000, 550), green);
+        tool.press({960, 600}, Qt::NoModifier);
+        tool.release({1020, 700}, Qt::NoModifier);
+        QCOMPARE(tool.transform().mapRect(QRectF(tool.box())), QRectF(900, 500, 120, 200));
+        QCOMPARE(pixel(1000, 580), green);
         QVERIFY(tool.keyPress(Qt::Key_Escape)); // dropped
-        QCOMPARE(qAlpha(pixel(1000, 550)), 0);
+        QCOMPARE(qAlpha(pixel(1000, 580)), 0);
         QCOMPARE(pixel(930, 540), green);
         QCOMPARE(controller.selection().boundingRect(), QRectF(900, 500, 60, 100));
 
-        tool.activated(); // outside the box: a quarter turn around its center (935, 540)
-        tool.press({1000, 540}, Qt::NoModifier);
-        tool.release({935, 600}, Qt::NoModifier);
+        tool.activated(); // outside the box: a quarter turn around its center (930, 550)
+        tool.press({1000, 550}, Qt::NoModifier);
+        tool.release({930, 620}, Qt::NoModifier);
         const QPointF axis = tool.transform().map(QPointF(1, 0)) - tool.transform().map(QPointF(0, 0));
         QVERIFY(std::abs(axis.x()) < 1e-6 && std::abs(axis.y() - 1) < 1e-6);
-        QCOMPARE(pixel(935, 560), green); // the bar now stands upright
+        QCOMPARE(pixel(940, 555), green); // the bar now stands upright
         QCOMPARE(qAlpha(pixel(915, 540)), 0);
         tool.commit();
         QCOMPARE(controller.undoText(), QStringLiteral("Undo transform"));
+    }
+
+    // Just outside a corner of the box (not on its handle) a drag turns it, with a turning
+    // arrow for the cursor; the handle itself scales, with arrows along its diagonal.
+    void transformTurnsFromJustOutsideACorner()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        QImage image(100, 100, QImage::Format_ARGB32);
+        image.fill(Qt::red);
+        controller.importImage(image, QStringLiteral("square")); // 910..1009, 490..589
+        canvas::TransformTool tool(&controller, &state, [](const QString &) {}, [] {});
+        tool.setViewZoom(1.0);
+        tool.activated();
+        QCOMPARE(tool.box(), QRect(910, 490, 100, 100));
+
+        tool.hover({1010, 590}); // on the bottom-right handle
+        QCOMPARE(tool.cursor().shape(), Qt::SizeFDiagCursor);
+        tool.hover({960, 540}); // inside
+        QCOMPARE(tool.cursor().shape(), Qt::SizeAllCursor);
+        tool.hover({1020, 600}); // a little out of the corner
+        QCOMPARE(tool.cursor().shape(), Qt::BitmapCursor); // the turning arrow
+        tool.hover({1010, 490}); // the top-right handle: the other diagonal
+        QCOMPARE(tool.cursor().shape(), Qt::SizeBDiagCursor);
+        tool.hover({960, 590}); // the middle of the bottom side
+        QCOMPARE(tool.cursor().shape(), Qt::SizeVerCursor);
+
+        tool.press({1020, 600}, Qt::NoModifier); // 14 px out of the corner: turns
+        tool.move({960, 650}, Qt::NoModifier);
+        tool.release({960, 650}, Qt::NoModifier);
+        const QTransform t = tool.transform();
+        QCOMPARE(t.m11(), t.m22()); // a rotation: no scaling, no shear
+        QVERIFY(std::abs(t.m12()) > 0.1);
+        QVERIFY(std::abs(t.m11() * t.m11() + t.m12() * t.m12() - 1.0) < 1e-9);
+        tool.cancel();
     }
 
     // The arrow next to + adds a perspective layer: a grid that cannot be
@@ -2537,6 +2573,68 @@ private slots:
         QVERIFY(tool.undoStep());
         QVERIFY(qAlpha(pixels.pixel(1130, 540)) != 0);
         QVERIFY(!tool.undoStep());
+    }
+
+    // While a transform is open a bar with OK and Cancel floats under its box (the selection's
+    // bar gives way); OK applies it, Cancel drops it, either returns to the previous tool.
+    void transformBarAppliesOrDrops()
+    {
+        ui::MainWindow window;
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *controller = window.findChild<document::DocumentController *>();
+        auto *state = window.findChild<tools::ToolState *>();
+        auto *canvas = window.findChild<canvas::CanvasView *>();
+        auto *bar = window.findChild<ui::TransformBar *>();
+        auto *selectionBar = window.findChild<ui::SelectionBar *>();
+        QVERIFY(bar && selectionBar);
+        QImage image(100, 100, QImage::Format_ARGB32);
+        image.fill(Qt::red);
+        controller->importImage(image, QStringLiteral("square")); // 910..1009, 490..589
+        QPainterPath area;
+        area.addRect(900, 480, 130, 130); // a selection larger than the pixels
+        controller->setSelection(area);
+        QVERIFY(selectionBar->isVisible());
+        QVERIFY(!bar->isVisible());
+
+        state->setActiveTool(tools::ToolId::Transform);
+        QCoreApplication::processEvents();
+        QCOMPARE(canvas->transformBounds(), QRectF(900, 480, 130, 130)); // the selection's box
+        QVERIFY(bar->isVisible());
+        QVERIFY(!selectionBar->isVisible());
+        const QRect box = canvas->view().documentToView().mapRect(canvas->transformBounds()).toAlignedRect();
+        QVERIFY(bar->geometry().top() >= box.bottom() || bar->geometry().bottom() <= box.top()); // not on the box
+        auto *ok = bar->findChild<QToolButton *>(QStringLiteral("ok"));
+        auto *cancel = bar->findChild<QToolButton *>(QStringLiteral("cancel"));
+        QVERIFY(ok && cancel);
+        QCOMPARE(ok->text(), QStringLiteral("OK"));
+        QCOMPARE(cancel->text(), QStringLiteral("Cancel"));
+
+        auto at = [&](QPointF doc) { return canvas->view().documentToView().map(doc).toPoint(); };
+        auto drag = [&](QPointF from, QPointF to) {
+            QTest::mousePress(canvas, Qt::LeftButton, {}, at(from));
+            QTest::mouseMove(canvas, at(to));
+            QTest::mouseRelease(canvas, Qt::LeftButton, {}, at(to));
+        };
+        const doc::Cel &cel = *controller->document().cel(controller->currentCel());
+        const doc::TiledImage &pixels = cel.drawingAt(0)->layers.front().image;
+        drag({965, 545}, {1065, 545}); // moved 100 to the right
+        QCOMPARE(pixels.pixel(1060, 545), doc::Pixel(0xffff0000));
+        QTest::mouseClick(cancel, Qt::LeftButton);
+        QVERIFY(!bar->isVisible());
+        QVERIFY(selectionBar->isVisible());
+        QVERIFY(state->activeTool() != tools::ToolId::Transform);
+        QCOMPARE(qAlpha(pixels.pixel(1060, 545)), 0); // dropped
+        QCOMPARE(pixels.pixel(960, 545), doc::Pixel(0xffff0000));
+
+        state->setActiveTool(tools::ToolId::Transform);
+        QVERIFY(bar->isVisible());
+        drag({965, 545}, {1065, 545});
+        QTest::mouseClick(ok, Qt::LeftButton);
+        QVERIFY(!bar->isVisible());
+        QVERIFY(state->activeTool() != tools::ToolId::Transform);
+        QCOMPARE(pixels.pixel(1060, 545), doc::Pixel(0xffff0000)); // applied
+        QCOMPARE(controller->undoText(), QStringLiteral("Undo transform"));
     }
 
     // The same for a transform; and Ctrl+Z in the window goes there first.
