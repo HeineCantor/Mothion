@@ -167,6 +167,20 @@ public:
         doc::LayerId layer = doc::kNoId;
         bool operator==(const LayerRef &) const = default;
     };
+    // The perspective layers shown on the current frame, in every cel (top cel first, each cel's
+    // top layer first): what the pen can be snapped to.
+    struct PerspectiveLayerInfo
+    {
+        LayerRef ref;
+        QString name;  // the layer's, with the cel's in brackets when there are several cels
+        perspective::Grid grid;
+    };
+    std::vector<PerspectiveLayerInfo> perspectiveLayers() const;
+    // The one to snap to when `preferred` is wanted: that layer if it is on this frame, else the one
+    // of the same name (a frame made from another keeps its layers' names), else the first;
+    // nothing if the frame has none.
+    std::optional<PerspectiveLayerInfo> perspectiveLayerFor(doc::LayerId preferred, const QString &name = {}) const;
+
     // The layers chosen in the Layers panel, for the edits that act on several
     // at once (a move): every layer of a chosen frame or cel is in it. Empty
     // when that is just the current layer.

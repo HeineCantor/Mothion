@@ -6,7 +6,7 @@ namespace mothion::ui {
 
 enum class IconId {
     New, Open, Save, Undo, Redo,
-    Brush, Eraser, Hand, Zoom, Move, RectSelect, LassoSelect, Puppet, Eyedropper, Fill, Transform, Blend, Liquify,
+    Brush, Eraser, Hand, Zoom, Move, RectSelect, LassoSelect, Puppet, Eyedropper, Fill, Transform, Blend, Liquify, Snap, Crosshair,
     Collapse, Expand, Float, Close,
     ZoomOut, ZoomFit, ZoomActual, RotateLeft, RotateRight, RotateReset,
     FlipHorizontal, FlipVertical, Eye, Lock, Add, Delete, ArrowUp, ArrowDown, Clear,

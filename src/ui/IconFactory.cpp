@@ -178,6 +178,27 @@ void drawGlyph(QPainter &p, IconId id)
         path.cubicTo(6, 11, 9, 11, 12, 16);
         path.cubicTo(15, 21, 18, 21, 21, 16);
         break;
+    case IconId::Snap: // a horseshoe magnet
+        path.moveTo(6, 4);
+        path.lineTo(6, 13);
+        path.cubicTo(6, 21, 18, 21, 18, 13);
+        path.lineTo(18, 4);
+        path.moveTo(6, 8);
+        path.lineTo(10, 8);
+        path.moveTo(14, 8);
+        path.lineTo(18, 8);
+        break;
+    case IconId::Crosshair: // a sight
+        path.addEllipse(QPointF(12, 12), 6.5, 6.5);
+        path.moveTo(12, 2.5);
+        path.lineTo(12, 8);
+        path.moveTo(12, 16);
+        path.lineTo(12, 21.5);
+        path.moveTo(2.5, 12);
+        path.lineTo(8, 12);
+        path.moveTo(16, 12);
+        path.lineTo(21.5, 12);
+        break;
     case IconId::Transform: // a box with handles
         path.addRect(QRectF(6, 6, 12, 12));
         for (QPointF at : {QPointF(6, 6), QPointF(18, 6), QPointF(18, 18), QPointF(6, 18), QPointF(12, 6),

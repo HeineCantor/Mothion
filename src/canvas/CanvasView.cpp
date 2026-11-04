@@ -23,6 +23,7 @@
 #include <QWheelEvent>
 
 #include <algorithm>
+#include <limits>
 #include <cmath>
 #include <numbers>
 
@@ -485,6 +486,8 @@ void CanvasView::handleSample(const PenSample &sample)
             break; // a second button during a drag: keep doing what we do
         if (const Mode mode = navigationModeFor(sample); mode != Mode::None) {
             m_gesture.begin(mode, QPointF(sample.x, sample.y), m_view);
+        } else if (m_pickingSnap && sample.tipDown()) {
+            pickSnapLayer(docPos);
         } else if (sample.tipDown() && m_gizmo.press(docPos, m_view)) {
             update(); // a handle of the perspective layer, whatever the tool
         } else if (picksColor() && sample.tipDown() && sample.tool != InputTool::Eraser) {
@@ -619,6 +622,17 @@ void CanvasView::beginStroke(const PenSample &sample)
     m_sharpCorners = m_toolState->sharpCorners() && style.revision == 0;
     m_corners.reset();
     m_heldSamples.clear();
+    m_snapHeld.clear();
+    m_snapping = false;
+    if (m_toolState->perspectiveSnap()) {
+        if (const auto layer = m_document->perspectiveLayerFor(m_toolState->perspectiveSnapLayer(),
+                                                               m_toolState->perspectiveSnapLayerName())) {
+            m_snap.begin(layer->grid, m_view.mapToDocument(QPointF(sample.x, sample.y)), 6.0 / m_view.zoom());
+            m_snapping = true;
+        } else {
+            emit statusMessage(tr("No perspective layer on this frame to snap to"));
+        }
+    }
     takeSample(sample);
 }
 
@@ -627,7 +641,33 @@ void CanvasView::continueStroke(const PenSample &sample)
     takeSample(sample);
 }
 
+PenSample CanvasView::snappedSample(const PenSample &sample) const
+{
+    const QPointF onAxis = m_snap.snapped(m_view.mapToDocument(QPointF(sample.x, sample.y)));
+    const QPointF inView = m_view.documentToView().map(onAxis);
+    PenSample out = sample;
+    out.x = inView.x();
+    out.y = inView.y();
+    return out;
+}
+
 void CanvasView::takeSample(const PenSample &sample)
+{
+    if (!m_snapping) {
+        takeRawSample(sample);
+        return;
+    }
+    // Snapping: the first samples wait until the pen has shown which axis it follows, then
+    // they and every later one are put on that axis's line.
+    m_snapHeld.push_back(sample);
+    if (!m_snap.update(m_view.mapToDocument(QPointF(sample.x, sample.y))))
+        return;
+    for (const PenSample &held : m_snapHeld)
+        takeRawSample(snappedSample(held));
+    m_snapHeld.clear();
+}
+
+void CanvasView::takeRawSample(const PenSample &sample)
 {
     if (!m_sharpCorners) {
         addStrokePoint(brushInput(m_smoother.filter(sample)));
@@ -686,6 +726,12 @@ void CanvasView::endStroke()
     // The release sample itself is not drawn: its pressure is often already 0.
     if (!m_stroke)
         return;
+    if (m_snapping) { // a stroke too short to show its direction: as drawn
+        for (const PenSample &held : m_snapHeld)
+            takeRawSample(held);
+        m_snapHeld.clear();
+        m_snapping = false;
+    }
     if (m_sharpCorners)
         releaseHeldSamples(true);
     drawPendingPoints();
@@ -756,6 +802,8 @@ void CanvasView::cancelStroke()
         return;
     // Restore pixels first: cancelPaint() may remove the drawing they live in.
     m_stroke->cancel();
+    m_snapHeld.clear();
+    m_snapping = false;
     m_stroke.reset();
     m_dabs.reset();
     m_heldSamples.clear();
@@ -909,6 +957,54 @@ void CanvasView::focusOutEvent(QFocusEvent *event)
     QWidget::focusOutEvent(event);
 }
 
+void CanvasView::setSnapPicking(bool on)
+{
+    if (on == m_pickingSnap)
+        return;
+    m_pickingSnap = on;
+    updateCursor();
+    emit snapPickingChanged(on);
+}
+
+namespace {
+
+double distanceToSegment(const QPointF &p, const perspective::Segment &s)
+{
+    const QPointF a(s.a.x, s.a.y), b(s.b.x, s.b.y), ab = b - a;
+    const double length2 = ab.x() * ab.x() + ab.y() * ab.y();
+    const double t = length2 > 0 ? std::clamp(((p - a).x() * ab.x() + (p - a).y() * ab.y()) / length2, 0.0, 1.0) : 0.0;
+    return std::hypot(p.x() - (a.x() + ab.x() * t), p.y() - (a.y() + ab.y() * t));
+}
+
+} // namespace
+
+void CanvasView::pickSnapLayer(const QPointF &docPos)
+{
+    const auto layers = m_document->perspectiveLayers();
+    if (layers.empty()) {
+        emit statusMessage(tr("No perspective layer on this frame"));
+        setSnapPicking(false);
+        return;
+    }
+    // The layer whose guides pass nearest the click.
+    const document::DocumentController::PerspectiveLayerInfo *nearest = nullptr;
+    double best = 0.0;
+    for (const auto &layer : layers) {
+        double distance = std::numeric_limits<double>::max();
+        for (const perspective::Segment &s : perspective::gridSegments(layer.grid))
+            distance = std::min(distance, distanceToSegment(docPos, s));
+        if (const auto horizon = perspective::horizonLine(layer.grid, layer.grid.frameWidth * 4.0))
+            distance = std::min(distance, distanceToSegment(docPos, *horizon));
+        if (!nearest || distance < best) {
+            nearest = &layer;
+            best = distance;
+        }
+    }
+    m_toolState->setPerspectiveSnapLayer(nearest->ref.layer, nearest->name);
+    m_toolState->setPerspectiveSnap(true);
+    setSnapPicking(false);
+}
+
 void CanvasView::updateGizmoCursor()
 {
     if (m_gizmo.hovered() != PerspectiveGizmo::Handle::None && !panKeyHeld())
@@ -923,7 +1019,7 @@ void CanvasView::updateCursor()
         setCursor(Qt::OpenHandCursor);
     else if (m_toolState->activeTool() == ToolId::Zoom)
         setCursor(Qt::SizeHorCursor);
-    else if (picksColor())
+    else if (picksColor() || m_pickingSnap)
         setCursor(Qt::CrossCursor);
     else if (const CanvasTool *tool = canvasTool())
         setCursor(tool->cursor());

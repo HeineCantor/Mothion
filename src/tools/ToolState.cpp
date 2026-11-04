@@ -211,4 +211,21 @@ void ToolState::setLiquifySettings(const LiquifySettings &settings)
     emit liquifySettingsChanged();
 }
 
+void ToolState::setPerspectiveSnap(bool on)
+{
+    if (on == m_perspectiveSnap)
+        return;
+    m_perspectiveSnap = on;
+    emit perspectiveSnapChanged();
+}
+
+void ToolState::setPerspectiveSnapLayer(doc::LayerId layer, const QString &name)
+{
+    if (layer == m_snapLayer && name == m_snapLayerName)
+        return;
+    m_snapLayer = layer;
+    m_snapLayerName = name;
+    emit perspectiveSnapChanged();
+}
+
 } // namespace mothion::tools

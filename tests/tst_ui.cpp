@@ -6,6 +6,7 @@
 #include "canvas/FrameRenderer.h"
 #include "canvas/MoveTool.h"
 #include "canvas/PerspectiveGizmo.h"
+#include "canvas/PerspectiveSnap.h"
 #include "canvas/PuppetTool.h"
 #include "canvas/SelectionTool.h"
 #include "canvas/TransformTool.h"
@@ -36,6 +37,7 @@
 #include "ui/panels/timeline/TimelinePanel.h"
 #include "ui/panels/timeline/TimelineView.h"
 
+#include <numbers>
 #include <set>
 #include <QCheckBox>
 #include <QClipboard>
@@ -2140,6 +2142,109 @@ private slots:
         tools::applyPreset(state, liquify[2]);
         QCOMPARE(state.liquifySettings().mode, tools::LiquifySettings::Mode::Shrink);
         QCOMPARE(state.settings(tools::ToolId::Blend).opacity, 0.6); // a mode keeps size and strength
+    }
+
+    // The snap picks the axis closest to the direction of the pen, once it has moved far enough, and
+    // puts the pen on that axis's line through the start.
+    void perspectiveSnapChoosesTheNearestAxis()
+    {
+        const perspective::Grid grid = perspective::defaultGrid(1920, 1080);
+        const QPointF start(900, 500);
+        const auto dirs = canvas::PerspectiveSnap::directions(grid, start);
+        for (int axis = 0; axis < 3; ++axis) {
+            if (!dirs[std::size_t(axis)])
+                continue;
+            const QPointF u = *dirs[std::size_t(axis)];
+            const double a = 5 * std::numbers::pi / 180; // a little off the axis
+            const QPointF off(u.x() * std::cos(a) - u.y() * std::sin(a), u.x() * std::sin(a) + u.y() * std::cos(a));
+            canvas::PerspectiveSnap snap;
+            snap.begin(grid, start, 10.0);
+            QVERIFY(!snap.update(start + off * 5)); // not far enough: not decided yet
+            QVERIFY(!snap.decided());
+            QVERIFY(snap.update(start + off * 100));
+            // (two axes can share a direction: the one found must be as close as this)
+            const QPointF onLine = snap.snapped(start + off * 100);
+            const QPointF along = *dirs[std::size_t(snap.axis())];
+            const QPointF w = onLine - start;
+            QVERIFY(std::abs(w.x() * along.y() - w.y() * along.x()) < 1e-6); // on the line through the start
+            QVERIFY(std::hypot(w.x(), w.y()) > 90 && std::hypot(w.x(), w.y()) < 101);
+            // Kept: turning the pen another way afterwards does not change the axis.
+            const int chosen = snap.axis();
+            snap.update(start + QPointF(-off.y(), off.x()) * 100);
+            QCOMPARE(snap.axis(), chosen);
+        }
+    }
+
+    // A stroke made with the snap on follows an axis of the chosen perspective layer instead of the pen.
+    void perspectiveSnapBendsTheStroke()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(900, 700);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        state.setColor(Qt::red);
+        state.setSize(tools::ToolId::Brush, 12.0);
+        auto stroke = [&](const QPointF &from, const QPointF &to) {
+            const QTransform toView = canvas.view().documentToView();
+            const QPoint a = toView.map(from).toPoint(), b = toView.map(to).toPoint();
+            QTest::mousePress(&canvas, Qt::LeftButton, {}, a);
+            for (int i = 1; i <= 8; ++i)
+                QTest::mouseMove(&canvas, a + (b - a) * i / 8);
+            QTest::mouseRelease(&canvas, Qt::LeftButton, {}, b);
+        };
+        stroke({100, 100}, {120, 100}); // makes the drawing, and its layer
+        const doc::LayerId raster = controller.currentLayer();
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Perspective));
+        controller.setCurrentLayer(raster);
+        QCOMPARE(controller.perspectiveLayers().size(), std::size_t(1));
+        const doc::Layer *drawn = nullptr;
+        for (const doc::Layer &l : controller.currentDrawing()->layers)
+            if (l.id == raster)
+                drawn = &l;
+        QVERIFY(drawn);
+        auto alpha = [&](const QPointF &p) { return qAlpha(drawn->image.pixel(int(p.x()), int(p.y()))); };
+
+        const perspective::Grid grid = controller.perspectiveLayers().front().grid;
+        const QPointF start(900, 500);
+        const auto dirs = canvas::PerspectiveSnap::directions(grid, start);
+        QVERIFY(dirs[0]);
+        const QPointF u = *dirs[0];
+        const double a = 6 * std::numbers::pi / 180;
+        const QPointF off(u.x() * std::cos(a) - u.y() * std::sin(a), u.x() * std::sin(a) + u.y() * std::cos(a));
+        const QPointF end = start + off * 200;
+
+        // Without snapping: along the pen.
+        stroke(start, end);
+        QVERIFY(alpha(start + off * 150) > 0);
+        controller.undo();
+        QCOMPARE(alpha(start + off * 150), 0);
+
+        // With it: along the axis; where the pen went is left clear.
+        state.setPerspectiveSnap(true);
+        state.setPerspectiveSnapLayer(controller.perspectiveLayers().front().ref.layer, QString());
+        stroke(start, end);
+        QVERIFY(alpha(start + u * 150) > 0);
+        QCOMPARE(alpha(start + off * 150), 0); // 16 px off the axis
+        QVERIFY(alpha(start + u * 5) > 0);     // and from the start
+    }
+
+    // The perspective layers of a frame, and the one to snap to when the wanted one is not there.
+    void perspectiveLayersOfTheFrame()
+    {
+        document::DocumentController controller;
+        QImage image(10, 10, QImage::Format_ARGB32);
+        image.fill(Qt::red);
+        controller.importImage(image, QStringLiteral("x"));
+        QVERIFY(controller.perspectiveLayers().empty());
+        QVERIFY(!controller.perspectiveLayerFor(doc::kNoId));
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Perspective));
+        const auto all = controller.perspectiveLayers();
+        QCOMPARE(all.size(), std::size_t(1));
+        QCOMPARE(controller.perspectiveLayerFor(all[0].ref.layer)->ref.layer, all[0].ref.layer);
+        QCOMPARE(controller.perspectiveLayerFor(99999, all[0].name)->ref.layer, all[0].ref.layer); // by name
+        QCOMPARE(controller.perspectiveLayerFor(99999)->ref.layer, all[0].ref.layer);               // the first
     }
 
     // The tool buttons are laid out in as many columns as the width allows, two to begin with.

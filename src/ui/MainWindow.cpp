@@ -32,6 +32,7 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QClipboard>
+#include <QComboBox>
 #include <QCloseEvent>
 #include <QDialog>
 #include <QDataStream>
@@ -48,6 +49,7 @@
 #include <QPlainTextEdit>
 #include <QProgressDialog>
 #include <QSettings>
+#include <QSignalBlocker>
 #include <QStatusBar>
 #include <QTextEdit>
 #include <QToolBar>
@@ -233,6 +235,62 @@ void MainWindow::createCanvasArea()
     bar->addActions(m_zoomActions);
     bar->addSeparator();
     bar->addActions(m_rotateActions);
+
+    // Snapping the pen to a perspective layer's axes, on the right of the bar: the on/off button,
+    // the layer it snaps to, and a sight to pick that layer on the canvas.
+    auto *spacer = new QWidget(bar);
+    spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    bar->addWidget(spacer);
+    auto *snapAction = new QAction(icon(IconId::Snap), tr("Snap to perspective"), this);
+    snapAction->setCheckable(true);
+    snapAction->setToolTip(tr("Snap strokes to an axis of the perspective layer: the one nearest the direction drawn"));
+    bar->addAction(snapAction);
+    auto *snapLayer = new QComboBox(bar);
+    snapLayer->setObjectName(QStringLiteral("snapLayer"));
+    snapLayer->setMinimumWidth(150);
+    snapLayer->setToolTip(tr("The perspective layer to snap to"));
+    bar->addWidget(snapLayer);
+    auto *pickAction = new QAction(icon(IconId::Crosshair), tr("Pick perspective layer"), this);
+    pickAction->setCheckable(true);
+    pickAction->setToolTip(tr("Click on the canvas to pick the perspective layer to snap to"));
+    bar->addAction(pickAction);
+
+    connect(snapAction, &QAction::toggled, m_toolState, &tools::ToolState::setPerspectiveSnap);
+    connect(pickAction, &QAction::toggled, m_canvas, &canvas::CanvasView::setSnapPicking);
+    connect(m_canvas, &canvas::CanvasView::snapPickingChanged, pickAction, [pickAction](bool on) {
+        const QSignalBlocker block(pickAction);
+        pickAction->setChecked(on);
+    });
+    connect(snapLayer, &QComboBox::activated, this, [this, snapLayer](int index) {
+        if (index >= 0 && snapLayer->itemData(index).isValid())
+            m_toolState->setPerspectiveSnapLayer(snapLayer->itemData(index).toULongLong(), snapLayer->itemText(index));
+    });
+    // The list follows the frame: the perspective layers shown on it, the one in use selected.
+    auto syncSnap = [this, snapAction, snapLayer] {
+        {
+            const QSignalBlocker block(snapAction);
+            snapAction->setChecked(m_toolState->perspectiveSnap());
+        }
+        const QSignalBlocker block(snapLayer);
+        snapLayer->clear();
+        const auto layers = m_document->perspectiveLayers();
+        for (const auto &layer : layers)
+            snapLayer->addItem(layer.name, qulonglong(layer.ref.layer));
+        snapLayer->setEnabled(!layers.empty());
+        if (layers.empty()) {
+            snapLayer->addItem(tr("No perspective layer"));
+            return;
+        }
+        if (const auto used = m_document->perspectiveLayerFor(m_toolState->perspectiveSnapLayer(),
+                                                              m_toolState->perspectiveSnapLayerName()))
+            snapLayer->setCurrentIndex(snapLayer->findData(qulonglong(used->ref.layer)));
+    };
+    connect(m_toolState, &tools::ToolState::perspectiveSnapChanged, this, syncSnap);
+    connect(m_document, &document::DocumentController::structureChanged, this, syncSnap);
+    connect(m_document, &document::DocumentController::currentFrameChanged, this, syncSnap);
+    connect(m_document, &document::DocumentController::documentReplaced, this, syncSnap);
+    connect(m_document, &document::DocumentController::historyChanged, this, syncSnap);
+    syncSnap();
 
     auto *area = new QWidget(this);
     auto *layout = new QVBoxLayout(area);
