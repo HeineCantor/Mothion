@@ -20,4 +20,5 @@ mothion_add_test(tst_canvas mothion_gui)
 find_package(Qt6 REQUIRED COMPONENTS Sql)
 mothion_add_test(tst_brushimport mothion_gui Qt6::Sql)
 mothion_add_test(tst_projectfile mothion_gui Qt6::Sql)
-mothion_add_test(tst_ui mothion_gui)
+find_package(Qt6 REQUIRED COMPONENTS Network)
+mothion_add_test(tst_ui mothion_gui Qt6::Network) # a fake Discord for the Rich Presence

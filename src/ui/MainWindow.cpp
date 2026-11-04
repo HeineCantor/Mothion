@@ -8,6 +8,7 @@
 #include "tools/BrushLibrary.h"
 #include "tools/ToolState.h"
 #include "ui/AutoplayWindow.h"
+#include "ui/DiscordPresence.h"
 #include "ui/DockLayout.h"
 #include "ui/ExportDialog.h"
 #include "ui/IconFactory.h"
@@ -107,6 +108,8 @@ MainWindow::MainWindow(QWidget *parent)
     connect(selectionBar, &SelectionBar::statusMessage, this,
             [this](const QString &text) { statusBar()->showMessage(text, 4000); });
     new TransformBar(m_canvas);
+    // Rich Presence: Discord shows "Mothion", the time and the frame (nothing without an application id).
+    new DiscordPresence(m_document, DiscordPresence::defaultApplicationId(), this);
     auto *viewInfo = new QLabel(this);
     statusBar()->addPermanentWidget(viewInfo);
     connect(m_canvas, &canvas::CanvasView::viewChanged, viewInfo, [viewInfo](double zoom, double rot) {

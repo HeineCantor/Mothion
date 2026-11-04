@@ -21,6 +21,7 @@
 #include "tools/ToolState.h"
 #include "ui/AutoplayWindow.h"
 #include "ui/ExportDialog.h"
+#include "ui/DiscordPresence.h"
 #include "ui/MainWindow.h"
 #include "ui/PanelDock.h"
 #include "ui/SelectionBar.h"
@@ -63,6 +64,12 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QPushButton>
+#include <QLocalServer>
+#include <QLocalSocket>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QtEndian>
+#include <QDateTime>
 #include <QSlider>
 #include <QTest>
 #include <QWheelEvent>
@@ -2463,6 +2470,106 @@ private slots:
         QVERIFY(palette.minimumHeight() < tall);
         for (auto *b : palette.findChildren<QToolButton *>())
             QVERIFY(b->geometry().right() < palette.width()); // none spills over the side
+    }
+
+    // The Rich Presence speaks Discord's socket protocol: a handshake with the application id, then
+    // SET_ACTIVITY with the frame and the start time, again when the frame changes (not too often); a
+    // ping is answered; and it keeps looking for Discord when it is not there yet.
+    void discordPresenceTalksToDiscord()
+    {
+        const QString name = QStringLiteral("mothion-test-discord-%1").arg(QCoreApplication::applicationPid());
+        QLocalServer::removeServer(name);
+        document::DocumentController controller;
+        ui::DiscordPresence presence(&controller, QStringLiteral("123456789"));
+        presence.setCandidatePaths({QStringLiteral("mothion-test-nobody-here"), name});
+        presence.setMinimumUpdateInterval(60);
+        presence.setRetryInterval(40);
+        presence.start();
+        QVERIFY(!presence.isConnected()); // Discord is not running yet
+
+        // Discord starts later.
+        QLocalServer server;
+        QVERIFY(server.listen(name));
+        QTRY_VERIFY_WITH_TIMEOUT(server.hasPendingConnections(), 3000);
+        QLocalSocket *client = server.nextPendingConnection();
+        QByteArray received;
+        struct Message
+        {
+            quint32 opcode;
+            QJsonObject json;
+            QByteArray raw;
+        };
+        auto next = [&]() -> Message {
+            auto have = [&] {
+                client->waitForReadyRead(0);
+                received += client->readAll();
+                return received.size() >= 8 && quint32(received.size()) >= 8 + qFromLittleEndian<quint32>(received.constData() + 4);
+            };
+            if (!QTest::qWaitFor(have, 3000))
+                return {quint32(-1), {}, {}};
+            const quint32 opcode = qFromLittleEndian<quint32>(received.constData());
+            const quint32 length = qFromLittleEndian<quint32>(received.constData() + 4);
+            const QByteArray raw = received.mid(8, int(length));
+            received.remove(0, 8 + int(length));
+            return {opcode, QJsonDocument::fromJson(raw).object(), raw};
+        };
+        auto send = [&](quint32 opcode, const QByteArray &json) {
+            QByteArray message(8, '\0');
+            qToLittleEndian<quint32>(opcode, message.data());
+            qToLittleEndian<quint32>(quint32(json.size()), message.data() + 4);
+            client->write(message + json);
+            client->flush();
+        };
+
+        const Message hello = next();
+        QCOMPARE(hello.opcode, quint32(0));
+        QCOMPARE(hello.json.value(QStringLiteral("client_id")).toString(), QStringLiteral("123456789"));
+        QCOMPARE(hello.json.value(QStringLiteral("v")).toInt(), 1);
+        QVERIFY(!presence.isConnected()); // not until Discord says it is ready
+        send(1, R"({"cmd":"DISPATCH","evt":"READY","data":{}})");
+        QTRY_VERIFY(presence.isConnected());
+
+        const Message first = next();
+        QCOMPARE(first.opcode, quint32(1));
+        QCOMPARE(first.json.value(QStringLiteral("cmd")).toString(), QStringLiteral("SET_ACTIVITY"));
+        QVERIFY(!first.json.value(QStringLiteral("nonce")).toString().isEmpty());
+        const QJsonObject args = first.json.value(QStringLiteral("args")).toObject();
+        QCOMPARE(args.value(QStringLiteral("pid")).toInteger(), qint64(QCoreApplication::applicationPid()));
+        const QJsonObject activity = args.value(QStringLiteral("activity")).toObject();
+        QVERIFY(activity.value(QStringLiteral("state")).toString().startsWith(QStringLiteral("Frame 1 / ")));
+        const qint64 start = activity.value(QStringLiteral("timestamps")).toObject().value(QStringLiteral("start")).toInteger();
+        QVERIFY(std::abs(start - QDateTime::currentSecsSinceEpoch()) < 30);
+
+        // The frame changes: sent again (the timer keeps the original start).
+        controller.setCurrentFrame(4);
+        controller.setCurrentFrame(5);
+        const Message second = next();
+        const QJsonObject again = second.json.value(QStringLiteral("args")).toObject().value(QStringLiteral("activity")).toObject();
+        QVERIFY(again.value(QStringLiteral("state")).toString().startsWith(QStringLiteral("Frame 6 / ")));
+        QCOMPARE(again.value(QStringLiteral("timestamps")).toObject().value(QStringLiteral("start")).toInteger(), start);
+
+        // Ping: the same payload comes back as pong.
+        send(3, QByteArrayLiteral("hello"));
+        const Message pong = next();
+        QCOMPARE(pong.opcode, quint32(4));
+        QCOMPARE(pong.raw, QByteArrayLiteral("hello"));
+
+        // Discord goes away: it is not connected, and finds it again when it is back.
+        client->disconnectFromServer();
+        QTRY_VERIFY(!presence.isConnected());
+        QTRY_VERIFY_WITH_TIMEOUT(server.hasPendingConnections(), 3000);
+        QVERIFY(server.nextPendingConnection());
+    }
+
+    // Without an application id the presence does nothing at all.
+    void discordPresenceNeedsAnApplicationId()
+    {
+        document::DocumentController controller;
+        ui::DiscordPresence presence(&controller, QString());
+        presence.setCandidatePaths({QStringLiteral("mothion-test-nobody-here")});
+        presence.start();
+        controller.setCurrentFrame(3);
+        QVERIFY(!presence.isConnected());
     }
 
     // "Flip" shows the animation mirrored left to right, in the window only.

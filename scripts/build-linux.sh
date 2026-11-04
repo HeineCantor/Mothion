@@ -3,7 +3,7 @@
 #
 # Checks for, and installs when missing (through the distribution's package
 # manager, with sudo): the C++ compiler, CMake, Ninja, Qt 6 (Core, Gui, Widgets,
-# Sql with the SQLite driver, Test, Wayland) and Eigen. Supported: apt
+# Sql with the SQLite driver, Network, Test, Wayland) and Eigen. Supported: apt
 # (Debian, Ubuntu), dnf (Fedora), pacman (Arch) and zypper (openSUSE).
 # Then configures and builds the project and runs the tests.
 #
