@@ -48,6 +48,8 @@ private:
     void createMenus();
     void newDocument();
     void open();
+    void openRecent(const QString &path);
+    void fillRecentMenu();
     bool save();
     bool saveAs();
     bool saveTo(const QString &path);
@@ -74,6 +76,7 @@ private:
     QList<QAction *> m_fileActions;
     QList<QAction *> m_editActions;
     QAction *m_saveAsAction = nullptr;
+    QMenu *m_recentMenu = nullptr; // File > Open recent
     QList<QAction *> m_zoomActions;
     QList<QAction *> m_rotateActions;
     QAction *m_clearAction = nullptr;

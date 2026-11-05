@@ -64,6 +64,7 @@
 #include <QTabletEvent>
 #include <QTemporaryDir>
 #include <QMenu>
+#include <QSettings>
 #include <QMenuBar>
 #include <QPushButton>
 #include <QLocalServer>
@@ -83,8 +84,20 @@ class TestUi : public QObject
 {
     Q_OBJECT
 
+private:
+    QTemporaryDir m_settingsDir;
+
 private slots:
-    void initTestCase() { QStandardPaths::setTestModeEnabled(true); } // keep the user's brushes out
+    void initTestCase()
+    {
+        QStandardPaths::setTestModeEnabled(true); // keep the user's brushes out
+        // And the user's settings (recent projects...): a folder of their own.
+        QCoreApplication::setOrganizationName(QStringLiteral("MothionTest"));
+        QCoreApplication::setApplicationName(QStringLiteral("MothionTest"));
+        QVERIFY(m_settingsDir.isValid());
+        QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, m_settingsDir.path());
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, m_settingsDir.path());
+    }
 
     // Opening a project swaps the whole document under every panel and the
     // canvas (another size, other layers); the window then shows its name.
@@ -109,6 +122,63 @@ private slots:
         QVERIFY(window.windowTitle().startsWith(QStringLiteral("shot 12")));
         QVERIFY(!window.isWindowModified());
         QTest::qWait(50); // let the panels repaint against the new document
+    }
+
+    // File > Open recent lists the projects opened or saved, the latest first; picking one opens it,
+    // and one that is gone drops off the list.
+    void openRecentListsLatestFirst()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        auto make = [&](const QString &name) {
+            doc::Document project(64, 64);
+            const QString path = dir.filePath(name + QStringLiteral(".") + QLatin1String(io::kProjectSuffix));
+            QString error;
+            [&] { QVERIFY2(io::saveProject(project, path, &error), qPrintable(error)); }();
+            return path;
+        };
+        const QString a = make(QStringLiteral("alpha")), b = make(QStringLiteral("beta")),
+                      c = make(QStringLiteral("gamma"));
+        QSettings().remove(QStringLiteral("recent/projects"));
+
+        ui::MainWindow window;
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        QMenu *recent = nullptr;
+        for (QMenu *menu : window.findChildren<QMenu *>())
+            if (menu->title() == QStringLiteral("Open recent"))
+                recent = menu;
+        QVERIFY(recent);
+        auto names = [&] {
+            emit recent->aboutToShow();
+            QStringList out;
+            for (QAction *action : recent->actions())
+                if (!action->isSeparator() && action->isEnabled())
+                    out << action->text();
+            return out;
+        };
+        QVERIFY(window.openFile(a));
+        QVERIFY(window.openFile(b));
+        QVERIFY(window.openFile(c));
+        QCOMPARE(names().mid(0, 3), (QStringList{QStringLiteral("gamma.moth"), QStringLiteral("beta.moth"),
+                                                 QStringLiteral("alpha.moth")}));
+
+        QVERIFY(window.openFile(a)); // opened again: back to the top
+        QCOMPARE(names().first(), QStringLiteral("alpha.moth"));
+
+        // Picking an entry opens it.
+        QAction *beta = nullptr;
+        for (QAction *action : recent->actions())
+            if (action->text() == QStringLiteral("beta.moth"))
+                beta = action;
+        QVERIFY(beta);
+        beta->trigger();
+        QVERIFY(window.windowTitle().startsWith(QStringLiteral("beta")));
+        QCOMPARE(names().first(), QStringLiteral("beta.moth"));
+
+        // A file that is gone is no longer offered.
+        QVERIFY(QFile::remove(c));
+        QVERIFY(!names().contains(QStringLiteral("gamma.moth")));
     }
 
     // A dock shorter than its panel (short or highly scaled screen) scrolls

@@ -271,6 +271,9 @@ void MainWindow::createMenus()
 {
     QMenu *file = menuBar()->addMenu(tr("&File"));
     file->addActions(m_fileActions);
+    m_recentMenu = new QMenu(tr("Open recent"), this);
+    file->insertMenu(m_fileActions[2], m_recentMenu); // between Open and Save
+    connect(m_recentMenu, &QMenu::aboutToShow, this, &MainWindow::fillRecentMenu);
     file->addAction(m_saveAsAction);
     file->addSeparator();
     file->addAction(tr("Import image…"), this, &MainWindow::importImage);
@@ -496,6 +499,38 @@ void rememberProjectDirectory(const QString &file)
     QSettings().setValue(kProjectDirKey, QFileInfo(file).absolutePath());
 }
 
+const QString kRecentFilesKey = QStringLiteral("recent/projects");
+constexpr int kMaxRecentFiles = 10;
+
+// Most recent first.
+QStringList recentFiles()
+{
+    return QSettings().value(kRecentFilesKey).toStringList();
+}
+
+void setRecentFiles(const QStringList &files)
+{
+    QSettings().setValue(kRecentFilesKey, files);
+}
+
+// `path` goes to the top of the list (or is taken off it).
+void rememberRecentFile(const QString &path)
+{
+    QStringList files = recentFiles();
+    files.removeAll(path);
+    files.prepend(path);
+    while (files.size() > kMaxRecentFiles)
+        files.removeLast();
+    setRecentFiles(files);
+}
+
+void forgetRecentFile(const QString &path)
+{
+    QStringList files = recentFiles();
+    files.removeAll(path);
+    setRecentFiles(files);
+}
+
 } // namespace
 
 void MainWindow::newDocument()
@@ -517,6 +552,36 @@ void MainWindow::open()
         openFile(file);
 }
 
+void MainWindow::openRecent(const QString &path)
+{
+    if (!maybeSave())
+        return;
+    if (!openFile(path))
+        forgetRecentFile(path); // gone or unreadable: no use keeping it
+}
+
+void MainWindow::fillRecentMenu()
+{
+    m_recentMenu->clear();
+    QStringList files = recentFiles();
+    const qsizetype before = files.size();
+    files.removeIf([](const QString &file) { return !QFileInfo::exists(file); });
+    if (files.size() != before)
+        setRecentFiles(files);
+    for (const QString &file : std::as_const(files)) {
+        QAction *action = m_recentMenu->addAction(QFileInfo(file).fileName());
+        action->setToolTip(QDir::toNativeSeparators(file));
+        action->setStatusTip(QDir::toNativeSeparators(file));
+        connect(action, &QAction::triggered, this, [this, file] { openRecent(file); });
+    }
+    if (files.isEmpty()) {
+        m_recentMenu->addAction(tr("No recent projects"))->setEnabled(false);
+        return;
+    }
+    m_recentMenu->addSeparator();
+    m_recentMenu->addAction(tr("Clear list"), this, [] { setRecentFiles({}); });
+}
+
 bool MainWindow::openFile(const QString &path)
 {
     QString error;
@@ -528,6 +593,7 @@ bool MainWindow::openFile(const QString &path)
     m_document->replaceDocument(std::move(loaded));
     m_filePath = QFileInfo(path).absoluteFilePath();
     rememberProjectDirectory(m_filePath);
+    rememberRecentFile(m_filePath);
     updateTitle();
     statusBar()->showMessage(tr("Opened %1").arg(QFileInfo(path).fileName()), 4000);
     return true;
@@ -564,6 +630,7 @@ bool MainWindow::saveTo(const QString &path)
     }
     m_filePath = QFileInfo(path).absoluteFilePath();
     rememberProjectDirectory(m_filePath);
+    rememberRecentFile(m_filePath);
     m_document->markSaved();
     updateTitle();
     statusBar()->showMessage(tr("Saved %1").arg(QFileInfo(path).fileName()), 4000);
