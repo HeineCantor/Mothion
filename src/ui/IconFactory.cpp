@@ -493,9 +493,9 @@ QPixmap render(IconId id, int size, const QColor &color)
 class GlyphIconEngine : public QIconEngine
 {
 public:
-    explicit GlyphIconEngine(IconId id) : m_id(id) {}
+    explicit GlyphIconEngine(IconId id, IconTone tone = IconTone::Auto) : m_id(id), m_tone(tone) {}
 
-    QIconEngine *clone() const override { return new GlyphIconEngine(m_id); }
+    QIconEngine *clone() const override { return new GlyphIconEngine(m_id, m_tone); }
 
     void paint(QPainter *painter, const QRect &rect, QIcon::Mode mode, QIcon::State state) override
     {
@@ -526,17 +526,22 @@ public:
     }
 
 private:
-    static QColor colorFor(QIcon::Mode mode, QIcon::State state)
+    QColor colorFor(QIcon::Mode mode, QIcon::State state) const
     {
         const QPalette pal = QApplication::palette();
         if (mode == QIcon::Disabled)
             return pal.color(QPalette::Disabled, QPalette::ButtonText);
+        if (m_tone == IconTone::Selected)
+            return pal.color(QPalette::Normal, QPalette::HighlightedText);
+        if (m_tone == IconTone::Plain)
+            return pal.color(QPalette::Normal, QPalette::ButtonText);
         if (state == QIcon::On)
             return pal.color(QPalette::Normal, QPalette::HighlightedText);
         return pal.color(QPalette::Normal, QPalette::ButtonText);
     }
 
     IconId m_id;
+    IconTone m_tone;
 };
 
 } // namespace
@@ -544,6 +549,11 @@ private:
 QIcon icon(IconId id)
 {
     return QIcon(new GlyphIconEngine(id));
+}
+
+QIcon icon(IconId id, IconTone tone)
+{
+    return QIcon(new GlyphIconEngine(id, tone));
 }
 
 } // namespace mothion::ui

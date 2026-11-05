@@ -97,6 +97,7 @@ public:
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
+    void changeEvent(QEvent *event) override;
 
 signals:
     // A command could not be done; the text says why.
@@ -110,6 +111,7 @@ private:
     void markCurrentFrames(); // the frames shown now, in bold
     void selectCurrentRow();  // the current cel / layer chosen elsewhere
     void restoreSelection();  // after rebuildTree()
+    void paintRowColors();    // the text and glyphs of the selected rows, in the highlighted text color
     void rowChosen(QTreeWidgetItem *item);
     void rename(QTreeWidgetItem *item);
     void commitOpacity();

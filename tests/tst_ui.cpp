@@ -1938,6 +1938,45 @@ private slots:
         QCOMPARE(tools::builtInPresets(ToolId::RectSelect).size(), 2);
     }
 
+    // The text of a selected row is in the highlighted text color (dark on the blue otherwise, in a light
+    // theme), the others' in the normal one.
+    void selectedLayerRowsKeepReadableText()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        QString reason;
+        const auto target = controller.beginPaint(true, &reason);
+        QVERIFY(target);
+        const doc::TiledImage before = *target->image;
+        controller.endPaint(before);
+        controller.addCel();
+        ui::LayersPanel panel(&controller);
+        panel.setToolState(&state);
+        panel.resize(320, 420);
+        panel.show();
+        QTest::qWait(50);
+        auto *tree = panel.findChild<QTreeWidget *>();
+        QVERIFY(tree && tree->topLevelItemCount() >= 2);
+        const QPalette pal = QApplication::palette();
+        int selected = 0, others = 0;
+        for (int i = 0; i < tree->topLevelItemCount(); ++i) {
+            QTreeWidgetItem *item = tree->topLevelItem(i);
+            QWidget *row = tree->itemWidget(item, 0);
+            auto *text = row ? row->findChildren<QLabel *>().last() : nullptr;
+            if (!text)
+                continue;
+            const QColor shown = text->palette().color(QPalette::WindowText);
+            if (item->isSelected()) {
+                ++selected;
+                QCOMPARE(shown, pal.color(QPalette::HighlightedText));
+            } else {
+                ++others;
+                QCOMPARE(shown, pal.color(QPalette::WindowText));
+            }
+        }
+        QVERIFY(selected >= 1 && others >= 1);
+    }
+
     // "Fill refer to other layers" finds the area in the union of the layers shown (the lines on another
     // layer stop it), "Fill" in the layer it fills; both fill in the current layer.
     void fillCanReferToOtherLayers()

@@ -17,6 +17,9 @@
 #include <QGraphicsOpacityEffect>
 #include <QHBoxLayout>
 #include <QInputDialog>
+#include <QApplication>
+#include <QEvent>
+#include <QStyle>
 #include <QLabel>
 #include <QMenu>
 #include <QPainter>
@@ -138,6 +141,17 @@ QPixmap layerThumbnail(const doc::Layer &layer, const QSize &docSize)
     return pixmap;
 }
 
+// The glyph of a row's button or label, in the tone of its row (white over the highlight when selected).
+void showGlyph(QWidget *w, bool shown = true)
+{
+    const IconTone tone = w->property("rowSelected").toBool() ? IconTone::Selected : IconTone::Plain;
+    const auto id = IconId(w->property("glyph").toInt());
+    if (auto *button = qobject_cast<QToolButton *>(w))
+        button->setIcon(shown ? icon(id, tone) : QIcon());
+    else if (auto *label = qobject_cast<QLabel *>(w))
+        label->setPixmap(icon(id, tone).pixmap(16, 16));
+}
+
 QToolButton *toggleButton(IconId id, const QString &tip, bool on, QWidget *parent)
 {
     auto *b = new QToolButton(parent);
@@ -146,8 +160,9 @@ QToolButton *toggleButton(IconId id, const QString &tip, bool on, QWidget *paren
     b->setCheckable(true);
     b->setAutoRaise(true);
     b->setToolTip(tip);
-    // Checked: icon shown; unchecked: empty slot.
-    QObject::connect(b, &QToolButton::toggled, b, [b, id](bool checked) { b->setIcon(checked ? icon(id) : QIcon()); });
+    // Checked: icon shown; unchecked: empty slot (with its outline). Its color follows the row's selection.
+    b->setProperty("glyph", int(id));
+    QObject::connect(b, &QToolButton::toggled, b, [b](bool checked) { showGlyph(b, checked); });
     b->setChecked(true); // the icon, via toggled
     b->setChecked(on);
     return b;
@@ -166,7 +181,8 @@ QToolButton *actionButton(IconId id, const QString &tip, QWidget *parent)
 QLabel *iconLabel(IconId id, QWidget *parent)
 {
     auto *label = new QLabel(parent);
-    label->setPixmap(icon(id).pixmap(16, 16));
+    label->setProperty("glyph", int(id));
+    showGlyph(label);
     return label;
 }
 
@@ -385,6 +401,7 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
             rowChosen(selected.last());
         }
         syncHeader();
+        paintRowColors();
     });
     connect(m_tree, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *item) { rename(item); });
 
@@ -623,8 +640,48 @@ void LayersPanel::rebuildTree()
     markCurrentFrames();
     refreshSnapMarks();
     restoreSelection();
+    paintRowColors();
     m_tree->verticalScrollBar()->setValue(scroll);
     syncHeader();
+}
+
+void LayersPanel::paintRowColors()
+{
+    // The rows are widgets over the tree: its selection colors do not reach them, so the text and the glyphs
+    // of a selected row take the highlighted text color by hand (dark on the blue otherwise, in the light theme).
+    const QPalette app = QApplication::palette();
+    std::function<void(QTreeWidgetItem *)> paint = [&](QTreeWidgetItem *item) {
+        if (QWidget *row = m_tree->itemWidget(item, 0)) {
+            const bool selected = item->isSelected();
+            QPalette pal = app;
+            if (selected)
+                for (auto role : {QPalette::WindowText, QPalette::ButtonText, QPalette::Text})
+                    pal.setColor(role, app.color(QPalette::HighlightedText));
+            row->setPalette(pal);
+            for (QLabel *label : row->findChildren<QLabel *>())
+                label->setPalette(pal); // the style sheet gives each its own: the row's does not reach them
+            for (QWidget *w : row->findChildren<QWidget *>()) {
+                if (!w->property("glyph").isValid())
+                    continue;
+                w->setProperty("rowSelected", selected);
+                w->style()->unpolish(w); // the outline of the slot follows the selection
+                w->style()->polish(w);
+                auto *button = qobject_cast<QToolButton *>(w);
+                showGlyph(w, !button || button->isChecked());
+            }
+        }
+        for (int i = 0; i < item->childCount(); ++i)
+            paint(item->child(i));
+    };
+    for (int i = 0; i < m_tree->topLevelItemCount(); ++i)
+        paint(m_tree->topLevelItem(i));
+}
+
+void LayersPanel::changeEvent(QEvent *event)
+{
+    QWidget::changeEvent(event);
+    if (event->type() == QEvent::PaletteChange && m_tree)
+        paintRowColors(); // another theme: the colors set by hand are taken again
 }
 
 void LayersPanel::refreshThumbnails()

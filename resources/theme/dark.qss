@@ -31,6 +31,10 @@ QToolButton::menu-button {
 QToolButton:hover   { border-color: palette(light); }
 QToolButton:checked { background: palette(highlight); }
 QToolButton#LayerEye:checked { background: transparent; }
+/* The slots of the layers and cels (visible, locked): outlined, so the empty ones show too, in both themes. */
+QToolButton#LayerEye { border: 1px solid palette(placeholder-text); }
+QToolButton#LayerEye:hover { border-color: palette(highlight); }
+QToolButton#LayerEye[rowSelected="true"] { border-color: palette(highlighted-text); }
 
 /* Horizontal sliders: a thin groove, filled up to the value, and a wide, tall
    white handle with a dark gray outline, easy to grab and readable in both

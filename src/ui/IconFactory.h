@@ -18,5 +18,10 @@ enum class IconId {
 // Everything that needs an icon asks here, so swapping in real (SVG) artwork
 // later only changes this file.
 QIcon icon(IconId id);
+// Which color the glyph takes: Auto is the button text color, and the highlighted text over the highlight of a
+// checked button; Plain the button text color whatever the state (a checked button with no fill of its own);
+// Selected the highlighted text (over a selected row).
+enum class IconTone { Auto, Plain, Selected };
+QIcon icon(IconId id, IconTone tone);
 
 } // namespace mothion::ui
