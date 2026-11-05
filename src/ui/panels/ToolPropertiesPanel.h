@@ -77,8 +77,8 @@ private:
     QComboBox *m_shapeStyle;
     SliderField *m_shapeRadius;
 
-    QLabel *m_transformHelp;
     QWidget *m_footer;
+    QLabel *m_transformHelp;
     AdvancedToolSettings *m_advanced = nullptr; // made on first use
 };
 

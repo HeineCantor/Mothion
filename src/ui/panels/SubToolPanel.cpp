@@ -66,7 +66,7 @@ QImage renderFillPreview(tools::FillSettings::Mode mode, const QColor &ink)
     QPainter p(&image);
     p.setRenderHint(QPainter::Antialiasing);
     QColor fill = ink;
-    fill.setAlphaF(0.45);
+    fill.setAlphaF(0.45f);
     const QRectF r(QPointF(10, 6), QPointF(kPreviewSize.width() - 10, kPreviewSize.height() - 6));
     if (mode == tools::FillSettings::Mode::Bucket) {
         p.setPen(QPen(ink, 2));
@@ -114,7 +114,7 @@ QImage renderEffectPreview(const tools::BrushPreset &preset, const QColor &ink)
         p.drawLine(QPointF(r.left(), c.y() - 6), QPointF(c.x() - 6, c.y() - 6));
         QColor soft = ink;
         for (int i = 0; i < 4; ++i) {
-            soft.setAlphaF(0.8 - i * 0.2);
+            soft.setAlphaF(0.8f - float(i) * 0.2f);
             p.setPen(QPen(soft, 2));
             p.drawLine(QPointF(c.x() + i * 7, c.y() + 6), QPointF(c.x() + i * 7 + 6, c.y() + 6));
         }

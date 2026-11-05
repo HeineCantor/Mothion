@@ -315,8 +315,8 @@ void LiquifyTool::stamp(const QPointF &at, const QPointF &step)
         const int x0 = int(std::floor(x)), y0 = int(std::floor(y));
         const int x1 = std::min(x0 + 1, wide - 1), y1 = std::min(y0 + 1, wide - 1);
         const double fx = x - x0, fy = y - y0;
-        auto at = [&](int px, int py) { return unpack(pixels[std::size_t(py) * std::size_t(wide) + std::size_t(px)]); };
-        return mix(mix(at(x0, y0), at(x1, y0), fx), mix(at(x0, y1), at(x1, y1), fx), fy);
+        auto pixelAt = [&](int px, int py) { return unpack(pixels[std::size_t(py) * std::size_t(wide) + std::size_t(px)]); };
+        return mix(mix(pixelAt(x0, y0), pixelAt(x1, y0), fx), mix(pixelAt(x0, y1), pixelAt(x1, y1), fx), fy);
     };
 
     const double centerX = at.x() - area.x(), centerY = at.y() - area.y();
