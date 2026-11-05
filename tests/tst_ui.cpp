@@ -4483,6 +4483,42 @@ private slots:
         QCOMPARE(state.inactiveColor(), QColor(Qt::green));
     }
 
+    // With deferred rendering, the samples of a drag are drawn once per turn of the event loop at the latest
+    // transform (the box follows at once), and the release draws what is pending.
+    void transformDrawsOncePerTurnWhileDragging()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        QImage image(100, 100, QImage::Format_ARGB32);
+        image.fill(Qt::red);
+        controller.importImage(image, QStringLiteral("square")); // 910..1009, 490..589
+        int repaints = 0;
+        canvas::TransformTool tool(&controller, &state, [](const QString &) {}, [&] { ++repaints; });
+        tool.setDeferredRendering(true);
+        tool.setViewZoom(1.0);
+        tool.activated();
+        const doc::Cel &cel = *controller.document().cel(controller.currentCel());
+        auto alpha = [&](int x, int y) { return qAlpha(cel.drawingAt(0)->layers.front().image.pixel(x, y)); };
+        QVERIFY(alpha(960, 540) > 0);
+        QCOMPARE(alpha(1100, 540), 0);
+
+        tool.press({960, 540}, Qt::NoModifier); // inside: moves
+        tool.move({1000, 540}, Qt::NoModifier);
+        tool.move({1050, 540}, Qt::NoModifier);
+        tool.move({1100, 540}, Qt::NoModifier); // three samples, nothing drawn yet
+        QCOMPARE(tool.transform().dx(), 140.0); // the box is already there
+        QCOMPARE(alpha(1100, 540), 0);
+        QCoreApplication::processEvents(); // the turn: once, at the last
+        QVERIFY(alpha(1100, 540) > 0);
+        QCOMPARE(alpha(960, 540), 0);
+
+        tool.move({1200, 540}, Qt::NoModifier); // pending when the button goes up
+        tool.release({1200, 540}, Qt::NoModifier);
+        QVERIFY(alpha(1200, 540) > 0); // drawn at the release, not left for later
+        QCOMPARE(alpha(1100, 540), 0);
+        tool.cancel();
+    }
+
     void largeImagesAreScaledToFit()
     {
         document::DocumentController controller;

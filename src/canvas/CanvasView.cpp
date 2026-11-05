@@ -116,6 +116,7 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
             update();
             emit transformChanged();
         });
+    static_cast<TransformTool *>(m_transformTool.get())->setDeferredRendering(true);
     m_antsTimer = new QTimer(this);
     m_antsTimer->setInterval(kAntsIntervalMs);
     connect(m_antsTimer, &QTimer::timeout, this, [this] {

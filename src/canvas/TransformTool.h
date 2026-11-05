@@ -7,6 +7,7 @@
 #include <QPainterPath>
 #include <QRect>
 #include <QString>
+#include <QTimer>
 #include <QTransform>
 
 #include <functional>
@@ -57,6 +58,10 @@ public:
     bool canUndoStep() const override { return m_session && !m_session->undo.empty() && !m_drag; }
     bool canRedoStep() const override { return m_session && !m_session->redo.empty() && !m_drag; }
     void setViewZoom(double zoom) override { m_zoom = zoom; }
+    // While dragging, draw the pixels once per turn of the event loop, at the latest transform, instead of once per
+    // pen sample: a pen sends them faster than a big layer can be redrawn, and each one would wait its turn. The
+    // box follows at once; the release (and the end of the transform) draws what is pending. Off: every sample.
+    void setDeferredRendering(bool on) { m_deferred = on; }
     void paintOverlay(QPainter &painter, const ViewTransform &view) const override;
     // Under the pointer: the arrows of a handle, all four inside the box, a turning arrow out of it.
     bool hover(const QPointF &docPos) override;
@@ -89,6 +94,8 @@ private:
 
     bool start();
     void render();
+    void requestRender(); // render(), or once the pending samples are in (see setDeferredRendering())
+    void flushRender();
     // Draws the transform, or the drawing as it was when back at the start.
     void show();
     void finish(bool apply);
@@ -100,6 +107,9 @@ private:
     std::function<void(const QString &)> m_status;
     std::function<void()> m_repaint;
     double m_zoom = 1.0;
+    bool m_deferred = false;
+    bool m_renderPending = false;
+    QTimer m_renderTimer;
 
     struct Part // one layer transformed
     {

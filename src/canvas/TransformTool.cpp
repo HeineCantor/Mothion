@@ -71,6 +71,9 @@ TransformTool::TransformTool(document::DocumentController *document, tools::Tool
     , m_status(std::move(status))
     , m_repaint(std::move(repaint))
 {
+    m_renderTimer.setSingleShot(true);
+    m_renderTimer.setInterval(0);
+    QObject::connect(&m_renderTimer, &QTimer::timeout, [this] { flushRender(); });
 }
 
 TransformTool::~TransformTool() = default;
@@ -305,6 +308,25 @@ void TransformTool::move(const QPointF &docPos, Qt::KeyboardModifiers modifiers)
         break;
     }
     }
+    requestRender();
+}
+
+void TransformTool::requestRender()
+{
+    if (!m_deferred) {
+        render();
+        return;
+    }
+    m_renderPending = true;
+    if (!m_renderTimer.isActive())
+        m_renderTimer.start();
+    m_repaint(); // the box follows the pen at once
+}
+
+void TransformTool::flushRender()
+{
+    if (!m_renderPending || !m_session)
+        return;
     render();
 }
 
@@ -313,6 +335,7 @@ void TransformTool::release(const QPointF &docPos, Qt::KeyboardModifiers modifie
     if (!m_drag)
         return;
     move(docPos, modifiers);
+    flushRender();
     if (m_session && m_session->transform != m_drag->start) {
         m_session->undo.push_back(m_drag->start);
         m_session->redo.clear();
@@ -328,6 +351,8 @@ void TransformTool::show()
         return;
     }
     // Back at the start: the layers and selection as they were, exactly.
+    m_renderPending = false; // what was pending is moot
+    m_renderTimer.stop();
     for (Part &part : s.parts)
         *part.image = part.before;
     if (!s.selection.isEmpty())
@@ -363,6 +388,8 @@ bool TransformTool::redoStep()
 
 void TransformTool::render()
 {
+    m_renderPending = false;
+    m_renderTimer.stop();
     Session &s = *m_session;
     const doc::Document &d = m_document->document();
     const QRect now = s.transform.mapRect(QRectF(s.box)).toAlignedRect().adjusted(-1, -1, 1, 1)
@@ -397,6 +424,7 @@ void TransformTool::commit()
 {
     if (!m_session)
         return;
+    flushRender();
     const std::unique_ptr<Session> s = std::move(m_session);
     m_drag.reset();
     if (s->changed) {
@@ -412,6 +440,8 @@ void TransformTool::commit()
 
 void TransformTool::cancel()
 {
+    m_renderPending = false;
+    m_renderTimer.stop();
     if (!m_session)
         return;
     const std::unique_ptr<Session> s = std::move(m_session);
