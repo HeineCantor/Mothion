@@ -11,6 +11,7 @@
 #include <QListWidget>
 #include <QPainter>
 #include <QPainterPath>
+#include <QPolygonF>
 #include <QStyledItemDelegate>
 #include <QVBoxLayout>
 
@@ -141,6 +142,39 @@ QImage renderEffectPreview(const tools::BrushPreset &preset, const QColor &ink)
     return image;
 }
 
+// A shape sub tool: the shape in outline.
+QImage renderShapePreview(tools::ShapeSettings::Kind kind, const QColor &ink)
+{
+    QImage image(kPreviewSize, QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+    QPainter p(&image);
+    p.setRenderHint(QPainter::Antialiasing);
+    const QRectF r(QPointF(10, 6), QPointF(kPreviewSize.width() - 10, kPreviewSize.height() - 6));
+    p.setPen(QPen(ink, 2, Qt::SolidLine, Qt::RoundCap, Qt::MiterJoin));
+    p.setBrush(Qt::NoBrush);
+    switch (kind) {
+    case tools::ShapeSettings::Kind::Line: p.drawLine(r.bottomLeft() + QPointF(2, -2), r.topRight() + QPointF(-2, 2)); break;
+    case tools::ShapeSettings::Kind::Rectangle: p.drawRect(r.adjusted(4, 2, -4, -2)); break;
+    case tools::ShapeSettings::Kind::RoundedRectangle: p.drawRoundedRect(r.adjusted(4, 2, -4, -2), 6, 6); break;
+    case tools::ShapeSettings::Kind::Ellipse: p.drawEllipse(r.adjusted(4, 1, -4, -1)); break;
+    case tools::ShapeSettings::Kind::Polygon: {
+        const QPointF c = r.center();
+        p.drawPolygon(QPolygonF{QPointF(c.x() - 20, c.y() + 11), QPointF(c.x() - 12, c.y() - 11),
+                                QPointF(c.x() + 8, c.y() - 7), QPointF(c.x() + 22, c.y() + 4),
+                                QPointF(c.x() + 4, c.y() + 12)});
+        break;
+    }
+    case tools::ShapeSettings::Kind::Curve: {
+        QPainterPath curve;
+        curve.moveTo(r.left() + 6, r.bottom() - 3);
+        curve.cubicTo(r.left() + 30, r.top() - 8, r.right() - 40, r.bottom() + 8, r.right() - 6, r.top() + 3);
+        p.drawPath(curve);
+        break;
+    }
+    }
+    return image;
+}
+
 // A selection sub tool: its marching-ants outline, a rectangle or a lasso loop.
 QImage renderSelectionPreview(tools::ToolId tool, const QColor &ink)
 {
@@ -259,6 +293,7 @@ void SubToolPanel::showPresetsFor(tools::ToolId tool)
         auto *item = new QListWidgetItem(preset.name, m_list);
         item->setData(kPreviewRole, preset.selectsTool ? renderSelectionPreview(*preset.selectsTool, ink)
                                     : preset.fillMode  ? renderFillPreview(*preset.fillMode, ink)
+                                    : preset.shapeKind ? renderShapePreview(*preset.shapeKind, ink)
                                     : (preset.blendMode || preset.liquifyMode) ? renderEffectPreview(preset, ink)
                                                        : renderPreview(preset, ink));
     }
@@ -269,7 +304,8 @@ void SubToolPanel::showPresetsFor(tools::ToolId tool)
     int row = m_selected.count(tool) ? m_selected[tool] : 0;
     for (int i = 0; i < m_presets.size(); ++i) { // what is in use, whoever set it
         const tools::BrushPreset &p = m_presets[i];
-        if ((p.blendMode && *p.blendMode == m_state->blendSettings().mode)
+        if ((p.shapeKind && *p.shapeKind == m_state->shapeSettings().kind)
+            || (p.blendMode && *p.blendMode == m_state->blendSettings().mode)
             || (p.liquifyMode && *p.liquifyMode == m_state->liquifySettings().mode)
             || (p.fillMode && *p.fillMode == m_state->fillSettings().mode) || (p.selectsTool && *p.selectsTool == tool))
             row = i;

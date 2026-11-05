@@ -11,6 +11,7 @@ ToolState::ToolState(QObject *parent)
     // For the blend and liquify brushes the opacity is their strength.
     m_settings[index(ToolId::Blend)] = {40.0, 0.6};
     m_settings[index(ToolId::Liquify)] = {90.0, 0.5};
+    m_settings[index(ToolId::Shape)].size = 4.0; // the outline's thickness
     m_brushes.fill(roundBrush());
 }
 
@@ -40,6 +41,7 @@ QString ToolState::displayName(ToolId tool)
     case ToolId::Transform: return tr("Transform");
     case ToolId::Blend: return tr("Blend");
     case ToolId::Liquify: return tr("Liquify");
+    case ToolId::Shape: return tr("Shape");
     }
     return {};
 }
@@ -225,6 +227,14 @@ void ToolState::setPerspectiveSnapLayer(doc::LayerId layer)
         return;
     m_snapLayer = layer;
     emit perspectiveSnapChanged();
+}
+
+void ToolState::setShapeSettings(const ShapeSettings &settings)
+{
+    if (settings == m_shape)
+        return;
+    m_shape = settings;
+    emit shapeSettingsChanged();
 }
 
 } // namespace mothion::tools

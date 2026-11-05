@@ -81,6 +81,7 @@ qt_add_library(mothion_gui STATIC
     canvas/MoveTool.h canvas/MoveTool.cpp
     canvas/EyedropperTool.h canvas/EyedropperTool.cpp
     canvas/FillTool.h canvas/FillTool.cpp
+    canvas/ShapeTool.h canvas/ShapeTool.cpp
     canvas/PerspectiveSnap.h canvas/PerspectiveSnap.cpp
     canvas/EffectBrushTools.h canvas/EffectBrushTools.cpp
     canvas/TransformTool.h canvas/TransformTool.cpp
@@ -97,6 +98,7 @@ qt_add_library(mothion_gui STATIC
     ui/SelectionBar.h ui/SelectionBar.cpp
     ui/DiscordPresence.h ui/DiscordPresence.cpp
     ui/TransformBar.h ui/TransformBar.cpp
+    ui/ShapeBar.h ui/ShapeBar.cpp
     ui/AutoplayWindow.h ui/AutoplayWindow.cpp
     ui/AdvancedToolSettings.h ui/AdvancedToolSettings.cpp
     ui/IconFactory.h ui/IconFactory.cpp

@@ -61,6 +61,21 @@ QList<BrushPreset> builtInPresets(ToolId tool)
         shrink.liquifyMode = LiquifySettings::Mode::Shrink;
         return {push, expand, shrink};
     }
+    case ToolId::Shape: {
+        BrushPreset line{QObject::tr("Line"), tool};
+        line.shapeKind = ShapeSettings::Kind::Line;
+        BrushPreset rectangle{QObject::tr("Rectangle"), tool};
+        rectangle.shapeKind = ShapeSettings::Kind::Rectangle;
+        BrushPreset rounded{QObject::tr("Rounded rectangle"), tool};
+        rounded.shapeKind = ShapeSettings::Kind::RoundedRectangle;
+        BrushPreset ellipse{QObject::tr("Ellipse"), tool};
+        ellipse.shapeKind = ShapeSettings::Kind::Ellipse;
+        BrushPreset polygon{QObject::tr("Polygon"), tool};
+        polygon.shapeKind = ShapeSettings::Kind::Polygon;
+        BrushPreset curve{QObject::tr("Curve"), tool};
+        curve.shapeKind = ShapeSettings::Kind::Curve;
+        return {line, rectangle, rounded, ellipse, polygon, curve};
+    }
     case ToolId::Hand:
     case ToolId::Zoom:
     case ToolId::Move:
@@ -94,6 +109,12 @@ void applyPreset(ToolState &state, const BrushPreset &preset)
         LiquifySettings liquify = state.liquifySettings();
         liquify.mode = *preset.liquifyMode;
         state.setLiquifySettings(liquify);
+        return;
+    }
+    if (preset.shapeKind) {
+        ShapeSettings shape = state.shapeSettings();
+        shape.kind = *preset.shapeKind;
+        state.setShapeSettings(shape);
         return;
     }
     state.setSize(preset.tool, preset.size);

@@ -9,6 +9,7 @@
 #include "canvas/PerspectiveSnap.h"
 #include "canvas/PuppetTool.h"
 #include "canvas/SelectionTool.h"
+#include "canvas/ShapeTool.h"
 #include "canvas/TransformTool.h"
 #include "canvas/ViewTransform.h"
 #include "core/document/commands/CelCommands.h"
@@ -25,6 +26,7 @@
 #include "ui/MainWindow.h"
 #include "ui/PanelDock.h"
 #include "ui/SelectionBar.h"
+#include "ui/ShapeBar.h"
 #include "ui/TransformBar.h"
 #include "ui/panels/BlendModes.h"
 #include "ui/panels/BrushSizePanel.h"
@@ -2151,6 +2153,169 @@ private slots:
         QCOMPARE(state.settings(tools::ToolId::Blend).opacity, 0.6); // a mode keeps size and strength
     }
 
+    // The shape tool draws a rectangle, an ellipse or a line as one undo step; the selection holds it,
+    // a click draws nothing.
+    void shapeToolDrawsShapes()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        controller.clearSelection();
+        const doc::Cel &cel = *controller.document().cel(controller.currentCel());
+        auto alphaAt = [&](int x, int y) {
+            return cel.drawingAt(0) ? qAlpha(cel.drawingAt(0)->layers.front().image.pixel(x, y)) : 0;
+        };
+        canvas::ShapeTool tool(&controller, &state, [](const QString &) {});
+        state.setColor(Qt::red);
+        state.setSize(tools::ToolId::Shape, 4);
+
+        // A click only.
+        tool.press({100, 100}, Qt::NoModifier);
+        tool.release({100, 100}, Qt::NoModifier);
+        QVERIFY(!controller.canUndo());
+
+        // An outlined rectangle: the edge is drawn, the inside is not.
+        tool.press({100, 100}, Qt::NoModifier);
+        QVERIFY(tool.isActive());
+        tool.move({200, 160}, Qt::NoModifier);
+        tool.release({200, 160}, Qt::NoModifier);
+        QVERIFY(!tool.isActive());
+        QCOMPARE(alphaAt(150, 100), 255);
+        QCOMPARE(alphaAt(100, 130), 255);
+        QCOMPARE(alphaAt(150, 130), 0);
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo shape"));
+        controller.undo();
+        QCOMPARE(alphaAt(150, 100), 0);
+
+        // Filled, at half opacity, inside a selection that holds back the right part.
+        tools::ShapeSettings shape = state.shapeSettings();
+        shape.style = tools::ShapeSettings::Style::Filled;
+        state.setShapeSettings(shape);
+        state.setOpacity(tools::ToolId::Shape, 0.5);
+        QPainterPath area;
+        area.addRect(0, 0, 150, 1080);
+        controller.setSelection(area);
+        tool.press({100, 100}, Qt::NoModifier);
+        tool.release({200, 160}, Qt::NoModifier);
+        QVERIFY(qAbs(alphaAt(120, 130) - 128) <= 1);
+        QCOMPARE(alphaAt(180, 130), 0);
+        controller.undo();
+        controller.clearSelection();
+
+        // Shift makes a circle, Alt grows it from the center.
+        shape.kind = tools::ShapeSettings::Kind::Ellipse;
+        state.setShapeSettings(shape);
+        state.setOpacity(tools::ToolId::Shape, 1.0);
+        tool.press({300, 300}, Qt::AltModifier | Qt::ShiftModifier);
+        tool.release({340, 310}, Qt::AltModifier | Qt::ShiftModifier);
+        QCOMPARE(alphaAt(300, 300), 255); // the center
+        QCOMPARE(alphaAt(300, 262), 255); // 40 up: a circle, not a 10 px high ellipse
+        QCOMPARE(alphaAt(300, 350), 0);   // beyond the radius
+    }
+
+    // A polygon is made of clicks: the first point closes it, Enter or a double click finish it, Esc drops it.
+    void shapeToolPolygonAndCurveTakeClicks()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        controller.clearSelection();
+        const doc::Cel &cel = *controller.document().cel(controller.currentCel());
+        auto alphaAt = [&](int x, int y) {
+            return cel.drawingAt(0) ? qAlpha(cel.drawingAt(0)->layers.front().image.pixel(x, y)) : 0;
+        };
+        canvas::ShapeTool tool(&controller, &state, [](const QString &) {});
+        state.setSize(tools::ToolId::Shape, 4);
+        tools::ShapeSettings shape;
+        shape.kind = tools::ShapeSettings::Kind::Polygon;
+        shape.style = tools::ShapeSettings::Style::Filled;
+        state.setShapeSettings(shape);
+
+        auto click = [&](double x, double y) {
+            tool.press({x, y}, Qt::NoModifier);
+            QVERIFY(!tool.isActive()); // no drag: the canvas does not hold the tool
+            tool.release({x, y}, Qt::NoModifier);
+        };
+        click(100, 100);
+        QVERIFY(tool.hasPendingEdit());
+        click(200, 100);
+        click(200, 200);
+        QVERIFY(!controller.canUndo()); // nothing drawn yet
+        click(100, 100);                // back on the first point: done
+        QVERIFY(!tool.hasPendingEdit());
+        QCOMPARE(alphaAt(180, 110), 255); // inside the triangle
+        QCOMPARE(alphaAt(110, 190), 0);   // the other half of the square
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo shape"));
+        controller.undo();
+
+        // Esc drops it; two points are too few for a polygon.
+        click(100, 100);
+        click(200, 100);
+        QVERIFY(tool.keyPress(Qt::Key_Escape));
+        QVERIFY(!tool.hasPendingEdit());
+        click(100, 100);
+        click(200, 100);
+        tool.commit();
+        QVERIFY(!controller.canUndo());
+
+        // A curve goes through its points and is finished by Enter; Backspace takes a point back.
+        shape.kind = tools::ShapeSettings::Kind::Curve;
+        state.setShapeSettings(shape);
+        click(100, 300);
+        click(150, 250);
+        click(200, 300);
+        click(250, 350);
+        QVERIFY(tool.keyPress(Qt::Key_Backspace));
+        QVERIFY(tool.keyPress(Qt::Key_Return));
+        QCOMPARE(alphaAt(150, 250), 255);
+        QCOMPARE(alphaAt(200, 300), 255);
+        QCOMPARE(alphaAt(250, 350), 0); // the removed point
+        QVERIFY(!tool.keyPress(Qt::Key_Return)); // nothing in progress
+    }
+
+    void shapeToolRoundedRectangleRoundsItsCorners()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        controller.clearSelection();
+        const doc::Cel &cel = *controller.document().cel(controller.currentCel());
+        canvas::ShapeTool tool(&controller, &state, [](const QString &) {});
+        tools::ShapeSettings shape;
+        shape.kind = tools::ShapeSettings::Kind::RoundedRectangle;
+        shape.style = tools::ShapeSettings::Style::Filled;
+        shape.cornerRadius = 30;
+        state.setShapeSettings(shape);
+        tool.press({100, 100}, Qt::NoModifier);
+        tool.release({300, 200}, Qt::NoModifier);
+        const auto &image = cel.drawingAt(0)->layers.front().image;
+        QCOMPARE(qAlpha(image.pixel(200, 150)), 255);
+        QCOMPARE(qAlpha(image.pixel(101, 101)), 0); // the corner is cut off
+        QCOMPARE(qAlpha(image.pixel(200, 101)), 255);
+    }
+
+    void shapeGeometryConstrains()
+    {
+        using Kind = tools::ShapeSettings::Kind;
+        const QPointF a(10, 10);
+        const auto square = canvas::shapeGeometry(Kind::Rectangle, a, {50, 30}, Qt::ShiftModifier);
+        QCOMPARE(square.box, QRectF(10, 10, 40, 40));
+        const auto centered = canvas::shapeGeometry(Kind::Rectangle, a, {20, 15}, Qt::AltModifier);
+        QCOMPARE(centered.box, QRectF(0, 5, 20, 10));
+        const auto flat = canvas::shapeGeometry(Kind::Line, a, {50, 14}, Qt::ShiftModifier); // ~5.7°: snaps to 0°
+        QVERIFY(qAbs(flat.line.p2().y() - 10) < 1e-6);
+        QVERIFY(qAbs(flat.line.length() - QLineF(a, QPointF(50, 14)).length()) < 1e-6);
+    }
+
+    void shapeHasSubTools()
+    {
+        tools::ToolState state;
+        const auto presets = tools::builtInPresets(tools::ToolId::Shape);
+        QCOMPARE(presets.size(), 6);
+        tools::applyPreset(state, presets[3]);
+        QCOMPARE(state.shapeSettings().kind, tools::ShapeSettings::Kind::Ellipse);
+        tools::applyPreset(state, presets[5]);
+        QCOMPARE(state.shapeSettings().kind, tools::ShapeSettings::Kind::Curve);
+        QCOMPARE(state.settings(tools::ToolId::Shape).size, 4.0); // a kind keeps the thickness
+    }
+
     // The snap picks the axis closest to the direction of the pen, once it has moved far enough, and
     // puts the pen on that axis's line through the start.
     void perspectiveSnapChoosesTheNearestAxis()
@@ -3476,6 +3641,56 @@ private slots:
         QVERIFY(tool.undoStep());
         QVERIFY(qAlpha(pixels.pixel(1130, 540)) != 0);
         QVERIFY(!tool.undoStep());
+    }
+
+    // A polygon in progress has a bar with OK and Cancel under its points; OK waits for enough points.
+    void shapeBarFinishesOrDrops()
+    {
+        ui::MainWindow window;
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *controller = window.findChild<document::DocumentController *>();
+        auto *state = window.findChild<tools::ToolState *>();
+        auto *canvas = window.findChild<canvas::CanvasView *>();
+        auto *bar = window.findChild<ui::ShapeBar *>();
+        QVERIFY(bar);
+        controller->clearSelection();
+        state->setActiveTool(tools::ToolId::Shape);
+        tools::ShapeSettings shape;
+        shape.kind = tools::ShapeSettings::Kind::Polygon;
+        shape.style = tools::ShapeSettings::Style::Filled;
+        state->setShapeSettings(shape);
+        QVERIFY(!bar->isVisible());
+
+        auto at = [&](QPointF doc) { return canvas->view().documentToView().map(doc).toPoint(); };
+        auto click = [&](QPointF doc) {
+            QTest::mouseClick(canvas, Qt::LeftButton, {}, at(doc));
+            QCoreApplication::processEvents();
+        };
+        auto *ok = bar->findChild<QToolButton *>(QStringLiteral("ok"));
+        auto *cancel = bar->findChild<QToolButton *>(QStringLiteral("cancel"));
+        QVERIFY(ok && cancel);
+        click({900, 500});
+        QVERIFY(bar->isVisible());
+        QVERIFY(!ok->isEnabled()); // one point
+        click({1000, 500});
+        click({1000, 600});
+        QVERIFY(ok->isEnabled());
+        const QRect points = canvas->view().documentToView().mapRect(canvas->shapeBounds()).toAlignedRect();
+        QVERIFY(bar->geometry().top() >= points.bottom() || bar->geometry().bottom() <= points.top());
+
+        QTest::mouseClick(cancel, Qt::LeftButton);
+        QVERIFY(!bar->isVisible());
+        QVERIFY(!controller->canUndo());
+
+        click({900, 500});
+        click({1000, 500});
+        click({1000, 600});
+        QTest::mouseClick(ok, Qt::LeftButton);
+        QVERIFY(!bar->isVisible());
+        QCOMPARE(controller->undoText(), QStringLiteral("Undo shape"));
+        const doc::Cel &cel = *controller->document().cel(controller->currentCel());
+        QCOMPARE(qAlpha(cel.drawingAt(0)->layers.front().image.pixel(980, 510)), 255);
     }
 
     // While a transform is open a bar with OK and Cancel floats under its box (the selection's

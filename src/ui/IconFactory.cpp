@@ -199,6 +199,10 @@ void drawGlyph(QPainter &p, IconId id)
         path.moveTo(16, 12);
         path.lineTo(21.5, 12);
         break;
+    case IconId::Shape: // a square and a circle overlapping
+        path.addRect(QRectF(3.5, 4.5, 11, 11));
+        path.addEllipse(QPointF(15, 15), 5.5, 5.5);
+        break;
     case IconId::Transform: // a box with handles
         path.addRect(QRectF(6, 6, 12, 12));
         for (QPointF at : {QPointF(6, 6), QPointF(18, 6), QPointF(18, 18), QPointF(6, 18), QPointF(12, 6),

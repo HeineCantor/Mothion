@@ -39,6 +39,7 @@ private:
     void syncPuppetFromState();
     void syncFillFromState();
     void syncEffectFromState();
+    void syncShapeFromState();
     void showAdvancedSettings();
 
     tools::ToolState *m_state;
@@ -68,6 +69,13 @@ private:
     QWidget *m_effectControls;
     SliderField *m_effectSize;
     SliderField *m_effectStrength;
+
+    // Shape: the outline's thickness, its opacity and whether it is outlined or filled.
+    QWidget *m_shapeControls;
+    SliderField *m_shapeThickness;
+    SliderField *m_shapeOpacity;
+    QComboBox *m_shapeStyle;
+    SliderField *m_shapeRadius;
 
     QLabel *m_transformHelp;
     QWidget *m_footer;

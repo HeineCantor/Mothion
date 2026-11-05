@@ -64,6 +64,7 @@ enum class CommandKind {
     PasteLayers,
     Blend,
     Liquify,
+    Shape,
 };
 
 // An undoable change to a Document.

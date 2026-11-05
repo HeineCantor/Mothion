@@ -176,6 +176,7 @@ ToolPalettePanel::ToolPalettePanel(tools::ToolState *state, QWidget *parent)
             {ToolId::Eyedropper, IconId::Eyedropper, QKeySequence(Qt::Key_I)},
             {ToolId::Blend, IconId::Blend, QKeySequence(Qt::Key_U)},
             {ToolId::Liquify, IconId::Liquify, QKeySequence(Qt::Key_Q)},
+            {ToolId::Shape, IconId::Shape, QKeySequence(Qt::Key_S)},
         },
         {   // selection and fill
             {ToolId::RectSelect, IconId::RectSelect, QKeySequence(Qt::Key_M)}, // the selection tool

@@ -843,6 +843,7 @@ QString DocumentController::commandName(doc::CommandKind kind)
     case doc::CommandKind::PasteLayers: return tr("paste layers");
     case doc::CommandKind::Blend: return tr("blend");
     case doc::CommandKind::Liquify: return tr("liquify");
+    case doc::CommandKind::Shape: return tr("shape");
     }
     return {};
 }

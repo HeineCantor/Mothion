@@ -29,6 +29,8 @@ struct BrushPreset
     // A blend or liquify sub tool: sets only the mode of that tool.
     std::optional<BlendSettings::Mode> blendMode;
     std::optional<LiquifySettings::Mode> liquifyMode;
+    // A shape sub tool: sets only the kind of shape (the style stays as it is).
+    std::optional<ShapeSettings::Kind> shapeKind;
     // A sub tool that is a tool of its own (the selection shapes): picking it
     // makes that tool active, nothing else.
     std::optional<ToolId> selectsTool;

@@ -52,6 +52,12 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
     , m_effectSize(new SliderField(tr("Size"), int(ToolState::kMinSize), int(ToolState::kMaxSize),
                                    QStringLiteral(" px"), m_effectControls))
     , m_effectStrength(new SliderField(tr("Strength"), 1, 100, QStringLiteral(" %"), m_effectControls))
+    , m_shapeControls(new QWidget(this))
+    , m_shapeThickness(new SliderField(tr("Thickness"), int(ToolState::kMinSize), 500, QStringLiteral(" px"),
+                                       m_shapeControls))
+    , m_shapeOpacity(new SliderField(tr("Opacity"), 0, 100, QStringLiteral(" %"), m_shapeControls))
+    , m_shapeStyle(new QComboBox(m_shapeControls))
+    , m_shapeRadius(new SliderField(tr("Corner radius"), 0, 200, QStringLiteral(" px"), m_shapeControls))
     , m_footer(new QWidget(this))
     , m_transformHelp(new QLabel(tr("Drag a corner to scale (Shift keeps the proportions), a side to stretch,\n"
                                     "inside the box to move, outside it to rotate (Shift: 15° steps).\n"
@@ -126,6 +132,22 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
     effect->addWidget(m_effectSize);
     effect->addWidget(m_effectStrength);
 
+    m_shapeStyle->addItems({tr("Outline"), tr("Fill"), tr("Outline and fill")});
+    m_shapeStyle->setToolTip(tr("The outline and the fill are the main color; with both, the fill is the secondary color"));
+    auto *shape = new QVBoxLayout(m_shapeControls);
+    shape->setContentsMargins(0, 0, 0, 0);
+    shape->setSpacing(4);
+    shape->addWidget(m_shapeThickness);
+    shape->addWidget(m_shapeOpacity);
+    auto *shapeStyle = new QFormLayout;
+    shapeStyle->setContentsMargins(0, 0, 0, 0);
+    shapeStyle->addRow(tr("Style"), m_shapeStyle);
+    shape->addLayout(shapeStyle);
+    shape->addWidget(m_shapeRadius);
+    auto *shapeHelp = new QLabel(tr("Shift: a square, a circle, a line in 15° steps.\nAlt: from the center.\nPolygon and curve: click the points; click the\nfirst point of a polygon, double-click or Enter to\nfinish, Backspace removes the last, Esc cancels."), m_shapeControls);
+    shapeHelp->setEnabled(false); // dimmed, as a hint
+    shape->addWidget(shapeHelp);
+
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(6, 6, 6, 6);
     layout->setSpacing(4);
@@ -134,6 +156,7 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
     layout->addWidget(m_puppetControls);
     layout->addWidget(m_fillControls);
     layout->addWidget(m_effectControls);
+    layout->addWidget(m_shapeControls);
     m_transformHelp->setWordWrap(true);
     m_transformHelp->setEnabled(false); // dimmed, as a hint
     layout->addWidget(m_transformHelp);
@@ -185,6 +208,22 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
     connect(m_effectStrength, &SliderField::valueEdited, this,
             [this](int v) { m_state->setOpacity(m_state->activeTool(), v / 100.0); });
     connect(m_state, &ToolState::toolSettingsChanged, this, &ToolPropertiesPanel::syncEffectFromState);
+    connect(m_shapeThickness, &SliderField::valueEdited, this, [this](int v) { m_state->setSize(ToolId::Shape, v); });
+    connect(m_shapeOpacity, &SliderField::valueEdited, this,
+            [this](int v) { m_state->setOpacity(ToolId::Shape, v / 100.0); });
+    connect(m_shapeStyle, &QComboBox::currentIndexChanged, this, [this](int i) {
+        tools::ShapeSettings s = m_state->shapeSettings();
+        s.style = static_cast<tools::ShapeSettings::Style>(i);
+        m_state->setShapeSettings(s);
+    });
+    connect(m_shapeRadius, &SliderField::valueEdited, this, [this](int v) {
+        tools::ShapeSettings s = m_state->shapeSettings();
+        s.cornerRadius = v;
+        m_state->setShapeSettings(s);
+    });
+    connect(m_state, &ToolState::toolSettingsChanged, this, &ToolPropertiesPanel::syncShapeFromState);
+    connect(m_state, &ToolState::shapeSettingsChanged, this, &ToolPropertiesPanel::syncShapeFromState);
+    syncShapeFromState();
 
     connect(m_state, &ToolState::fillSettingsChanged, this, &ToolPropertiesPanel::syncFillFromState);
     connect(m_state, &ToolState::toolSettingsChanged, this, &ToolPropertiesPanel::syncFillFromState);
@@ -211,11 +250,13 @@ void ToolPropertiesPanel::syncFromState()
     m_toolName->setText(ToolState::displayName(tool));
     const bool transform = tool == ToolId::Transform;
     const bool effect = tool == ToolId::Blend || tool == ToolId::Liquify;
-    const bool brush = !puppet && !fill && !transform && !effect;
+    const bool shape = tool == ToolId::Shape;
+    const bool brush = !puppet && !fill && !transform && !effect && !shape;
     m_brushControls->setVisible(brush);
     if (m_footer->parentWidget() != this) // in a dock: shown with the brush options
         m_footer->setVisible(brush);
     m_effectControls->setVisible(effect);
+    m_shapeControls->setVisible(shape);
     syncEffectFromState();
     m_transformHelp->setVisible(transform);
     m_puppetControls->setVisible(puppet);
@@ -274,6 +315,19 @@ void ToolPropertiesPanel::syncEffectFromState()
     const QSignalBlocker b1(m_effectSize), b2(m_effectStrength);
     m_effectSize->setValue(int(std::lround(s.size)));
     m_effectStrength->setValue(int(std::lround(s.opacity * 100)));
+}
+
+void ToolPropertiesPanel::syncShapeFromState()
+{
+    const tools::ShapeSettings s = m_state->shapeSettings();
+    const tools::BrushSettings b = m_state->settings(ToolId::Shape);
+    const QSignalBlocker b1(m_shapeThickness), b2(m_shapeOpacity), b3(m_shapeStyle), b4(m_shapeRadius);
+    m_shapeThickness->setValue(int(std::lround(b.size)));
+    m_shapeOpacity->setValue(int(std::lround(b.opacity * 100)));
+    m_shapeStyle->setCurrentIndex(int(s.style));
+    m_shapeStyle->setEnabled(!tools::ShapeSettings::isOpen(s.kind)); // a line or a curve has no inside
+    m_shapeRadius->setValue(s.cornerRadius);
+    m_shapeRadius->setEnabled(s.kind == tools::ShapeSettings::Kind::RoundedRectangle);
 }
 
 void ToolPropertiesPanel::syncFillFromState()

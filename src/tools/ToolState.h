@@ -14,8 +14,8 @@ namespace mothion::tools {
 
 // The tools in the tool palette. Not to be confused with mothion::InputTool,
 // which is the *physical* end of the pen (tip / eraser / mouse).
-enum class ToolId { Brush, Eraser, Hand, Zoom, Move, RectSelect, LassoSelect, Puppet, Eyedropper, Fill, Transform, Blend, Liquify };
-inline constexpr int kToolCount = 13;
+enum class ToolId { Brush, Eraser, Hand, Zoom, Move, RectSelect, LassoSelect, Puppet, Eyedropper, Fill, Transform, Blend, Liquify, Shape };
+inline constexpr int kToolCount = 14;
 
 // Puppet warp options (see puppet::PuppetRig).
 struct PuppetSettings
@@ -61,6 +61,24 @@ struct LiquifySettings
     Mode mode = Mode::Push;
 
     bool operator==(const LiquifySettings &) const = default;
+};
+
+// Shape tool: what a drag (or a series of clicks) draws, outlined, filled, or both.
+// The outline is drawn in the main color with the tool's size as its
+// thickness; the fill is the main color, or the secondary one under an outline.
+struct ShapeSettings
+{
+    // A polygon and a curve are made by clicking their points one after the other.
+    enum class Kind { Line, Rectangle, RoundedRectangle, Ellipse, Polygon, Curve };
+    enum class Style { Outline, Filled, OutlineAndFill };
+    Kind kind = Kind::Rectangle;
+    Style style = Style::Outline; // an open shape (line, curve) is always an outline
+    int cornerRadius = 16;        // px, of a rounded rectangle
+
+    static bool isOpen(Kind kind) { return kind == Kind::Line || kind == Kind::Curve; }
+    static bool isMultiPoint(Kind kind) { return kind == Kind::Polygon || kind == Kind::Curve; }
+
+    bool operator==(const ShapeSettings &) const = default;
 };
 
 // Onion skin: the current layer's drawings of the frames around the
@@ -174,6 +192,9 @@ public:
     doc::LayerId perspectiveSnapLayer() const { return m_snapLayer; }
     void setPerspectiveSnapLayer(doc::LayerId layer);
 
+    ShapeSettings shapeSettings() const { return m_shape; }
+    void setShapeSettings(const ShapeSettings &settings);
+
     static constexpr int kMaxOnionFrames = 10;
     OnionSkinSettings onionSkin() const { return m_onion; }
     void setOnionSkin(const OnionSkinSettings &settings);
@@ -194,6 +215,7 @@ signals:
     void perspectiveSnapChanged();
     void blendSettingsChanged();
     void liquifySettingsChanged();
+    void shapeSettingsChanged();
     void onionSkinChanged();
 
 private:
@@ -217,6 +239,7 @@ private:
     doc::LayerId m_snapLayer = doc::kNoId;
     BlendSettings m_blend;
     LiquifySettings m_liquify;
+    ShapeSettings m_shape;
     OnionSkinSettings m_onion;
 };
 

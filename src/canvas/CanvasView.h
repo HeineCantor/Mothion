@@ -72,6 +72,11 @@ public:
     QRectF transformBounds() const;
     // Applies (true) or drops the open transform, as Enter and Esc do.
     void finishTransform(bool apply);
+    // The same for a polygon or curve in progress: the box around its points
+    // (null when none), whether it has enough points to finish, and OK (true) or Cancel.
+    QRectF shapeBounds() const;
+    bool shapeCanFinish() const;
+    void finishShape(bool apply);
 
     // Undo and redo inside an edit left open by the active tool (the drags
     // of a puppet warp or a transform); false if there is no step to take,
@@ -112,6 +117,8 @@ signals:
     void editStepsChanged();
     // The transform box came up, moved or went away (see transformBounds()).
     void transformChanged();
+    // The points of a polygon or curve in progress changed (see shapeBounds()).
+    void shapeChanged();
 
 protected:
     void paintEvent(QPaintEvent *event) override;
@@ -185,6 +192,7 @@ private:
     std::unique_ptr<CanvasTool> m_fillTool;
     std::unique_ptr<CanvasTool> m_blendTool;
     std::unique_ptr<CanvasTool> m_liquifyTool;
+    std::unique_ptr<CanvasTool> m_shapeTool;
     std::unique_ptr<CanvasTool> m_transformTool;
     CanvasTool *m_editTool = nullptr; // the canvas tool between its press and release
     PerspectiveGizmo m_gizmo;

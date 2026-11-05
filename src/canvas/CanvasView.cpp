@@ -7,6 +7,7 @@
 #include "canvas/MoveTool.h"
 #include "canvas/PuppetTool.h"
 #include "canvas/SelectionTool.h"
+#include "canvas/ShapeTool.h"
 #include "canvas/TransformTool.h"
 #include "document/DocumentController.h"
 #include "input/TabletInputAdapter.h"
@@ -97,6 +98,13 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
                                               [this](const QString &text) { emit statusMessage(text); });
     m_liquifyTool = std::make_unique<LiquifyTool>(m_document, m_toolState,
                                                   [this](const QString &text) { emit statusMessage(text); });
+    m_shapeTool = std::make_unique<ShapeTool>(
+        m_document, m_toolState, [this](const QString &text) { emit statusMessage(text); },
+        [this] {
+            update();
+            emit shapeChanged();
+        });
+    connect(m_toolState, &ToolState::shapeSettingsChanged, this, &CanvasView::shapeChanged);
     m_transformTool = std::make_unique<TransformTool>(
         m_document, m_toolState, [this](const QString &text) { emit statusMessage(text); },
         [this] {
@@ -833,6 +841,7 @@ CanvasTool *CanvasView::canvasTool() const
     case ToolId::Transform: return m_transformTool.get();
     case ToolId::Blend: return m_blendTool.get();
     case ToolId::Liquify: return m_liquifyTool.get();
+    case ToolId::Shape: return m_shapeTool.get();
     default: return nullptr;
     }
 }
@@ -841,7 +850,7 @@ void CanvasView::commitPendingEdits()
 {
     // An edit left open (a puppet warp) is applied when another tool takes over.
     for (CanvasTool *tool : {m_moveTool.get(), m_rectSelectTool.get(), m_lassoSelectTool.get(), m_puppetTool.get(),
-                              m_transformTool.get()})
+                              m_shapeTool.get(), m_transformTool.get()})
         if (tool != canvasTool() && tool->hasPendingEdit())
             tool->commit();
     emit editStepsChanged();
@@ -858,6 +867,8 @@ void CanvasView::cancelStroke()
             tool->cancel();
         update();
     }
+    // Points of a polygon or curve belong to the layer they were placed on: dropped.
+    m_shapeTool->cancel();
     // An open edit is applied: undo then takes it back, a frame or layer
     // change keeps it.
     for (CanvasTool *tool : {m_moveTool.get(), m_rectSelectTool.get(), m_lassoSelectTool.get(), m_puppetTool.get(),
@@ -940,6 +951,22 @@ QRectF CanvasView::transformBounds() const
 void CanvasView::finishTransform(bool apply)
 {
     if (m_transformTool->keyPress(apply ? Qt::Key_Return : Qt::Key_Escape))
+        emit editStepsChanged();
+}
+
+QRectF CanvasView::shapeBounds() const
+{
+    return static_cast<const ShapeTool *>(m_shapeTool.get())->pendingBounds();
+}
+
+bool CanvasView::shapeCanFinish() const
+{
+    return static_cast<const ShapeTool *>(m_shapeTool.get())->canFinish();
+}
+
+void CanvasView::finishShape(bool apply)
+{
+    if (m_shapeTool->keyPress(apply ? Qt::Key_Return : Qt::Key_Escape))
         emit editStepsChanged();
 }
 
