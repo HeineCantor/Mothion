@@ -307,13 +307,15 @@ void TimelineView::paintExposure(QPainter &p, const doc::Exposure &e, const QStr
     const TimelineMetrics &m = m_metrics;
     const QRect block(m.frameX(e.start) + 1, y + 2, e.length * m.frameWidth - 2, m.rowHeight - 4);
 
-    p.fillRect(block, selected ? color.darker(115) : color.darker(170));
+    const QColor fill = selected ? color.darker(115) : color.darker(170);
+    p.fillRect(block, fill);
     p.fillRect(QRect(block.left(), block.top(), 3, block.height()), color); // exposure start mark
     p.setPen(selected ? palette().highlightedText().color() : color.darker(120));
     p.drawRect(block.adjusted(0, 0, -1, -1));
 
-    // Drawing name at the start of the block; the rest of the hold shows a line.
-    p.setPen(palette().text().color());
+    // Drawing name at the start of the block; the rest of the hold shows a line. In the color that reads on the
+    // block's own (the theme's text color is dark in a light theme, on a dark block).
+    p.setPen(fill.lightness() < 150 ? QColor(0xf2, 0xf2, 0xf5) : QColor(0x1e, 0x1e, 0x22));
     const QRect textRect = block.adjusted(5, 0, -2, 0);
     const QString shown = p.fontMetrics().elidedText(name, Qt::ElideRight, textRect.width());
     p.drawText(textRect, Qt::AlignVCenter | Qt::AlignLeft, shown);
@@ -371,18 +373,22 @@ void TimelineView::paintHeaders(QPainter &p) const
         const int celIndex = celIndexForRow(row);
         const doc::Cel &cel = d.celAt(celIndex);
         const QRect r(0, m.rowY(row), m.headerWidth - 1, m.rowHeight);
-        if (cel.id() == m_document->currentCel())
+        const bool current = cel.id() == m_document->currentCel();
+        if (current)
             p.fillRect(r, palette().highlight().color().darker(200));
+        // On the dark highlight of the current cel the text and glyphs are the highlighted text's color.
+        const QColor ink = current ? palette().highlightedText().color() : palette().text().color();
+        const IconTone tone = current ? IconTone::Selected : IconTone::Plain;
         p.fillRect(QRect(r.left() + 4, r.top() + 6, 4, r.height() - 12), colorForCel(celIndex));
         // The toggles: the icon when on, an empty slot when off.
-        p.setPen(palette().mid().color());
+        p.setPen(current ? palette().highlightedText().color() : palette().placeholderText().color());
         for (const QRect &slot : {eyeRect(row), lockRect(row)})
             p.drawRect(slot.adjusted(0, 0, -1, -1));
         if (cel.properties().visible)
-            icon(IconId::Eye).paint(&p, eyeRect(row).adjusted(1, 1, -1, -1));
+            icon(IconId::Eye, tone).paint(&p, eyeRect(row).adjusted(1, 1, -1, -1));
         if (cel.properties().locked)
-            icon(IconId::Lock).paint(&p, lockRect(row).adjusted(1, 1, -1, -1));
-        p.setPen(cel.properties().visible ? palette().text().color()
+            icon(IconId::Lock, tone).paint(&p, lockRect(row).adjusted(1, 1, -1, -1));
+        p.setPen(cel.properties().visible ? ink
                                           : palette().color(QPalette::Disabled, QPalette::Text));
         p.drawText(r.adjusted(lockRect(row).right() + 6, 0, -4, 0), Qt::AlignVCenter | Qt::AlignLeft,
                    QString::fromStdString(cel.properties().name));
