@@ -89,7 +89,11 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
     m_lassoSelectTool =
         std::make_unique<SelectionTool>(m_document, SelectionTool::Shape::Lasso);
     m_puppetTool = std::make_unique<PuppetTool>(
-        m_document, m_toolState, [this](const QString &text) { emit statusMessage(text); }, [this] { update(); });
+        m_document, m_toolState, [this](const QString &text) { emit statusMessage(text); },
+        [this] {
+            update();
+            emit puppetChanged();
+        });
     m_eyedropperTool =
         std::make_unique<EyedropperTool>(m_toolState, [this](const QPointF &docPos) { return colorAt(docPos); });
     m_fillTool = std::make_unique<FillTool>(
@@ -1071,6 +1075,17 @@ QRectF CanvasView::transformBounds() const
 void CanvasView::finishTransform(bool apply)
 {
     if (m_transformTool->keyPress(apply ? Qt::Key_Return : Qt::Key_Escape))
+        emit editStepsChanged();
+}
+
+QRectF CanvasView::puppetBounds() const
+{
+    return static_cast<const PuppetTool *>(m_puppetTool.get())->pendingBounds();
+}
+
+void CanvasView::finishPuppet(bool apply)
+{
+    if (m_puppetTool->keyPress(apply ? Qt::Key_Return : Qt::Key_Escape))
         emit editStepsChanged();
 }
 

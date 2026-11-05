@@ -75,6 +75,9 @@ public:
     void finishTransform(bool apply);
     // The same for a polygon or curve in progress: the box around its points
     // (null when none), whether it has enough points to finish, and OK (true) or Cancel.
+    // And for the open puppet warp: the area it shows (null while it has nothing to apply), and OK / Cancel.
+    QRectF puppetBounds() const;
+    void finishPuppet(bool apply);
     QRectF shapeBounds() const;
     bool shapeCanFinish() const;
     void finishShape(bool apply);
@@ -120,6 +123,8 @@ signals:
     void transformChanged();
     // The points of a polygon or curve in progress changed (see shapeBounds()).
     void shapeChanged();
+    // The puppet warp opened, changed or closed (see puppetBounds()).
+    void puppetChanged();
 
 protected:
     void paintEvent(QPaintEvent *event) override;

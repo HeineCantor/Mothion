@@ -357,6 +357,13 @@ void PuppetTool::release(const QPointF &docPos, Qt::KeyboardModifiers)
     endStep();
 }
 
+QRectF PuppetTool::pendingBounds() const
+{
+    if (!m_session || (!m_session->changed && m_session->rig->pins().empty() && m_session->undo.empty()))
+        return {};
+    return QRectF(m_session->shown);
+}
+
 void PuppetTool::commit()
 {
     m_localDrag = false;

@@ -62,6 +62,9 @@ public:
     void setViewZoom(double zoom) override { m_zoom = zoom; }
     void activated() override;
     bool hover(const QPointF &docPos) override;
+    // The area the open warp shows now (document coordinates), once it has something to apply: a pin placed or a
+    // drag done. A null rect otherwise (no warp, or only the mesh made for the radius preview).
+    QRectF pendingBounds() const;
     // Pins placed in the open warp.
     std::size_t pinCount() const { return m_session ? m_session->rig->pins().size() : 0; }
     // Pins selected, and in radius mode the points picked, to move together.

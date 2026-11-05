@@ -99,6 +99,7 @@ qt_add_library(mothion_gui STATIC
     ui/DiscordPresence.h ui/DiscordPresence.cpp
     ui/TransformBar.h ui/TransformBar.cpp
     ui/ShapeBar.h ui/ShapeBar.cpp
+    ui/PuppetBar.h ui/PuppetBar.cpp
     ui/AutoplayWindow.h ui/AutoplayWindow.cpp
     ui/AdvancedToolSettings.h ui/AdvancedToolSettings.cpp
     ui/IconFactory.h ui/IconFactory.cpp

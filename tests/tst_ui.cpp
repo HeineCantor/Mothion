@@ -26,6 +26,7 @@
 #include "ui/MainWindow.h"
 #include "ui/PanelDock.h"
 #include "ui/SelectionBar.h"
+#include "ui/PuppetBar.h"
 #include "ui/ShapeBar.h"
 #include "ui/TransformBar.h"
 #include "ui/panels/BlendModes.h"
@@ -4324,6 +4325,64 @@ private slots:
         QVERIFY(tool.keyPress(Qt::Key_Escape));
         QCOMPARE(pixels.pixel(1140, 540), ink);
         QVERIFY(!controller.isPainting());
+    }
+
+    // The puppet warp has an OK / Cancel bar under the warped area once there is something to apply
+    // (a pin placed); OK applies the warp, Cancel drops it, as Enter and Esc do.
+    void puppetBarAppliesOrDrops()
+    {
+        ui::MainWindow window;
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *controller = window.findChild<document::DocumentController *>();
+        auto *state = window.findChild<tools::ToolState *>();
+        auto *canvas = window.findChild<canvas::CanvasView *>();
+        auto *bar = window.findChild<ui::PuppetBar *>();
+        QVERIFY(bar);
+        QImage image(400, 40, QImage::Format_ARGB32);
+        image.fill(Qt::darkCyan);
+        controller->importImage(image, QStringLiteral("bar")); // x 760..1159, y 520..559
+        const doc::Cel &cel = *controller->document().cel(controller->currentCel());
+        auto pixel = [&](int x, int y) { return cel.drawingAt(0)->layers.front().image.pixel(x, y); };
+        const doc::Pixel ink = pixel(960, 540);
+
+        state->setActiveTool(tools::ToolId::Puppet);
+        QCoreApplication::processEvents();
+        QVERIFY(!bar->isVisible()); // nothing to apply yet
+        auto at = [&](QPointF doc) { return canvas->view().documentToView().map(doc).toPoint(); };
+        auto click = [&](QPointF p) {
+            QTest::mousePress(canvas, Qt::LeftButton, {}, at(p));
+            QTest::mouseRelease(canvas, Qt::LeftButton, {}, at(p));
+        };
+        auto drag = [&](QPointF from, QPointF to) {
+            QTest::mousePress(canvas, Qt::LeftButton, {}, at(from));
+            QTest::mouseMove(canvas, at(to));
+            QTest::mouseRelease(canvas, Qt::LeftButton, {}, at(to));
+        };
+        click({780, 540}); // the first pin
+        QVERIFY(bar->isVisible());
+        const QRect shown = canvas->view().documentToView().mapRect(canvas->puppetBounds()).toAlignedRect();
+        QVERIFY(bar->geometry().top() >= shown.bottom() || bar->geometry().bottom() <= shown.top());
+        auto *ok = bar->findChild<QToolButton *>(QStringLiteral("ok"));
+        auto *cancel = bar->findChild<QToolButton *>(QStringLiteral("cancel"));
+        QVERIFY(ok && cancel);
+
+        click({1140, 540});
+        drag({1140, 540}, {1140, 640});
+        QCOMPARE(qAlpha(pixel(1140, 540)), 0); // bent
+        QTest::mouseClick(cancel, Qt::LeftButton);
+        QCoreApplication::processEvents();
+        QCOMPARE(pixel(1140, 540), ink); // dropped
+        QVERIFY(!bar->isVisible());
+
+        click({780, 540});
+        click({1140, 540});
+        drag({1140, 540}, {1140, 640});
+        QTest::mouseClick(ok, Qt::LeftButton);
+        QCoreApplication::processEvents();
+        QCOMPARE(qAlpha(pixel(1140, 540)), 0); // applied: stays bent
+        QVERIFY(!bar->isVisible());
+        QVERIFY(controller->canUndo());
     }
 
     void largeImagesAreScaledToFit()

@@ -14,6 +14,7 @@
 #include "ui/IconFactory.h"
 #include "ui/PanelDock.h"
 #include "ui/SelectionBar.h"
+#include "ui/PuppetBar.h"
 #include "ui/ShapeBar.h"
 #include "ui/TransformBar.h"
 #include "ui/Theme.h"
@@ -110,6 +111,7 @@ MainWindow::MainWindow(QWidget *parent)
             [this](const QString &text) { statusBar()->showMessage(text, 4000); });
     new TransformBar(m_canvas);
     new ShapeBar(m_canvas);
+    new PuppetBar(m_canvas);
     // Rich Presence: Discord shows "Mothion", the time and the frame (nothing without an application id).
     new DiscordPresence(m_document, DiscordPresence::defaultApplicationId(), this);
     auto *viewInfo = new QLabel(this);
