@@ -8,6 +8,7 @@
 #include <QString>
 
 #include <optional>
+#include <utility>
 
 namespace mothion::tools {
 
@@ -16,6 +17,25 @@ namespace mothion::tools {
 // user presets and saving come with the document/settings work.
 struct BrushPreset
 {
+    BrushPreset() = default;
+    // A brush or eraser sub tool; everything else keeps its default.
+    BrushPreset(QString presetName, ToolId forTool, double brushSize, double brushOpacity, PressureCurve pressure,
+                double stabilizer)
+        : name(std::move(presetName))
+        , tool(forTool)
+        , size(brushSize)
+        , opacity(brushOpacity)
+        , curve(std::move(pressure))
+        , smoothing(stabilizer)
+    {
+    }
+    // A sub tool that only sets a mode (fill, blend, liquify, shape) or picks a tool.
+    BrushPreset(QString presetName, ToolId forTool)
+        : name(std::move(presetName))
+        , tool(forTool)
+    {
+    }
+
     QString name;
     ToolId tool = ToolId::Brush;
     double size = 10.0;
