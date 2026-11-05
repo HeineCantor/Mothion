@@ -2482,6 +2482,64 @@ private slots:
     }
 
     // A stroke made with the snap on follows an axis of the chosen perspective layer instead of the pen.
+    // Shift, tapped: a straight line from where the last stroke ended; a touch places it. Esc, or Shift
+    // again, drops it; until a touch nothing is drawn.
+    void shiftTapPlacesAStraightLineFromTheLastPoint()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(900, 700);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        state.setColor(Qt::red);
+        state.setSize(tools::ToolId::Brush, 10.0);
+        auto alphaAt = [&](const QPointF &docPoint) {
+            for (const doc::Layer &l : controller.currentDrawing()->layers)
+                if (l.id == controller.currentLayer())
+                    return qAlpha(l.image.pixel(int(docPoint.x()), int(docPoint.y())));
+            return -1;
+        };
+        const QTransform toView = canvas.view().documentToView();
+        auto view = [&](const QPointF &p) { return toView.map(p).toPoint(); };
+        auto tap = [&](const QPointF &p) {
+            QTest::mousePress(&canvas, Qt::LeftButton, {}, view(p));
+            QTest::mouseRelease(&canvas, Qt::LeftButton, {}, view(p));
+        };
+        const QPointF last(100, 100), target(300, 160);
+
+        // Nothing drawn yet: Shift has no point to start from.
+        QTest::keyClick(&canvas, Qt::Key_Shift);
+        QTest::mouseMove(&canvas, view(target));
+        tap(last); // an ordinary dot, then the line has its start
+        QVERIFY(alphaAt(last) > 0);
+        QCOMPARE(alphaAt((last + target) / 2.0), 0);
+
+        QTest::keyClick(&canvas, Qt::Key_Shift); // armed: the preview does not draw
+        QTest::mouseMove(&canvas, view(target));
+        QCOMPARE(alphaAt((last + target) / 2.0), 0);
+        tap(target); // placed
+        QVERIFY(alphaAt((last + target) / 2.0) > 0);
+        QVERIFY(alphaAt(QPointF(target.x() - 2, target.y() - 0.7)) > 0);
+        QCOMPARE(alphaAt(QPointF(200, 100)), 0); // only the line
+        controller.undo(); // one undo step for the line
+        QCOMPARE(alphaAt((last + target) / 2.0), 0);
+        QVERIFY(alphaAt(last) > 0);
+
+        // Esc drops it: the next touch is an ordinary dot.
+        QTest::keyClick(&canvas, Qt::Key_Shift);
+        QTest::keyClick(&canvas, Qt::Key_Escape);
+        tap(QPointF(400, 400));
+        QCOMPARE(alphaAt(QPointF(250, 250)), 0);
+        QVERIFY(alphaAt(QPointF(400, 400)) > 0);
+
+        // The line goes on from where the last one ended; Shift twice drops it too.
+        QTest::keyClick(&canvas, Qt::Key_Shift);
+        QTest::keyClick(&canvas, Qt::Key_Shift);
+        tap(QPointF(500, 400));
+        QCOMPARE(alphaAt(QPointF(450, 400)), 0);
+    }
+
     // Through a fisheye the axis's line is a curve: the pen is put on it, and it starts where the stroke did.
     void perspectiveSnapFollowsTheCurveOfAFisheye()
     {

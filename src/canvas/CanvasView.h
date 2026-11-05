@@ -8,6 +8,7 @@
 #include "canvas/StrokeSession.h"
 #include "canvas/ViewTransform.h"
 #include "core/PenSample.h"
+#include "core/document/TiledImage.h"
 #include "core/StrokeSmoother.h"
 #include "core/brush/DabGenerator.h"
 #include "core/brush/StrokeShaper.h"
@@ -164,6 +165,12 @@ private:
     void cycleSnapAxis();
     // The outline and the letter of the axis the stroke in progress is snapped to.
     void paintSnapGuide(QPainter &p) const;
+    // Shift, tapped, with a paint tool: a straight line from the last point drawn, ending at the pen
+    // (shown as it moves); touching places it.
+    QPointF lineStartOf(const std::vector<brush::BrushInput> &points) const;
+    void toggleStraightLine();
+    void placeStraightLine(const PenSample &touch);
+    void paintStraightLinePreview(QPainter &p) const;
     // The held samples now judged (all of them at the end of the stroke): a
     // corner restarts the stabilizer from itself and gets its point painted.
     void releaseHeldSamples(bool end);
@@ -227,6 +234,11 @@ private:
     bool panKeyHeld() const { return m_spaceHeld || m_tabHeld; }
     // Alt held with a paint tool: the pen picks colors instead.
     bool m_altHeld = false;
+    std::optional<QPointF> m_lastPoint; // where the last stroke ended, document coordinates
+    const doc::TiledImage *m_strokeImage = nullptr; // what the stroke in progress paints on
+    bool m_lineArmed = false;           // the straight line waits for the pen to touch
+    bool m_shiftTap = false;            // Shift went down and nothing else has happened since
+    bool m_placingLine = false;         // the stroke in progress is that line: full pressure, no stabilizer
     bool picksColor() const;
     // The frame's color at a document point, invalid off the sheet.
     QColor colorAt(const QPointF &docPos) const;

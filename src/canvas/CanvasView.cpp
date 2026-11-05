@@ -15,6 +15,7 @@
 
 #include <QGuiApplication>
 #include <QKeyEvent>
+#include <QLineF>
 #include <QMouseEvent>
 #include <QMenu>
 #include <QPainter>
@@ -122,6 +123,11 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
 
     connect(m_toolState, &ToolState::activeToolChanged, this, &CanvasView::commitPendingEdits);
     connect(m_toolState, &ToolState::activeToolChanged, this, &CanvasView::updateCursor);
+    connect(m_toolState, &ToolState::activeToolChanged, this, [this] { m_lineArmed = false; update(); });
+    connect(m_document, &DocumentController::documentReplaced, this, [this] {
+        m_lineArmed = false;
+        m_lastPoint.reset();
+    });
     connect(m_toolState, &ToolState::activeToolChanged, this, [this] {
         if (CanvasTool *tool = canvasTool()) {
             tool->setViewZoom(m_view.zoom());
@@ -344,6 +350,7 @@ void CanvasView::paintEvent(QPaintEvent *)
     }
     m_gizmo.paint(p, m_view);
     paintSnapGuide(p);
+    paintStraightLinePreview(p);
 
     m_paintedOutline = QRect();
     if (m_pointerVisible && ToolState::isPaintTool(m_toolState->activeTool()) && !m_gesture.isActive()
@@ -374,6 +381,8 @@ void CanvasView::updateBrushOutline(const QPointF &newPos)
     update(m_paintedOutline);
     m_pointerPos = newPos;
     update(brushOutlineRect().toAlignedRect().adjusted(-2, -2, 2, 2));
+    if (m_lineArmed)
+        update(); // the line follows the pen
 }
 
 void CanvasView::renderWholeFrame()
@@ -487,6 +496,8 @@ void CanvasView::handleSample(const PenSample &sample)
     updateBrushOutline(QPointF(sample.x, sample.y));
 
     const bool busy = m_gesture.isActive() || m_stroke.has_value() || m_editTool || m_gizmo.isDragging();
+    if (sample.phase == SamplePhase::Press)
+        m_shiftTap = false; // Shift used with the pointer is not a tap
     const QPointF docPos = m_view.mapToDocument(QPointF(sample.x, sample.y));
     const Qt::KeyboardModifiers modifiers = QGuiApplication::keyboardModifiers();
     switch (sample.phase) {
@@ -502,7 +513,10 @@ void CanvasView::handleSample(const PenSample &sample)
             m_editTool = m_eyedropperTool.get();
         } else if (sample.tipDown()
                    && (sample.tool == InputTool::Eraser || ToolState::isPaintTool(m_toolState->activeTool()))) {
-            beginStroke(sample);
+            if (m_lineArmed)
+                placeStraightLine(sample);
+            else
+                beginStroke(sample);
         } else if (CanvasTool *tool = canvasTool(); tool && sample.tipDown()) {
             tool->setViewZoom(m_view.zoom());
             tool->press(docPos, modifiers);
@@ -614,6 +628,7 @@ void CanvasView::beginStroke(const PenSample &sample)
                                                 style.verticalThickness);
     stamper->setSecondaryColor(m_toolState->secondaryColor());
     const doc::Document &d = m_document->document();
+    m_strokeImage = target->image;
     m_stroke.emplace(*target->image, std::move(stamper), settings.opacity, m_eraseStroke,
                      QRect(0, 0, d.width(), d.height()));
     if (m_document->hasSelection())
@@ -624,17 +639,17 @@ void CanvasView::beginStroke(const PenSample &sample)
     m_points.clear();
     m_drawnPoints = 0;
 
-    m_smoother.setStrength(m_toolState->smoothing());
+    m_smoother.setStrength(m_placingLine ? 0 : m_toolState->smoothing());
     m_smoother.reset();
     m_velocity.reset();
     // With the correction after the stroke, corners are found when the pen lifts.
-    m_sharpCorners = m_toolState->sharpCorners() && style.revision == 0;
+    m_sharpCorners = m_toolState->sharpCorners() && style.revision == 0 && !m_placingLine;
     m_corners.reset();
     m_heldSamples.clear();
     m_snapHeld.clear();
     m_snapRaw.clear();
     m_snapping = false;
-    if (m_toolState->perspectiveSnap()) {
+    if (m_toolState->perspectiveSnap() && !m_placingLine) {
         if (const auto layer = m_document->perspectiveLayerById(m_toolState->perspectiveSnapLayer())) {
             m_snap.begin(layer->grid, m_view.mapToDocument(QPointF(sample.x, sample.y)), 6.0 / m_view.zoom());
             m_snapping = true;
@@ -829,7 +844,10 @@ void CanvasView::endStroke()
     }
     m_document->notifyPainted(m_stroke->finish());
     m_document->endPaint(m_stroke->before());
+    if (!m_points.empty())
+        m_lastPoint = lineStartOf(m_points);
     m_stroke.reset();
+    m_strokeImage = nullptr;
     m_dabs.reset();
     m_points.clear();
 }
@@ -861,6 +879,101 @@ void CanvasView::commitPendingEdits()
     emit editStepsChanged();
 }
 
+QPointF CanvasView::lineStartOf(const std::vector<brush::BrushInput> &points) const
+{
+    // The last point that shows: a stroke's end may thin out or fade to almost nothing, and a line
+    // starting there would seem to start in the blank. Back from the end to the last point whose pixel
+    // is at least half as opaque as the stroke's most opaque one (an eraser leaves nothing to look at).
+    const QPointF last(points.back().x, points.back().y);
+    if (!m_strokeImage || m_eraseStroke)
+        return last;
+    auto alphaAt = [this](const brush::BrushInput &in) {
+        return qAlpha(m_strokeImage->pixel(int(std::floor(in.x)), int(std::floor(in.y))));
+    };
+    int peak = 0;
+    for (const brush::BrushInput &in : points)
+        peak = std::max(peak, alphaAt(in));
+    if (peak == 0)
+        return last;
+    for (auto it = points.rbegin(); it != points.rend(); ++it)
+        if (alphaAt(*it) * 2 >= peak)
+            return QPointF(it->x, it->y);
+    return last;
+}
+
+void CanvasView::toggleStraightLine()
+{
+    if (m_lineArmed) {
+        m_lineArmed = false;
+        update();
+        return;
+    }
+    if (m_stroke || m_gesture.isActive() || !ToolState::isPaintTool(m_toolState->activeTool()))
+        return;
+    if (!m_lastPoint) {
+        emit statusMessage(tr("Draw something first: Shift then draws a straight line from the last point"));
+        return;
+    }
+    m_lineArmed = true;
+    emit statusMessage(tr("Straight line: touch to place it, Shift or Esc to cancel"));
+    update();
+}
+
+void CanvasView::placeStraightLine(const PenSample &touch)
+{
+    // The line goes from the last point to where the pen touched, at full pressure.
+    m_lineArmed = false;
+    if (!m_lastPoint)
+        return;
+    const QPointF from = m_view.documentToView().map(*m_lastPoint);
+    PenSample s = touch;
+    s.pressure = 1.0f;
+    m_placingLine = true;
+    PenSample start = s;
+    start.x = from.x();
+    start.y = from.y();
+    beginStroke(start);
+    if (m_stroke) {
+        constexpr double kSpacing = 3.0;
+        constexpr int kMaxSteps = 4000;
+        const int steps = std::clamp(int(QLineF(from, QPointF(touch.x, touch.y)).length() / kSpacing), 1, kMaxSteps);
+        for (int i = 1; i <= steps; ++i) {
+            const double k = double(i) / steps;
+            PenSample step = s;
+            step.x = from.x() + (touch.x - from.x()) * k;
+            step.y = from.y() + (touch.y - from.y()) * k;
+            continueStroke(step);
+        }
+        endStroke();
+    }
+    m_placingLine = false;
+    update();
+}
+
+void CanvasView::paintStraightLinePreview(QPainter &p) const
+{
+    if (!m_lineArmed || !m_lastPoint || !m_pointerVisible)
+        return;
+    const QPointF from = m_view.documentToView().map(*m_lastPoint);
+    const bool eraser = m_pointerTool == InputTool::Eraser || m_toolState->activeTool() == ToolId::Eraser;
+    const double size = m_toolState->settings(eraser ? ToolId::Eraser : ToolId::Brush).size;
+    QPainterPath line;
+    line.moveTo(from);
+    line.lineTo(m_pointerPos + QPointF(0.01, 0));
+    QPainterPathStroker stroker;
+    stroker.setWidth(std::max(2.0, size * m_view.zoom()));
+    stroker.setCapStyle(Qt::RoundCap);
+    const QPainterPath body = stroker.createStroke(line);
+    QColor fill = eraser ? QColor(128, 128, 128) : m_toolState->color();
+    fill.setAlpha(110);
+    p.save();
+    p.setRenderHint(QPainter::Antialiasing);
+    p.setBrush(fill);
+    p.setPen(QPen(QColor(0, 0, 0, 150), 1.0));
+    p.drawPath(body);
+    p.restore();
+}
+
 void CanvasView::cancelStroke()
 {
     m_gizmo.cancel();
@@ -889,6 +1002,7 @@ void CanvasView::cancelStroke()
     m_snapRaw.clear();
     m_snapping = false;
     m_stroke.reset();
+    m_strokeImage = nullptr;
     m_dabs.reset();
     m_heldSamples.clear();
     m_document->cancelPaint();
@@ -901,7 +1015,7 @@ brush::BrushInput CanvasView::brushInput(const PenSample &smoothed)
     const QPointF doc = m_view.mapToDocument(QPointF(smoothed.x, smoothed.y));
     in.x = doc.x();
     in.y = doc.y();
-    in.pressure = m_toolState->pressureCurve().map(smoothed.pressure);
+    in.pressure = m_placingLine ? 1.0 : m_toolState->pressureCurve().map(smoothed.pressure);
     in.velocity = m_velocity.sample(smoothed.t, smoothed.x, smoothed.y);
     in.hasTilt = m_toolState->usesTilt();
     in.tilt = in.hasTilt ? brush::tiltInput(smoothed.tiltX, smoothed.tiltY) : 1.0;
@@ -917,6 +1031,7 @@ brush::BrushInput CanvasView::brushInput(const PenSample &smoothed)
 
 void CanvasView::wheelEvent(QWheelEvent *event)
 {
+    m_shiftTap = false;
     // Some platforms turn Shift+wheel into horizontal scrolling: accept either axis.
     const QPoint a = event->angleDelta();
     const int delta = a.y() != 0 ? a.y() : a.x();
@@ -977,6 +1092,19 @@ void CanvasView::finishShape(bool apply)
 
 void CanvasView::keyPressEvent(QKeyEvent *event)
 {
+    // Shift on its own is a tap that arms the straight line; any other key makes it something else.
+    if (event->key() == Qt::Key_Shift) {
+        if (!event->isAutoRepeat())
+            m_shiftTap = true;
+    } else if (event->key() != Qt::Key_Control && event->key() != Qt::Key_Alt && event->key() != Qt::Key_Meta) {
+        m_shiftTap = false;
+    }
+    if (event->key() == Qt::Key_Escape && m_lineArmed) {
+        m_lineArmed = false;
+        update();
+        event->accept();
+        return;
+    }
     // Repeats too: a held key may keep stepping (the puppet radius).
     if (CanvasTool *tool = canvasTool(); tool && tool->keyPress(event->key())) {
         event->accept();
@@ -1005,6 +1133,10 @@ void CanvasView::keyPressEvent(QKeyEvent *event)
 
 void CanvasView::keyReleaseEvent(QKeyEvent *event)
 {
+    if (event->key() == Qt::Key_Shift && !event->isAutoRepeat() && m_shiftTap) {
+        m_shiftTap = false;
+        toggleStraightLine();
+    }
     if (bool *held = panKeyFlag(event->key())) {
         if (!event->isAutoRepeat()) {
             *held = false;
