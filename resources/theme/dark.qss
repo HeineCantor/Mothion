@@ -32,8 +32,9 @@ QToolButton:hover   { border-color: palette(light); }
 QToolButton:checked { background: palette(highlight); }
 QToolButton#LayerEye:checked { background: transparent; }
 
-/* Horizontal sliders: a thin groove, filled up to the value, and a tall vertical
-   bar for the handle (the negative margin lets it stand out of the groove). */
+/* Horizontal sliders: a thin groove, filled up to the value, and a wide, tall
+   white handle with a dark gray outline, easy to grab and readable in both
+   themes (the negative margin lets it stand out of the groove). */
 QSlider::groove:horizontal {
     height: 4px;
     border-radius: 2px;
@@ -44,15 +45,17 @@ QSlider::sub-page:horizontal {
     border-radius: 2px;
     background: palette(highlight);
 }
+QSlider:horizontal { min-height: 24px; }
 QSlider::handle:horizontal {
-    width: 5px;
-    margin: -7px 0;
-    border-radius: 2px;
-    background: palette(text);
+    width: 7px;
+    margin: -9px 0;
+    border: 1px solid #4a4a4a;
+    border-radius: 3px;
+    background: #ffffff;
 }
 QSlider::handle:horizontal:hover,
-QSlider::handle:horizontal:pressed { background: palette(highlight); }
-QSlider::handle:horizontal:disabled { background: palette(mid); }
+QSlider::handle:horizontal:pressed { border-color: palette(highlight); }
+QSlider::handle:horizontal:disabled { background: #d8d8d8; border-color: #8a8a8a; }
 QSlider::sub-page:horizontal:disabled { background: palette(mid); }
 
 QTabBar::tab {
