@@ -7,7 +7,9 @@
 #include "ui/IconFactory.h"
 
 #include <QApplication>
+#include <QClipboard>
 #include <QContextMenuEvent>
+#include <QGuiApplication>
 #include <QInputDialog>
 #include <QKeyEvent>
 #include <QMenu>
@@ -40,6 +42,7 @@ TimelineView::TimelineView(DocumentController *document, QWidget *parent)
     setFocusPolicy(Qt::StrongFocus);
     viewport()->setMouseTracking(true); // resize cursor over block edges
 
+    connect(QGuiApplication::clipboard(), &QClipboard::dataChanged, this, [this] { m_blocksNewer = false; });
     connect(m_document, &DocumentController::structureChanged, this, &TimelineView::onStructureChanged);
     connect(m_document, &DocumentController::currentFrameChanged, this, [this](int frame) {
         ensureFrameVisible(frame);
@@ -635,8 +638,10 @@ void TimelineView::copyFrames()
         if (e && e->start == ref.start)
             copied.push_back({ref.cel, e->drawing, e->start - first, e->length});
     }
-    if (!copied.empty())
+    if (!copied.empty()) {
         m_copied = std::move(copied);
+        m_blocksNewer = true;
+    }
 }
 
 bool TimelineView::canPasteFrames() const
@@ -670,7 +675,9 @@ bool TimelineView::event(QEvent *event)
         const bool copy = key->key() == Qt::Key_C && mods == Qt::ControlModifier;
         const bool paste = key->key() == Qt::Key_V
                            && (mods == Qt::ControlModifier || mods == (Qt::ControlModifier | Qt::ShiftModifier));
-        if (copy || paste) {
+        // The timeline's own when it has blocks to copy, or blocks were copied last; else the window's copy and
+        // paste (the pixels of the drawing) work from here too, as from the canvas.
+        if ((copy && !m_selected.empty()) || (paste && m_blocksNewer)) {
             event->accept();
             return true;
         }

@@ -4385,6 +4385,67 @@ private slots:
         QVERIFY(controller->canUndo());
     }
 
+    // Ctrl+C and Ctrl+V copy the drawing's pixels from the timeline too (the focus often stays there after a
+    // frame change): with no block selected Ctrl+C is the window's copy, and Ctrl+V after it pastes the pixels at the
+    // current frame, not the blocks (nothing copied: an error sound).
+    void pastePixelsWithTheTimelineFocused()
+    {
+        ui::MainWindow window;
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        window.activateWindow();
+        auto *controller = window.findChild<document::DocumentController *>();
+        auto *timeline = window.findChild<ui::TimelineView *>();
+        QVERIFY(timeline);
+        QImage image(60, 60, QImage::Format_ARGB32);
+        image.fill(Qt::red);
+        controller->importImage(image, QStringLiteral("a")); // 930..989, 510..569
+        const doc::CelId cel = controller->currentCel();
+        controller->insertFrame(cel, 1, false);
+        controller->setCurrentFrame(0);
+        controller->selectAll();
+        timeline->setFocus();
+        QVERIFY(timeline->selectedFrames().empty());
+        QTest::keyClick(timeline, Qt::Key_C, Qt::ControlModifier); // the window's copy: the pixels
+        controller->clearSelection();
+        controller->setCurrentFrame(1);
+        QTest::keyClick(timeline, Qt::Key_V, Qt::ControlModifier);
+        const doc::Cel *c = controller->document().cel(cel);
+        const doc::Drawing *second = c->drawingAt(1);
+        QVERIFY(second);
+        QCOMPARE(qAlpha(second->layers.front().image.pixel(960, 540)), 255);
+    }
+
+    // The keyboard focus follows the pointer onto the canvas, the timeline and the layer rows, but not out of a
+    // field being typed in.
+    void focusFollowsThePointer()
+    {
+        ui::MainWindow window;
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        window.activateWindow();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+        auto *canvas = window.findChild<canvas::CanvasView *>();
+        auto *timeline = window.findChild<ui::TimelineView *>();
+        auto enter = [](QWidget *w) {
+            QEnterEvent event(QPointF(5, 5), QPointF(5, 5), w->mapToGlobal(QPointF(5, 5)));
+            QApplication::sendEvent(w, &event);
+        };
+        timeline->setFocus();
+        QVERIFY(timeline->hasFocus());
+        enter(canvas);
+        QVERIFY(canvas->hasFocus());
+        enter(timeline);
+        QVERIFY(timeline->hasFocus());
+
+        QLineEdit field(&window); // a field being typed in keeps the focus
+        field.show();
+        field.setFocus();
+        QVERIFY(field.hasFocus());
+        enter(canvas);
+        QVERIFY(field.hasFocus());
+    }
+
     void largeImagesAreScaledToFit()
     {
         document::DocumentController controller;

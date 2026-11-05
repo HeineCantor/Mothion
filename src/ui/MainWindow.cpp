@@ -29,13 +29,14 @@
 #include "ui/panels/ToolPalettePanel.h"
 #include "ui/panels/ToolPropertiesPanel.h"
 #include "ui/panels/timeline/TimelinePanel.h"
+#include "ui/panels/timeline/TimelineView.h"
 
 #include <QAbstractSpinBox>
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
 #include <QClipboard>
-#include <QComboBox>
+#include <QTreeWidget>
 #include <QCloseEvent>
 #include <QDialog>
 #include <QDataStream>
@@ -61,6 +62,34 @@
 #include <algorithm>
 
 namespace mothion::ui {
+
+namespace {
+
+// Keyboard focus follows the pointer over the canvas, the timeline and the layer rows: their keys (copy and paste,
+// arrows, Delete...) act where the pointer is, not where the last click was. A field being typed in keeps it.
+class FocusFollowsPointer : public QObject
+{
+public:
+    using QObject::QObject;
+
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override
+    {
+        if (event->type() != QEvent::Enter)
+            return false;
+        auto *widget = qobject_cast<QWidget *>(watched);
+        if (!widget || !widget->isActiveWindow() || widget->hasFocus() || QApplication::activePopupWidget())
+            return false;
+        QWidget *current = QApplication::focusWidget();
+        const bool typing = qobject_cast<QLineEdit *>(current) || qobject_cast<QAbstractSpinBox *>(current)
+                            || qobject_cast<QTextEdit *>(current) || qobject_cast<QPlainTextEdit *>(current);
+        if (!typing)
+            widget->setFocus(Qt::MouseFocusReason);
+        return false;
+    }
+};
+
+} // namespace
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -98,6 +127,13 @@ MainWindow::MainWindow(QWidget *parent)
 
     createCommandBar();
     createCanvasArea();
+    {
+        auto *follow = new FocusFollowsPointer(this);
+        for (QWidget *w : {static_cast<QWidget *>(m_canvas), static_cast<QWidget *>(static_cast<TimelinePanel *>(panels.timeline)->view()),
+                           static_cast<QWidget *>(panels.layers->findChild<QTreeWidget *>())})
+            if (w)
+                w->installEventFilter(follow);
+    }
     m_dockLayout = new DockLayout(this, panels);
     createMenus();
     statusBar()->showMessage(tr("Ready"));

@@ -80,7 +80,7 @@ protected:
     void wheelEvent(QWheelEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
     void contextMenuEvent(QContextMenuEvent *event) override;
-    bool event(QEvent *event) override; // Ctrl+C / V here are the timeline's
+    bool event(QEvent *event) override; // Ctrl+C / V here are the timeline's, for blocks
 
 private:
     // Hold-length drag in progress.
@@ -147,6 +147,9 @@ private:
     std::optional<FrameDrag> m_frameDrag;
     std::map<int, doc::Timing> m_movePreview; // by cel index, while dragging
     std::vector<doc::ExposureCopy> m_copied;  // the blocks copied
+    // The blocks were the last thing copied (the system clipboard has not changed since): Ctrl+V pastes them.
+    // After a copy of pixels (from the canvas), or of anything else, Ctrl+V is the window's paste.
+    bool m_blocksNewer = false;
 };
 
 } // namespace mothion::ui
