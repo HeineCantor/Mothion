@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/document/Cel.h"
 #include "core/document/Drawing.h"
 #include "core/document/Ids.h"
 
@@ -9,6 +10,7 @@
 #include <QWidget>
 
 #include <map>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -111,6 +113,11 @@ private:
     void rowChosen(QTreeWidgetItem *item);
     void rename(QTreeWidgetItem *item);
     void commitOpacity();
+    // While the opacity slider is dragged the canvas follows it: the cel or the
+    // selected layers show the value at once, and on release they go back to
+    // what they were and the change is executed as one undo step.
+    void previewOpacity(int percent);
+    void endOpacityPreview();
     void addClicked(doc::LayerKind kind);
     void removeSelected();
     struct LayerRow
@@ -151,6 +158,14 @@ private:
     tools::ToolState *m_toolState = nullptr;
     QTimer m_thumbnailTimer;
     Focus m_focus = Focus::Layer;
+    struct OpacityPreview
+    {
+        bool cel = false;
+        doc::CelId celId = doc::kNoId;
+        doc::CelProperties celBefore;
+        std::vector<std::pair<doc::LayerId, doc::LayerProperties>> layersBefore;
+    };
+    std::optional<OpacityPreview> m_opacityPreview; // while the slider is dragged
     bool m_choosing = false;        // a row click is making its cel and layer current
     QList<doc::LayerId> m_selected; // kept across rebuilds of the rows
     QSet<doc::CelId> m_closedCels;       // folders closed by hand

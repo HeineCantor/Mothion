@@ -388,6 +388,17 @@ bool DocumentController::previewLayerProperties(const LayerRef &ref, const doc::
     return true;
 }
 
+bool DocumentController::previewCelProperties(doc::CelId id, const doc::CelProperties &properties)
+{
+    doc::Cel *cel = m_document->cel(id);
+    if (!cel)
+        return false;
+    cel->setProperties(properties);
+    // The cel's looks change what the whole frame shows.
+    emit pixelsChanged(id, doc::kNoId, QRect(0, 0, m_document->width(), m_document->height()));
+    return true;
+}
+
 void DocumentController::commitLayerProperties(const LayerRef &ref, const doc::LayerProperties &before,
                                                const doc::LayerProperties &after)
 {

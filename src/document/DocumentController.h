@@ -183,6 +183,10 @@ public:
     // nothing (a slider being dragged); the edit is then executed as a command
     // from the properties it had before. False if there is no such layer.
     bool previewLayerProperties(const LayerRef &layer, const doc::LayerProperties &properties);
+    // The same for a cel (its opacity while the slider is dragged): shown at
+    // once, recorded nowhere; the edit is then executed as a command from the
+    // properties it had before. False if there is no such cel.
+    bool previewCelProperties(doc::CelId cel, const doc::CelProperties &properties);
     // Records an edit shown with previewLayerProperties(): the layer back to
     // `before`, then `after` executed as one undo step (nothing if equal).
     void commitLayerProperties(const LayerRef &layer, const doc::LayerProperties &before,

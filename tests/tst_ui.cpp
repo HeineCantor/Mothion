@@ -124,6 +124,70 @@ private slots:
         QTest::qWait(50); // let the panels repaint against the new document
     }
 
+    // Dragging the opacity slider shows the opacity on the canvas as it goes (for a layer and for a cel),
+    // and the drag is one undo step.
+    void opacitySliderPreviewsWhileDragged()
+    {
+        ui::MainWindow window;
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *controller = window.findChild<document::DocumentController *>();
+        auto *panel = window.findChild<ui::LayersPanel *>();
+        QVERIFY(panel);
+        QSlider *slider = nullptr;
+        for (QSlider *s : panel->findChildren<QSlider *>())
+            if (s->orientation() == Qt::Horizontal && s->maximum() == 100)
+                slider = s;
+        QVERIFY(slider);
+        const doc::Document &d = controller->document();
+        controller->importImage(QImage(10, 10, QImage::Format_ARGB32), QStringLiteral("x"));
+        const doc::CelId cel = controller->currentCel();
+        auto layerOpacity = [&] {
+            return d.cel(cel)->drawingAt(controller->currentFrame())->layers.front().properties.opacity;
+        };
+        const float before = layerOpacity();
+        const bool couldUndo = controller->canUndo();
+        const QString undoBefore = controller->undoText();
+
+        slider->setSliderDown(true); // the handle grabbed
+        slider->setSliderPosition(30); // moved with the button down
+        QCOMPARE(layerOpacity(), 0.30f); // seen at once, not on release
+        slider->setSliderPosition(60);
+        QCOMPARE(layerOpacity(), 0.60f);
+        QCOMPARE(controller->undoText(), undoBefore); // nothing recorded yet
+        slider->setSliderDown(false);
+        QCOMPARE(layerOpacity(), 0.60f);
+        QVERIFY(controller->canUndo());
+        QCOMPARE(controller->undoText(), QStringLiteral("Undo layer properties"));
+        controller->undo(); // the whole drag at once
+        QCOMPARE(layerOpacity(), before);
+        QCOMPARE(controller->canUndo(), couldUndo);
+    }
+
+    // A cel's opacity can be previewed (shown on the frame, nothing recorded).
+    void celPropertiesCanBePreviewed()
+    {
+        document::DocumentController controller;
+        controller.importImage(QImage(10, 10, QImage::Format_ARGB32), QStringLiteral("x"));
+        const doc::CelId id = controller.currentCel();
+        doc::CelProperties shown = controller.document().cel(id)->properties();
+        const float before = shown.opacity;
+        const QString undoBefore = controller.undoText();
+        QSignalSpy repaint(&controller, &document::DocumentController::pixelsChanged);
+        shown.opacity = 0.25f;
+        QVERIFY(controller.previewCelProperties(id, shown));
+        QCOMPARE(controller.document().cel(id)->properties().opacity, 0.25f);
+        QCOMPARE(repaint.count(), 1); // the frame is redrawn
+        QCOMPARE(controller.undoText(), undoBefore);
+        QVERIFY(!controller.previewCelProperties(doc::kNoId, shown));
+        shown.opacity = before; // back, then the change as a command: one step
+        controller.previewCelProperties(id, shown);
+        shown.opacity = 0.25f;
+        controller.execute(doc::makeSetCelProperties(controller.document(), id, shown));
+        controller.undo();
+        QCOMPARE(controller.document().cel(id)->properties().opacity, before);
+    }
+
     // File > Open recent lists the projects opened or saved, the latest first; picking one opens it,
     // and one that is gone drops off the list.
     void openRecentListsLatestFirst()

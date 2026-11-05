@@ -327,15 +327,17 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
         else
             editSelectedLayers([blend](doc::LayerProperties &p) { p.blend = blend; });
     });
-    // Opacity: the slider previews in the spin box while dragged and is
-    // committed once, on release, so a drag is a single undo step.
+    // Opacity: while the slider is dragged the canvas follows it (a preview, nothing recorded);
+    // on release the change is executed once, so a drag is a single undo step.
     connect(m_opacity, &QSlider::valueChanged, this, [this](int v) {
         const QSignalBlocker block(m_opacityValue);
         m_opacityValue->setValue(v);
-        if (!m_opacity->isSliderDown())
+        if (m_opacity->isSliderDown())
+            previewOpacity(v);
+        else
             commitOpacity();
     });
-    connect(m_opacity, &QSlider::sliderReleased, this, &LayersPanel::commitOpacity);
+    connect(m_opacity, &QSlider::sliderReleased, this, &LayersPanel::endOpacityPreview);
     connect(m_opacityValue, &QSpinBox::valueChanged, this, [this](int v) {
         const QSignalBlocker block(m_opacity);
         m_opacity->setValue(v);
@@ -835,6 +837,55 @@ void LayersPanel::editCurrentCel(Edit edit)
     m_document->execute(doc::makeSetCelProperties(m_document->document(), cel->id(), props));
 }
 
+void LayersPanel::previewOpacity(int percent)
+{
+    const float opacity = float(percent) / 100.0f;
+    if (!m_opacityPreview) { // the drag begins: what it will go back to
+        OpacityPreview start;
+        if (m_focus == Focus::Cel) {
+            const doc::Cel *cel = m_document->document().cel(m_document->currentCel());
+            if (!cel)
+                return;
+            start.cel = true;
+            start.celId = cel->id();
+            start.celBefore = cel->properties();
+        } else if (const doc::Drawing *drawing = m_document->currentDrawing()) {
+            for (doc::LayerId id : selectedLayers())
+                start.layersBefore.emplace_back(id, drawing->layer(id)->properties);
+        }
+        m_opacityPreview = std::move(start);
+    }
+    if (m_opacityPreview->cel) {
+        doc::CelProperties shown = m_opacityPreview->celBefore;
+        shown.opacity = opacity;
+        m_document->previewCelProperties(m_opacityPreview->celId, shown);
+        return;
+    }
+    const doc::Drawing *drawing = m_document->currentDrawing();
+    if (!drawing)
+        return;
+    for (const auto &[id, before] : m_opacityPreview->layersBefore) {
+        doc::LayerProperties shown = before;
+        shown.opacity = opacity;
+        m_document->previewLayerProperties({m_document->currentCel(), drawing->id, id}, shown);
+    }
+}
+
+void LayersPanel::endOpacityPreview()
+{
+    if (m_opacityPreview) { // back to the start, so the command records the whole change
+        const OpacityPreview start = std::move(*m_opacityPreview);
+        m_opacityPreview.reset();
+        if (start.cel) {
+            m_document->previewCelProperties(start.celId, start.celBefore);
+        } else if (const doc::Drawing *drawing = m_document->currentDrawing()) {
+            for (const auto &[id, before] : start.layersBefore)
+                m_document->previewLayerProperties({m_document->currentCel(), drawing->id, id}, before);
+        }
+    }
+    commitOpacity();
+}
+
 void LayersPanel::commitOpacity()
 {
     const float opacity = float(m_opacity->value()) / 100.0f;
@@ -974,6 +1025,9 @@ void LayersPanel::showContextMenu(const QPoint &at)
     if (!item->isSelected()) // the row under the pointer, unless it is one of the chosen
         m_tree->setCurrentItem(item);
     QMenu menu(this);
+    // As the double click: the row under the pointer, whichever kind it is.
+    menu.addAction(tr("Rename…"), this, [this, item] { rename(item); });
+    menu.addSeparator();
     if (kindOf(item) == Row::Layer) {
         QAction *merge = menu.addAction(icon(IconId::MergeLayers), tr("Merge layers"), this, &LayersPanel::mergeSelected);
         merge->setEnabled(m_merge->isEnabled());
@@ -1025,9 +1079,6 @@ void LayersPanel::moveSelectedToRow(int row)
             rows.push_back(id);
         }
     }
-    // As the double click: the row under the pointer, whichever kind it is.
-    menu.addAction(tr("Rename…"), this, [this, item] { rename(item); });
-    menu.addSeparator();
     std::vector<doc::LayerId> top(moving.rbegin(), moving.rend()); // top first too
     rows.insert(rows.begin() + std::clamp(insertAt, 0, int(rows.size())), top.begin(), top.end());
 
