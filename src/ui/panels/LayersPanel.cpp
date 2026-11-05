@@ -1025,6 +1025,9 @@ void LayersPanel::moveSelectedToRow(int row)
             rows.push_back(id);
         }
     }
+    // As the double click: the row under the pointer, whichever kind it is.
+    menu.addAction(tr("Rename…"), this, [this, item] { rename(item); });
+    menu.addSeparator();
     std::vector<doc::LayerId> top(moving.rbegin(), moving.rend()); // top first too
     rows.insert(rows.begin() + std::clamp(insertAt, 0, int(rows.size())), top.begin(), top.end());
 
