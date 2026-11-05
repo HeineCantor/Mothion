@@ -512,7 +512,7 @@ private slots:
     }
 
     // A tool key held lasts as long as it is held; tapped, the tool stays.
-    // X swaps the colors, [ and ] step the size through the presets.
+    // X switches the selected color (they keep their places), [ and ] step the size through the presets.
     void toolKeysHoldSwapAndResize()
     {
         tools::ToolState state;
@@ -533,8 +533,15 @@ private slots:
         state.setColor(Qt::red);
         state.setSecondaryColor(Qt::white);
         QTest::keyClick(&palette, Qt::Key_X);
-        QCOMPARE(state.color(), QColor(Qt::white));
-        QCOMPARE(state.secondaryColor(), QColor(Qt::red));
+        QCOMPARE(state.color(), QColor(Qt::white)); // the secondary is selected now...
+        QCOMPARE(state.mainColor(), QColor(Qt::red)); // ...and nothing moved
+        QCOMPARE(state.secondaryColor(), QColor(Qt::white));
+        QCOMPARE(state.inactiveColor(), QColor(Qt::red));
+        state.setColor(Qt::green); // editing changes the selected one only
+        QCOMPARE(state.secondaryColor(), QColor(Qt::green));
+        QCOMPARE(state.mainColor(), QColor(Qt::red));
+        QTest::keyClick(&palette, Qt::Key_X);
+        QCOMPARE(state.color(), QColor(Qt::red));
 
         state.setSize(tools::ToolId::Brush, 9); // between presets 8 and 10
         QTest::keyClick(&palette, Qt::Key_BracketRight);
@@ -1323,7 +1330,7 @@ private slots:
         stroke(300);
         QVERIFY(alpha(200, 300) > 0);
         state.setTransparentSelected(true);
-        state.swapColors();
+        state.switchColor();
         QVERIFY(!state.transparentSelected());
     }
 
@@ -4447,6 +4454,33 @@ private slots:
         QVERIFY(field.hasFocus());
         enter(canvas);
         QVERIFY(field.hasFocus());
+    }
+
+    // The two colors keep their places: a click on one selects it (the wheel then edits it, the other is
+    // what a two-color brush uses), nothing swaps.
+    void colorSwatchesSelectInsteadOfSwapping()
+    {
+        tools::ToolState state;
+        ui::ColorWheelPanel panel(&state);
+        panel.show();
+        auto *swatches = panel.findChild<ui::ColorSwatchPair *>();
+        QVERIFY(swatches);
+        state.setColor(Qt::red);
+        state.setSecondaryColor(Qt::blue);
+        QVERIFY(!state.secondarySelected());
+        QTest::mouseClick(swatches, Qt::LeftButton, {}, QPoint(40, 40)); // the secondary, behind
+        QVERIFY(state.secondarySelected());
+        QCOMPARE(state.color(), QColor(Qt::blue));
+        QCOMPARE(state.mainColor(), QColor(Qt::red));
+        state.setColor(Qt::green); // the wheel's edit goes to the selected one
+        QCOMPARE(state.secondaryColor(), QColor(Qt::green));
+        QCOMPARE(state.mainColor(), QColor(Qt::red));
+        QCOMPARE(state.inactiveColor(), QColor(Qt::red));
+        QTest::mouseClick(swatches, Qt::LeftButton, {}, QPoint(8, 8)); // the main, in front
+        QVERIFY(!state.secondarySelected());
+        QCOMPARE(state.color(), QColor(Qt::red));
+        QCOMPARE(state.secondaryColor(), QColor(Qt::green));
+        QCOMPARE(state.inactiveColor(), QColor(Qt::green));
     }
 
     void largeImagesAreScaledToFit()

@@ -246,7 +246,7 @@ RenderedShape ShapeTool::render(const ShapeGeometry &geometry) const
 {
     const doc::Document &d = m_document->document();
     return renderShape(m_state->shapeSettings(), m_state->settings(tools::ToolId::Shape).size, m_state->color(),
-                       m_state->secondaryColor(), geometry, QRect(0, 0, d.width(), d.height()));
+                       m_state->inactiveColor(), geometry, QRect(0, 0, d.width(), d.height()));
 }
 
 void ShapeTool::release(const QPointF &docPos, Qt::KeyboardModifiers modifiers)

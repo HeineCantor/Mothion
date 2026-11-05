@@ -233,7 +233,7 @@ ToolPalettePanel::ToolPalettePanel(tools::ToolState *state, QWidget *parent)
     }
 
     auto *swap = new QShortcut(QKeySequence(Qt::Key_X), this);
-    connect(swap, &QShortcut::activated, state, &tools::ToolState::swapColors);
+    connect(swap, &QShortcut::activated, state, &tools::ToolState::switchColor);
     auto *smaller = new QShortcut(QKeySequence(Qt::Key_BracketLeft), this);
     connect(smaller, &QShortcut::activated, this, [this] { stepSize(-1); });
     auto *bigger = new QShortcut(QKeySequence(Qt::Key_BracketRight), this);

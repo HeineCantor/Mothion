@@ -134,12 +134,18 @@ public:
     BrushDefinitionPtr brush(ToolId tool) const { return m_brushes[index(tool)]; }
     void setBrush(ToolId tool, BrushDefinitionPtr brush);
 
-    // Main color (what the brush paints) and secondary color; swapColors() exchanges them.
-    QColor color() const { return m_color; }
-    void setColor(const QColor &color);
+    // Two colors that keep their places, the main and the secondary, and one of them selected: the selected
+    // color is the one the tools paint with and the wheel, the hex field and the eyedropper edit; the
+    // other one is what a two-color brush uses besides it.
+    QColor color() const { return m_secondarySelected ? m_secondaryColor : m_color; } // the selected one
+    void setColor(const QColor &color);                                             // ... edited
+    QColor mainColor() const { return m_color; }
     QColor secondaryColor() const { return m_secondaryColor; }
     void setSecondaryColor(const QColor &color);
-    void swapColors();
+    QColor inactiveColor() const { return m_secondarySelected ? m_color : m_secondaryColor; }
+    bool secondarySelected() const { return m_secondarySelected; }
+    void selectSecondary(bool secondary); // also leaves the transparent color
+    void switchColor() { selectSecondary(!m_secondarySelected); } // X
 
     // The transparent "color", under the other two: while it is selected the
     // brush erases, with its own tip, size and opacity. It cannot be edited;
@@ -202,8 +208,9 @@ public:
 signals:
     void activeToolChanged(mothion::tools::ToolId tool);
     void toolSettingsChanged(mothion::tools::ToolId tool);
-    void colorChanged(const QColor &color);
-    void secondaryColorChanged(const QColor &color);
+    void colorChanged(const QColor &color);          // the selected color changed, or another got selected
+    void secondaryColorChanged(const QColor &color); // the color in the secondary place changed
+    void selectedColorChanged(bool secondary);       // which of the two is selected
     void transparentSelectedChanged(bool on);
     void pressureCurveChanged();
     void smoothingChanged(double amount);
@@ -227,6 +234,7 @@ private:
     std::array<BrushDefinitionPtr, kToolCount> m_brushes;
     QColor m_color = QColor(0x20, 0x20, 0x24);
     QColor m_secondaryColor = Qt::white;
+    bool m_secondarySelected = false;
     bool m_transparentSelected = false;
     PressureCurve m_pressureCurve;
     double m_smoothing = 0.3;

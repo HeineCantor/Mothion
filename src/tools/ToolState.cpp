@@ -104,10 +104,13 @@ void ToolState::setColor(const QColor &color)
     if (!color.isValid())
         return;
     setTransparentSelected(false); // choosing a color is leaving the transparent one
-    if (color == m_color)
+    QColor &target = m_secondarySelected ? m_secondaryColor : m_color;
+    if (color == target)
         return;
-    m_color = color;
+    target = color;
     emit colorChanged(color);
+    if (m_secondarySelected)
+        emit secondaryColorChanged(color);
 }
 
 void ToolState::setSecondaryColor(const QColor &color)
@@ -116,14 +119,22 @@ void ToolState::setSecondaryColor(const QColor &color)
         return;
     m_secondaryColor = color;
     emit secondaryColorChanged(color);
+    if (m_secondarySelected)
+        emit colorChanged(color);
 }
 
-void ToolState::swapColors()
+void ToolState::selectSecondary(bool secondary)
 {
+    const bool wasTransparent = m_transparentSelected;
     setTransparentSelected(false);
-    std::swap(m_color, m_secondaryColor);
-    emit colorChanged(m_color);
-    emit secondaryColorChanged(m_secondaryColor);
+    if (secondary == m_secondarySelected) {
+        if (wasTransparent)
+            emit colorChanged(color()); // back on a color
+        return;
+    }
+    m_secondarySelected = secondary;
+    emit selectedColorChanged(secondary);
+    emit colorChanged(color());
 }
 
 void ToolState::setPressureCurve(const PressureCurve &curve)
