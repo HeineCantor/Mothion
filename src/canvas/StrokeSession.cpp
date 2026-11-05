@@ -87,6 +87,17 @@ StrokeSession::StrokeSession(doc::TiledImage &target, const QColor &color, doubl
 {
 }
 
+void StrokeSession::setSelection(const QPainterPath &area)
+{
+    if (area.isEmpty()) {
+        m_selection.reset();
+        return;
+    }
+    m_selection = SelectionMask::fromPath(area);
+    if (!m_clip.isEmpty()) // nothing outside the selection's box is ever touched
+        m_clip &= m_selection->bounds;
+}
+
 void StrokeSession::setStyle(const brush::BrushStyle &style)
 {
     m_ribbon = style.ribbon;
@@ -285,7 +296,23 @@ void StrokeSession::recomposeTile(doc::TileCoord c)
         p.setCompositionMode(m_erase ? QPainter::CompositionMode_DestinationOut
                                      : QPainter::CompositionMode_SourceOver);
         p.setOpacity(m_opacity);
-        p.drawImage(0, 0, tileImage(*maskTile));
+        if (m_selection) {
+            // The part of the stroke inside the selection, edge coverage included.
+            QImage limited = tileImage(*maskTile).copy();
+            QImage coverage(doc::kTileSize, doc::kTileSize, QImage::Format_Alpha8);
+            coverage.fill(0);
+            {
+                QPainter cp(&coverage);
+                cp.drawImage(m_selection->bounds.topLeft() - tileRect(c).topLeft(), m_selection->coverage);
+            }
+            QPainter lp(&limited);
+            lp.setCompositionMode(QPainter::CompositionMode_DestinationIn);
+            lp.drawImage(0, 0, coverage);
+            lp.end();
+            p.drawImage(0, 0, limited);
+        } else {
+            p.drawImage(0, 0, tileImage(*maskTile));
+        }
     }
     if (m_target.tile(c)->isTransparent()) // e.g. erased to nothing
         m_target.setTile(c, nullptr);

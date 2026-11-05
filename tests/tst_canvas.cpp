@@ -128,6 +128,37 @@ private slots:
         QVERIFY(doc::alphaOf(image.pixel(5, 50)) > 200);
     }
 
+    // With a selection the stroke paints only inside it, and an eraser stroke erases only there.
+    void strokeStaysInsideTheSelection()
+    {
+        QPainterPath area;
+        area.addRect(40, 0, 20, 100); // x 40..59
+        doc::TiledImage image;
+        {
+            canvas::StrokeSession session(image, Qt::black, 1.0, false, QRect(0, 0, 100, 100));
+            session.setSelection(area);
+            brush::DabGenerator gen(roundStyle(10.0));
+            session.addDabs(gen.begin(point(10, 50)));
+            session.addDabs(gen.continueTo(point(90, 50)));
+        }
+        QCOMPARE(image.pixel(20, 50), doc::Pixel(0));
+        QVERIFY(doc::alphaOf(image.pixel(50, 50)) > 200);
+        QCOMPARE(image.pixel(80, 50), doc::Pixel(0));
+
+        // Erasing across the whole line takes out only the selected part.
+        doc::TiledImage line;
+        stroke(line, Qt::black, 1.0, false, {10, 50}, {90, 50}, 6.0);
+        QVERIFY(doc::alphaOf(line.pixel(20, 50)) > 200);
+        canvas::StrokeSession eraser(line, Qt::black, 1.0, true, QRect(0, 0, 100, 100));
+        eraser.setSelection(area);
+        brush::DabGenerator gen(roundStyle(20.0));
+        eraser.addDabs(gen.begin(point(10, 50)));
+        eraser.addDabs(gen.continueTo(point(90, 50)));
+        QVERIFY(doc::alphaOf(line.pixel(20, 50)) > 200);
+        QCOMPARE(doc::alphaOf(line.pixel(50, 50)), 0);
+        QVERIFY(doc::alphaOf(line.pixel(80, 50)) > 200);
+    }
+
     void strokeCaptureUndoRedo()
     {
         doc::Document document(200, 100);

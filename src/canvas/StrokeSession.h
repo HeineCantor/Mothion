@@ -1,11 +1,13 @@
 #pragma once
 
 #include "canvas/DabStamper.h"
+#include "canvas/SelectionMask.h"
 #include "core/brush/BrushStyle.h"
 #include "core/brush/StrokeShaper.h"
 #include "core/document/TiledImage.h"
 
 #include <QColor>
+#include <QPainterPath>
 #include <QRect>
 
 namespace mothion::brush {
@@ -48,6 +50,11 @@ public:
     // Hard round dabs in `color`.
     StrokeSession(doc::TiledImage &target, const QColor &color, double opacity, bool erase,
                   const QRect &clip = {});
+
+    // Keeps the stroke inside `area` (the selection): only what lies in it is
+    // painted or erased, with the outline's antialiased edge. An empty path
+    // means no limit.
+    void setSelection(const QPainterPath &area);
 
     // Ribbon, mixing and water edge settings of the brush.
     void setStyle(const brush::BrushStyle &style);
@@ -96,6 +103,7 @@ private:
     double m_opacity;
     bool m_erase;
     QRect m_clip;
+    std::optional<SelectionMask> m_selection;
 
     bool m_ribbon = false;
     brush::MixStyle m_mix;

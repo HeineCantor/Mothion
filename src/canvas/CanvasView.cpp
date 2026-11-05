@@ -616,6 +616,8 @@ void CanvasView::beginStroke(const PenSample &sample)
     const doc::Document &d = m_document->document();
     m_stroke.emplace(*target->image, std::move(stamper), settings.opacity, m_eraseStroke,
                      QRect(0, 0, d.width(), d.height()));
+    if (m_document->hasSelection())
+        m_stroke->setSelection(m_document->selection()); // paint or erase only inside it
     m_stroke->setStyle(style);
     m_seed = QRandomGenerator::global()->generate();
     m_dabs.emplace(style, m_seed);
