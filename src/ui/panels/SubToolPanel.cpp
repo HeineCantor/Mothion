@@ -59,7 +59,7 @@ QImage renderPreview(const tools::BrushPreset &preset, const QColor &ink)
 
 // A fill sub tool: a closed shape filled (bucket), or a lasso loop with its
 // inside filled (lasso).
-QImage renderFillPreview(tools::FillSettings::Mode mode, const QColor &ink)
+QImage renderFillPreview(tools::FillSettings::Mode mode, const QColor &ink, bool otherLayers)
 {
     QImage image(kPreviewSize, QImage::Format_ARGB32_Premultiplied);
     image.fill(Qt::transparent);
@@ -69,6 +69,11 @@ QImage renderFillPreview(tools::FillSettings::Mode mode, const QColor &ink)
     fill.setAlphaF(0.45f);
     const QRectF r(QPointF(10, 6), QPointF(kPreviewSize.width() - 10, kPreviewSize.height() - 6));
     if (mode == tools::FillSettings::Mode::Bucket) {
+        if (otherLayers) { // the lines of a layer behind, dashed, that stop the fill
+            p.setPen(QPen(ink, 1.5, Qt::DashLine));
+            p.setBrush(Qt::NoBrush);
+            p.drawRoundedRect(r.translated(-5, -3), 10, 10);
+        }
         p.setPen(QPen(ink, 2));
         p.setBrush(fill);
         p.drawRoundedRect(r, 10, 10);
@@ -292,7 +297,7 @@ void SubToolPanel::showPresetsFor(tools::ToolId tool)
     for (const tools::BrushPreset &preset : std::as_const(m_presets)) {
         auto *item = new QListWidgetItem(preset.name, m_list);
         item->setData(kPreviewRole, preset.selectsTool ? renderSelectionPreview(*preset.selectsTool, ink)
-                                    : preset.fillMode  ? renderFillPreview(*preset.fillMode, ink)
+                                    : preset.fillMode  ? renderFillPreview(*preset.fillMode, ink, preset.fillAllLayers.value_or(false))
                                     : preset.shapeKind ? renderShapePreview(*preset.shapeKind, ink)
                                     : (preset.blendMode || preset.liquifyMode) ? renderEffectPreview(preset, ink)
                                                        : renderPreview(preset, ink));
@@ -307,7 +312,9 @@ void SubToolPanel::showPresetsFor(tools::ToolId tool)
         if ((p.shapeKind && *p.shapeKind == m_state->shapeSettings().kind)
             || (p.blendMode && *p.blendMode == m_state->blendSettings().mode)
             || (p.liquifyMode && *p.liquifyMode == m_state->liquifySettings().mode)
-            || (p.fillMode && *p.fillMode == m_state->fillSettings().mode) || (p.selectsTool && *p.selectsTool == tool))
+            || (p.fillMode && *p.fillMode == m_state->fillSettings().mode
+                && (!p.fillAllLayers || *p.fillAllLayers == m_state->fillSettings().allLayers))
+            || (p.selectsTool && *p.selectsTool == tool))
             row = i;
     }
     m_list->setCurrentRow(row);

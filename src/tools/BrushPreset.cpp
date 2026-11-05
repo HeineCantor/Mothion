@@ -41,9 +41,13 @@ QList<BrushPreset> builtInPresets(ToolId tool)
     case ToolId::Fill: {
         BrushPreset bucket{QObject::tr("Fill"), tool};
         bucket.fillMode = FillSettings::Mode::Bucket;
+        bucket.fillAllLayers = false; // the lines of this layer only
+        BrushPreset others{QObject::tr("Fill refer to other layers"), tool};
+        others.fillMode = FillSettings::Mode::Bucket;
+        others.fillAllLayers = true; // the union of the layers shown, merged or not
         BrushPreset lasso{QObject::tr("Lasso fill"), tool};
         lasso.fillMode = FillSettings::Mode::Lasso;
-        return {bucket, lasso};
+        return {bucket, others, lasso};
     }
     case ToolId::Blend: {
         BrushPreset smudge{QObject::tr("Smudge"), tool};
@@ -96,6 +100,8 @@ void applyPreset(ToolState &state, const BrushPreset &preset)
     if (preset.fillMode) {
         FillSettings fill = state.fillSettings();
         fill.mode = *preset.fillMode;
+        if (preset.fillAllLayers)
+            fill.allLayers = *preset.fillAllLayers;
         state.setFillSettings(fill);
         return;
     }

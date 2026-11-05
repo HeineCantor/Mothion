@@ -1932,10 +1932,65 @@ private slots:
         for (ToolId t : {ToolId::Hand, ToolId::Zoom, ToolId::Move, ToolId::Puppet, ToolId::Eyedropper,
                          ToolId::Transform})
             QVERIFY(tools::builtInPresets(t).isEmpty());
-        QCOMPARE(tools::builtInPresets(ToolId::Fill).size(), 2);
+        QCOMPARE(tools::builtInPresets(ToolId::Fill).size(), 3);
         QVERIFY(!tools::builtInPresets(ToolId::Brush).isEmpty());
         QVERIFY(!tools::builtInPresets(ToolId::Eraser).isEmpty());
         QCOMPARE(tools::builtInPresets(ToolId::RectSelect).size(), 2);
+    }
+
+    // "Fill refer to other layers" finds the area in the union of the layers shown (the lines on another
+    // layer stop it), "Fill" in the layer it fills; both fill in the current layer.
+    void fillCanReferToOtherLayers()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        const auto presets = tools::builtInPresets(tools::ToolId::Fill);
+        QCOMPARE(presets[1].name, QStringLiteral("Fill refer to other layers"));
+        state.setColor(Qt::blue);
+        state.setOpacity(tools::ToolId::Fill, 1.0);
+
+        // A square of lines on one layer; then another layer, empty, is the one to fill.
+        QString reason;
+        const auto target = controller.beginPaint(true, &reason);
+        QVERIFY(target);
+        const doc::TiledImage before = *target->image;
+        for (int i = 100; i <= 300; ++i)
+            for (int t = 0; t < 3; ++t) {
+                target->image->setPixel(i, 100 + t, 0xff000000);
+                target->image->setPixel(i, 300 + t, 0xff000000);
+                target->image->setPixel(100 + t, i, 0xff000000);
+                target->image->setPixel(300 + t, i, 0xff000000);
+            }
+        controller.endPaint(before);
+        const doc::LayerId lines = controller.currentLayer();
+        QVERIFY(controller.addLayer(true));
+        const doc::LayerId color = controller.currentLayer();
+        QVERIFY(color != lines);
+
+        canvas::FrameRenderer frame;
+        canvas::FillTool tool(&controller, &state, [&]() -> const QImage & {
+            frame.renderAll(controller.document(), controller.currentFrame());
+            return frame.image();
+        }, [](const QString &) {});
+        auto pixel = [&](int x, int y) {
+            for (const doc::Layer &l : controller.currentDrawing()->layers)
+                if (l.id == color)
+                    return l.image.pixel(x, y);
+            return doc::Pixel(0);
+        };
+
+        tools::applyPreset(state, presets[1]);
+        QVERIFY(state.fillSettings().allLayers);
+        tool.press({200, 200}, Qt::NoModifier);
+        QCOMPARE(pixel(200, 200), doc::Pixel(0xff0000ff)); // inside the lines of the other layer
+        QCOMPARE(qAlpha(pixel(50, 50)), 0);                 // and not outside them
+        controller.undo();
+
+        tools::applyPreset(state, presets[0]);
+        QVERIFY(!state.fillSettings().allLayers);
+        tool.press({200, 200}, Qt::NoModifier);
+        QCOMPARE(pixel(200, 200), doc::Pixel(0xff0000ff)); // this layer is empty: the area is all of it
+        QCOMPARE(pixel(50, 50), doc::Pixel(0xff0000ff));
     }
 
     // The lasso fill sub tool: an outline drawn freehand, its inside filled
@@ -1945,9 +2000,9 @@ private slots:
         tools::ToolState state;
         document::DocumentController controller;
         const auto presets = tools::builtInPresets(tools::ToolId::Fill);
-        QCOMPARE(presets.size(), 2);
+        QCOMPARE(presets.size(), 3);
         state.setOpacity(tools::ToolId::Fill, 0.5);
-        tools::applyPreset(state, presets[1]);
+        tools::applyPreset(state, presets[2]);
         QCOMPARE(state.fillSettings().mode, tools::FillSettings::Mode::Lasso);
         QCOMPARE(state.settings(tools::ToolId::Fill).opacity, 0.5); // a fill sub tool keeps the rest
         state.setOpacity(tools::ToolId::Fill, 1.0);
