@@ -170,10 +170,10 @@ private:
     void cycleSnapAxis();
     // The outline and the letter of the axis the stroke in progress is snapped to.
     void paintSnapGuide(QPainter &p) const;
-    // Shift, tapped, with a paint tool: a straight line from the last point drawn, ending at the pen
-    // (shown as it moves); touching places it.
+    // Shift held, with a paint tool: a straight line from the last point drawn, ending at the pen (shown as
+    // it moves); touching places it, letting go of Shift drops it.
     QPointF lineStartOf(const std::vector<brush::BrushInput> &points) const;
-    void toggleStraightLine();
+    void updateStraightLine(); // armed while Shift is held, with a paint tool and a point to start from
     void placeStraightLine(const PenSample &touch);
     void paintStraightLinePreview(QPainter &p) const;
     // The held samples now judged (all of them at the end of the stroke): a
@@ -242,7 +242,7 @@ private:
     std::optional<QPointF> m_lastPoint; // where the last stroke ended, document coordinates
     const doc::TiledImage *m_strokeImage = nullptr; // what the stroke in progress paints on
     bool m_lineArmed = false;           // the straight line waits for the pen to touch
-    bool m_shiftTap = false;            // Shift went down and nothing else has happened since
+    bool m_shiftHeld = false;
     bool m_placingLine = false;         // the stroke in progress is that line: full pressure, no stabilizer
     bool picksColor() const;
     // The frame's color at a document point, invalid off the sheet.

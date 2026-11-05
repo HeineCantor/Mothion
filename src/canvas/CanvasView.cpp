@@ -127,10 +127,10 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
 
     connect(m_toolState, &ToolState::activeToolChanged, this, &CanvasView::commitPendingEdits);
     connect(m_toolState, &ToolState::activeToolChanged, this, &CanvasView::updateCursor);
-    connect(m_toolState, &ToolState::activeToolChanged, this, [this] { m_lineArmed = false; update(); });
+    connect(m_toolState, &ToolState::activeToolChanged, this, [this] { updateStraightLine(); });
     connect(m_document, &DocumentController::documentReplaced, this, [this] {
-        m_lineArmed = false;
         m_lastPoint.reset();
+        updateStraightLine();
     });
     connect(m_toolState, &ToolState::activeToolChanged, this, [this] {
         if (CanvasTool *tool = canvasTool()) {
@@ -500,8 +500,6 @@ void CanvasView::handleSample(const PenSample &sample)
     updateBrushOutline(QPointF(sample.x, sample.y));
 
     const bool busy = m_gesture.isActive() || m_stroke.has_value() || m_editTool || m_gizmo.isDragging();
-    if (sample.phase == SamplePhase::Press)
-        m_shiftTap = false; // Shift used with the pointer is not a tap
     const QPointF docPos = m_view.mapToDocument(QPointF(sample.x, sample.y));
     const Qt::KeyboardModifiers modifiers = QGuiApplication::keyboardModifiers();
     switch (sample.phase) {
@@ -854,6 +852,7 @@ void CanvasView::endStroke()
     m_strokeImage = nullptr;
     m_dabs.reset();
     m_points.clear();
+    updateStraightLine(); // Shift still held: a line from where this stroke ended
 }
 
 CanvasTool *CanvasView::canvasTool() const
@@ -905,28 +904,19 @@ QPointF CanvasView::lineStartOf(const std::vector<brush::BrushInput> &points) co
     return last;
 }
 
-void CanvasView::toggleStraightLine()
+void CanvasView::updateStraightLine()
 {
-    if (m_lineArmed) {
-        m_lineArmed = false;
+    const bool armed = m_shiftHeld && m_lastPoint && !m_stroke && !m_gesture.isActive() && !panKeyHeld()
+                       && ToolState::isPaintTool(m_toolState->activeTool());
+    if (armed != m_lineArmed) {
+        m_lineArmed = armed;
         update();
-        return;
     }
-    if (m_stroke || m_gesture.isActive() || !ToolState::isPaintTool(m_toolState->activeTool()))
-        return;
-    if (!m_lastPoint) {
-        emit statusMessage(tr("Draw something first: Shift then draws a straight line from the last point"));
-        return;
-    }
-    m_lineArmed = true;
-    emit statusMessage(tr("Straight line: touch to place it, Shift or Esc to cancel"));
-    update();
 }
 
 void CanvasView::placeStraightLine(const PenSample &touch)
 {
     // The line goes from the last point to where the pen touched, at full pressure.
-    m_lineArmed = false;
     if (!m_lastPoint)
         return;
     const QPointF from = m_view.documentToView().map(*m_lastPoint);
@@ -951,6 +941,7 @@ void CanvasView::placeStraightLine(const PenSample &touch)
         endStroke();
     }
     m_placingLine = false;
+    updateStraightLine(); // Shift still held: the next line starts where this one ended
     update();
 }
 
@@ -1035,7 +1026,6 @@ brush::BrushInput CanvasView::brushInput(const PenSample &smoothed)
 
 void CanvasView::wheelEvent(QWheelEvent *event)
 {
-    m_shiftTap = false;
     // Some platforms turn Shift+wheel into horizontal scrolling: accept either axis.
     const QPoint a = event->angleDelta();
     const int delta = a.y() != 0 ? a.y() : a.x();
@@ -1107,18 +1097,12 @@ void CanvasView::finishShape(bool apply)
 
 void CanvasView::keyPressEvent(QKeyEvent *event)
 {
-    // Shift on its own is a tap that arms the straight line; any other key makes it something else.
-    if (event->key() == Qt::Key_Shift) {
-        if (!event->isAutoRepeat())
-            m_shiftTap = true;
-    } else if (event->key() != Qt::Key_Control && event->key() != Qt::Key_Alt && event->key() != Qt::Key_Meta) {
-        m_shiftTap = false;
-    }
-    if (event->key() == Qt::Key_Escape && m_lineArmed) {
-        m_lineArmed = false;
-        update();
-        event->accept();
-        return;
+    // Shift held: the straight line from the last point (see updateStraightLine()).
+    if (event->key() == Qt::Key_Shift && !event->isAutoRepeat()) {
+        m_shiftHeld = true;
+        if (!m_lastPoint && ToolState::isPaintTool(m_toolState->activeTool()) && !m_stroke)
+            emit statusMessage(tr("Draw something first: Shift then draws a straight line from the last point"));
+        updateStraightLine();
     }
     // Repeats too: a held key may keep stepping (the puppet radius).
     if (CanvasTool *tool = canvasTool(); tool && tool->keyPress(event->key())) {
@@ -1130,6 +1114,7 @@ void CanvasView::keyPressEvent(QKeyEvent *event)
         if (!event->isAutoRepeat()) {
             *held = true;
             updateCursor();
+            updateStraightLine();
         }
         return;
     }
@@ -1148,14 +1133,15 @@ void CanvasView::keyPressEvent(QKeyEvent *event)
 
 void CanvasView::keyReleaseEvent(QKeyEvent *event)
 {
-    if (event->key() == Qt::Key_Shift && !event->isAutoRepeat() && m_shiftTap) {
-        m_shiftTap = false;
-        toggleStraightLine();
+    if (event->key() == Qt::Key_Shift && !event->isAutoRepeat()) {
+        m_shiftHeld = false;
+        updateStraightLine();
     }
     if (bool *held = panKeyFlag(event->key())) {
         if (!event->isAutoRepeat()) {
             *held = false;
             updateCursor();
+            updateStraightLine();
         }
         return;
     }
@@ -1203,6 +1189,10 @@ bool *CanvasView::panKeyFlag(int key)
 void CanvasView::focusOutEvent(QFocusEvent *event)
 {
     // The release of a key held while focus moves away never reaches us.
+    if (m_shiftHeld) {
+        m_shiftHeld = false;
+        updateStraightLine();
+    }
     if (panKeyHeld() || m_altHeld) {
         m_spaceHeld = m_tabHeld = m_altHeld = false;
         updateCursor();
