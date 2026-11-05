@@ -3,6 +3,7 @@
 #include "canvas/TileQt.h"
 
 #include <QPainter>
+#include <QPainterPath>
 
 #include <QLineF>
 
@@ -108,7 +109,25 @@ void paintPerspective(QPainter &p, const perspective::Grid &grid)
         if (const auto t = clipped(a, b, area))
             p.drawLine(a + (b - a) * t->first, a + (b - a) * t->second);
     }
-    if (grid.horizon)
+    if (grid.horizon && grid.fisheye > 0.0) {
+        // A curve: one path, so the dashes run on along it.
+        QPainterPath path;
+        std::optional<QPointF> end;
+        for (const perspective::Segment &s : perspective::horizonSegments(grid, grid.frameWidth * 4.0)) {
+            const QPointF a(s.a.x, s.a.y), b(s.b.x, s.b.y);
+            if (!clipped(a, b, area)) {
+                end.reset();
+                continue;
+            }
+            if (!end || *end != a)
+                path.moveTo(a);
+            path.lineTo(b);
+            end = b;
+        }
+        p.setPen(QPen(color, width * 1.5, Qt::DashLine, Qt::FlatCap));
+        p.setBrush(Qt::NoBrush);
+        p.drawPath(path);
+    } else if (grid.horizon)
         if (const auto h = perspective::horizonLine(grid, grid.frameWidth * 4.0)) {
             const QPointF a(h->a.x, h->a.y), b(h->b.x, h->b.y);
             if (const auto t = clipped(a, b, area)) {
@@ -135,8 +154,8 @@ QRect drawingBounds(const doc::Drawing &drawing, bool guides)
             for (const perspective::Segment &s : perspective::gridSegments(g))
                 lines |= QRectF(QPointF(s.a.x, s.a.y), QPointF(s.b.x, s.b.y)).normalized();
             if (g.horizon)
-                if (const auto h = perspective::horizonLine(g, g.frameWidth * 4.0))
-                    lines |= QRectF(QPointF(h->a.x, h->a.y), QPointF(h->b.x, h->b.y)).normalized();
+                for (const perspective::Segment &h : perspective::horizonSegments(g, g.frameWidth * 4.0))
+                    lines |= QRectF(QPointF(h.a.x, h.a.y), QPointF(h.b.x, h.b.y)).normalized();
             const double reach = g.frameWidth * 4.0, pad = lineWidth(g) * 2.0;
             const QRectF limit(g.originX - reach, g.originY - reach, 2.0 * reach, 2.0 * reach);
             bounds |= lines.adjusted(-pad, -pad, pad, pad).intersected(limit).toAlignedRect();

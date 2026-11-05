@@ -53,6 +53,7 @@ std::unique_ptr<doc::Document> sampleDocument()
     grid.perspective.orientation = perspective::fromAngles(-12.5, 71.0, 3.0);
     grid.perspective.position = {15.0, -30.0, 400.0};
     grid.perspective.fov = 45.0;
+    grid.perspective.fisheye = 0.6;
     grid.perspective.cells = 5;
     grid.perspective.color = 0x80ff8000;
     grid.perspective.horizon = false;

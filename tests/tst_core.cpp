@@ -89,6 +89,47 @@ private slots:
     }
 
     // A closed outline stops the fill; growing slips it under the line.
+    // A fisheye keeps the scale at the center and curves straight lines; its inverse takes a point back.
+    void fisheyeLensCurvesTheGrid()
+    {
+        perspective::Grid g = perspective::defaultGrid(1000, 600);
+        g.orientation = {};
+        g.cell = 50.0;
+        g.cells = 4;
+        const auto straight = perspective::project(g, 20, 0);
+        g.fisheye = 1.0;
+        const auto near = perspective::project(g, 20, 0);
+        QVERIFY(qAbs(near->x - straight->x) < 0.5); // same scale at the center
+        const auto far = perspective::project(g, 600, 0);
+        g.fisheye = 0.0;
+        const auto rectilinear = perspective::project(g, 600, 0);
+        QVERIFY(far->x < rectilinear->x); // squeezed toward the center at the edges
+
+        g.fisheye = 0.7;
+        for (const perspective::Point p : {perspective::Point{500, 300}, {820, 140}, {60, 580}}) {
+            const auto back = perspective::projectDirection(g, perspective::unprojectDirection(g, p));
+            QVERIFY(back && qAbs(back->x - p.x) < 1e-6 && qAbs(back->y - p.y) < 1e-6);
+        }
+
+        // A line that does not cross the center bends: its middle is off the chord of its ends.
+        g.orientation = perspective::fromAngles(0, 0, 0);
+        const auto a = perspective::project(g, -200, 100), m = perspective::project(g, 0, 100),
+                   b = perspective::project(g, 200, 100);
+        const double chord = (b->x - a->x) * (m->y - a->y) - (b->y - a->y) * (m->x - a->x);
+        QVERIFY(qAbs(chord) > 1.0);
+        g.fisheye = 0.0;
+        const auto a0 = perspective::project(g, -200, 100), m0 = perspective::project(g, 0, 100),
+                   b0 = perspective::project(g, 200, 100);
+        QVERIFY(qAbs((b0->x - a0->x) * (m0->y - a0->y) - (b0->y - a0->y) * (m0->x - a0->x)) < 1e-6);
+
+        // The horizon of a tilted plane is a curve of segments, one line for the usual lens.
+        g.orientation = perspective::fromAngles(30, 60, 0);
+        QCOMPARE(perspective::horizonSegments(g, 100.0).size(), std::size_t(1));
+        g.fisheye = 0.8;
+        QVERIFY(perspective::horizonSegments(g, 100.0).size() > 10);
+        QVERIFY(perspective::gridSegments(g).size() > 18); // lines cut in pieces
+    }
+
     void floodFillStopsAtLinesAndGrows()
     {
         constexpr int w = 20, h = 20;

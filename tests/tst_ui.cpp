@@ -2482,6 +2482,33 @@ private slots:
     }
 
     // A stroke made with the snap on follows an axis of the chosen perspective layer instead of the pen.
+    // Through a fisheye the axis's line is a curve: the pen is put on it, and it starts where the stroke did.
+    void perspectiveSnapFollowsTheCurveOfAFisheye()
+    {
+        perspective::Grid grid = perspective::defaultGrid(800, 600);
+        grid.fisheye = 0.8;
+        const QPointF start(300, 250);
+        const auto dirs = canvas::PerspectiveSnap::directions(grid, start);
+        QVERIFY(dirs[0] && dirs[1] && dirs[2]);
+        canvas::PerspectiveSnap snap;
+        snap.begin(grid, start, 6.0);
+        QVERIFY(snap.update(start + *dirs[0] * 40.0));
+        QCOMPARE(snap.axis(), 0);
+        const QPointF origin = snap.snapped(start);
+        QVERIFY(QLineF(origin, start).length() < 1e-6);
+        // Whatever the pen does, the point stays in the plane of the start's ray and the axis.
+        const perspective::Vec3 ray = perspective::unprojectDirection(grid, {start.x(), start.y()});
+        const perspective::Vec3 along = perspective::axis(grid, {1, 0, 0});
+        const perspective::Vec3 n = perspective::cross(ray, along);
+        const double length = std::sqrt(perspective::dot(n, n));
+        for (const QPointF pen : {QPointF(420, 330), QPointF(150, 100), QPointF(500, 200)}) {
+            const QPointF on = snap.snapped(pen);
+            const perspective::Vec3 d = perspective::unprojectDirection(grid, {on.x(), on.y()});
+            QVERIFY(std::abs(perspective::dot(d, n)) / length < 1e-6);
+        }
+        QVERIFY(snap.guide(QPointF(420, 330)).size() > 2); // a curve, not two points
+    }
+
     void perspectiveSnapBendsTheStroke()
     {
         tools::ToolState state;

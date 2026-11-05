@@ -493,6 +493,16 @@ QMenu *PerspectiveGizmo::createMenu(QWidget *parent)
         QObject::connect(a, &QAction::triggered, menu,
                          [apply, fov] { apply([fov](perspective::Grid &g) { g.fov = fov; }); });
     }
+    QMenu *fisheye = menu->addMenu(QObject::tr("Fisheye"));
+    auto *fisheyeGroup = new QActionGroup(fisheye);
+    for (int percent : {0, 25, 50, 75, 100, 150, 200, 300}) {
+        QAction *a = fisheye->addAction(percent == 0 ? QObject::tr("Off") : QObject::tr("%1%").arg(percent));
+        a->setCheckable(true);
+        a->setChecked(std::abs(grid.fisheye * 100.0 - percent) < 0.5);
+        fisheyeGroup->addAction(a);
+        QObject::connect(a, &QAction::triggered, menu,
+                         [apply, percent] { apply([percent](perspective::Grid &g) { g.fisheye = percent / 100.0; }); });
+    }
     menu->addSeparator();
     menu->addAction(QObject::tr("Reset rotation"), menu,
                     [apply] { apply([](perspective::Grid &g) { g.orientation = perspective::Grid().orientation; }); });

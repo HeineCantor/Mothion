@@ -707,7 +707,10 @@ void CanvasView::paintSnapGuide(QPainter &p) const
     const int axis = m_snap.axis();
     const QColor color = PerspectiveSnap::axisColor(axis);
     const QTransform toView = m_view.documentToView();
-    const QPointF from = toView.map(m_snap.anchor()), to = toView.map(m_snap.snapped(m_snapPen));
+    const QPolygonF guide = toView.map(m_snap.guide(m_snapPen));
+    if (guide.size() < 2)
+        return;
+    const QPointF to = guide.last();
     const ToolId tool = m_eraseStroke ? ToolId::Eraser : ToolId::Brush;
     const double half = std::max(2.0, m_toolState->settings(tool).size / 2.0 * m_view.zoom()) + 2.0;
 
@@ -715,7 +718,7 @@ void CanvasView::paintSnapGuide(QPainter &p) const
     p.setRenderHint(QPainter::Antialiasing);
     // An outline around the stroke: a pill the width of the brush, along the line.
     QPainterPath line;
-    line.moveTo(from);
+    line.addPolygon(guide);
     line.lineTo(to + QPointF(0.01, 0)); // a dot, not nothing, when it has not moved
     QPainterPathStroker stroker;
     stroker.setWidth(2.0 * half);

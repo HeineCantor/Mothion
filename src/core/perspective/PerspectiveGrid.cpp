@@ -79,9 +79,56 @@ Vec3 axis(const Grid &grid, const Vec3 &planeAxis)
     return rotate(grid.orientation, planeAxis);
 }
 
+namespace {
+
+constexpr int kCurveSamples = 64;   // pieces of a grid line seen through a fisheye
+constexpr int kHorizonSamples = 180; // and of its horizon
+constexpr double kMaxRadius = 8.0;  // of the frame's width: farther is not drawn
+
+double lensMix(const Grid &grid) { return std::clamp(grid.fisheye, 0.0, kMaxFisheye); }
+
+} // namespace
+
+Vec3 unprojectDirection(const Grid &grid, Point p)
+{
+    const double k = 1.0 + lensMix(grid);
+    const double focal = focalLength(grid);
+    const double dx = p.x - grid.originX, dy = p.y - grid.originY;
+    const double r = std::hypot(dx, dy);
+    if (r < 1e-12)
+        return {0.0, 0.0, 1.0};
+    const double theta = k * std::atan(r / (focal * k));
+    return {std::sin(theta) * dx / r, std::sin(theta) * dy / r, std::cos(theta)};
+}
+
+std::optional<Point> projectDirection(const Grid &grid, const Vec3 &d)
+{
+    const double length = std::sqrt(dot(d, d));
+    if (length < 1e-12)
+        return std::nullopt;
+    const double k = 1.0 + lensMix(grid);
+    const double theta = std::acos(std::clamp(d.z / length, -1.0, 1.0));
+    if (theta >= std::min(k * std::numbers::pi / 2.0 * 0.98, 0.95 * std::numbers::pi))
+        return std::nullopt;
+    const double focal = focalLength(grid);
+    const double r = focal * k * std::tan(theta / k);
+    if (r > kMaxRadius * grid.frameWidth)
+        return std::nullopt;
+    const double planar = std::hypot(d.x, d.y);
+    if (planar < 1e-12)
+        return Point{grid.originX, grid.originY};
+    return Point{grid.originX + d.x / planar * r, grid.originY + d.y / planar * r};
+}
+
 std::optional<Point> projectCamera(const Grid &grid, const Vec3 &v)
 {
     const double focal = focalLength(grid);
+    if (grid.fisheye > 0.0) {
+        const Vec3 fromEye{v.x, v.y, v.z + focal};
+        if (std::sqrt(dot(fromEye, fromEye)) < kNearFraction * focal)
+            return std::nullopt;
+        return projectDirection(grid, fromEye);
+    }
     const double depth = focal + v.z;
     if (depth < kNearFraction * focal)
         return std::nullopt;
@@ -117,9 +164,25 @@ std::vector<Segment> gridSegments(const Grid &grid)
         if (pa && pb)
             segments.push_back({*pa, *pb});
     };
+    // Through a fisheye a line is a curve: cut in pieces, those that can be drawn.
+    auto addCurve = [&](double x0, double y0, double x1, double y1) {
+        std::optional<Point> previous;
+        for (int i = 0; i <= kCurveSamples; ++i) {
+            const double t = double(i) / kCurveSamples;
+            const auto p = project(grid, x0 + (x1 - x0) * t, y0 + (y1 - y0) * t);
+            if (p && previous)
+                segments.push_back({*previous, *p});
+            previous = p;
+        }
+    };
     for (int i = -n; i <= n; ++i) {
-        add(i * grid.cell, -extent, i * grid.cell, extent);
-        add(-extent, i * grid.cell, extent, i * grid.cell);
+        if (grid.fisheye > 0.0) {
+            addCurve(i * grid.cell, -extent, i * grid.cell, extent);
+            addCurve(-extent, i * grid.cell, extent, i * grid.cell);
+        } else {
+            add(i * grid.cell, -extent, i * grid.cell, extent);
+            add(-extent, i * grid.cell, extent, i * grid.cell);
+        }
     }
     return segments;
 }
@@ -136,6 +199,27 @@ std::optional<Segment> horizonLine(const Grid &grid, double reach)
     const double length = std::sqrt(planar);
     const double dx = -n.y / length, dy = n.x / length;
     return Segment{{mid.x - dx * reach, mid.y - dy * reach}, {mid.x + dx * reach, mid.y + dy * reach}};
+}
+
+std::vector<Segment> horizonSegments(const Grid &grid, double reach)
+{
+    std::vector<Segment> segments;
+    if (grid.fisheye <= 0.0) {
+        if (const auto h = horizonLine(grid, reach))
+            segments.push_back(*h);
+        return segments;
+    }
+    // The directions of the plane, all round: where they are seen, through the lens.
+    const Vec3 ax = axis(grid, {1, 0, 0}), ay = axis(grid, {0, 1, 0});
+    std::optional<Point> previous;
+    for (int i = 0; i <= kHorizonSamples; ++i) {
+        const double angle = 2.0 * std::numbers::pi * i / kHorizonSamples;
+        const auto p = projectDirection(grid, ax * std::cos(angle) + ay * std::sin(angle));
+        if (p && previous)
+            segments.push_back({*previous, *p});
+        previous = p;
+    }
+    return segments;
 }
 
 Grid defaultGrid(int width, int height)

@@ -48,11 +48,17 @@ Rotation fromAngles(double turn, double tilt, double roll);
 // centered on where the camera looks. The camera looks at (originX,
 // originY) of the document; its horizontal field of view `fov` spans
 // `frameWidth` px (the document's width when the layer was made).
+inline constexpr double kMaxFisheye = 3.0;
+
 struct Grid
 {
     Rotation orientation = fromAngles(30.0, 60.0, 0.0);
     Vec3 position;
     double fov = 60.0;
+    // The lens: 0 is the usual (rectilinear) one, lines stay straight; above, a fisheye where they curve
+    // toward the edges: stereographic at 1, and stronger up to kMaxFisheye (closer to equidistant, with a
+    // field of view of nearly 180°). The scale at the center is the same.
+    double fisheye = 0.0;
     double frameWidth = 1920.0;
     double originX = 960.0;
     double originY = 540.0;
@@ -89,6 +95,11 @@ std::optional<Point> projectCamera(const Grid &grid, const Vec3 &cameraPoint);
 // Where the plane's point (x, y) is drawn.
 std::optional<Point> project(const Grid &grid, double x, double y);
 
+// The direction (unit, camera's space) the eye sees the document's point in, and the point a direction
+// (any length, from the eye) is drawn at: the lens and its inverse.
+Vec3 unprojectDirection(const Grid &grid, Point documentPoint);
+std::optional<Point> projectDirection(const Grid &grid, const Vec3 &direction);
+
 // The grid's lines drawn on the document: the parts in front of the eye.
 std::vector<Segment> gridSegments(const Grid &grid);
 
@@ -96,6 +107,10 @@ std::vector<Segment> gridSegments(const Grid &grid);
 // way of the point of it nearest to where the camera looks; nothing when the
 // plane faces the viewer (the horizon is then at infinity).
 std::optional<Segment> horizonLine(const Grid &grid, double reach);
+
+// The horizon as lines to draw: `horizonLine()` for the usual lens, a curve cut in short segments
+// for a fisheye (the directions of the plane drawn through the lens).
+std::vector<Segment> horizonSegments(const Grid &grid, double reach);
 
 // A grid for a document of `width` × `height` px: centered, a cell 1/16 of
 // the width.

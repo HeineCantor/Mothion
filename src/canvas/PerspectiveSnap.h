@@ -5,6 +5,7 @@
 #include <QChar>
 #include <QColor>
 #include <QPointF>
+#include <QPolygonF>
 
 #include <array>
 #include <optional>
@@ -42,12 +43,22 @@ public:
     static QChar axisLetter(int axis);
     // `pen` put on the chosen line (as is while undecided).
     QPointF snapped(const QPointF &pen) const;
+    // The line from the anchor to `pen` put on the chosen axis: two points, or the curve it is
+    // through a fisheye lens.
+    QPolygonF guide(const QPointF &pen) const;
 
     // The direction (unit) of each axis's line through `from`, nothing for one that has none
     // there (when `from` is at the vanishing point itself).
     static std::array<std::optional<QPointF>, 3> directions(const perspective::Grid &grid, const QPointF &from);
 
 private:
+    // Through a fisheye the axis's line is a curve: the lines of one direction through the points of
+    // one ray from the eye all lie in the plane of the ray and the direction, so they are drawn as one.
+    // The direction (unit, from the eye) the chosen axis's curve passes `pen` in, nothing if it has none.
+    std::optional<perspective::Vec3> curveDirection(const QPointF &pen) const;
+
+    perspective::Grid m_grid;
+    perspective::Vec3 m_ray; // from the eye through the start
     std::array<std::optional<QPointF>, 3> m_directions;
     QPointF m_start;
     double m_threshold = 0.0;

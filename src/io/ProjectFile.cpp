@@ -86,6 +86,7 @@ QString gridToJson(const perspective::Grid &g)
          QJsonArray{g.orientation.w, g.orientation.x, g.orientation.y, g.orientation.z}},
         {QStringLiteral("position"), QJsonArray{g.position.x, g.position.y, g.position.z}},
         {QStringLiteral("fov"), g.fov},
+        {QStringLiteral("fisheye"), g.fisheye},
         {QStringLiteral("frameWidth"), g.frameWidth},
         {QStringLiteral("originX"), g.originX},
         {QStringLiteral("originY"), g.originY},
@@ -120,6 +121,7 @@ perspective::Grid gridFromJson(const QString &text)
     if (const QJsonArray p = o.value(QStringLiteral("position")).toArray(); p.size() == 3)
         g.position = {p[0].toDouble(), p[1].toDouble(), p[2].toDouble()};
     number("fov", g.fov);
+    number("fisheye", g.fisheye);
     number("frameWidth", g.frameWidth);
     number("centerX", g.originX); // the first ones
     number("centerY", g.originY);
