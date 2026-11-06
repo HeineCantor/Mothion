@@ -24,6 +24,8 @@
 #include "tools/ToolState.h"
 #include "ui/AutoplayWindow.h"
 #include "compositing/Graph.h"
+#include "compositing/Evaluator.h"
+#include "io/VideoExport.h"
 #include "ui/compositing/CompositingWindow.h"
 #include "ui/compositing/NodeGraphView.h"
 #include "ui/ExportDialog.h"
@@ -5340,6 +5342,57 @@ private slots:
         controller.redo();
         QCOMPARE(window.network().node(blur)->params.value(QStringLiteral("radius")).toInt(), 5);
         QCOMPARE(controller.compositing().nodes.size(), size_t(5));
+    }
+
+    void videoFramesCarryTheCompositing()
+    {
+        doc::Document d(64, 48);
+        compositing::Graph network;
+        compositing::NodeId ids[5];
+        exampleNetwork(network, ids);
+        d.setCompositing(network.toData());
+        compositing::Graph loaded;
+        loaded.load(d.compositing());
+        compositing::Evaluator evaluator;
+        const QImage plain = io::renderFinalFrame(d, 0, evaluator, nullptr);
+        const QImage composed = io::renderFinalFrame(d, 0, evaluator, &loaded);
+        QCOMPARE(plain.size(), QSize(64, 48));
+        QCOMPARE(composed.size(), QSize(64, 48));
+        QVERIFY(composed != plain); // the example tints the white paper
+        QVERIFY(!composed.hasAlphaChannel());
+        // A network with nothing wired to Output leaves the frame as it is.
+        loaded.disconnect(ids[4], 0);
+        QCOMPARE(io::renderFinalFrame(d, 0, evaluator, &loaded), plain);
+    }
+
+    void videoIsExportedThroughFfmpeg()
+    {
+        if (io::findFfmpeg().isEmpty())
+            QSKIP("ffmpeg is not installed");
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        doc::Document d(63, 47); // odd sizes: the video loses a pixel
+        d.setFrameCount(6);
+        compositing::Graph network;
+        compositing::NodeId ids[5];
+        exampleNetwork(network, ids);
+        d.setCompositing(network.toData());
+        const QString file = dir.filePath(QStringLiteral("out.mp4"));
+        QString error;
+        int last = 0;
+        QVERIFY2(io::exportVideo(d, 1, 4, file, {}, [&last](int done, int total) {
+                     last = done;
+                     return total == 4;
+                 }, &error), qPrintable(error));
+        QCOMPARE(last, 4);
+        QVERIFY(QFileInfo(file).size() > 200);
+        // Stopped part of the way: no file is left.
+        const QString stopped = dir.filePath(QStringLiteral("stopped.mp4"));
+        QVERIFY(io::exportVideo(d, 0, 5, stopped, {}, [](int done, int) { return done < 2; }, &error));
+        QVERIFY(!QFileInfo::exists(stopped));
+        // A folder that is not there is an error, with ffmpeg's words.
+        QVERIFY(!io::exportVideo(d, 0, 1, dir.filePath(QStringLiteral("no/such/dir/x.mp4")), {}, {}, &error));
+        QVERIFY(!error.isEmpty());
     }
 
     void nodeEditorFollowsTheNetwork()

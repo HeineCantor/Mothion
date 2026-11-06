@@ -62,6 +62,7 @@ qt_add_library(mothion_gui STATIC
     io/ProjectFile.h io/ProjectFile.cpp
     io/ProjectThumbnail.h
     io/FrameExport.h io/FrameExport.cpp
+    io/VideoExport.h io/VideoExport.cpp
 
     tools/ToolState.h tools/ToolState.cpp
     tools/Preferences.h tools/Preferences.cpp
@@ -98,6 +99,7 @@ qt_add_library(mothion_gui STATIC
     ui/MainWindow.h ui/MainWindow.cpp
     ui/DockLayout.h ui/DockLayout.cpp
     ui/ExportDialog.h ui/ExportDialog.cpp
+    ui/VideoExportDialog.h ui/VideoExportDialog.cpp
     ui/PanelDock.h ui/PanelDock.cpp
     ui/SplashScreen.h ui/SplashScreen.cpp
     ui/SelectionBar.h ui/SelectionBar.cpp

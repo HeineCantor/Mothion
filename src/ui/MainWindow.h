@@ -62,6 +62,7 @@ private:
     bool maybeSave();
     void updateTitle();
     void exportFrames();
+    void exportVideo();
     void importImage();
     // An image sequence: one dialog to choose the images (several of them, or "Use this folder" for all of
     // the folder's), then asks where it starts and the frames per image, and imports it.

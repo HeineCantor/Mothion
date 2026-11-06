@@ -15,7 +15,9 @@
 #include "ui/DiscordPresence.h"
 #include "ui/ImportSequenceDialog.h"
 #include "ui/DockLayout.h"
+#include "io/VideoExport.h"
 #include "ui/ExportDialog.h"
+#include "ui/VideoExportDialog.h"
 #include "ui/IconFactory.h"
 #include "ui/PanelDock.h"
 #include "ui/SelectionBar.h"
@@ -336,6 +338,7 @@ void MainWindow::createMenus()
     file->addSeparator();
     Shortcuts &keymap = Shortcuts::instance();
     keymap.bind(file->addAction(tr("Export frames…"), this, &MainWindow::exportFrames), QStringLiteral("file.export"));
+    file->addAction(tr("Export video…"), this, &MainWindow::exportVideo);
     file->addSeparator();
     file->addAction(tr("Settings…"), this, &MainWindow::openSettings); // only from here: no key
     file->addSeparator();
@@ -923,6 +926,39 @@ void MainWindow::exportFrames()
                                        .arg(QFileInfo(file).absolutePath())
                                  : tr("Exported %1").arg(QFileInfo(file).fileName()),
                              4000);
+}
+
+void MainWindow::exportVideo()
+{
+    if (m_compositing)
+        m_compositing->commit(); // edits made a moment ago are in the project
+    m_document->finishEdits();
+    const doc::Document &d = m_document->document();
+    const QString name = m_filePath.isEmpty() ? QString() : QFileInfo(m_filePath).completeBaseName();
+    VideoExportDialog dialog(d.frameCount(), !d.compositing().nodes.empty(), name, this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+
+    const int total = dialog.lastFrame() - dialog.firstFrame() + 1;
+    QProgressDialog progress(tr("Exporting video…"), tr("Cancel"), 0, total, this);
+    progress.setWindowModality(Qt::WindowModal);
+    progress.setMinimumDuration(0);
+    QString error;
+    const bool done = io::exportVideo(d, dialog.firstFrame(), dialog.lastFrame(), dialog.path(), dialog.options(),
+                                      [&progress](int count, int) {
+                                          progress.setValue(count);
+                                          return !progress.wasCanceled();
+                                      },
+                                      &error);
+    if (progress.wasCanceled()) {
+        statusBar()->showMessage(tr("Export cancelled"), 4000);
+        return;
+    }
+    if (!done) {
+        QMessageBox::critical(this, tr("Export video"), error);
+        return;
+    }
+    statusBar()->showMessage(tr("Exported %1 frames to %2").arg(total).arg(QFileInfo(dialog.path()).fileName()), 6000);
 }
 
 namespace {

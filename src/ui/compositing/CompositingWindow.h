@@ -33,6 +33,9 @@ public:
     compositing::Graph &network() { return m_network; }
     ImagePreview *preview() const { return m_preview; }
 
+    // Puts the edits not yet in the document into it (one undo step), at once.
+    void commit();
+
     // Takes the frame again and runs the nodes, at once.
     void refresh();
 
@@ -43,7 +46,6 @@ private:
     void scheduleRefresh();
     void frame();
     void seed();           // the network a project starts with, until the user changes it
-    void commit();         // the editor's work goes to the document: one undo step
     void documentChanged(); // the document's network is not the one shown (undo, redo, another project)
 
     QPointer<document::DocumentController> m_document;
