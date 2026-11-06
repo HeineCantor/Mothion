@@ -514,6 +514,52 @@ private slots:
         QVERIFY(qAbs(qRed(j.pixel(0, 0)) - qRed(d->paperColor())) < 6);
     }
 
+    // The document's compositing network can be applied to the exported images, when it is asked for.
+    void exportCanApplyTheCompositing()
+    {
+        QTemporaryDir dir;
+        const auto d = sampleDocument(); // frame -> blur -> output
+        QString error;
+        auto read = [&](const QString &name, const io::ExportOptions &options) {
+            const QString path = dir.filePath(name);
+            return io::exportFrame(*d, 0, path, options, &error) ? QImage(path) : QImage();
+        };
+        io::ExportOptions plain{io::ImageFormat::Png, true, 90};
+        io::ExportOptions composed = plain;
+        composed.compositing = true;
+
+        const QImage a = read(QStringLiteral("plain.png"), plain);
+        const QImage b = read(QStringLiteral("composed.png"), composed);
+        QVERIFY2(!a.isNull() && !b.isNull(), qPrintable(error));
+        QCOMPARE(b.size(), a.size());
+        QCOMPARE(a.pixel(10, 20), QRgb(kRed));
+        QVERIFY(b.pixel(10, 20) != QRgb(kRed)); // blurred
+        QVERIFY(b != a);
+        QVERIFY(b.hasAlphaChannel()); // transparent stays transparent where the nodes leave nothing
+        QCOMPARE(qAlpha(b.pixel(319, 239)), 0);
+
+        // Over the paper (not transparent): the result is opaque, and still not the plain frame.
+        io::ExportOptions opaque{io::ImageFormat::Png, false, 90};
+        opaque.compositing = true;
+        const QImage c = read(QStringLiteral("opaque.png"), opaque);
+        QCOMPARE(qAlpha(c.pixel(0, 0)), 255);
+        QVERIFY(c.pixel(10, 20) != QRgb(kRed));
+
+        // A sequence, and JPEG, through the same frames.
+        const QString seq = dir.filePath(QStringLiteral("walk.png"));
+        QVERIFY2(io::exportSequence(*d, 0, 1, seq, composed, {}, &error), qPrintable(error));
+        QCOMPARE(QImage(io::sequenceFileName(seq, 0, 1)).pixel(10, 20), b.pixel(10, 20));
+        io::ExportOptions jpeg{io::ImageFormat::Jpeg, false, 95};
+        jpeg.compositing = true;
+        const QImage j = read(QStringLiteral("composed.jpg"), jpeg);
+        QVERIFY(qAbs(qRed(j.pixel(10, 20)) - qRed(kRed)) > 8 || qAbs(qGreen(j.pixel(10, 20))) > 8); // blurred too
+
+        // No network in the project: the option changes nothing.
+        d->setCompositing({});
+        const QImage none = read(QStringLiteral("none.png"), composed);
+        QCOMPARE(none.pixel(10, 20), QRgb(kRed));
+    }
+
     void exportSequenceWritesEveryFrame()
     {
         QTemporaryDir dir;

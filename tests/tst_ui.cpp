@@ -332,6 +332,29 @@ private slots:
         QVERIFY(!dialog.options().transparent); // JPEG selected: never transparent
     }
 
+    // "Apply compositing" is offered when the project has a network, and is the user's choice.
+    void exportDialogOffersTheCompositingOnlyWhenThereIsOne()
+    {
+        auto compositingBox = [](ui::ExportDialog &dialog) -> QCheckBox * {
+            for (QCheckBox *box : dialog.findChildren<QCheckBox *>())
+                if (box->text() == QStringLiteral("Apply compositing"))
+                    return box;
+            return nullptr;
+        };
+        ui::ExportDialog without(0, 10, QStringLiteral("x"), false);
+        QVERIFY(compositingBox(without));
+        QVERIFY(!compositingBox(without)->isEnabled());
+        QVERIFY(!without.options().compositing);
+
+        ui::ExportDialog with(0, 10, QStringLiteral("x"), true);
+        QCheckBox *box = compositingBox(with);
+        QVERIFY(box && box->isEnabled());
+        box->setChecked(true);
+        QVERIFY(with.options().compositing);
+        box->setChecked(false);
+        QVERIFY(!with.options().compositing);
+    }
+
     // A number field with focus keeps Ctrl+Z for the document, not for its text.
     void undoWorksFromANumberField()
     {

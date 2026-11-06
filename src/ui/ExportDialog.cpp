@@ -31,6 +31,7 @@ constexpr int kMaxFrame = 99999; // exposures may run past the scene's end
 const QString kDirKey = QStringLiteral("export/directory");
 const QString kFormatKey = QStringLiteral("export/format");
 const QString kTransparentKey = QStringLiteral("export/transparent");
+const QString kCompositingKey = QStringLiteral("export/compositing");
 const QString kQualityKey = QStringLiteral("export/quality");
 const QString kRangeKey = QStringLiteral("export/range");
 
@@ -38,7 +39,8 @@ io::ImageFormat formatAt(const QComboBox *box) { return io::ImageFormat(box->cur
 
 } // namespace
 
-ExportDialog::ExportDialog(int currentFrame, int frameCount, const QString &projectName, QWidget *parent)
+ExportDialog::ExportDialog(int currentFrame, int frameCount, const QString &projectName, bool hasCompositing,
+                           QWidget *parent)
     : QDialog(parent)
     , m_currentFrame(currentFrame)
     , m_frameCount(frameCount)
@@ -62,6 +64,11 @@ ExportDialog::ExportDialog(int currentFrame, int frameCount, const QString &proj
 
     m_transparent = new QCheckBox(tr("Transparent background"), this);
     m_transparent->setChecked(settings.value(kTransparentKey, false).toBool());
+    m_compositing = new QCheckBox(tr("Apply compositing"), this);
+    m_compositing->setEnabled(hasCompositing);
+    m_compositing->setChecked(hasCompositing && settings.value(kCompositingKey, true).toBool());
+    if (!hasCompositing)
+        m_compositing->setToolTip(tr("This project has no compositing network yet."));
     m_quality = new QSpinBox(this);
     m_quality->setRange(1, 100);
     m_quality->setValue(settings.value(kQualityKey, 90).toInt());
@@ -100,6 +107,7 @@ ExportDialog::ExportDialog(int currentFrame, int frameCount, const QString &proj
     form->addRow(tr("File:"), pathRow);
     form->addRow(tr("Format:"), m_format);
     form->addRow(QString(), m_transparent);
+    form->addRow(QString(), m_compositing);
     form->addRow(tr("JPEG quality:"), m_quality);
     form->addRow(tr("Export:"), rangeBox);
     form->addRow(QString(), m_summary);
@@ -144,6 +152,7 @@ io::ExportOptions ExportDialog::options() const
     o.format = formatAt(m_format);
     o.transparent = o.format == io::ImageFormat::Png && m_transparent->isChecked();
     o.quality = m_quality->value();
+    o.compositing = m_compositing->isChecked();
     return o;
 }
 
@@ -235,6 +244,8 @@ void ExportDialog::accept()
     settings.setValue(kDirKey, QFileInfo(file).absolutePath());
     settings.setValue(kFormatKey, m_format->currentIndex());
     settings.setValue(kTransparentKey, m_transparent->isChecked());
+    if (m_compositing->isEnabled())
+        settings.setValue(kCompositingKey, m_compositing->isChecked());
     settings.setValue(kQualityKey, m_quality->value());
     settings.setValue(kRangeKey, m_range->checkedId());
     QDialog::accept();

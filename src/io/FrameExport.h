@@ -17,11 +17,15 @@ struct ExportOptions
     ImageFormat format = ImageFormat::Png;
     bool transparent = false; // PNG only: no paper behind the layers
     int quality = 90;         // JPEG only, 0..100
+    bool compositing = false; // run the document's compositing network on each frame (see io/VideoExport.h)
 };
 
 // The format a file name asks for (.png, .jpg, .jpeg), if any.
 std::optional<ImageFormat> formatForFile(const QString &path);
 QString suffixOf(ImageFormat format); // "png", "jpg"
+
+// With `options.compositing` the frames are what the nodes make of them (if the document has a network with
+// something wired to its Output); a transparent PNG then keeps the alpha the nodes leave.
 
 // What `frame` (0-based) looks like, document-sized: the visible layers
 // over the paper, or over transparency; perspective layers (guides) left out.

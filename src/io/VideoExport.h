@@ -24,9 +24,11 @@ struct VideoOptions
 QString findFfmpeg();
 
 // The frame as the video shows it: what renderFrame makes, at the full size of the page, and, if `graph` is
-// given and its Output has something wired to it, what the nodes make of it. Always opaque (over the paper).
+// given and its Output has something wired to it, what the nodes make of it. Opaque (over the paper) unless
+// `transparent`.
+// With `transparent` the page is left out (no paper behind the layers) and the result keeps its alpha.
 QImage renderFinalFrame(const doc::Document &document, int frame, compositing::Evaluator &evaluator,
-                        const compositing::Graph *graph);
+                        const compositing::Graph *graph, bool transparent = false);
 
 // Writes frames [first, last] (0-based) as an H.264 .mp4 at the document's frame rate, through ffmpeg: the
 // frames are handed to it one by one, nothing is written to disk but the video. `progress(done, total)` is

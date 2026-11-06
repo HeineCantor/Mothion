@@ -961,10 +961,12 @@ void MainWindow::updateTitle()
 
 void MainWindow::exportFrames()
 {
+    if (m_compositing)
+        m_compositing->commit(); // edits made a moment ago are in the project
     m_document->finishEdits();
     const doc::Document &d = m_document->document();
     const QString name = m_filePath.isEmpty() ? QString() : QFileInfo(m_filePath).completeBaseName();
-    ExportDialog dialog(m_document->currentFrame(), d.frameCount(), name, this);
+    ExportDialog dialog(m_document->currentFrame(), d.frameCount(), name, !d.compositing().nodes.empty(), this);
     if (dialog.exec() != QDialog::Accepted)
         return;
 

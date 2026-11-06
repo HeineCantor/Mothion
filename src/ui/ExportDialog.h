@@ -22,8 +22,10 @@ class ExportDialog : public QDialog
     Q_OBJECT
 
 public:
-    // Frames are 0-based; `projectName` names the files the first time.
-    ExportDialog(int currentFrame, int frameCount, const QString &projectName, QWidget *parent = nullptr);
+    // Frames are 0-based; `projectName` names the files the first time; `hasCompositing`: the project has a
+    // compositing network, which the export can apply.
+    ExportDialog(int currentFrame, int frameCount, const QString &projectName, bool hasCompositing = false,
+                 QWidget *parent = nullptr);
 
     QString path() const;
     io::ExportOptions options() const;
@@ -43,6 +45,7 @@ private:
     QLineEdit *m_path = nullptr;
     QComboBox *m_format = nullptr;
     QCheckBox *m_transparent = nullptr;
+    QCheckBox *m_compositing = nullptr;
     QSpinBox *m_quality = nullptr;
     QButtonGroup *m_range = nullptr;
     QSpinBox *m_from = nullptr;

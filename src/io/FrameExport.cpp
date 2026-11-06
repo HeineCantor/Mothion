@@ -1,6 +1,7 @@
 #include "io/FrameExport.h"
 
 #include "canvas/FrameRenderer.h"
+#include "io/VideoExport.h"
 
 #include <QDir>
 #include <QFileInfo>
@@ -64,11 +65,45 @@ QImage renderFrame(const doc::Document &document, int frame, bool transparent)
     return renderer.image();
 }
 
+namespace {
+
+// The frames of an export: plain, or through the document's compositing network when it is asked for and there
+// is one. Holds the network and its cache across the frames of a sequence.
+class FrameSource
+{
+public:
+    FrameSource(const doc::Document &document, const ExportOptions &options)
+        : m_document(document)
+        , m_transparent(options.transparent && options.format == ImageFormat::Png)
+        , m_composited(options.compositing && !document.compositing().nodes.empty())
+    {
+        if (m_composited)
+            m_graph.load(document.compositing());
+    }
+
+    QImage frame(int frame)
+    {
+        if (!m_composited)
+            return renderFrame(m_document, frame, m_transparent);
+        return renderFinalFrame(m_document, frame, m_evaluator, &m_graph, m_transparent);
+    }
+    bool transparent() const { return m_transparent; }
+
+private:
+    const doc::Document &m_document;
+    bool m_transparent;
+    bool m_composited;
+    compositing::Graph m_graph;
+    compositing::Evaluator m_evaluator;
+};
+
+} // namespace
+
 bool exportFrame(const doc::Document &document, int frame, const QString &path, const ExportOptions &options,
                  QString *error)
 {
-    const bool transparent = options.transparent && options.format == ImageFormat::Png;
-    return writeImage(renderFrame(document, frame, transparent), path, options, error);
+    FrameSource source(document, options);
+    return writeImage(source.frame(frame), path, options, error);
 }
 
 QString sequenceFileName(const QString &path, int frame, int lastFrame)
@@ -84,14 +119,10 @@ QString sequenceFileName(const QString &path, int frame, int lastFrame)
 bool exportSequence(const doc::Document &document, int first, int last, const QString &path,
                     const ExportOptions &options, const std::function<bool(int, int)> &progress, QString *error)
 {
-    const bool transparent = options.transparent && options.format == ImageFormat::Png;
-    canvas::FrameRenderer renderer;
-    renderer.setPaperVisible(!transparent);
-    renderer.setGuidesVisible(false); // perspective layers are guides, not the picture
+    FrameSource source(document, options);
     const int total = last - first + 1;
     for (int frame = first; frame <= last; ++frame) {
-        renderer.renderAll(document, frame);
-        if (!writeImage(renderer.image(), sequenceFileName(path, frame, last), options, error))
+        if (!writeImage(source.frame(frame), sequenceFileName(path, frame, last), options, error))
             return false;
         if (progress && !progress(frame - first + 1, total))
             break;

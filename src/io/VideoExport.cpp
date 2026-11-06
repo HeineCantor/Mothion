@@ -26,9 +26,9 @@ QString findFfmpeg()
 }
 
 QImage renderFinalFrame(const doc::Document &document, int frame, compositing::Evaluator &evaluator,
-                        const compositing::Graph *graph)
+                        const compositing::Graph *graph, bool transparent)
 {
-    QImage plain = renderFrame(document, frame, false);
+    QImage plain = renderFrame(document, frame, transparent);
     if (!graph)
         return plain;
     compositing::EvalContext context;
@@ -38,6 +38,8 @@ QImage renderFinalFrame(const doc::Document &document, int frame, compositing::E
     const QImage result = evaluator.evaluate(*graph, context);
     if (result.isNull())
         return plain; // nothing wired to Output: the picture as it is
+    if (transparent)
+        return result.convertToFormat(QImage::Format_ARGB32_Premultiplied);
     // Blurs and tints leave partly transparent pixels: over the paper, like the plain frame.
     QImage opaque(result.size(), QImage::Format_RGB32);
     opaque.fill(QColor::fromRgba(document.paperColor()));
