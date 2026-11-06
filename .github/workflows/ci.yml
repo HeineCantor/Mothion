@@ -46,7 +46,8 @@ jobs:
           host: linux
           target: desktop
           # aqtinstall names the Linux desktop build linux_gcc_64 from Qt 6.7 on.
-          # Qt Sql (and its SQLite driver) is part of the base package: no modules.
+          # Qt Sql (and its SQLite driver) is part of the base package; Multimedia (the audio track) is a module.
+          modules: qtmultimedia
           arch: linux_gcc_64
           cache: true
 

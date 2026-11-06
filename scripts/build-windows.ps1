@@ -7,8 +7,9 @@
       - CMake (winget)
       - Visual Studio 2022 with the C++ tools, or the Build Tools with the
         C++ workload (winget; the installer asks for administrator rights)
-      - Qt for MSVC 2022 64-bit, downloaded with aqtinstall (which needs
-        Python, also installed with winget if missing)
+      - Qt for MSVC 2022 64-bit with its Multimedia module (the audio track),
+        downloaded with aqtinstall (which needs Python, also installed with
+        winget if missing)
     Then configures and builds the project, runs the tests and copies Qt's
     DLLs next to mothion.exe, so the program starts on its own.
 
@@ -31,6 +32,7 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 $buildDir = Join-Path $repo 'build'
 $qtDir = Join-Path $QtRoot "$QtVersion\msvc2022_64"
+$qtModules = @('qtmultimedia') # besides the base: what aqtinstall is asked for
 
 function Step([string]$message) { Write-Host "==> $message" -ForegroundColor Cyan }
 
@@ -107,8 +109,11 @@ if (-not $vs) {
 Step "C++ tools: $vs"
 
 # --- Qt ---
-if (-not (Test-Path (Join-Path $qtDir 'lib\cmake\Qt6\Qt6Config.cmake'))) {
-    Step "Installing Qt $QtVersion for MSVC 2022 64-bit into $QtRoot"
+# The base and each module: a Qt installed before the audio track lacks its Multimedia, and gets it now.
+$qtMissing = -not (Test-Path (Join-Path $qtDir 'lib\cmake\Qt6\Qt6Config.cmake')) -or
+    -not (Test-Path (Join-Path $qtDir 'lib\cmake\Qt6Multimedia\Qt6MultimediaConfig.cmake'))
+if ($qtMissing) {
+    Step "Installing Qt $QtVersion for MSVC 2022 64-bit ($($qtModules -join ', ')) into $QtRoot"
     $python = Find-Python
     if (-not $python) {
         Install-WithWinget 'Python.Python.3.12'
@@ -117,7 +122,7 @@ if (-not (Test-Path (Join-Path $qtDir 'lib\cmake\Qt6\Qt6Config.cmake'))) {
     }
     Invoke-Checked 'Installing aqtinstall' { & $python -m pip install --user --upgrade --quiet aqtinstall }
     Invoke-Checked 'Downloading Qt' {
-        & $python -m aqt install-qt windows desktop $QtVersion win64_msvc2022_64 --outputdir $QtRoot
+        & $python -m aqt install-qt windows desktop $QtVersion win64_msvc2022_64 -m @qtModules --outputdir $QtRoot
     }
 }
 Step "Qt: $qtDir"

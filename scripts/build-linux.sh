@@ -3,7 +3,8 @@
 #
 # Checks for, and installs when missing (through the distribution's package
 # manager, with sudo): the C++ compiler, CMake, Ninja, Qt 6 (Core, Gui, Widgets,
-# Sql with the SQLite driver, Network, Test, Wayland) and Eigen. Supported: apt
+# Sql with the SQLite driver, Network, Multimedia with its FFmpeg backend for the
+# audio track, Test, Wayland) and Eigen. Supported: apt
 # (Debian, Ubuntu), dnf (Fedora), pacman (Arch) and zypper (openSUSE).
 # Then configures and builds the project and runs the tests.
 #
@@ -18,6 +19,7 @@ usage() {
 Usage: build-linux.sh [options]
   --config <name>   RelWithDebInfo (default), Release or Debug
   --qt-dir <dir>    use the Qt installed in <dir> (e.g. ~/Qt/6.10.2/gcc_64) instead of the system one
+                    (with its Multimedia module installed)
   --skip-tests      build only
   --dev-tools       also build mothion_brushsheet
   --no-install      do not install missing packages
@@ -60,20 +62,21 @@ fail() { printf '\033[31m%s\033[0m\n' "$*" >&2; exit 1; }
 # --- Packages ---
 # One list per package manager, and how to ask whether a package is installed.
 if command -v apt-get >/dev/null; then
-    packages=(build-essential cmake ninja-build qt6-base-dev libqt6sql6-sqlite qt6-wayland libeigen3-dev)
+    packages=(build-essential cmake ninja-build qt6-base-dev libqt6sql6-sqlite qt6-multimedia-dev qt6-wayland libeigen3-dev)
     is_installed() { dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q 'ok installed'; }
     install() { sudo apt-get update && sudo apt-get install -y "$@"; }
 elif command -v dnf >/dev/null; then
-    packages=(gcc-c++ cmake ninja-build qt6-qtbase-devel qt6-qtwayland eigen3-devel)
+    packages=(gcc-c++ cmake ninja-build qt6-qtbase-devel qt6-qtmultimedia-devel qt6-qtwayland eigen3-devel)
     is_installed() { rpm -q "$1" >/dev/null 2>&1; }
     install() { sudo dnf install -y "$@"; }
 elif command -v pacman >/dev/null; then
-    packages=(base-devel cmake ninja qt6-base qt6-wayland eigen)
+    # qt6-multimedia is the library, qt6-multimedia-ffmpeg the backend that decodes the audio files.
+    packages=(base-devel cmake ninja qt6-base qt6-multimedia qt6-multimedia-ffmpeg qt6-wayland eigen)
     # base-devel is a group on older Arch installs, a package on newer ones.
     is_installed() { pacman -Q "$1" >/dev/null 2>&1 || pacman -Qg "$1" >/dev/null 2>&1; }
     install() { sudo pacman -S --needed --noconfirm "$@"; }
 elif command -v zypper >/dev/null; then
-    packages=(gcc-c++ cmake ninja qt6-base-devel qt6-sql-sqlite qt6-wayland eigen3-devel)
+    packages=(gcc-c++ cmake ninja qt6-base-devel qt6-sql-sqlite qt6-multimedia-devel qt6-wayland eigen3-devel)
     is_installed() { rpm -q "$1" >/dev/null 2>&1; }
     install() { sudo zypper --non-interactive install "$@"; }
 else
@@ -110,7 +113,8 @@ fi
 step 'Configuring'
 if ! cmake "${cmake_args[@]}"; then
     fail "Configuring failed. If CMake did not find Qt >= 6.5 (older distributions ship an older one),
-install a recent Qt (e.g. with aqtinstall or the Qt Online Installer) and pass it with --qt-dir."
+install a recent Qt (e.g. with aqtinstall or the Qt Online Installer, with the Multimedia module) and pass it
+with --qt-dir."
 fi
 step "Building ($config)"
 cmake --build "$build_dir" --parallel || fail 'Building failed.'

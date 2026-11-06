@@ -16,8 +16,10 @@ This is still an homemade project, made with love and moths in our hearts, so en
 
 - CMake ≥ 3.21
 - C++20 compiler
-- Qt ≥ 6.5 (Core, Gui, Widgets, Sql; Test for the test suite)
+- Qt ≥ 6.5 (Core, Gui, Widgets, Sql, Network, Multimedia; Test for the test suite)
 - Eigen 3.4 (MPL-2.0, header-only)
+
+Qt Multimedia, with its FFmpeg backend, decodes and plays the project's audio track. It is a separate package or module in most Qt distributions (`qt6-multimedia-dev` on Debian/Ubuntu, the *Qt Multimedia* module in the Qt Online Installer).
 
 Qt's SQLite driver (`qsqlite`) is used to read `.sut` brush files. Qt must be dynamically linked, as required by the LGPL. CMake checks for static Qt builds and stops if one is found.
 
@@ -76,7 +78,7 @@ This also rebuilds the project if the sources have changed. It accepts the same 
 Alternatively, on Ubuntu/Debian, the project can be built manually:
 
 ```sh
-sudo apt install build-essential cmake qt6-base-dev libqt6sql6-sqlite qt6-wayland libeigen3-dev
+sudo apt install build-essential cmake qt6-base-dev libqt6sql6-sqlite qt6-multimedia-dev qt6-wayland libeigen3-dev
 
 cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build -j
@@ -122,7 +124,7 @@ It rebuilds the project if the sources have changed and accepts the same options
 #### Manual build
 
 1. Install Visual Studio 2022 with the *Desktop development with C++* workload.
-2. Install Qt 6.x for **MSVC 2022 64-bit** using the Qt Online Installer.
+2. Install Qt 6.x for **MSVC 2022 64-bit** using the Qt Online Installer, with the **Qt Multimedia** module selected under *Additional Libraries*.
 3. Open an *x64 Native Tools Command Prompt for VS 2022* and run:
 
 ```bat
@@ -136,7 +138,7 @@ C:\Qt\6.10.2\msvc2022_64\bin\windeployqt.exe build\RelWithDebInfo\mothion.exe
 build\RelWithDebInfo\mothion.exe
 ```
 
-`windeployqt` copies the required Qt DLLs and plugins next to the executable.
+`windeployqt` copies the required Qt DLLs and plugins (including the FFmpeg backend of Qt Multimedia) next to the executable.
 
 ### CMake options
 
