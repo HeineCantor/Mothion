@@ -83,11 +83,19 @@ NodeItem::NodeItem(const NodeKind &kind)
             };
             paint(param.initial.value<QColor>());
             layout->addWidget(swatch, 1);
-            connect(swatch, &QPushButton::clicked, this, [this, key, swatch] {
-                const QColor chosen = QColorDialog::getColor(m_values.value(key).value<QColor>(), swatch,
-                                                             tr("Color"), QColorDialog::ShowAlphaChannel);
-                if (chosen.isValid())
-                    setParam(key, chosen);
+            connect(swatch, &QPushButton::clicked, this, [this, key] {
+                // The swatch lives inside the scene and has no window of its own: the dialog hangs on the view's.
+                // It is opened without blocking (the picture follows the color as it is picked), with Qt's own
+                // dialog: the system's can hang over a window like this one.
+                const QList<QGraphicsView *> views = scene() ? scene()->views() : QList<QGraphicsView *>();
+                const QColor original = m_values.value(key).value<QColor>();
+                auto *dialog = new QColorDialog(original, views.isEmpty() ? nullptr : views.first()->window());
+                dialog->setAttribute(Qt::WA_DeleteOnClose);
+                dialog->setOptions(QColorDialog::ShowAlphaChannel | QColorDialog::DontUseNativeDialog);
+                dialog->setWindowTitle(tr("Color"));
+                connect(dialog, &QColorDialog::currentColorChanged, this, [this, key](const QColor &c) { setParam(key, c); });
+                connect(dialog, &QColorDialog::rejected, this, [this, key, original] { setParam(key, original); });
+                dialog->open();
             });
             m_shown[key] = [paint](const QVariant &v) { paint(v.value<QColor>()); };
         }

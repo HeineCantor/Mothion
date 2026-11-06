@@ -70,6 +70,8 @@
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <QScrollArea>
+#include <QColorDialog>
+#include <QGraphicsProxyWidget>
 #include <QSignalSpy>
 #include <QSpinBox>
 #include <QScrollBar>
@@ -5358,6 +5360,32 @@ private slots:
         const QImage after = graph.evaluate(frame);
         QVERIFY(after != before);
         QCOMPARE(after, frame);
+    }
+
+    void nodeColorIsPickedWithoutBlocking()
+    {
+        ui::NodeGraphView graph;
+        graph.show();
+        ui::NodeItem *color = nullptr;
+        for (auto *item : graph.items())
+            if (auto *node = dynamic_cast<ui::NodeItem *>(item); node && node->kind().type == ui::NodeKind::Type::Color)
+                color = node;
+        QVERIFY(color);
+        QPushButton *swatch = nullptr;
+        for (QGraphicsItem *child : color->childItems())
+            if (auto *proxy = dynamic_cast<QGraphicsProxyWidget *>(child))
+                swatch = proxy->widget()->findChild<QPushButton *>();
+        QVERIFY(swatch);
+        swatch->click(); // must return: the dialog does not block
+        QColorDialog *dialog = nullptr;
+        for (QWidget *top : QApplication::topLevelWidgets())
+            if (auto *d = qobject_cast<QColorDialog *>(top))
+                dialog = d;
+        QVERIFY(dialog);
+        dialog->setCurrentColor(QColor(10, 200, 30, 255));
+        QCOMPARE(color->param(QStringLiteral("color")).value<QColor>(), QColor(10, 200, 30, 255));
+        dialog->reject(); // cancelled: the old color is back
+        QCOMPARE(color->param(QStringLiteral("color")).value<QColor>(), QColor(150, 60, 190, 110));
     }
 
     void nodeGraphWiresAreMovedAndCut()
