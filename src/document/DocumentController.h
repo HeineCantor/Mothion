@@ -4,6 +4,7 @@
 #include "core/document/History.h"
 
 #include <QImage>
+#include <functional>
 #include <QObject>
 #include <QPainterPath>
 #include <QRect>
@@ -98,6 +99,12 @@ public:
     // drawing held for the whole scene: centered, scaled down to fit the
     // document if larger. One undo step; the new cel becomes current.
     void importImage(const QImage &image, const QString &name);
+    // An image sequence as one new cel: image i is a drawing of its own, shown for `hold` frames from
+    // startFrame + i * hold (the scene gets longer if it needs). Images that are null are skipped; returns how
+    // many were imported. One undo step.
+    // `progress`, if given, is told how many are done after each one (the views refresh once, at the end).
+    int importImageSequence(const QList<QImage> &images, const QString &name, int startFrame, int hold,
+                            const std::function<void(int)> &progress = {});
 
     // Erases every pixel of the current layer, as one undo step. Returns
     // false, with `reason` saying why, when there is nothing to clear or the

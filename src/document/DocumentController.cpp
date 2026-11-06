@@ -515,6 +515,66 @@ void DocumentController::importImage(const QImage &image, const QString &name)
     setCurrentCel(celId);
 }
 
+int DocumentController::importImageSequence(const QList<QImage> &images, const QString &name, int startFrame,
+                                            int hold, const std::function<void(int)> &progress)
+{
+    QList<QImage> usable;
+    for (const QImage &image : images)
+        if (!image.isNull())
+            usable << image;
+    if (usable.isEmpty())
+        return 0;
+    interruptStroke();
+    doc::Document &d = *m_document;
+    startFrame = std::max(0, startFrame);
+    hold = std::max(1, hold);
+
+    // One new cel above the current one; each image a drawing of its own, shown for `hold` frames from the
+    // one after the last. Applied now, recorded together.
+    std::vector<std::unique_ptr<doc::Command>> steps;
+    auto cel = std::make_unique<doc::AddCelCommand>(d, d.indexOf(m_currentCel) + 1,
+                                                    doc::CelProperties{name.toStdString()});
+    const doc::CelId celId = cel->celId();
+    // The views hear of it once, when all is in: one refresh, not one for each of the frames.
+    doc::ChangeSet changes = cel->apply(d);
+    steps.push_back(std::move(cel));
+    std::vector<std::pair<doc::DrawingId, QRect>> painted;
+
+    for (int i = 0; i < usable.size(); ++i) {
+        // Scaled down to fit the document if larger, centered, as a single imported image is.
+        QImage pixels = usable[i].convertToFormat(QImage::Format_ARGB32_Premultiplied);
+        if (pixels.width() > d.width() || pixels.height() > d.height())
+            pixels = pixels.scaled(d.width(), d.height(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        const QPoint at((d.width() - pixels.width()) / 2, (d.height() - pixels.height()) / 2);
+
+        doc::NewDrawing drawing = doc::makeNewDrawing(d, celId, startFrame + i * hold, hold, tr("Layer 1").toStdString());
+        changes.merge(drawing.command->apply(d));
+        steps.push_back(std::move(drawing.command));
+        doc::TiledImage &target = d.layer(celId, drawing.id, drawing.layer)->image;
+        const doc::TiledImage before = target;
+        target.write(at.x(), at.y(), pixels.width(), pixels.height(),
+                     reinterpret_cast<const doc::Pixel *>(pixels.constBits()), pixels.bytesPerLine() / 4);
+        if (auto paint = doc::PaintCommand::capture(celId, drawing.id, drawing.layer, before, target))
+            steps.push_back(std::move(paint));
+        painted.emplace_back(drawing.id, QRect(at, pixels.size()));
+        if (progress)
+            progress(i + 1);
+    }
+    // The scene is as long as the sequence needs (this is not one of the undo steps).
+    const int end = startFrame + int(usable.size()) * hold;
+    if (end > d.frameCount())
+        d.setFrameCount(end);
+
+    m_history.pushApplied(std::make_unique<doc::GroupCommand>(doc::CommandKind::ImportSequence, std::move(steps)));
+    publish(changes);
+    for (const auto &[drawingId, area] : painted)
+        emit pixelsChanged(celId, drawingId, area);
+    emit historyChanged();
+    setCurrentCel(celId);
+    setCurrentFrame(startFrame);
+    return int(usable.size());
+}
+
 std::optional<DocumentController::PerspectiveLayerInfo> DocumentController::perspectiveLayerById(doc::LayerId id) const
 {
     if (id == doc::kNoId)
@@ -848,6 +908,7 @@ QString DocumentController::commandName(doc::CommandKind kind)
     case doc::CommandKind::MoveLayer: return tr("move layer");
     case doc::CommandKind::ChangeLayerProperties: return tr("layer properties");
     case doc::CommandKind::ImportImage: return tr("import image");
+    case doc::CommandKind::ImportSequence: return tr("import image sequence");
     case doc::CommandKind::ClearLayer: return tr("clear");
     case doc::CommandKind::Move: return tr("move");
     case doc::CommandKind::Select: return tr("selection");

@@ -58,6 +58,19 @@ private:
     void updateTitle();
     void exportFrames();
     void importImage();
+    // An image sequence: one dialog to choose the images (several of them, or "Use this folder" for all of
+    // the folder's), then asks where it starts and the frames per image, and imports it.
+    void chooseSequence();
+    void importSequence(QStringList files, const QString &name);
+
+public:
+    // The images of `files`, in name order (numbers as numbers: 2 before 10), one new cel with a frame for each,
+    // from `startFrame`, `hold` frames each. How many were read and imported.
+    int importSequenceFiles(QStringList files, const QString &name, int startFrame, int hold);
+    // The image files directly in `folder`, with their paths.
+    static QStringList imageFilesIn(const QString &folder);
+
+private:
     // The clipboard: the selected pixels (as an image other apps take too,
     // with where they were for pasting back in place), and pasting them or
     // any image onto the current layer.

@@ -29,6 +29,7 @@
 #include "ui/PuppetBar.h"
 #include "input/TabletInputAdapter.h"
 #include "tools/Preferences.h"
+#include "ui/ImportSequenceDialog.h"
 #include "ui/SettingsDialog.h"
 #include "ui/ShapeBar.h"
 #include "ui/Shortcuts.h"
@@ -57,6 +58,8 @@
 #include <QPainter>
 #include <QLineEdit>
 #include <QLabel>
+#include <QFileDialog>
+#include <QDialogButtonBox>
 #include <QListWidget>
 #include <QTreeWidget>
 #include <QElapsedTimer>
@@ -4753,6 +4756,101 @@ private slots:
         prefs.setBrushOutline(true);
         QCOMPARE(canvas.cursor().shape(), Qt::BitmapCursor);
         prefs.resetAll();
+    }
+
+    // An image sequence from files comes in as one new cel with a drawing for each image, in name order (2
+    // before 10), `hold` frames each from the start frame; the scene grows to fit; one undo step; a file that
+    // is no image is skipped.
+    void imageSequenceImportsAsOneCel()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        auto write = [&](const char *name, QColor color) {
+            QImage image(40, 30, QImage::Format_ARGB32);
+            image.fill(color);
+            const QString path = dir.filePath(QLatin1String(name));
+            image.save(path); // read back below: a file that did not save would not be imported
+            return path;
+        };
+        QStringList files;
+        files << write("walk_10.png", Qt::blue) << write("walk_2.png", Qt::green) << write("walk_1.png", Qt::red);
+        QFile bad(dir.filePath(QStringLiteral("walk_3.png"))); // named like an image, is not one
+        QVERIFY(bad.open(QIODevice::WriteOnly));
+        bad.write("not an image");
+        bad.close();
+        files << bad.fileName();
+
+        ui::MainWindow window;
+        auto *controller = window.findChild<document::DocumentController *>();
+        const int cels = controller->document().celCount();
+        QCOMPARE(controller->document().frameCount(), 120);
+        QCOMPARE(window.importSequenceFiles(files, QStringLiteral("walk"), 118, 2), 3);
+        QCOMPARE(controller->document().celCount(), cels + 1);
+        const doc::Cel &cel = *controller->document().cel(controller->currentCel());
+        QCOMPARE(QString::fromStdString(cel.properties().name), QStringLiteral("walk"));
+        QCOMPARE(cel.drawings().size(), std::size_t(3));
+        auto colorAt = [&](int frame) {
+            const doc::Drawing *d = cel.drawingAt(frame);
+            return d ? QColor::fromRgba(d->layers.front().image.pixel(960, 540)) : QColor();
+        };
+        QCOMPARE(colorAt(118), QColor(Qt::red)); // walk_1, then walk_2, then walk_10 (not walk_10 first)
+        QCOMPARE(colorAt(119), QColor(Qt::red)); // held for two frames
+        QCOMPARE(colorAt(120), QColor(Qt::green));
+        QCOMPARE(colorAt(122), QColor(Qt::blue));
+        QVERIFY(!cel.drawingAt(124));
+        QCOMPARE(controller->document().frameCount(), 124); // the scene grew to hold it
+        QCOMPARE(controller->undoText(), QStringLiteral("Undo import image sequence"));
+        controller->undo();
+        QCOMPARE(controller->document().celCount(), cels);
+    }
+
+    // A folder's images, whole: the image files directly in it (not other files, not in subfolders).
+    void sequenceFromAFolderTakesItsImages()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        QImage image(8, 8, QImage::Format_ARGB32);
+        image.fill(Qt::red);
+        for (const char *name : {"a_1.png", "a_2.png", "b.jpg"})
+            image.save(dir.filePath(QLatin1String(name)));
+        QFile text(dir.filePath(QStringLiteral("notes.txt")));
+        QVERIFY(text.open(QIODevice::WriteOnly));
+        text.close();
+        QVERIFY(QDir(dir.path()).mkdir(QStringLiteral("sub")));
+        image.save(dir.filePath(QStringLiteral("sub/inner.png")));
+        const QStringList files = ui::MainWindow::imageFilesIn(dir.path());
+        QCOMPARE(files.size(), 3);
+        for (const QString &f : files)
+            QVERIFY(QFileInfo(f).isAbsolute() && !f.contains(QStringLiteral("sub")) && !f.endsWith(QStringLiteral(".txt")));
+    }
+
+    // The sequence's file dialog gets its "Use this folder" button next to Open: a non-native QFileDialog has
+    // the button box it is added to.
+    void nonNativeFileDialogHasAButtonBox()
+    {
+        QFileDialog dialog;
+        dialog.setOption(QFileDialog::DontUseNativeDialog);
+        dialog.setFileMode(QFileDialog::ExistingFiles);
+        auto *buttons = dialog.findChild<QDialogButtonBox *>();
+        QVERIFY(buttons);
+        QVERIFY(buttons->button(QDialogButtonBox::Open) || buttons->button(QDialogButtonBox::Save)
+                || !buttons->buttons().isEmpty());
+    }
+
+    // The dialog says where the sequence ends and when the scene has to grow.
+    void importSequenceDialogShowsTheEnd()
+    {
+        ui::ImportSequenceDialog dialog(10, 4, 24);
+        auto *start = dialog.findChild<QSpinBox *>(QStringLiteral("start"));
+        auto *hold = dialog.findChild<QSpinBox *>(QStringLiteral("hold"));
+        auto *end = dialog.findChild<QLabel *>(QStringLiteral("end"));
+        QVERIFY(start && hold && end);
+        QCOMPARE(dialog.startFrame(), 4); // the current frame, counted from 1 in the box
+        QCOMPARE(start->value(), 5);
+        QCOMPARE(dialog.hold(), 1);
+        QVERIFY(!end->text().contains(QStringLiteral("grows"))); // frames 5 to 14 fit in 24
+        hold->setValue(3);
+        QVERIFY(end->text().contains(QStringLiteral("grows from 24 to 34")));
     }
 
     void largeImagesAreScaledToFit()

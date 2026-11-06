@@ -9,7 +9,9 @@
 #include "tools/ToolState.h"
 #include "ui/AutoplayWindow.h"
 #include "tools/Preferences.h"
+#include "core/Parallel.h"
 #include "ui/DiscordPresence.h"
+#include "ui/ImportSequenceDialog.h"
 #include "ui/DockLayout.h"
 #include "ui/ExportDialog.h"
 #include "ui/IconFactory.h"
@@ -43,18 +45,22 @@
 #include <QCloseEvent>
 #include <QDialog>
 #include <QDataStream>
+#include <QCollator>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QImageReader>
 #include <QKeyEvent>
 #include <QMessageBox>
+#include <QPushButton>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenuBar>
 #include <QMimeData>
 #include <QPlainTextEdit>
 #include <QProgressDialog>
+#include <QThread>
 #include <QSettings>
 #include <QSignalBlocker>
 #include <QStatusBar>
@@ -63,6 +69,9 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <atomic>
+#include <thread>
+#include <vector>
 
 namespace mothion::ui {
 
@@ -310,6 +319,7 @@ void MainWindow::createMenus()
     file->addAction(m_saveAsAction);
     file->addSeparator();
     file->addAction(tr("Import image…"), this, &MainWindow::importImage);
+    file->addAction(tr("Import image sequence…"), this, &MainWindow::chooseSequence);
     file->addAction(tr("Import brush (.sut)…"), this, &MainWindow::importBrush);
     file->addSeparator();
     Shortcuts &keymap = Shortcuts::instance();
@@ -471,6 +481,148 @@ void MainWindow::importImage()
     }
     m_document->importImage(image, QFileInfo(file).completeBaseName());
     statusBar()->showMessage(tr("Image imported: %1").arg(QFileInfo(file).fileName()), 4000);
+}
+
+namespace {
+
+QStringList imagePatterns()
+{
+    QStringList patterns;
+    for (const QByteArray &format : QImageReader::supportedImageFormats())
+        patterns << QStringLiteral("*.") + QString::fromLatin1(format);
+    return patterns;
+}
+
+// A name for the cel of a sequence: the first file's, without the number that counts the frames
+// ("walk_001" -> "walk").
+QString sequenceName(const QString &firstFile)
+{
+    QString name = QFileInfo(firstFile).completeBaseName();
+    while (!name.isEmpty() && (name.back().isDigit() || name.back() == QLatin1Char('_') || name.back() == QLatin1Char('-')
+                               || name.back() == QLatin1Char('.') || name.back() == QLatin1Char(' ')))
+        name.chop(1);
+    return name.isEmpty() ? QFileInfo(firstFile).completeBaseName() : name;
+}
+
+} // namespace
+
+int MainWindow::importSequenceFiles(QStringList files, const QString &name, int startFrame, int hold)
+{
+    // In name order, numbers as numbers (frame2 before frame10).
+    QCollator collator;
+    collator.setNumericMode(true);
+    collator.setCaseSensitivity(Qt::CaseInsensitive);
+    std::sort(files.begin(), files.end(), [&](const QString &a, const QString &b) {
+        return collator.compare(QFileInfo(a).fileName(), QFileInfo(b).fileName()) < 0;
+    });
+    // Reading and adding take a while for a long sequence: a progress bar (shown only if it does), which
+    // keeps the window answering, and a Cancel while nothing has been added yet.
+    const int total = int(files.size());
+    QProgressDialog progress(tr("Reading images…"), tr("Cancel"), 0, 2 * total, this);
+    progress.setWindowTitle(tr("Import image sequence"));
+    progress.setWindowModality(Qt::WindowModal);
+    progress.setMinimumDuration(400);
+    // Read on all the cores (decoding is the slow part); each image is also made ready for the document
+    // there: in its pixel format, and scaled down to fit. This thread keeps the progress and the window.
+    const int fitWidth = m_document->document().width(), fitHeight = m_document->document().height();
+    std::vector<QImage> loaded;
+    loaded.resize(std::size_t(total));
+    std::atomic<int> done{0};
+    std::atomic<bool> cancelled{false};
+    std::thread readers([&] {
+        parallelFor(total, [&](int i) {
+            QImageReader reader(files[i]);
+            reader.setAutoTransform(true);
+            QImage image = reader.read();
+            if (!image.isNull()) {
+                image = image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+                if (image.width() > fitWidth || image.height() > fitHeight)
+                    image = image.scaled(fitWidth, fitHeight, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+            }
+            loaded[std::size_t(i)] = std::move(image);
+            ++done;
+        }, &cancelled);
+    });
+    while (done.load() < total && !cancelled.load()) {
+        progress.setValue(done.load());
+        if (progress.wasCanceled())
+            cancelled = true;
+        QCoreApplication::processEvents();
+        QThread::msleep(10);
+    }
+    readers.join();
+    if (cancelled.load())
+        return 0;
+    QList<QImage> images;
+    QStringList unreadable;
+    for (int i = 0; i < total; ++i) {
+        if (loaded[std::size_t(i)].isNull())
+            unreadable << QFileInfo(files[i]).fileName();
+        else
+            images << loaded[std::size_t(i)];
+    }
+    progress.setLabelText(tr("Adding frames…"));
+    progress.setCancelButton(nullptr); // the document is being changed: no way back from here
+    progress.setValue(total);
+    if (!unreadable.isEmpty())
+        statusBar()->showMessage(tr("Skipped, cannot be read: %1").arg(unreadable.join(QStringLiteral(", "))), 6000);
+    const int imported = m_document->importImageSequence(
+        images, name.isEmpty() ? tr("Sequence") : name, startFrame, hold,
+        [&progress, total](int added) { progress.setValue(total + added); });
+    progress.setValue(2 * total);
+    if (imported > 0 && unreadable.isEmpty())
+        statusBar()->showMessage(tr("%n image(s) imported", nullptr, imported), 4000);
+    return imported;
+}
+
+void MainWindow::importSequence(QStringList files, const QString &name)
+{
+    if (files.isEmpty()) {
+        QMessageBox::information(this, tr("Import image sequence"), tr("There are no images to import."));
+        return;
+    }
+    ImportSequenceDialog dialog(int(files.size()), m_document->currentFrame(), m_document->document().frameCount(),
+                                this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    if (importSequenceFiles(files, name, dialog.startFrame(), dialog.hold()) == 0)
+        QMessageBox::warning(this, tr("Import image sequence"), tr("None of the files could be read as an image."));
+}
+
+QStringList MainWindow::imageFilesIn(const QString &folder)
+{
+    QStringList files;
+    for (const QFileInfo &info : QDir(folder).entryInfoList(imagePatterns(), QDir::Files | QDir::Readable))
+        files << info.absoluteFilePath();
+    return files;
+}
+
+void MainWindow::chooseSequence()
+{
+    // One dialog for both: select the images (Ctrl or Shift for several), or go into a folder and take it whole.
+    QFileDialog dialog(this, tr("Import image sequence"));
+    dialog.setOption(QFileDialog::DontUseNativeDialog); // the extra button is not possible in a native one
+    dialog.setFileMode(QFileDialog::ExistingFiles);
+    dialog.setNameFilter(tr("Images (%1)").arg(imagePatterns().join(QLatin1Char(' '))));
+    bool wholeFolder = false;
+    if (auto *buttons = dialog.findChild<QDialogButtonBox *>()) {
+        auto *folder = buttons->addButton(tr("Use this folder"), QDialogButtonBox::ActionRole);
+        folder->setToolTip(tr("Import every image of the folder shown"));
+        connect(folder, &QPushButton::clicked, &dialog, [&dialog, &wholeFolder] {
+            wholeFolder = true;
+            static_cast<QDialog &>(dialog).done(QDialog::Accepted);
+        });
+    }
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    if (wholeFolder) {
+        const QDir folder = dialog.directory();
+        importSequence(imageFilesIn(folder.absolutePath()), folder.dirName());
+        return;
+    }
+    const QStringList files = dialog.selectedFiles();
+    if (!files.isEmpty())
+        importSequence(files, sequenceName(files.first()));
 }
 
 void MainWindow::importBrush()

@@ -48,6 +48,7 @@ enum class CommandKind {
     MoveLayer,
     ChangeLayerProperties,
     ImportImage,
+    ImportSequence,
     ClearLayer,
     Move,
     Select,
