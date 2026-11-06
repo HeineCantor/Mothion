@@ -40,4 +40,16 @@ struct GraphData
     bool operator==(const GraphData &) const = default;
 };
 
+// How the editor was left: the zoom of the node view and the scene point at its center. Not part of the network
+// (moving the view is no undo step); the project keeps it so the editor opens as it was.
+struct GraphView
+{
+    bool valid = false;
+    double zoom = 1;
+    double x = 0;
+    double y = 0;
+
+    bool operator==(const GraphView &) const = default;
+};
+
 } // namespace mothion::doc

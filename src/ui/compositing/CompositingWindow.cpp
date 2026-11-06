@@ -7,6 +7,7 @@
 
 #include <QButtonGroup>
 #include <QHBoxLayout>
+#include <QScrollBar>
 #include <QLabel>
 #include <QToolButton>
 #include <QPainter>
@@ -26,6 +27,7 @@ CompositingWindow::CompositingWindow(document::DocumentController *document, QWi
     , m_graph(nullptr)
     , m_preview(new ImagePreview(this))
     , m_timer(new QTimer(this))
+    , m_viewTimer(new QTimer(this))
     , m_frameTimer(new QTimer(this))
     , m_commitTimer(new QTimer(this))
 {
@@ -195,7 +197,20 @@ CompositingWindow::CompositingWindow(document::DocumentController *document, QWi
     m_frameTimer->setSingleShot(true);
     m_frameTimer->setInterval(60);
     connect(m_frameTimer, &QTimer::timeout, this, &CompositingWindow::frame);
-    connect(m_graph, &NodeGraphView::viewTouched, this, [this] { m_autoFrame = false; });
+    connect(m_graph, &NodeGraphView::viewTouched, this, [this] {
+        m_autoFrame = false;
+        m_viewTimer->start();
+    });
+    m_viewTimer->setSingleShot(true);
+    m_viewTimer->setInterval(300);
+    connect(m_viewTimer, &QTimer::timeout, this, &CompositingWindow::keepView);
+    for (QScrollBar *bar : {m_graph->horizontalScrollBar(), m_graph->verticalScrollBar()})
+        connect(bar, &QScrollBar::valueChanged, m_viewTimer, qOverload<>(&QTimer::start));
+    if (m_document)
+        connect(m_document, &document::DocumentController::documentReplaced, this, [this] {
+            m_autoFrame = true; // another project: its view, or the first look
+            m_frameTimer->start();
+        });
     connect(split, &QSplitter::splitterMoved, this, [this] { m_autoFrame = false; });
     refresh();
 }
@@ -239,6 +254,7 @@ void CompositingWindow::documentChanged()
 CompositingWindow::~CompositingWindow()
 {
     commit();
+    keepView();
     // The editor listens to the network, which goes first among the members: it cannot wait for the children.
     m_network.removeListener(m_listener);
     delete m_graph;
@@ -255,10 +271,30 @@ void CompositingWindow::frame()
 {
     if (!m_autoFrame)
         return;
-    // Half and half, the nodes zoomed to take 80% of the width.
+    // Half and half, the nodes where the project left them (or at their own size).
     const int half = m_split->height() / 2;
     m_split->setSizes({half, m_split->height() - half});
-    m_graph->fitWidth(0.8);
+    applyView();
+}
+
+void CompositingWindow::applyView()
+{
+    const doc::GraphView saved = m_document ? m_document->compositingView() : doc::GraphView();
+    if (saved.valid)
+        m_graph->setView(saved.zoom, {saved.x, saved.y});
+    else
+        m_graph->showStart();
+}
+
+void CompositingWindow::keepView()
+{
+    m_viewTimer->stop();
+    if (!m_document || m_autoFrame || !m_graph)
+        return; // not touched by the user: nothing of theirs to keep
+    const QPointF center = m_graph->viewCenter();
+    const doc::GraphView view{true, m_graph->viewZoom(), center.x(), center.y()};
+    if (view != m_document->compositingView())
+        m_document->setCompositingView(view);
 }
 
 void CompositingWindow::scheduleRefresh()

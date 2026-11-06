@@ -47,6 +47,8 @@ public:
     // The compositing network (see GraphData); empty until the editor makes one.
     const GraphData &compositing() const { return m_compositing; }
     void setCompositing(GraphData graph) { m_compositing = std::move(graph); }
+    const GraphView &compositingView() const { return m_compositingView; }
+    void setCompositingView(const GraphView &view) { m_compositingView = view; }
 
     // Cels from bottom (index 0) to top.
     int celCount() const { return int(m_cels.size()); }
@@ -84,6 +86,7 @@ private:
     Pixel m_paperColor = 0xffffffff;
     std::optional<AudioTrack> m_audio;
     GraphData m_compositing;
+    GraphView m_compositingView;
     std::vector<std::unique_ptr<Cel>> m_cels;
     CelId m_nextCelId = 1;
     DrawingId m_nextDrawingId = 1;

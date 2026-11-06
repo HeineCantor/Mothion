@@ -446,6 +446,20 @@ void NodeGraphView::fitWidth(qreal fraction)
     centerOn(box.center());
 }
 
+void NodeGraphView::setView(qreal zoom, const QPointF &center)
+{
+    const qreal s = std::clamp(zoom, 0.2, 3.0);
+    resetTransform();
+    scale(s, s);
+    centerOn(center);
+}
+
+void NodeGraphView::showStart()
+{
+    const QRectF box = m_scene->itemsBoundingRect();
+    setView(1.0, box.isEmpty() ? QPointF() : box.center());
+}
+
 void NodeGraphView::zoomBy(qreal factor)
 {
     emit viewTouched();

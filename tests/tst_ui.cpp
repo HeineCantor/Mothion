@@ -5351,6 +5351,25 @@ private slots:
         QCOMPARE(window.network().nodes().size(), size_t(2));
     }
 
+    void nodeViewIsKeptInTheDocument()
+    {
+        document::DocumentController controller;
+        {
+            ui::CompositingWindow window(&controller);
+            window.show();
+            QTRY_VERIFY(window.graph()->viewZoom() > 0);
+            QVERIFY(!controller.compositingView().valid); // not touched: nothing to keep
+            window.graph()->zoomBy(1.5);
+            window.graph()->horizontalScrollBar()->setValue(window.graph()->horizontalScrollBar()->value() + 40);
+            QTRY_VERIFY(controller.compositingView().valid);
+        } // closing keeps the last view
+        const doc::GraphView kept = controller.compositingView();
+        ui::CompositingWindow again(&controller);
+        again.show();
+        QTRY_VERIFY(qAbs(again.graph()->viewZoom() - kept.zoom) < 1e-6);
+        QVERIFY(QLineF(again.graph()->viewCenter(), QPointF(kept.x, kept.y)).length() < 2);
+    }
+
     void compositingPreviewZoomsAndMoves()
     {
         ui::ImagePreview preview;

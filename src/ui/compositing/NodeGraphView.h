@@ -110,6 +110,12 @@ public:
     void fitAll();
     // Zooms so the graph is `fraction` of the view wide (less if it would not fit in height), centered.
     void fitWidth(qreal fraction);
+    // The zoom and the scene point at the center of the view, to keep and to come back to.
+    qreal viewZoom() const { return transform().m11(); }
+    QPointF viewCenter() const { return mapToScene(viewport()->rect().center()); }
+    void setView(qreal zoom, const QPointF &center);
+    // The first look: the nodes at their own size, centered.
+    void showStart();
     // Zooms around the center of the view (buttons: no wheel on a tablet).
     void zoomBy(qreal factor);
 

@@ -51,6 +51,8 @@ protected:
 private:
     void scheduleRefresh();
     void frame();
+    void applyView();
+    void keepView();
     void editMask(compositing::NodeId id);  // 0 or a node that is not a mask: back to showing the result
     void addMaskShape(const MaskShape &shapeInPreviewPixels);
     QList<MaskShape> maskShapes() const;
@@ -66,6 +68,7 @@ private:
     ImagePreview *m_preview;
     QTimer *m_timer;
     QSplitter *m_split;
+    QTimer *m_viewTimer; // keeps where the user left the node view, a moment after it moved
     QTimer *m_frameTimer; // frames the layout once the window has its size
     QImage m_frame;           // what the Frame nodes hold: the frame, composed, as big as the preview needs
     double m_frameScale = 1.0; // its width over the page's

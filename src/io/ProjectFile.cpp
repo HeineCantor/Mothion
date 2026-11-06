@@ -268,7 +268,7 @@ QByteArray thumbnailBlob(const doc::Document &d)
 }
 
 // The compositing network as JSON text.
-QString graphToJson(const doc::GraphData &graph)
+QString graphToJson(const doc::GraphData &graph, const doc::GraphView &view)
 {
     QJsonArray nodes, links;
     for (const doc::GraphNodeData &n : graph.nodes) {
@@ -283,8 +283,23 @@ QString graphToJson(const doc::GraphData &graph)
     }
     for (const doc::GraphLinkData &l : graph.links)
         links.append(QJsonArray{l.from, l.fromPort, l.to, l.toPort});
-    return QString::fromUtf8(QJsonDocument(QJsonObject{{"next", graph.nextId}, {"nodes", nodes}, {"links", links}})
-                                 .toJson(QJsonDocument::Compact));
+    QJsonObject root{{"next", graph.nextId}, {"nodes", nodes}, {"links", links}};
+    if (view.valid)
+        root["view"] = QJsonArray{view.zoom, view.x, view.y};
+    return QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact));
+}
+
+doc::GraphView viewFromJson(const QString &text)
+{
+    doc::GraphView view;
+    const QJsonArray a = QJsonDocument::fromJson(text.toUtf8()).object().value("view").toArray();
+    if (a.size() == 3 && a[0].toDouble() > 0) {
+        view.valid = true;
+        view.zoom = a[0].toDouble();
+        view.x = a[1].toDouble();
+        view.y = a[2].toDouble();
+    }
+    return view;
 }
 
 doc::GraphData graphFromJson(const QString &text)
@@ -430,10 +445,10 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
             return false;
         }
     }
-    if (!d.compositing().nodes.empty()) {
+    if (!d.compositing().nodes.empty() || d.compositingView().valid) {
         QSqlQuery graph(db);
         graph.prepare(QStringLiteral("insert into compositing values (?)"));
-        graph.addBindValue(graphToJson(d.compositing()));
+        graph.addBindValue(graphToJson(d.compositing(), d.compositingView()));
         if (!graph.exec()) {
             failure = sqlError(graph);
             return false;
@@ -631,7 +646,10 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
     }
 
     if (version >= 7 && q.exec(QStringLiteral("select graph from compositing")) && q.next())
+    {
         d->setCompositing(graphFromJson(q.value(0).toString()));
+        d->setCompositingView(viewFromJson(q.value(0).toString()));
+    }
 
     d->restoreIdCounters(nextCel, nextDrawing, nextLayer);
     for (auto &[id, layer] : v1Layers)

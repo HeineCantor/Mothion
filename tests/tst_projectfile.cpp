@@ -86,6 +86,7 @@ std::unique_ptr<doc::Document> sampleDocument()
     graph.links.push_back({4, 0, 7, 0});
     graph.nextId = 10;
     d->setCompositing(graph);
+    d->setCompositingView({true, 1.5, -120.25, 40});
     d->allocateCelId(); // ids used by a cel and a layer since deleted: must not come back
     d->allocateLayerId();
     return d;
@@ -102,6 +103,7 @@ void compareDocuments(const doc::Document &x, const doc::Document &y)
     QCOMPARE(x.nextDrawingId(), y.nextDrawingId());
     QCOMPARE(x.nextLayerId(), y.nextLayerId());
     QVERIFY(x.compositing() == y.compositing());
+    QVERIFY(x.compositingView() == y.compositingView());
     QCOMPARE(x.audio().has_value(), y.audio().has_value());
     if (x.audio() && y.audio()) {
         const doc::AudioTrack &ax = *x.audio(), &ay = *y.audio();
@@ -192,6 +194,7 @@ private slots:
         const auto original = sampleDocument();
         original->setAudio(std::nullopt); // the audio table came with format 5
         original->setCompositing({});     // and the compositing one with format 7
+        original->setCompositingView({});
         const QString path = dir.filePath(QStringLiteral("old.moth"));
         QString error;
         QVERIFY2(io::saveProject(*original, path, &error), qPrintable(error));

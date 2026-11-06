@@ -119,6 +119,9 @@ public:
     // The compositing network kept in the project: one undo step puts `graph` in place of it.
     const doc::GraphData &compositing() const { return m_document->compositing(); }
     void setCompositing(doc::GraphData graph);
+    // Where the node editor was left (no undo step; kept in the project).
+    const doc::GraphView &compositingView() const { return m_document->compositingView(); }
+    void setCompositingView(const doc::GraphView &view) { m_document->setCompositingView(view); }
 
     // An image sequence as one new cel: image i is a drawing of its own, shown for `hold` frames from
     // startFrame + i * hold (the scene gets longer if it needs). Images that are null are skipped; returns how
