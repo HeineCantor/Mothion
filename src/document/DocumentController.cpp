@@ -1143,7 +1143,8 @@ void DocumentController::setCurrentLayer(doc::LayerId layer)
 
 // --- painting ----------------------------------------------------------------------
 
-std::optional<DocumentController::PaintTarget> DocumentController::beginPaint(bool createIfEmpty, QString *reason)
+std::optional<DocumentController::PaintTarget> DocumentController::beginPaint(bool createIfEmpty, QString *reason,
+                                                                              bool forDrawing)
 {
     auto fail = [reason](const QString &why) -> std::optional<PaintTarget> {
         if (reason)
@@ -1161,6 +1162,8 @@ std::optional<DocumentController::PaintTarget> DocumentController::beginPaint(bo
 
     PaintState state;
     doc::DrawingId drawing = cel->timing().drawingAt(m_currentFrame);
+    if (forDrawing && !m_layerChosen && drawing != doc::kNoId)
+        return fail(tr("Choose a layer to draw on: a cel or a frame is selected"));
     if (drawing == doc::kNoId) {
         if (!createIfEmpty)
             return fail(QString());
@@ -1171,6 +1174,10 @@ std::optional<DocumentController::PaintTarget> DocumentController::beginPaint(bo
         publish(created.command->apply(*m_document)); // the new layer becomes current
         state.createdDrawing = std::move(created.command);
         drawing = created.id;
+        if (!m_layerChosen) { // the new frame's layer is the selection now
+            m_layerChosen = true;
+            emit layerChosenByDrawing();
+        }
     }
     doc::Layer *layer = cel->drawing(drawing)->layer(m_currentLayer);
     if (!layer)
@@ -1198,7 +1205,7 @@ void DocumentController::setLayerSelection(std::vector<LayerRef> layers)
 std::vector<DocumentController::PaintTarget> DocumentController::beginPaintLayers(QString *reason)
 {
     if (m_layerSelection.empty()) {
-        const auto target = beginPaint(false, reason);
+        const auto target = beginPaint(false, reason, false);
         return target ? std::vector<PaintTarget>{*target} : std::vector<PaintTarget>{};
     }
     interruptStroke(); // a previous stroke left open

@@ -426,6 +426,11 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
             m_thumbnailTimer.start();
     });
     connect(m_document, &DocumentController::currentCelChanged, this, &LayersPanel::selectCurrentRow);
+    // Drawing on a cel's empty frame made it and selected its layer.
+    connect(m_document, &DocumentController::layerChosenByDrawing, this, [this] {
+        m_focus = Focus::Layer;
+        selectCurrentRow();
+    });
     connect(m_document, &DocumentController::currentLayerChanged, this, &LayersPanel::selectCurrentRow);
     connect(m_document, &DocumentController::pixelsChanged, this, [this] {
         if (!m_thumbnailTimer.isActive())
@@ -734,6 +739,7 @@ void LayersPanel::rowChosen(QTreeWidgetItem *item)
     if (kind == Row::Paper)
         return;
     m_focus = kind == Row::Cel ? Focus::Cel : kind == Row::Layer ? Focus::Layer : Focus::Frame;
+    m_document->setLayerChosen(m_focus == Focus::Layer);
     m_choosing = true;
     m_document->setCurrentCel(celOf(item));
     // A frame not shown here: to the first point it is shown at, if any.
@@ -961,6 +967,7 @@ void LayersPanel::addClicked(doc::LayerKind kind)
     case Focus::Cel: m_document->addCel(); break;
     case Focus::Frame:
         m_focus = Focus::Layer; // the new layer is shown as current
+        m_document->setLayerChosen(true);
         m_document->addLayer(true, kind);
         break;
     case Focus::Layer: m_document->addLayer(false, kind); break;

@@ -416,6 +416,64 @@ private slots:
         QCOMPARE(state.settings(tools::ToolId::Brush).size, 60.0);
     }
 
+    // A cel chosen in the Layers panel (not one of its layers) cannot be drawn on where it has a frame; where it
+    // has none, drawing makes the frame and chooses its layer. Moving whole layers is not affected.
+    void aSelectedCelCannotBeDrawnOn()
+    {
+        document::DocumentController controller;
+        ui::LayersPanel panel(&controller);
+        panel.resize(320, 800);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        auto *tree = panel.findChild<QTreeWidget *>();
+        QVERIFY(tree);
+        QImage red(20, 20, QImage::Format_ARGB32);
+        red.fill(Qt::red);
+        controller.importImage(red, QStringLiteral("x")); // a cel with a frame, from 0 on
+        QCoreApplication::processEvents();
+        const doc::CelId cel = controller.currentCel();
+
+        tree->setCurrentItem(panel.celItem(cel)); // the cel row
+        QVERIFY(!controller.layerChosen());
+        QString reason;
+        QVERIFY(!controller.beginPaint(true, &reason)); // there is a frame: refused
+        QVERIFY(!reason.isEmpty());
+        QVERIFY(!controller.pasteImage(red, QPoint(10, 10), &reason));
+        QVERIFY(!controller.canUndo() || controller.undoText() != QStringLiteral("Undo paste"));
+        QVERIFY(controller.beginPaintLayers(&reason).size() == 1); // a move still works on it
+        controller.cancelPaint();
+
+        // The same for a frame's row: it is not a layer either.
+        tree->setCurrentItem(panel.frameItem(controller.currentDrawingId()));
+        QCOMPARE(panel.focus(), ui::LayersPanel::Focus::Frame);
+        QVERIFY(!controller.layerChosen());
+        reason.clear();
+        QVERIFY(!controller.beginPaint(true, &reason));
+        QVERIFY(!reason.isEmpty());
+        QVERIFY(controller.beginPaintLayers(&reason).size() == 1); // moving it still works
+        controller.cancelPaint();
+
+        // A frame where the cel has none: drawing makes it, and the layer is the selection now.
+        controller.addCel(); // a new cel, with no frame yet
+        QCoreApplication::processEvents();
+        tree->setCurrentItem(panel.celItem(controller.currentCel()));
+        QVERIFY(!controller.layerChosen());
+        QVERIFY(!controller.currentDrawing()); // nothing there yet
+        const auto target = controller.beginPaint(true, &reason);
+        QVERIFY(target.has_value());
+        controller.cancelPaint();
+        QVERIFY(controller.layerChosen());
+        QCoreApplication::processEvents();
+        QCOMPARE(panel.focus(), ui::LayersPanel::Focus::Layer);
+        QVERIFY(controller.beginPaint(true, &reason)); // and it can be drawn on from now on
+        controller.cancelPaint();
+
+        tree->setCurrentItem(panel.layerItem(controller.currentLayer())); // a layer chosen: drawing works
+        QVERIFY(controller.layerChosen());
+        QVERIFY(controller.beginPaint(true, &reason));
+        controller.cancelPaint();
+    }
+
     // The effect brushes and the shape tool have a size too: the palette, the [ ] keys and the size slider work
     // on it, as on the brush (the opacity slider stays with the paint tools).
     void sizeControlsServeTheEffectBrushesAndShapes()

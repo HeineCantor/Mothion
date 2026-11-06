@@ -191,7 +191,11 @@ public:
     // layer) is created if `createIfEmpty` (it becomes part of the stroke's
     // undo step). Returns nothing if painting is not possible; `reason` then
     // says why (empty when there is nothing to tell, e.g. erasing on an empty frame).
-    std::optional<PaintTarget> beginPaint(bool createIfEmpty, QString *reason = nullptr);
+    // While a cel or a frame (and not one of its layers) is the selected row of the Layers panel, drawing is refused
+    // where the cel has a frame; where it has none, drawing makes the frame and selects its layer (see
+    // setLayerChosen()).
+    // `forDrawing` false is for the tools that move whole layers: they are not refused.
+    std::optional<PaintTarget> beginPaint(bool createIfEmpty, QString *reason = nullptr, bool forDrawing = true);
     // Live pixel updates during the stroke.
     void notifyPainted(const QRect &docRect);
     // A layer of a drawing of a cel.
@@ -264,6 +268,10 @@ public slots:
     void setCurrentCel(doc::CelId cel);
     // A layer of the current drawing.
     void setCurrentLayer(doc::LayerId layer);
+    // Whether the Layers panel's selection is a layer (true) or a cel or a frame, which cannot be drawn on (see
+    // beginPaint()).
+    bool layerChosen() const { return m_layerChosen; }
+    void setLayerChosen(bool chosen) { m_layerChosen = chosen; }
 
 signals:
     // The audio track changed without a structure change (a volume being dragged): the views and the player take it up.
@@ -275,6 +283,8 @@ signals:
     void currentFrameChanged(int frame);
     void currentCelChanged(doc::CelId cel);
     void currentLayerChanged(doc::LayerId layer);
+    // Drawing on an empty frame of the selected cel made the frame and selected its layer.
+    void layerChosenByDrawing();
     // Undo/redo availability or labels changed.
     void historyChanged();
     void selectionChanged();
@@ -304,6 +314,7 @@ private:
     doc::History m_history;
     doc::CelId m_currentCel = doc::kNoId;
     int m_currentFrame = 0;
+    bool m_layerChosen = true;
     doc::LayerId m_currentLayer = doc::kNoId;
     std::string m_currentLayerName; // looked for when the drawing changes
     QPainterPath m_selection;
