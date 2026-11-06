@@ -2,7 +2,10 @@
 
 #include <QGraphicsPathItem>
 #include <QGraphicsView>
+#include <QHash>
 #include <QImage>
+#include <QVariant>
+#include <functional>
 #include <QPointer>
 #include <QString>
 #include <QStringList>
@@ -14,6 +17,19 @@ class EdgeItem;
 
 // What a node does is not decided yet (this is the prototype of the interface):
 // a kind is a title, a tint and the names of its inputs and outputs.
+// A setting of a node, shown inside the node: a slider (an integer from min to max) or a color.
+struct NodeParam
+{
+    enum class Kind { Slider, Color };
+
+    QString key;
+    QString label;
+    Kind kind = Kind::Slider;
+    int min = 0;
+    int max = 100;
+    QVariant initial; // an int, or a QColor
+};
+
 struct NodeKind
 {
     enum class Type { Frame, Blur, Merge, Color, Output };
@@ -23,6 +39,7 @@ struct NodeKind
     QColor tint;
     QStringList inputs;
     QStringList outputs;
+    QList<NodeParam> params;
 };
 
 // A box with its sockets: inputs on the left, outputs on the right.
@@ -33,6 +50,9 @@ public:
     explicit NodeItem(const NodeKind &kind);
 
     const NodeKind &kind() const { return m_kind; }
+    // The value of a setting (an int or a QColor), and changing it (the widget in the node follows).
+    QVariant param(const QString &key) const { return m_values.value(key); }
+    void setParam(const QString &key, const QVariant &value);
     QRectF boundingRect() const override;
     void paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *) override;
 
@@ -51,14 +71,20 @@ public:
     void removeEdge(EdgeItem *edge) { m_edges.removeOne(edge); }
     const QList<EdgeItem *> &edges() const { return m_edges; }
 
+signals:
+    void paramChanged();
+
 protected:
     QVariant itemChange(GraphicsItemChange change, const QVariant &value) override;
 
 private:
     QPointF socketLocal(bool output, int index) const;
+    qreal bodyHeight() const;
 
     NodeKind m_kind;
     QList<EdgeItem *> m_edges;
+    QVariantMap m_values;
+    QHash<QString, std::function<void(const QVariant &)>> m_shown; // key -> updates its widget
     bool m_hotOutput = false;
     int m_hotIndex = -1;
 };

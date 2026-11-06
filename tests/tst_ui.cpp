@@ -5335,6 +5335,31 @@ private slots:
         QVERIFY(graph.evaluate(frame).isNull());
     }
 
+    void nodeSettingsChangeTheResult()
+    {
+        ui::NodeGraphView graph;
+        QImage frame(40, 40, QImage::Format_ARGB32_Premultiplied);
+        frame.fill(Qt::white);
+        frame.setPixelColor(20, 20, Qt::black);
+        ui::NodeItem *blur = nullptr, *color = nullptr;
+        for (auto *item : graph.items())
+            if (auto *node = dynamic_cast<ui::NodeItem *>(item)) {
+                if (node->kind().type == ui::NodeKind::Type::Blur)
+                    blur = node;
+                if (node->kind().type == ui::NodeKind::Type::Color)
+                    color = node;
+            }
+        QVERIFY(blur && color);
+        QSignalSpy changed(&graph, &ui::NodeGraphView::graphChanged);
+        const QImage before = graph.evaluate(frame);
+        blur->setParam(QStringLiteral("radius"), 0); // no blur: the dot stays sharp
+        color->setParam(QStringLiteral("color"), QColor(0, 0, 0, 0)); // no tint
+        QVERIFY(changed.count() >= 2);
+        const QImage after = graph.evaluate(frame);
+        QVERIFY(after != before);
+        QCOMPARE(after, frame);
+    }
+
     void nodeGraphWiresAreMovedAndCut()
     {
         ui::NodeGraphView graph;

@@ -1,6 +1,13 @@
 #include "ui/compositing/NodeGraphView.h"
 
+#include <QColorDialog>
 #include <QContextMenuEvent>
+#include <QGraphicsProxyWidget>
+#include <QHBoxLayout>
+#include <QLabel>
+#include <QPushButton>
+#include <QSignalBlocker>
+#include <QSlider>
 #include <QKeyEvent>
 #include <QMenu>
 #include <QPainter>
@@ -22,6 +29,7 @@ constexpr qreal kRowHeight = 22;
 constexpr qreal kSocketRadius = 5;
 constexpr qreal kSocketGrab = 18; // how near the pen must be to connect
 constexpr qreal kHotMargin = 10;
+constexpr qreal kParamHeight = 28;
 
 } // namespace
 
@@ -32,12 +40,83 @@ NodeItem::NodeItem(const NodeKind &kind)
 {
     setFlags(ItemIsMovable | ItemIsSelectable | ItemSendsGeometryChanges);
     setZValue(1);
+
+    // The settings, as widgets under the sockets.
+    const qreal rows = static_cast<qreal>(std::max<qsizetype>(1, std::max(m_kind.inputs.size(), m_kind.outputs.size())));
+    qreal y = kHeaderHeight + 6 + rows * kRowHeight;
+    for (const NodeParam &param : std::as_const(m_kind.params)) {
+        m_values[param.key] = param.initial;
+        auto *row = new QWidget;
+        row->setAttribute(Qt::WA_NoSystemBackground);
+        auto *layout = new QHBoxLayout(row);
+        layout->setContentsMargins(0, 2, 0, 2);
+        layout->setSpacing(6);
+        auto *label = new QLabel(param.label, row);
+        label->setMinimumWidth(48);
+        layout->addWidget(label);
+        const QString key = param.key;
+        if (param.kind == NodeParam::Kind::Slider) {
+            auto *slider = new QSlider(Qt::Horizontal, row);
+            slider->setRange(param.min, param.max);
+            slider->setValue(param.initial.toInt());
+            auto *number = new QLabel(QString::number(param.initial.toInt()), row);
+            number->setMinimumWidth(24);
+            number->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+            layout->addWidget(slider, 1);
+            layout->addWidget(number);
+            connect(slider, &QSlider::valueChanged, this, [this, key, number](int v) {
+                number->setText(QString::number(v));
+                setParam(key, v);
+            });
+            m_shown[key] = [slider](const QVariant &v) {
+                const QSignalBlocker block(slider);
+                slider->setValue(v.toInt());
+                static_cast<QLabel *>(slider->parentWidget()->layout()->itemAt(2)->widget())->setText(QString::number(v.toInt()));
+            };
+        } else {
+            auto *swatch = new QPushButton(row);
+            swatch->setFixedHeight(22);
+            auto paint = [swatch](const QColor &c) {
+                swatch->setStyleSheet(QStringLiteral("QPushButton { background-color: rgba(%1,%2,%3,%4); "
+                                                     "border: 1px solid palette(mid); border-radius: 3px; }")
+                                          .arg(c.red()).arg(c.green()).arg(c.blue()).arg(c.alpha()));
+            };
+            paint(param.initial.value<QColor>());
+            layout->addWidget(swatch, 1);
+            connect(swatch, &QPushButton::clicked, this, [this, key, swatch] {
+                const QColor chosen = QColorDialog::getColor(m_values.value(key).value<QColor>(), swatch,
+                                                             tr("Color"), QColorDialog::ShowAlphaChannel);
+                if (chosen.isValid())
+                    setParam(key, chosen);
+            });
+            m_shown[key] = [paint](const QVariant &v) { paint(v.value<QColor>()); };
+        }
+        auto *proxy = new QGraphicsProxyWidget(this);
+        proxy->setWidget(row);
+        proxy->setGeometry(QRectF(8, y, kNodeWidth - 16, kParamHeight));
+        y += kParamHeight;
+    }
 }
 
 QRectF NodeItem::boundingRect() const
 {
+    return QRectF(-2, -2, kNodeWidth + 4, bodyHeight() + 4).adjusted(-kHotMargin, -kHotMargin, kHotMargin, kHotMargin);
+}
+
+qreal NodeItem::bodyHeight() const
+{
     const qreal rows = static_cast<qreal>(std::max<qsizetype>(1, std::max(m_kind.inputs.size(), m_kind.outputs.size())));
-    return QRectF(-2, -2, kNodeWidth + 4, kHeaderHeight + rows * kRowHeight + 10).adjusted(-kHotMargin, -kHotMargin, kHotMargin, kHotMargin);
+    return kHeaderHeight + rows * kRowHeight + 6 + static_cast<qreal>(m_kind.params.size()) * kParamHeight;
+}
+
+void NodeItem::setParam(const QString &key, const QVariant &value)
+{
+    if (m_values.value(key) == value)
+        return;
+    m_values[key] = value;
+    if (const auto shown = m_shown.value(key))
+        shown(value);
+    emit paramChanged();
 }
 
 QPointF NodeItem::socketLocal(bool output, int index) const
@@ -87,17 +166,15 @@ void NodeItem::setHotSocket(bool output, int index)
 QPainterPath NodeItem::shape() const
 {
     // The body only: the reach around the sockets is not for grabbing the node.
-    const qreal rows = static_cast<qreal>(std::max<qsizetype>(1, std::max(m_kind.inputs.size(), m_kind.outputs.size())));
     QPainterPath path;
-    path.addRoundedRect(QRectF(0, 0, kNodeWidth, kHeaderHeight + rows * kRowHeight + 6), 6, 6);
+    path.addRoundedRect(QRectF(0, 0, kNodeWidth, bodyHeight()), 6, 6);
     return path;
 }
 
 void NodeItem::paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *widget)
 {
     const QPalette pal = widget ? widget->palette() : QPalette();
-    const qreal rows = static_cast<qreal>(std::max<qsizetype>(1, std::max(m_kind.inputs.size(), m_kind.outputs.size())));
-    const QRectF body(0, 0, kNodeWidth, kHeaderHeight + rows * kRowHeight + 6);
+    const QRectF body(0, 0, kNodeWidth, bodyHeight());
 
     p->setRenderHint(QPainter::Antialiasing);
     p->setPen(Qt::NoPen);
@@ -232,11 +309,14 @@ NodeGraphView::NodeGraphView(QWidget *parent)
 QList<NodeKind> NodeGraphView::kinds()
 {
     return {
-        {NodeKind::Type::Frame, tr("Frame"), QColor(70, 110, 170), {}, {tr("Image")}},
-        {NodeKind::Type::Blur, tr("Blur"), QColor(150, 90, 60), {tr("Image")}, {tr("Image")}},
-        {NodeKind::Type::Merge, tr("Merge"), QColor(60, 130, 100), {tr("Back"), tr("Front")}, {tr("Image")}},
-        {NodeKind::Type::Color, tr("Color"), QColor(140, 80, 140), {}, {tr("Image")}},
-        {NodeKind::Type::Output, tr("Output"), QColor(150, 70, 80), {tr("Image")}, {}},
+        {NodeKind::Type::Frame, tr("Frame"), QColor(70, 110, 170), {}, {tr("Image")}, {}},
+        {NodeKind::Type::Blur, tr("Blur"), QColor(150, 90, 60), {tr("Image")}, {tr("Image")},
+         {{QStringLiteral("radius"), tr("Radius"), NodeParam::Kind::Slider, 0, 60, 8}}},
+        {NodeKind::Type::Merge, tr("Merge"), QColor(60, 130, 100), {tr("Back"), tr("Front")}, {tr("Image")},
+         {{QStringLiteral("opacity"), tr("Opacity"), NodeParam::Kind::Slider, 0, 100, 100}}},
+        {NodeKind::Type::Color, tr("Color"), QColor(140, 80, 140), {}, {tr("Image")},
+         {{QStringLiteral("color"), tr("Color"), NodeParam::Kind::Color, 0, 0, QColor(150, 60, 190, 110)}}},
+        {NodeKind::Type::Output, tr("Output"), QColor(150, 70, 80), {tr("Image")}, {}, {}},
     };
 }
 
@@ -245,6 +325,7 @@ NodeItem *NodeGraphView::addNode(const NodeKind &kind, const QPointF &scenePos)
     auto *node = new NodeItem(kind);
     node->setPos(scenePos);
     m_scene->addItem(node);
+    connect(node, &NodeItem::paramChanged, this, &NodeGraphView::graphChanged);
     emit graphChanged();
     return node;
 }
@@ -335,10 +416,10 @@ QImage NodeGraphView::evaluate(const QImage &frame) const
                 case NodeKind::Type::Frame:
                     return frame;
                 case NodeKind::Type::Blur:
-                    return boxBlur(first, 8);
+                    return boxBlur(first, source->param(QStringLiteral("radius")).toInt());
                 case NodeKind::Type::Color: {
                     QImage solid(frame.size(), QImage::Format_ARGB32_Premultiplied);
-                    solid.fill(QColor(150, 60, 190, 110)); // a tint, until nodes have settings
+                    solid.fill(source->param(QStringLiteral("color")).value<QColor>());
                     return solid;
                 }
                 case NodeKind::Type::Merge: {
@@ -349,6 +430,7 @@ QImage NodeGraphView::evaluate(const QImage &frame) const
                     back = back.convertToFormat(QImage::Format_ARGB32_Premultiplied);
                     if (!front.isNull()) {
                         QPainter p(&back);
+                        p.setOpacity(source->param(QStringLiteral("opacity")).toInt() / 100.0);
                         p.drawImage(QRect(QPoint(), back.size()), front);
                     }
                     return back;
