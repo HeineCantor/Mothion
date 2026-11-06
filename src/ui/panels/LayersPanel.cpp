@@ -52,7 +52,7 @@ constexpr int kKindRole = Qt::UserRole + 1;
 constexpr int kCelRole = Qt::UserRole + 2;
 constexpr int kLayerRole = Qt::UserRole + 3;
 constexpr int kDrawingRole = Qt::UserRole + 4;
-enum class Row { Cel, Frame, Layer, Paper };
+enum class Row { Cel, Frame, Layer, Paper, Camera };
 
 Row kindOf(const QTreeWidgetItem *item)
 {
@@ -264,6 +264,7 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     , m_add(actionButton(IconId::Add, tr("New layer"), this))
     , m_merge(actionButton(IconId::MergeLayers, tr("Merge the selected layers"), this))
     , m_remove(actionButton(IconId::Delete, tr("Delete layer"), this))
+    , m_camera(actionButton(IconId::Camera, tr("Camera: add it to the project, or select it"), this))
     , m_up(actionButton(IconId::ArrowUp, tr("Move up"), this))
     , m_down(actionButton(IconId::ArrowDown, tr("Move down"), this))
     , m_snapTo(actionButton(IconId::Crosshair,
@@ -314,6 +315,8 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     buttons->addWidget(m_add);
     buttons->addWidget(m_merge);
     buttons->addWidget(m_remove);
+    m_camera->setObjectName(QStringLiteral("cameraButton"));
+    buttons->addWidget(m_camera);
     buttons->addStretch(1);
     buttons->addWidget(m_up);
     buttons->addWidget(m_down);
@@ -369,6 +372,17 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     connect(m_remove, &QToolButton::clicked, this, &LayersPanel::removeSelected);
     connect(m_merge, &QToolButton::clicked, this, &LayersPanel::mergeSelected);
     connect(m_snapTo, &QToolButton::clicked, this, &LayersPanel::snapToClicked);
+    // The camera: made if the project has none, and selected.
+    connect(m_camera, &QToolButton::clicked, this, [this] {
+        m_focus = Focus::Camera;
+        m_document->setLayerChosen(false);
+        if (!m_document->camera())
+            m_document->addCamera(); // the row is made as the change is told
+        m_document->selectCamera(true);
+        if (QTreeWidgetItem *row = cameraItem())
+            m_tree->setCurrentItem(row);
+        syncHeader();
+    });
     // Right click on a row: the same commands, where the pointer is.
     m_tree->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(m_tree, &QWidget::customContextMenuRequested, this, &LayersPanel::showContextMenu);
@@ -426,6 +440,25 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
             m_thumbnailTimer.start();
     });
     connect(m_document, &DocumentController::currentCelChanged, this, &LayersPanel::selectCurrentRow);
+    // The camera's row follows the camera (a key, the eye, the camera added, taken away, undone).
+    connect(m_document, &DocumentController::cameraChanged, this, [this] {
+        if (cameraRowState(*m_document) != m_cameraRowState)
+            rebuildTree();
+    });
+    // The camera went (or another row was chosen): back to a layer, if the panel still thought it selected.
+    connect(m_document, &DocumentController::cameraSelectionChanged, this, [this] {
+        if (m_document->cameraSelected() && m_focus != Focus::Camera) { // chosen elsewhere (the timeline)
+            m_focus = Focus::Camera;
+            m_document->setLayerChosen(false);
+            selectCurrentRow();
+            return;
+        }
+        if (!m_document->cameraSelected() && m_focus == Focus::Camera) {
+            m_focus = Focus::Layer;
+            m_document->setLayerChosen(true);
+            selectCurrentRow();
+        }
+    });
     // Drawing on a cel's empty frame made it and selected its layer.
     connect(m_document, &DocumentController::layerChosenByDrawing, this, [this] {
         m_focus = Focus::Layer;
@@ -440,6 +473,20 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
 }
 
 // --- rows ----------------------------------------------------------------------------
+
+int LayersPanel::cameraRowState(const document::DocumentController &document)
+{
+    const auto &camera = document.camera();
+    return camera ? int(camera->keys().size()) * 2 + (camera->visible ? 1 : 0) : -1;
+}
+
+QTreeWidgetItem *LayersPanel::cameraItem() const
+{
+    for (int i = 0; i < m_tree->topLevelItemCount(); ++i)
+        if (kindOf(m_tree->topLevelItem(i)) == Row::Camera)
+            return m_tree->topLevelItem(i);
+    return nullptr;
+}
 
 QTreeWidgetItem *LayersPanel::celItem(doc::CelId cel) const
 {
@@ -527,6 +574,21 @@ void LayersPanel::rebuildTree()
         h->setSpacing(4);
         return std::pair{row, h};
     };
+
+    // The camera, above all the cels: an eye (is it on), its icon and how many keys it has.
+    if (d.camera()) {
+        auto [row, h] = rowWidget();
+        auto *eye = toggleButton(IconId::Eye, tr("Turn the camera on / off: off, the picture is the whole sheet"),
+                                 d.camera()->visible, row);
+        h->addWidget(eye);
+        h->addWidget(iconLabel(IconId::Camera, row));
+        const int keys = int(d.camera()->keys().size());
+        h->addWidget(new QLabel(tr("Camera\n%n keyframe(s)", "", keys), row), 1);
+        connect(eye, &QToolButton::clicked, this, [this](bool on) { m_document->setCameraVisible(on); });
+        QTreeWidgetItem *cameraRow = addRow(nullptr, Row::Camera, doc::kNoId, doc::kNoId, doc::kNoId, row);
+        cameraRow->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable); // not dragged, nothing dropped on it
+    }
+    m_cameraRowState = cameraRowState(*m_document);
 
     for (int i = d.celCount() - 1; i >= 0; --i) { // top cel first
         const doc::Cel &cel = d.celAt(i);
@@ -738,7 +800,15 @@ void LayersPanel::rowChosen(QTreeWidgetItem *item)
     const Row kind = kindOf(item);
     if (kind == Row::Paper)
         return;
+    if (kind == Row::Camera) { // not a cel: nothing is current but the camera
+        m_focus = Focus::Camera;
+        m_document->setLayerChosen(false);
+        m_document->selectCamera(true);
+        syncHeader();
+        return;
+    }
     m_focus = kind == Row::Cel ? Focus::Cel : kind == Row::Layer ? Focus::Layer : Focus::Frame;
+    m_document->selectCamera(false);
     m_document->setLayerChosen(m_focus == Focus::Layer);
     m_choosing = true;
     m_document->setCurrentCel(celOf(item));
@@ -771,6 +841,9 @@ static void setCurrentQuietly(QTreeWidget *tree, QTreeWidgetItem *item, QItemSel
 static QTreeWidgetItem *currentRow(const LayersPanel &panel, LayersPanel::Focus focus,
                                    const DocumentController &document)
 {
+    if (focus == LayersPanel::Focus::Camera)
+        if (QTreeWidgetItem *item = panel.cameraItem())
+            return item;
     if (focus == LayersPanel::Focus::Layer)
         if (QTreeWidgetItem *item = panel.layerItem(document.currentLayer()))
             return item;
@@ -971,11 +1044,16 @@ void LayersPanel::addClicked(doc::LayerKind kind)
         m_document->addLayer(true, kind);
         break;
     case Focus::Layer: m_document->addLayer(false, kind); break;
+    case Focus::Camera: break; // nothing is added from the camera
     }
 }
 
 void LayersPanel::removeSelected()
 {
+    if (m_focus == Focus::Camera) {
+        m_document->removeCamera(); // the row goes with it (see the camera's changes)
+        return;
+    }
     if (m_focus == Focus::Cel) {
         if (m_document->document().celCount() > 1) // keep at least one cel
             m_document->execute(std::make_unique<doc::RemoveCelCommand>(m_document->currentCel()));
@@ -1397,6 +1475,13 @@ void LayersPanel::syncHeader()
         m_down->setToolTip(tr("Move the cel down"));
         break;
     }
+    case Focus::Camera:
+        canRemove = m_document->camera().has_value();
+        m_add->setToolTip(tr("New cel"));
+        m_remove->setToolTip(tr("Delete the camera"));
+        m_up->setToolTip(tr("Move up"));
+        m_down->setToolTip(tr("Move down"));
+        break;
     case Focus::Frame:
         canAdd = drawing != nullptr;
         for (const QTreeWidgetItem *item : m_tree->selectedItems())

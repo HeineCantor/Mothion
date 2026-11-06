@@ -141,6 +141,9 @@ void DocumentController::replaceDocument(std::unique_ptr<doc::Document> document
     m_currentFrame = 0;
     m_currentLayer = doc::kNoId;
     m_currentLayerName.clear();
+    const bool cameraWasSelected = m_cameraSelected;
+    m_cameraSelected = false;
+    m_layerChosen = true;
     m_layerSelection.clear();
     m_selection = QPainterPath();
     if (const doc::Drawing *drawing = currentDrawing(); drawing && !drawing->layers.empty()) {
@@ -149,6 +152,8 @@ void DocumentController::replaceDocument(std::unique_ptr<doc::Document> document
     }
 
     emit documentReplaced();
+    if (cameraWasSelected)
+        emit cameraSelectionChanged();
     emit structureChanged();
     emit currentCelChanged(m_currentCel);
     emit currentFrameChanged(m_currentFrame);
@@ -617,6 +622,15 @@ void DocumentController::commitAudioVolume(float before)
     setAudioVolume(after);
 }
 
+void DocumentController::selectCamera(bool selected)
+{
+    selected = selected && m_document->camera().has_value();
+    if (selected == m_cameraSelected)
+        return;
+    m_cameraSelected = selected;
+    emit cameraSelectionChanged();
+}
+
 void DocumentController::addCamera()
 {
     if (m_document->camera())
@@ -700,12 +714,11 @@ void DocumentController::previewCamera(const std::optional<doc::Camera> &camera)
 
 void DocumentController::commitCamera(const std::optional<doc::Camera> &before, const std::optional<doc::Camera> &after)
 {
-    if (before == after) {
-        previewCamera(before);
-        return;
-    }
-    previewCamera(before); // so the step records the whole change, not the part after the last preview
-    execute(std::make_unique<doc::SetCameraCommand>(after));
+    // Copies: either may be the document's own camera, which the preview below replaces.
+    const std::optional<doc::Camera> was = before, now = after;
+    previewCamera(was); // so the step records the whole change, not the part after the last preview
+    if (was != now)
+        execute(std::make_unique<doc::SetCameraCommand>(now));
 }
 
 void DocumentController::setCompositing(doc::GraphData graph)
@@ -1162,8 +1175,13 @@ QString DocumentController::redoText() const
 
 void DocumentController::publish(const doc::ChangeSet &changes)
 {
-    if (changes.camera)
+    if (changes.camera) {
+        if (m_cameraSelected && !m_document->camera()) {
+            m_cameraSelected = false;
+            emit cameraSelectionChanged();
+        }
         emit cameraChanged();
+    }
     if (changes.structure) {
         ensureValidCurrentCel();
         resolveCurrentLayer();
@@ -1261,6 +1279,8 @@ std::optional<DocumentController::PaintTarget> DocumentController::beginPaint(bo
     if (cel->properties().locked)
         return fail(tr("Cel “%1” is locked").arg(QString::fromStdString(cel->properties().name)));
 
+    if (forDrawing && m_cameraSelected)
+        return fail(tr("The camera is selected: choose a layer to draw on"));
     PaintState state;
     doc::DrawingId drawing = cel->timing().drawingAt(m_currentFrame);
     if (forDrawing && !m_layerChosen && drawing != doc::kNoId)
@@ -1305,6 +1325,11 @@ void DocumentController::setLayerSelection(std::vector<LayerRef> layers)
 
 std::vector<DocumentController::PaintTarget> DocumentController::beginPaintLayers(QString *reason)
 {
+    if (m_cameraSelected) { // the camera is what the pen moves: not the layers
+        if (reason)
+            *reason = tr("The camera is selected: choose a cel or a layer first");
+        return {};
+    }
     if (m_layerSelection.empty()) {
         const auto target = beginPaint(false, reason, false);
         return target ? std::vector<PaintTarget>{*target} : std::vector<PaintTarget>{};

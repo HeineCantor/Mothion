@@ -3,6 +3,7 @@
 #include "canvas/CanvasTool.h"
 #include "canvas/FrameRenderer.h"
 #include "canvas/NavigationGesture.h"
+#include "canvas/CameraGizmo.h"
 #include "canvas/PerspectiveGizmo.h"
 #include "canvas/PerspectiveSnap.h"
 #include "canvas/StrokeSession.h"
@@ -68,6 +69,8 @@ public:
 
     // The handles of the current perspective layer.
     const PerspectiveGizmo &perspectiveGizmo() const { return m_gizmo; }
+    // The frame of the camera and its handles (the camera selected in the Layers panel).
+    const CameraGizmo &cameraGizmo() const { return m_cameraGizmo; }
     // Where the open transform's box is now (document coordinates, the box
     // after the transform); a null rect when no transform is open.
     QRectF transformBounds() const;
@@ -213,6 +216,7 @@ private:
     std::unique_ptr<CanvasTool> m_transformTool;
     CanvasTool *m_editTool = nullptr; // the canvas tool between its press and release
     PerspectiveGizmo m_gizmo;
+    CameraGizmo m_cameraGizmo;
     void updateGizmoCursor(); // over a handle: the hand
     std::optional<brush::DabGenerator> m_dabs;
     std::vector<brush::BrushInput> m_points; // the stroke so far, for the final pass

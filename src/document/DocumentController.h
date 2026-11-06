@@ -134,6 +134,11 @@ public:
     void previewCamera(const std::optional<doc::Camera> &camera);
     void commitCamera(const std::optional<doc::Camera> &before, const std::optional<doc::Camera> &after);
 
+    // Whether the camera is what the Layers panel has selected: drawing is refused then (see beginPaint()), and the
+    // canvas moves the camera with the pen (canvas::CameraGizmo). Not kept in the project.
+    bool cameraSelected() const { return m_cameraSelected; }
+    void selectCamera(bool selected);
+
     // The compositing network kept in the project: one undo step puts `graph` in place of it.
     const doc::GraphData &compositing() const { return m_document->compositing(); }
     void setCompositing(doc::GraphData graph);
@@ -296,6 +301,8 @@ signals:
     void audioChanged();
     // The camera changed (a key, whether it is on, or it was added or taken away; also a preview).
     void cameraChanged();
+    // The camera was selected, or another row was (see cameraSelected()).
+    void cameraSelectionChanged();
     // Pixels of (a layer of) `drawing` changed in `rect` (document coordinates).
     void pixelsChanged(doc::CelId cel, doc::DrawingId drawing, const QRect &rect);
     // Cels, drawings, layers, timing or document properties changed.
@@ -335,6 +342,7 @@ private:
     doc::CelId m_currentCel = doc::kNoId;
     int m_currentFrame = 0;
     bool m_layerChosen = true;
+    bool m_cameraSelected = false;
     doc::LayerId m_currentLayer = doc::kNoId;
     std::string m_currentLayerName; // looked for when the drawing changes
     QPainterPath m_selection;

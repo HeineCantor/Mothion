@@ -39,6 +39,8 @@ namespace mothion::ui {
 // first point the frame is shown at, so that what is edited is on the canvas.
 //
 // The current row says what the header and the buttons act on:
+//  - the camera (a row at the top, with the Camera button): drawing is refused, the canvas moves the camera
+//    with the pen; its eye turns it on and off; delete removes it;
 //  - a cel: its blend mode and opacity; new cel, delete, up and down;
 //  - a frame: new layer on top of it (the arrow next to +: a layer or a
 //    perspective layer); delete removes every selected frame
@@ -76,7 +78,7 @@ public:
     // True when a row of the panel has the keyboard focus.
     bool hasRowFocus() const;
 
-    enum class Focus { Cel, Frame, Layer };
+    enum class Focus { Cel, Frame, Layer, Camera };
     Focus focus() const { return m_focus; }
 
     // The selected layers of the current frame, bottom first; at least the
@@ -94,6 +96,7 @@ public:
     QTreeWidgetItem *celItem(doc::CelId cel) const;
     QTreeWidgetItem *frameItem(doc::DrawingId drawing) const;
     QTreeWidgetItem *layerItem(doc::LayerId layer) const;
+    QTreeWidgetItem *cameraItem() const; // the camera's row, at the top (none without a camera)
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
@@ -154,11 +157,16 @@ private:
     QMenu *m_addMenu = nullptr; // the kinds of layer, from the arrow next to +
     QToolButton *m_merge;
     QToolButton *m_remove;
+    QToolButton *m_camera; // adds the camera, or selects it
     QToolButton *m_up;
     QToolButton *m_down;
     QToolButton *m_snapTo;  // the layer actions' second row
     tools::ToolState *m_toolState = nullptr;
     QTimer m_thumbnailTimer;
+    // What the camera's row shows (-1: no camera; else twice the number of keys, plus one if it is on): the rows are
+    // made again only when it changes, not at each step of a drag.
+    int m_cameraRowState = -2;
+    static int cameraRowState(const document::DocumentController &document);
     Focus m_focus = Focus::Layer;
     struct OpacityPreview
     {

@@ -110,12 +110,55 @@ private slots:
         QCOMPARE(controller.camera(), before);
         controller.redo();
         QCOMPARE(controller.camera(), shown);
+        // The camera shown can itself be what is committed (the canvas does so): the step is still recorded.
+        controller.undo();
+        shown->setKey(12, {300, 300, 3, 0});
+        controller.previewCamera(shown);
+        controller.commitCamera(before, controller.camera());
+        QCOMPARE(controller.camera(), shown);
+        controller.undo();
+        QCOMPARE(controller.camera(), before);
+        controller.redo();
         // A drag that ends where it began records nothing.
         const bool couldUndo = controller.canUndo();
         const QString text = controller.undoText();
         controller.commitCamera(shown, shown);
         QCOMPARE(controller.canUndo(), couldUndo);
         QCOMPARE(controller.undoText(), text);
+    }
+
+    void aSelectedCameraRefusesDrawing()
+    {
+        document::DocumentController controller;
+        QSignalSpy selection(&controller, &document::DocumentController::cameraSelectionChanged);
+        controller.selectCamera(true); // there is none: nothing to select
+        QVERIFY(!controller.cameraSelected());
+        QCOMPARE(selection.count(), 0);
+        QImage image(10, 10, QImage::Format_ARGB32);
+        image.fill(Qt::red);
+        controller.importImage(image, QStringLiteral("x"));
+        controller.addCamera();
+        controller.selectCamera(true);
+        QVERIFY(controller.cameraSelected());
+        QCOMPARE(selection.count(), 1);
+        QString reason;
+        QVERIFY(!controller.beginPaint(true, &reason)); // no stroke, fill, paste, shape or effect
+        QVERIFY(!reason.isEmpty());
+        QVERIFY(!controller.pasteImage(image, QPoint(5, 5), &reason));
+        QVERIFY(controller.beginPaintLayers(&reason).empty()); // the move and the transform are refused too
+        QVERIFY(!reason.isEmpty());
+        // Taken away (by undo too), the camera is not selected any more.
+        controller.undo(); // the camera
+        QVERIFY(!controller.camera());
+        QVERIFY(!controller.cameraSelected());
+        QCOMPARE(selection.count(), 2);
+        QVERIFY(controller.beginPaint(true, &reason)); // drawing again
+        controller.cancelPaint();
+        // Another project: not selected either.
+        controller.redo();
+        controller.selectCamera(true);
+        controller.newDocument();
+        QVERIFY(!controller.cameraSelected());
     }
 
     void aNewDocumentHasNoCamera()

@@ -152,6 +152,119 @@ private slots:
     }
 
 
+    // The camera selected in the Layers panel is moved, zoomed and turned on the canvas with its frame and handles;
+    // what is changed at the current frame is the camera's key there, and a drag is one undo step.
+    void cameraGizmoMovesZoomsAndTurnsTheCamera()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(1000, 700);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        using Handle = canvas::CameraGizmo::Handle;
+        const canvas::CameraGizmo &gizmo = canvas.cameraGizmo();
+        const double zoom = canvas.view().zoom();
+        auto at = [&](Handle h) {
+            const auto p = gizmo.handlePoint(h, canvas.view());
+            return p ? canvas.view().documentToView().map(*p) : QPointF(-1000, -1000);
+        };
+        auto drag = [&](QPointF from, QPointF by) {
+            QTest::mousePress(&canvas, Qt::LeftButton, {}, from.toPoint());
+            QTest::mouseMove(&canvas, (from + by * 0.5).toPoint());
+            QTest::mouseMove(&canvas, (from + by).toPoint());
+            QTest::mouseRelease(&canvas, Qt::LeftButton, {}, (from + by).toPoint());
+        };
+        auto near = [](double a, double b, double tolerance) { return std::abs(a - b) <= tolerance; };
+
+        // No camera, or one that is not selected, has no handles.
+        QCOMPARE(gizmo.handleAt(QPointF(100, 100), canvas.view()), Handle::None);
+        controller.addCamera();
+        QVERIFY(!gizmo.editable());
+        QCOMPARE(gizmo.handleAt(QPointF(100, 100), canvas.view()), Handle::None);
+        controller.selectCamera(true);
+        QVERIFY(gizmo.editable());
+        for (Handle h : {Handle::Move, Handle::Scale, Handle::Rotate}) {
+            const auto p = gizmo.handlePoint(h, canvas.view());
+            QVERIFY2(p, qPrintable(QStringLiteral("handle %1 shown").arg(int(h))));
+            QCOMPARE(gizmo.handleAt(*p, canvas.view()), h);
+        }
+        const doc::CameraPose whole = controller.camera()->poseAt(0);
+        const QString undoBefore = controller.undoText();
+
+        // Inside the frame: the camera moves as far as the pen went (the brush is the tool: it draws nothing).
+        QVERIFY(tools::ToolState::isPaintTool(state.activeTool()));
+        drag(at(Handle::Move), QPointF(60, -30));
+        QVERIFY(near(controller.camera()->poseAt(0).centerX, whole.centerX + 60.0 / zoom, 2.0 / zoom));
+        QVERIFY(near(controller.camera()->poseAt(0).centerY, whole.centerY - 30.0 / zoom, 2.0 / zoom));
+        QCOMPARE(controller.camera()->keys().size(), size_t(1)); // the key at frame 0 changed
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo camera"));
+        QVERIFY(controller.document().celCount() == 0 || controller.currentDrawing() == nullptr
+                || controller.currentDrawing()->layers.front().image.isEmpty());
+        controller.undo(); // the whole drag at once
+        QCOMPARE(controller.camera()->poseAt(0), whole);
+        QCOMPARE(controller.undoText(), undoBefore);
+
+        // At another frame, the same drag makes a key there; the first one stays.
+        controller.setCurrentFrame(12);
+        QVERIFY(controller.camera()->keyAt(12) == nullptr);
+        drag(at(Handle::Move), QPointF(-80, 40));
+        QCOMPARE(controller.camera()->keys().size(), size_t(2));
+        QVERIFY(controller.camera()->keyAt(12));
+        QVERIFY(near(controller.camera()->poseAt(12).centerX, whole.centerX - 80.0 / zoom, 2.0 / zoom));
+        QCOMPARE(controller.camera()->poseAt(0), whole);
+        controller.undo();
+        QCOMPARE(controller.camera()->keys().size(), size_t(1));
+
+        // A corner pulled out: the frame is bigger, the camera sees more, the zoom is less; pushed in, more.
+        const QPointF center = at(Handle::Move);
+        QPointF corner = at(Handle::Scale);
+        QPointF out = (corner - center) * 0.5; // half as far again
+        drag(corner, out);
+        QVERIFY(near(controller.camera()->poseAt(12).zoom, 1.0 / 1.5, 0.03));
+        QVERIFY(near(controller.camera()->poseAt(12).centerX, whole.centerX, 1.0)); // around its middle
+        controller.undo();
+        corner = at(Handle::Scale);
+        drag(corner, (center - corner) * 0.5); // half way in
+        QVERIFY(near(controller.camera()->poseAt(12).zoom, 2.0, 0.08));
+        controller.undo();
+
+        // The knob carried a quarter of a turn round the middle turns the camera that much, clockwise.
+        const QPointF knob = at(Handle::Rotate);
+        const QPointF arm = knob - center;
+        const QPointF quarter(-arm.y(), arm.x()); // the arm a quarter turn on, clockwise on the screen (y down)
+        drag(knob, quarter - arm);
+        QVERIFY(near(controller.camera()->poseAt(12).rotation, 90.0, 3.0));
+        controller.undo();
+        // Round more than a turn: it goes on.
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, knob.toPoint());
+        for (int i = 1; i <= 12; ++i) {
+            const double a = i * 35.0 * 3.14159265358979 / 180.0; // 420 degrees in all
+            const QPointF at2 = center + QPointF(arm.x() * std::cos(a) - arm.y() * std::sin(a),
+                                                 arm.x() * std::sin(a) + arm.y() * std::cos(a));
+            QTest::mouseMove(&canvas, at2.toPoint());
+        }
+        const double end = 420.0 * 3.14159265358979 / 180.0;
+        const QPointF last = center + QPointF(arm.x() * std::cos(end) - arm.y() * std::sin(end),
+                                              arm.x() * std::sin(end) + arm.y() * std::cos(end));
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, last.toPoint());
+        QVERIFY(near(controller.camera()->poseAt(12).rotation, 420.0, 4.0));
+        controller.undo();
+
+        // A press that moves nothing is no step.
+        const QString text = controller.undoText();
+        drag(at(Handle::Move), QPointF(0, 0));
+        QCOMPARE(controller.undoText(), text);
+
+        // Off: no handles, and the pen is the tool's again.
+        controller.setCameraVisible(false);
+        QVERIFY(!gizmo.editable());
+        QCOMPARE(gizmo.handleAt(center, canvas.view()), Handle::None);
+        controller.setCameraVisible(true);
+        controller.selectCamera(false);
+        QVERIFY(!gizmo.editable());
+    }
+
     void perspectiveGizmo()
     {
         tools::ToolState state;

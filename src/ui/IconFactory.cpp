@@ -415,6 +415,13 @@ void drawGlyph(QPainter &p, IconId id)
         path.lineTo(3.5, 5.5);
         path.closeSubpath();
         break;
+    case IconId::Camera: // a film camera: the body and its lens
+        path.addRect(QRectF(3.5, 7.5, 12, 9));
+        path.moveTo(15.5, 10.5);
+        path.lineTo(20.5, 7.5);
+        path.lineTo(20.5, 16.5);
+        path.lineTo(15.5, 13.5);
+        break;
     case IconId::Frame: // a frame of film: the picture between sprocket holes
         path.addRect(QRectF(4.5, 3.5, 15, 17));
         path.addRect(QRectF(8, 7, 8, 10));

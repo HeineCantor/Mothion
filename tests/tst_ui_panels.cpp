@@ -313,6 +313,73 @@ private slots:
     }
 
 
+    // The camera has a row at the top of the Layers panel: the Camera button adds and selects it, its eye turns it
+    // on and off, Delete takes it away; while it is selected the cels cannot be drawn on.
+    void cameraHasARowInTheLayersPanel()
+    {
+        document::DocumentController controller;
+        ui::LayersPanel panel(&controller);
+        panel.resize(320, 800);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        auto *tree = panel.findChild<QTreeWidget *>();
+        auto *button = panel.findChild<QToolButton *>(QStringLiteral("cameraButton"));
+        QVERIFY(tree && button);
+        QImage image(20, 20, QImage::Format_ARGB32);
+        image.fill(Qt::red);
+        controller.importImage(image, QStringLiteral("x"));
+        QCoreApplication::processEvents();
+        QVERIFY(!panel.cameraItem()); // none in the project
+
+        button->click(); // made, and selected
+        QVERIFY(controller.camera());
+        QVERIFY(panel.cameraItem());
+        QCOMPARE(tree->topLevelItem(0), panel.cameraItem()); // above the cels
+        QCOMPARE(panel.focus(), ui::LayersPanel::Focus::Camera);
+        QVERIFY(controller.cameraSelected());
+        QCOMPARE(tree->currentItem(), panel.cameraItem());
+        QString reason;
+        QVERIFY(!controller.beginPaint(true, &reason)); // not drawn on
+
+        // Its eye: on and off.
+        auto *eye = tree->itemWidget(panel.cameraItem(), 0)->findChild<QToolButton *>();
+        QVERIFY(eye && eye->isChecked());
+        eye->click();
+        QVERIFY(!controller.camera()->visible);
+        QVERIFY(panel.cameraItem()); // the row stays, off
+        eye = tree->itemWidget(panel.cameraItem(), 0)->findChild<QToolButton *>();
+        QVERIFY(!eye->isChecked());
+        eye->click();
+        QVERIFY(controller.camera()->visible);
+
+        // Another row chosen: the camera is not selected, and a layer can be drawn on again.
+        tree->setCurrentItem(panel.layerItem(controller.currentLayer()));
+        QVERIFY(!controller.cameraSelected());
+        QVERIFY(panel.focus() != ui::LayersPanel::Focus::Camera);
+        QVERIFY(controller.beginPaint(true, &reason));
+        controller.cancelPaint();
+
+        // The button again selects it (it does not make another one); the bin takes it away.
+        button->click();
+        QCOMPARE(controller.camera()->keys().size(), size_t(1));
+        QVERIFY(controller.cameraSelected());
+        QToolButton *bin = nullptr;
+        for (QToolButton *b : panel.findChildren<QToolButton *>())
+            if (b->toolTip() == QStringLiteral("Delete the camera"))
+                bin = b;
+        QVERIFY(bin && bin->isEnabled());
+        bin->click();
+        QCoreApplication::processEvents();
+        QVERIFY(!controller.camera());
+        QVERIFY(!panel.cameraItem());
+        QVERIFY(!controller.cameraSelected());
+        QVERIFY(panel.focus() != ui::LayersPanel::Focus::Camera);
+        // Undone, the camera is back, not selected.
+        controller.undo();
+        QVERIFY(panel.cameraItem());
+        QVERIFY(!controller.cameraSelected());
+    }
+
     // The effect brushes and the shape tool have a size too: the palette, the [ ] keys and the size slider work
     // on it, as on the brush (the opacity slider stays with the paint tools).
     void sizeControlsServeTheEffectBrushesAndShapes()
