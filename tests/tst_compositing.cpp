@@ -1,5 +1,6 @@
 #include "compositing/Evaluator.h"
 #include "compositing/Graph.h"
+#include "compositing/MaskData.h"
 #include "compositing/NodeType.h"
 
 #include <QtTest>
@@ -281,6 +282,106 @@ private slots:
         const QColor near = glow.pixelColor(24, 32);
         QVERIFY(near.alpha() > 0);
         QVERIFY(near.alpha() > glow.pixelColor(2, 2).alpha());
+    }
+
+    void maskShapesAreStoredAndRasterized()
+    {
+        const QList<MaskShape> shapes{MaskShape::rectangle(QRectF(10, 10, 20, 10)),
+                                      MaskShape::lasso(QPolygonF({QPointF(40, 40), QPointF(60, 40), QPointF(50, 60)}))};
+        const QString json = maskShapesToJson(shapes);
+        QVERIFY(parseMaskShapes(json) == shapes);
+        QVERIFY(maskShapesToJson({}).isEmpty());
+        QVERIFY(parseMaskShapes(QStringLiteral("not json")).isEmpty());
+        // Shapes that are not shapes (an empty rectangle, a lasso of two points) are left out.
+        QVERIFY(parseMaskShapes(QStringLiteral(R"([{"t":"rect","x":0,"y":0,"w":0,"h":5},{"t":"lasso","p":[1,2,3,4]}])")).isEmpty());
+
+        const QImage mask = rasterizeMask(shapes, QSize(80, 80), 1.0);
+        QCOMPARE(mask.format(), QImage::Format_Grayscale8);
+        QCOMPARE(qGray(mask.pixel(20, 15)), 255); // inside the rectangle
+        QCOMPARE(qGray(mask.pixel(5, 5)), 0);
+        QCOMPARE(qGray(mask.pixel(50, 45)), 255); // inside the lasso
+        QCOMPARE(qGray(mask.pixel(41, 58)), 0);   // outside its triangle, inside its box
+        // A picture half the size (a preview) has the shapes half the size.
+        const QImage half = rasterizeMask(shapes, QSize(40, 40), 0.5);
+        QCOMPARE(qGray(half.pixel(10, 7)), 255);
+        QCOMPARE(qGray(half.pixel(10, 20)), 0);
+    }
+
+    void maskNodeCutsTheImageAndGivesTheMask()
+    {
+        Graph g;
+        const NodeId frame = g.addNode(QStringLiteral("frame"));
+        const NodeId mask = g.addNode(QStringLiteral("mask"));
+        const NodeId out = g.addNode(QStringLiteral("output"));
+        g.connect(frame, 0, mask, 0);
+        g.connect(mask, 0, out, 0);
+        g.setData(mask, maskShapesToJson({MaskShape::rectangle(QRectF(10, 10, 20, 20))}));
+        QImage input(40, 40, QImage::Format_ARGB32_Premultiplied);
+        input.fill(Qt::red);
+        Evaluator evaluator;
+        EvalContext context;
+        context.frame = input;
+        const QImage cut = evaluator.evaluate(g, context); // output socket 0: the image
+        QCOMPARE(cut.pixelColor(20, 20), QColor(Qt::red));
+        QCOMPARE(cut.pixelColor(2, 2).alpha(), 0); // outside the area: gone
+        const QImage matte = evaluator.evaluateNode(g, context, mask, 1); // output socket 1: the mask
+        QCOMPARE(qGray(matte.pixel(20, 20)), 255);
+        QCOMPARE(qGray(matte.pixel(2, 2)), 0);
+        // Before anything is drawn nothing is selected.
+        g.setData(mask, {});
+        QCOMPARE(evaluator.evaluate(g, context).pixelColor(20, 20).alpha(), 0);
+        // What goes into the node, asked for after the result: the pictures that were kept are shared.
+        g.setData(mask, maskShapesToJson({MaskShape::rectangle(QRectF(0, 0, 5, 5))}));
+        evaluator.evaluate(g, context);
+        QCOMPARE(evaluator.evaluateInput(g, context, mask, 0), input);
+        QCOMPARE(evaluator.processedCount(), 0);
+        QCOMPARE(evaluator.evaluate(g, context).pixelColor(20, 20).alpha(), 0); // and the result was not forgotten
+        QCOMPARE(evaluator.processedCount(), 0);
+    }
+
+    void mergeWithAMaskShowsTheFrontOnlyThere()
+    {
+        Graph g;
+        const NodeId back = g.addNode(QStringLiteral("frame"));
+        const NodeId color = g.addNode(QStringLiteral("color"));
+        const NodeId mask = g.addNode(QStringLiteral("mask"));
+        const NodeId merge = g.addNode(QStringLiteral("merge"));
+        const NodeId out = g.addNode(QStringLiteral("output"));
+        g.setParam(color, QStringLiteral("color"), QColor(0, 0, 255, 255));
+        g.setData(mask, maskShapesToJson({MaskShape::rectangle(QRectF(10, 10, 20, 20))}));
+        g.connect(back, 0, merge, 0);
+        g.connect(color, 0, merge, 1);
+        g.connect(back, 0, mask, 0);
+        g.connect(mask, 1, merge, 2); // the mask socket, not the image one
+        g.connect(merge, 0, out, 0);
+        QImage white(40, 40, QImage::Format_ARGB32_Premultiplied);
+        white.fill(Qt::white);
+        Evaluator evaluator;
+        EvalContext context;
+        context.frame = white;
+        const QImage result = evaluator.evaluate(g, context);
+        QCOMPARE(result.pixelColor(20, 20), QColor(Qt::blue)); // inside: the front
+        QCOMPARE(result.pixelColor(2, 2), QColor(Qt::white));   // outside: the back
+        // Without the mask the front covers everything.
+        g.disconnect(merge, 2);
+        QCOMPARE(evaluator.evaluate(g, context).pixelColor(2, 2), QColor(Qt::blue));
+    }
+
+    void nodeDataIsStoredAndLoaded()
+    {
+        Graph g;
+        const NodeId mask = g.addNode(QStringLiteral("mask"));
+        const QString json = maskShapesToJson({MaskShape::rectangle(QRectF(1, 2, 3, 4))});
+        g.setData(mask, json);
+        Graph other;
+        int heard = 0;
+        other.addListener([&](const GraphChange &c) { heard += c.kind == GraphChange::Kind::Data; });
+        other.load(g.toData());
+        QCOMPARE(other.node(mask)->data, json);
+        other.setData(mask, {});
+        QCOMPARE(heard, 1);
+        other.setData(mask, {}); // the same: nothing to hear
+        QCOMPARE(heard, 1);
     }
 
     void choicesAndTogglesAreStoredAsNumbers()

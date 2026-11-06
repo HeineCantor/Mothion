@@ -6,15 +6,19 @@
 
 class QSplitter;
 class QTimer;
+class QToolButton;
 
 #include "compositing/Evaluator.h"
 #include "compositing/Graph.h"
+#include "compositing/MaskData.h"
 
 namespace mothion::document {
 class DocumentController;
 }
 
 namespace mothion::ui {
+
+using compositing::MaskShape;
 
 class NodeGraphView;
 class ImagePreview;
@@ -32,6 +36,8 @@ public:
     NodeGraphView *graph() const { return m_graph; }
     compositing::Graph &network() { return m_network; }
     ImagePreview *preview() const { return m_preview; }
+    // The Mask node whose areas are being drawn on the preview (0: none). That is the one node selected, if it is a Mask.
+    compositing::NodeId editedMask() const { return m_editing; }
 
     // Puts the edits not yet in the document into it (one undo step), at once.
     void commit();
@@ -45,6 +51,10 @@ protected:
 private:
     void scheduleRefresh();
     void frame();
+    void editMask(compositing::NodeId id);  // 0 or a node that is not a mask: back to showing the result
+    void addMaskShape(const MaskShape &shapeInPreviewPixels);
+    QList<MaskShape> maskShapes() const;
+    void setMaskShapes(const QList<MaskShape> &shapes);
     void seed();           // the network a project starts with, until the user changes it
     void documentChanged(); // the document's network is not the one shown (undo, redo, another project)
 
@@ -60,6 +70,8 @@ private:
     QImage m_frame;           // what the Frame nodes hold: the frame, composed, as big as the preview needs
     double m_frameScale = 1.0; // its width over the page's
     bool m_frameDirty = true;
+    compositing::NodeId m_editing = 0;
+    QWidget *m_maskBar = nullptr; // the tools of the mask being edited, over the preview
     bool m_autoFrame = true;
     doc::GraphData m_committed; // what the document holds, as far as this window knows
     bool m_pending = false;     // edits not yet committed

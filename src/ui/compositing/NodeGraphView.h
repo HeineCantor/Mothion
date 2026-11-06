@@ -117,6 +117,8 @@ signals:
     void viewTouched();
     // A mouse button was released in the view: a drag, a slider or a wire is done (a good moment to keep the work).
     void gestureEnded();
+    // The selection became a single node (its id), or anything else (0).
+    void selectedNodeChanged(compositing::NodeId id);
 
 protected:
     void mousePressEvent(QMouseEvent *event) override;

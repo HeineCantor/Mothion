@@ -19,6 +19,7 @@ struct Node
     QString type; // NodeType::id()
     QPointF pos;  // where the editor shows it
     QVariantMap params;
+    QString data;      // what a type keeps besides its numbers (see NodeType): the areas of a mask
     quint64 stamp = 0; // changes whenever what the node computes may have changed
 };
 
@@ -33,7 +34,7 @@ struct Link
 
 struct GraphChange
 {
-    enum class Kind { NodeAdded, NodeRemoved, Links, Param, Moved, Reset };
+    enum class Kind { NodeAdded, NodeRemoved, Links, Param, Data, Moved, Reset };
     Kind kind;
     NodeId node = 0; // not for Links
     QString key;     // Param: the setting
@@ -58,6 +59,7 @@ public:
     // Takes out the wire into an input, if there is one.
     void disconnect(NodeId to, int toPort);
     void setParam(NodeId id, const QString &key, const QVariant &value);
+    void setData(NodeId id, const QString &data);
     void setPosition(NodeId id, const QPointF &pos);
 
     // The network as the document stores it, and the other way round: load() replaces everything with what

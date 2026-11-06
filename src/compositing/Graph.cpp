@@ -107,6 +107,16 @@ void Graph::setParam(NodeId id, const QString &key, const QVariant &value)
     notify({GraphChange::Kind::Param, id, key});
 }
 
+void Graph::setData(NodeId id, const QString &data)
+{
+    Node *n = mutableNode(id);
+    if (!n || n->data == data)
+        return;
+    n->data = data;
+    n->stamp = ++m_stamp;
+    notify({GraphChange::Kind::Data, id, {}});
+}
+
 void Graph::setPosition(NodeId id, const QPointF &pos)
 {
     Node *n = mutableNode(id);
@@ -126,6 +136,7 @@ doc::GraphData Graph::toData() const
         node.type = n.type.toStdString();
         node.x = n.pos.x();
         node.y = n.pos.y();
+        node.data = n.data.toStdString();
         if (const NodeType *type = NodeRegistry::instance().find(n.type))
             for (const ParamInfo &param : type->params()) {
                 const QVariant value = n.params.value(param.key);
@@ -156,6 +167,7 @@ void Graph::load(const doc::GraphData &data)
         n.id = stored.id;
         n.type = typeName;
         n.pos = {stored.x, stored.y};
+        n.data = QString::fromStdString(stored.data);
         n.stamp = ++m_stamp;
         for (const ParamInfo &param : type->params()) {
             n.params[param.key] = param.initial;

@@ -328,6 +328,19 @@ NodeGraphView::NodeGraphView(compositing::Graph &graph, QWidget *parent)
     setDragMode(RubberBandDrag);
     setViewportUpdateMode(FullViewportUpdate);
 
+    connect(m_scene, &QGraphicsScene::selectionChanged, this, [this] {
+        NodeId only = 0;
+        int nodes = 0, others = 0;
+        for (QGraphicsItem *item : m_scene->selectedItems()) {
+            if (auto *node = dynamic_cast<NodeItem *>(item)) {
+                only = node->nodeId();
+                ++nodes;
+            } else {
+                ++others;
+            }
+        }
+        emit selectedNodeChanged(nodes == 1 && others == 0 ? only : 0);
+    });
     for (const compositing::Node &node : m_graph.nodes())
         addNodeItem(node.id);
     rebuildEdges();
@@ -346,6 +359,7 @@ void NodeGraphView::graphChanged(const compositing::GraphChange &change)
     case Kind::NodeAdded:
         addNodeItem(change.node);
         break;
+    case Kind::Data:  // nothing to show in the node
     case Kind::Moved: // an item was dragged: it is already there
         break;
     case Kind::Reset: // everything was replaced

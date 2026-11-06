@@ -80,9 +80,10 @@ std::unique_ptr<doc::Document> sampleDocument()
     graph.nodes.push_back({1, "frame", -330.5, 12, {}});
     graph.nodes.push_back({4, "blur", 20, -7.25, {{"radius", 17}}});
     graph.nodes.push_back({7, "output", 400, 0, {}});
+    graph.nodes.push_back({8, "mask", 1, 2, {}, R"([{"t":"rect","x":1,"y":2,"w":3,"h":4}])"});
     graph.links.push_back({1, 0, 4, 0});
     graph.links.push_back({4, 0, 7, 0});
-    graph.nextId = 9;
+    graph.nextId = 10;
     d->setCompositing(graph);
     d->allocateCelId(); // ids used by a cel and a layer since deleted: must not come back
     d->allocateLayerId();

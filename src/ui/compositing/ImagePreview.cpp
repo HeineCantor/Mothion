@@ -26,6 +26,31 @@ ImagePreview::ImagePreview(QWidget *parent)
     setFocusPolicy(Qt::StrongFocus); // for the keys
 }
 
+void ImagePreview::setTool(Tool tool)
+{
+    m_tool = tool;
+    m_drawing = false;
+    if (m_dragging)
+        return;
+    if (tool == Tool::Pan)
+        unsetCursor();
+    else
+        setCursor(Qt::CrossCursor);
+    update();
+}
+
+void ImagePreview::setOverlay(const QImage &overlay)
+{
+    m_overlay = overlay;
+    update();
+}
+
+QPointF ImagePreview::toWidget(const QPointF &imagePoint) const
+{
+    const QPointF center(width() / 2.0, height() / 2.0);
+    return center + m_offset + (imagePoint - QPointF(m_image.width() / 2.0, m_image.height() / 2.0)) * scale();
+}
+
 void ImagePreview::setImage(const QImage &image)
 {
     // A picture of another size (another page) starts fitted; the same size, as at every frame, stays where it is.
@@ -88,6 +113,25 @@ void ImagePreview::paintEvent(QPaintEvent *)
     const QRectF target(QPointF((width() - size.width()) / 2, (height() - size.height()) / 2) + m_offset, size);
     p.setRenderHint(QPainter::SmoothPixmapTransform, s < 2.0);
     p.drawImage(target, m_image);
+    if (!m_overlay.isNull())
+        p.drawImage(target, m_overlay);
+
+    if (m_drawing && m_shape.size() >= 2) { // the shape being drawn
+        p.setRenderHint(QPainter::Antialiasing);
+        QPolygonF shown;
+        if (m_tool == Tool::Rectangle) {
+            const QRectF r = QRectF(toWidget(m_shape.first()), toWidget(m_shape.last())).normalized();
+            shown << r.topLeft() << r.topRight() << r.bottomRight() << r.bottomLeft();
+        } else {
+            for (const QPointF &point : std::as_const(m_shape))
+                shown << toWidget(point);
+        }
+        QColor fill = palette().color(QPalette::Highlight);
+        fill.setAlpha(60);
+        p.setBrush(fill);
+        p.setPen(QPen(palette().color(QPalette::Highlight), 1.5, Qt::DashLine));
+        p.drawPolygon(shown);
+    }
 
     if (std::abs(m_zoom - 1.0) > 0.001) { // where it is not just fitted: how much it is shown
         const QString text = tr("%1%").arg(std::lround(s * 100));
@@ -108,7 +152,13 @@ void ImagePreview::wheelEvent(QWheelEvent *event)
 
 void ImagePreview::mousePressEvent(QMouseEvent *event)
 {
-    if (event->button() == Qt::LeftButton || event->button() == Qt::MiddleButton) {
+    if (event->button() == Qt::LeftButton && m_tool != Tool::Pan && !m_image.isNull()) {
+        m_drawing = true;
+        m_shapeStart = imagePointAt(event->position());
+        m_shape = {m_shapeStart};
+        setFocus(Qt::MouseFocusReason);
+        event->accept();
+    } else if (event->button() == Qt::LeftButton || event->button() == Qt::MiddleButton) {
         m_dragging = true;
         m_dragFrom = event->pos();
         setCursor(Qt::ClosedHandCursor);
@@ -119,6 +169,16 @@ void ImagePreview::mousePressEvent(QMouseEvent *event)
 
 void ImagePreview::mouseMoveEvent(QMouseEvent *event)
 {
+    if (m_drawing) {
+        const QPointF point = imagePointAt(event->position());
+        if (m_tool == Tool::Rectangle) {
+            m_shape = {m_shapeStart, point};
+        } else if (QLineF(toWidget(m_shape.last()), event->position()).length() >= 2.0) {
+            m_shape << point; // a point for each couple of pixels of the screen is plenty
+        }
+        update();
+        return;
+    }
     if (!m_dragging)
         return;
     m_offset += QPointF(event->pos() - m_dragFrom);
@@ -126,23 +186,51 @@ void ImagePreview::mouseMoveEvent(QMouseEvent *event)
     update();
 }
 
+void ImagePreview::finishShape()
+{
+    const QRectF bounds(QPointF(0, 0), QSizeF(m_image.size()));
+    if (m_tool == Tool::Rectangle && m_shape.size() >= 2) {
+        const QRectF rect = QRectF(m_shape.first(), m_shape.last()).normalized().intersected(bounds);
+        if (rect.width() >= 2 && rect.height() >= 2)
+            emit rectangleDrawn(rect);
+    } else if (m_tool == Tool::Lasso && m_shape.size() >= 3) {
+        QPolygonF polygon;
+        for (const QPointF &point : std::as_const(m_shape))
+            polygon << QPointF(std::clamp(point.x(), 0.0, bounds.width()), std::clamp(point.y(), 0.0, bounds.height()));
+        if (polygon.boundingRect().width() >= 2 && polygon.boundingRect().height() >= 2)
+            emit lassoDrawn(polygon);
+    }
+}
+
 void ImagePreview::mouseReleaseEvent(QMouseEvent *event)
 {
-    if (m_dragging && (event->button() == Qt::LeftButton || event->button() == Qt::MiddleButton)) {
+    if (m_drawing && event->button() == Qt::LeftButton) {
+        m_drawing = false;
+        finishShape();
+        m_shape.clear();
+        update();
+    } else if (m_dragging && (event->button() == Qt::LeftButton || event->button() == Qt::MiddleButton)) {
         m_dragging = false;
-        unsetCursor();
+        if (m_tool == Tool::Pan)
+            unsetCursor();
+        else
+            setCursor(Qt::CrossCursor);
     }
 }
 
 void ImagePreview::mouseDoubleClickEvent(QMouseEvent *event)
 {
-    if (event->button() == Qt::LeftButton)
+    if (event->button() == Qt::LeftButton && m_tool == Tool::Pan)
         fit();
 }
 
 void ImagePreview::keyPressEvent(QKeyEvent *event)
 {
-    if (event->key() == Qt::Key_F || event->key() == Qt::Key_Home
+    if (event->key() == Qt::Key_Escape && m_drawing) {
+        m_drawing = false; // the shape is given up
+        m_shape.clear();
+        update();
+    } else if (event->key() == Qt::Key_F || event->key() == Qt::Key_Home
         || (event->key() == Qt::Key_0 && event->modifiers() == Qt::ControlModifier)) {
         fit();
     } else if (event->key() == Qt::Key_1 && event->modifiers() == Qt::ControlModifier) {

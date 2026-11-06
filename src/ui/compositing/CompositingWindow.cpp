@@ -5,13 +5,20 @@
 #include "ui/compositing/ImagePreview.h"
 #include "ui/compositing/NodeGraphView.h"
 
+#include <QButtonGroup>
+#include <QHBoxLayout>
 #include <QLabel>
+#include <QToolButton>
 #include <QPainter>
 #include <QSplitter>
 #include <QTimer>
 #include <QVBoxLayout>
 
 namespace mothion::ui {
+
+using compositing::MaskShape;
+using compositing::parseMaskShapes;
+using compositing::maskShapesToJson;
 
 CompositingWindow::CompositingWindow(document::DocumentController *document, QWidget *parent)
     : QWidget(parent, Qt::Window)
@@ -35,7 +42,7 @@ CompositingWindow::CompositingWindow(document::DocumentController *document, QWi
     resize(1100, 700); // what restoring from maximized gives
 
     auto *hint = new QLabel(tr("Prototype: right-click to add a node, drag from a socket to connect, "
-                               "Delete removes, middle button pans, wheel zooms, F frames all. In the picture above: drag to move, wheel to zoom, double click to fit."),
+                               "Delete removes, middle button pans, wheel zooms, F frames all. In the picture above: drag to move, wheel to zoom, double click to fit. Select a Mask node to draw its areas on the picture."),
                             this);
     hint->setContentsMargins(8, 4, 8, 4);
     hint->setEnabled(false);
@@ -47,10 +54,60 @@ CompositingWindow::CompositingWindow(document::DocumentController *document, QWi
     lowerLayout->addWidget(hint);
     lowerLayout->addWidget(m_graph, 1);
 
+    // The picture, with the tools of the Mask node being edited above it (shown only then).
+    m_maskBar = new QWidget(this);
+    auto *barLayout = new QHBoxLayout(m_maskBar);
+    barLayout->setContentsMargins(8, 4, 8, 4);
+    auto *group = new QButtonGroup(this);
+    auto addTool = [&](const QString &text, const QString &tip, ImagePreview::Tool tool, bool checked) {
+        auto *button = new QToolButton(m_maskBar);
+        button->setText(text);
+        button->setToolTip(tip);
+        button->setCheckable(true);
+        button->setChecked(checked);
+        group->addButton(button);
+        barLayout->addWidget(button);
+        connect(button, &QToolButton::clicked, this, [this, tool] { m_preview->setTool(tool); });
+    };
+    addTool(tr("Rectangle"), tr("Drag to add a rectangle to the mask"), ImagePreview::Tool::Rectangle, true);
+    addTool(tr("Lasso"), tr("Draw a free shape around an area to add it to the mask"), ImagePreview::Tool::Lasso, false);
+    addTool(tr("Move"), tr("Drag to move the picture (the middle button always does)"), ImagePreview::Tool::Pan, false);
+    barLayout->addSpacing(12);
+    auto *removeLast = new QToolButton(m_maskBar);
+    removeLast->setText(tr("Remove last"));
+    removeLast->setToolTip(tr("Take out the area drawn last"));
+    barLayout->addWidget(removeLast);
+    auto *clear = new QToolButton(m_maskBar);
+    clear->setText(tr("Clear"));
+    clear->setToolTip(tr("Take out all the areas"));
+    barLayout->addWidget(clear);
+    barLayout->addStretch(1);
+    barLayout->addWidget(new QLabel(tr("Mask: the areas drawn are in red"), m_maskBar));
+    m_maskBar->hide();
+    connect(removeLast, &QToolButton::clicked, this, [this] {
+        QList<MaskShape> shapes = maskShapes();
+        if (!shapes.isEmpty()) {
+            shapes.removeLast();
+            setMaskShapes(shapes);
+        }
+    });
+    connect(clear, &QToolButton::clicked, this, [this] { setMaskShapes({}); });
+    auto *upper = new QWidget(this);
+    auto *upperLayout = new QVBoxLayout(upper);
+    upperLayout->setContentsMargins(0, 0, 0, 0);
+    upperLayout->setSpacing(0);
+    upperLayout->addWidget(m_maskBar);
+    upperLayout->addWidget(m_preview, 1);
+    connect(m_preview, &ImagePreview::rectangleDrawn, this,
+            [this](const QRectF &r) { addMaskShape(MaskShape::rectangle(r)); });
+    connect(m_preview, &ImagePreview::lassoDrawn, this,
+            [this](const QPolygonF &poly) { addMaskShape(MaskShape::lasso(poly)); });
+    connect(m_graph, &NodeGraphView::selectedNodeChanged, this, &CompositingWindow::editMask);
+
     auto *split = new QSplitter(Qt::Vertical, this);
     m_split = split;
     split->setChildrenCollapsible(false);
-    split->addWidget(m_preview);
+    split->addWidget(upper);
     split->addWidget(lower);
     split->setStretchFactor(0, 1);
     split->setStretchFactor(1, 1);
@@ -172,6 +229,47 @@ void CompositingWindow::scheduleRefresh()
         m_timer->start();
 }
 
+void CompositingWindow::editMask(compositing::NodeId id)
+{
+    const compositing::Node *node = id ? m_network.node(id) : nullptr;
+    const compositing::NodeId mask = node && node->type == QLatin1String("mask") ? id : 0;
+    if (mask == m_editing)
+        return;
+    m_editing = mask;
+    m_maskBar->setVisible(mask != 0);
+    m_preview->setTool(mask ? ImagePreview::Tool::Rectangle : ImagePreview::Tool::Pan);
+    for (auto *button : m_maskBar->findChildren<QToolButton *>()) // the bar starts at the Rectangle tool
+        if (button->isCheckable())
+            button->setChecked(button->text() == tr("Rectangle"));
+    refresh();
+}
+
+QList<MaskShape> CompositingWindow::maskShapes() const
+{
+    const compositing::Node *node = m_editing ? m_network.node(m_editing) : nullptr;
+    return node ? parseMaskShapes(node->data) : QList<MaskShape>();
+}
+
+void CompositingWindow::setMaskShapes(const QList<MaskShape> &shapes)
+{
+    if (m_editing)
+        m_network.setData(m_editing, maskShapesToJson(shapes));
+}
+
+void CompositingWindow::addMaskShape(const MaskShape &shape)
+{
+    // Drawn on the preview, kept in pixels of the document: the preview may be smaller.
+    const double k = m_frameScale > 0 ? 1.0 / m_frameScale : 1.0;
+    MaskShape stored = shape;
+    stored.rect = QRectF(shape.rect.x() * k, shape.rect.y() * k, shape.rect.width() * k, shape.rect.height() * k);
+    stored.polygon.clear();
+    for (const QPointF &point : shape.polygon)
+        stored.polygon << point * k;
+    QList<MaskShape> shapes = maskShapes();
+    shapes.append(stored);
+    setMaskShapes(shapes);
+}
+
 void CompositingWindow::refresh()
 {
     if (m_frameDirty && m_document) {
@@ -192,6 +290,32 @@ void CompositingWindow::refresh()
     context.scale = m_frameScale;
     if (m_document)
         context.paper = m_document->document().paperColor();
+
+    if (m_editing && !m_network.node(m_editing))
+        editMask(0); // the node was taken away (an undo)
+    if (m_editing) {
+        // The mask being drawn: what goes into the node, with its areas tinted over it.
+        QImage base = m_evaluator.evaluateInput(m_network, context, m_editing, 0);
+        if (base.isNull())
+            base = m_frame;
+        const QImage matte = m_evaluator.evaluateNode(m_network, context, m_editing, 1);
+        QImage tint;
+        if (!matte.isNull()) {
+            tint = QImage(matte.size(), QImage::Format_ARGB32_Premultiplied);
+            for (int y = 0; y < matte.height(); ++y) {
+                const uchar *m = matte.constScanLine(y);
+                QRgb *out = reinterpret_cast<QRgb *>(tint.scanLine(y));
+                for (int x = 0; x < matte.width(); ++x) {
+                    const int a = m[x] * 110 / 255; // red, see-through
+                    out[x] = qRgba(a, a * 60 / 255, a * 60 / 255, a);
+                }
+            }
+        }
+        m_preview->setImage(base);
+        m_preview->setOverlay(tint);
+        return;
+    }
+    m_preview->setOverlay({});
     m_preview->setImage(m_evaluator.evaluate(m_network, context));
 }
 

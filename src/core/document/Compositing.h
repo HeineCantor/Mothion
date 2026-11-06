@@ -16,6 +16,7 @@ struct GraphNodeData
     double x = 0;
     double y = 0;
     std::vector<std::pair<std::string, int>> params;
+    std::string data{}; // what does not fit in numbers (the areas of a mask), as the node's type writes it
 
     bool operator==(const GraphNodeData &) const = default;
 };

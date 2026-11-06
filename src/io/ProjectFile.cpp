@@ -275,8 +275,11 @@ QString graphToJson(const doc::GraphData &graph)
         QJsonObject params;
         for (const auto &[key, value] : n.params)
             params[QString::fromStdString(key)] = value;
-        nodes.append(QJsonObject{{"id", n.id}, {"type", QString::fromStdString(n.type)}, {"x", n.x}, {"y", n.y},
-                                 {"params", params}});
+        QJsonObject node{{"id", n.id}, {"type", QString::fromStdString(n.type)}, {"x", n.x}, {"y", n.y},
+                         {"params", params}};
+        if (!n.data.empty())
+            node["data"] = QString::fromStdString(n.data);
+        nodes.append(node);
     }
     for (const doc::GraphLinkData &l : graph.links)
         links.append(QJsonArray{l.from, l.fromPort, l.to, l.toPort});
@@ -296,6 +299,7 @@ doc::GraphData graphFromJson(const QString &text)
         n.type = o.value("type").toString().toStdString();
         n.x = o.value("x").toDouble();
         n.y = o.value("y").toDouble();
+        n.data = o.value("data").toString().toStdString();
         const QJsonObject params = o.value("params").toObject();
         for (auto it = params.begin(); it != params.end(); ++it)
             n.params.emplace_back(it.key().toStdString(), it.value().toInt());

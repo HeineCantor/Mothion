@@ -14,16 +14,43 @@ void combine(quint64 &hash, quint64 value)
 QImage Evaluator::evaluate(const Graph &graph, const EvalContext &context)
 {
     m_processed = 0;
-    std::unordered_map<NodeId, Result> done;
+    Done done;
     QImage result;
     if (const NodeId output = graph.outputNode())
-        result = compute(graph, output, context, done).image;
-    m_kept = std::move(done); // what was not reached this time (a removed node) is forgotten
+        result = compute(graph, output, context, done).images.value(0);
+    keep(graph, done);
     return result;
 }
 
+QImage Evaluator::evaluateNode(const Graph &graph, const EvalContext &context, NodeId id, int port)
+{
+    m_processed = 0;
+    Done done;
+    const QImage result = compute(graph, id, context, done).images.value(port);
+    keep(graph, done);
+    return result;
+}
+
+QImage Evaluator::evaluateInput(const Graph &graph, const EvalContext &context, NodeId id, int port)
+{
+    m_processed = 0;
+    Done done;
+    const Link *link = graph.linkInto(id, port);
+    const QImage result = link ? compute(graph, link->from, context, done).images.value(link->fromPort) : QImage();
+    keep(graph, done);
+    return result;
+}
+
+void Evaluator::keep(const Graph &graph, Done &done)
+{
+    for (auto &[id, result] : done)
+        m_kept[id] = std::move(result);
+    for (auto it = m_kept.begin(); it != m_kept.end();)
+        it = graph.node(it->first) ? std::next(it) : m_kept.erase(it);
+}
+
 Evaluator::Result Evaluator::compute(const Graph &graph, NodeId id, const EvalContext &context,
-                                     std::unordered_map<NodeId, Result> &done)
+                                     Done &done)
 {
     if (const auto it = done.find(id); it != done.end())
         return it->second;
@@ -46,16 +73,19 @@ Evaluator::Result Evaluator::compute(const Graph &graph, NodeId id, const EvalCo
     for (int port = 0; port < type->inputs().size(); ++port) {
         const Link *link = graph.linkInto(id, port);
         const Result upstream = link ? compute(graph, link->from, context, done) : Result{};
-        inputs.append(upstream.image);
+        inputs.append(upstream.images.value(link ? link->fromPort : 0));
         combine(signature, upstream.signature);
     }
 
     Result result;
     result.signature = signature;
     if (const auto kept = m_kept.find(id); kept != m_kept.end() && kept->second.signature == signature) {
-        result.image = kept->second.image;
+        result.images = kept->second.images;
     } else {
-        result.image = type->process(inputs, node->params, context);
+        QVariantMap settings = node->params;
+        if (!node->data.isEmpty())
+            settings[kDataKey] = node->data;
+        result.images = type->processOutputs(inputs, settings, context);
         ++m_processed;
     }
     done[id] = result;

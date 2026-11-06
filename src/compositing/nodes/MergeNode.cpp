@@ -1,5 +1,7 @@
 #include "compositing/nodes/MergeNode.h"
 
+#include "compositing/MaskData.h"
+
 #include <QPainter>
 
 namespace mothion::compositing {
@@ -7,7 +9,9 @@ namespace mothion::compositing {
 QImage MergeNode::process(const QList<QImage> &inputs, const QVariantMap &params, const EvalContext &) const
 {
     const QImage &back = inputs.value(0);
-    const QImage &front = inputs.value(1);
+    QImage front = inputs.value(1);
+    if (!front.isNull() && !inputs.value(2).isNull())
+        front = applyMask(front, inputs.value(2));
     if (back.isNull())
         return front;
     QImage result = back.convertToFormat(QImage::Format_ARGB32_Premultiplied);

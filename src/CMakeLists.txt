@@ -119,6 +119,8 @@ qt_add_library(mothion_gui STATIC
     compositing/nodes/ChromaticAberrationNode.h compositing/nodes/ChromaticAberrationNode.cpp
     compositing/nodes/SensorNoiseNode.h compositing/nodes/SensorNoiseNode.cpp
     compositing/nodes/GlowNode.h compositing/nodes/GlowNode.cpp
+    compositing/nodes/MaskNode.h compositing/nodes/MaskNode.cpp
+    compositing/MaskData.h compositing/MaskData.cpp
     ui/compositing/NodeGraphView.h ui/compositing/NodeGraphView.cpp
     ui/compositing/CompositingWindow.h ui/compositing/CompositingWindow.cpp
     ui/compositing/ImagePreview.h ui/compositing/ImagePreview.cpp

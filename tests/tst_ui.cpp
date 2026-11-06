@@ -5398,6 +5398,118 @@ private slots:
         QCOMPARE(preview.zoom(), 1.0);
     }
 
+    void compositingPreviewDrawsShapes()
+    {
+        ui::ImagePreview preview;
+        preview.resize(400, 300);
+        preview.show();
+        QImage image(200, 100, QImage::Format_ARGB32_Premultiplied);
+        image.fill(Qt::red);
+        preview.setImage(image); // fitted: 2 screen pixels for each of the image's, centered at (200, 150)
+        QSignalSpy rectangles(&preview, &ui::ImagePreview::rectangleDrawn);
+        QSignalSpy lassos(&preview, &ui::ImagePreview::lassoDrawn);
+
+        // With the Pan tool a drag moves the picture and draws nothing.
+        QTest::mousePress(&preview, Qt::LeftButton, {}, QPoint(100, 100));
+        QTest::mouseMove(&preview, QPoint(150, 120));
+        QTest::mouseRelease(&preview, Qt::LeftButton, {}, QPoint(150, 120));
+        QCOMPARE(rectangles.count(), 0);
+        preview.fit();
+
+        preview.setTool(ui::ImagePreview::Tool::Rectangle);
+        const QPointF a = preview.imagePointAt(QPointF(120, 100)), b = preview.imagePointAt(QPointF(240, 180));
+        QTest::mousePress(&preview, Qt::LeftButton, {}, QPoint(120, 100));
+        QTest::mouseMove(&preview, QPoint(200, 140));
+        QTest::mouseMove(&preview, QPoint(240, 180));
+        QTest::mouseRelease(&preview, Qt::LeftButton, {}, QPoint(240, 180));
+        QCOMPARE(rectangles.count(), 1);
+        const QRectF drawn = rectangles.first().first().toRectF();
+        QVERIFY(QLineF(drawn.topLeft(), a).length() < 0.01);
+        QVERIFY(QLineF(drawn.bottomRight(), b).length() < 0.01);
+        QCOMPARE(preview.offset(), QPointF(0, 0)); // nothing moved
+        // Dragged from the other corner, or out of the picture, the rectangle is the same kind and kept inside it.
+        QTest::mousePress(&preview, Qt::LeftButton, {}, QPoint(390, 290));
+        QTest::mouseMove(&preview, QPoint(300, 200));
+        QTest::mouseRelease(&preview, Qt::LeftButton, {}, QPoint(300, 200));
+        QCOMPARE(rectangles.count(), 2);
+        const QRectF inside = rectangles.last().first().toRectF();
+        QVERIFY(QRectF(0, 0, 200, 100).contains(inside));
+        // A click, or a rectangle of a pixel, is not a shape.
+        QTest::mouseClick(&preview, Qt::LeftButton, {}, QPoint(200, 150));
+        QCOMPARE(rectangles.count(), 2);
+        // Escape gives up the shape being drawn.
+        QTest::mousePress(&preview, Qt::LeftButton, {}, QPoint(100, 100));
+        QTest::mouseMove(&preview, QPoint(250, 200));
+        QTest::keyClick(&preview, Qt::Key_Escape);
+        QTest::mouseRelease(&preview, Qt::LeftButton, {}, QPoint(250, 200));
+        QCOMPARE(rectangles.count(), 2);
+
+        // The middle button still moves the picture with a drawing tool.
+        QTest::mousePress(&preview, Qt::MiddleButton, {}, QPoint(100, 100));
+        QTest::mouseMove(&preview, QPoint(120, 90));
+        QTest::mouseRelease(&preview, Qt::MiddleButton, {}, QPoint(120, 90));
+        QCOMPARE(preview.offset(), QPointF(20, -10));
+        QCOMPARE(rectangles.count(), 2);
+        preview.fit();
+
+        // The lasso follows the pen.
+        preview.setTool(ui::ImagePreview::Tool::Lasso);
+        QTest::mousePress(&preview, Qt::LeftButton, {}, QPoint(150, 100));
+        for (const QPoint &p : {QPoint(200, 110), QPoint(250, 150), QPoint(200, 200), QPoint(150, 150), QPoint(148, 102)})
+            QTest::mouseMove(&preview, p);
+        QTest::mouseRelease(&preview, Qt::LeftButton, {}, QPoint(148, 102));
+        QCOMPARE(lassos.count(), 1);
+        const QPolygonF shape = lassos.first().first().value<QPolygonF>();
+        QVERIFY(shape.size() >= 5);
+        QVERIFY(QRectF(0, 0, 200, 100).contains(shape.boundingRect()));
+    }
+
+    void maskIsDrawnOnThePreviewWhileItsNodeIsSelected()
+    {
+        document::DocumentController controller;
+        ui::CompositingWindow window(&controller);
+        window.show();
+        compositing::Graph &network = window.network();
+        const compositing::NodeId mask = network.addNode(QStringLiteral("mask"), {0, 200});
+        compositing::NodeId other = 0;
+        for (const compositing::Node &n : network.nodes())
+            if (n.type == QLatin1String("blur"))
+                other = n.id;
+        QCOMPARE(window.editedMask(), compositing::NodeId(0));
+        QCOMPARE(window.preview()->tool(), ui::ImagePreview::Tool::Pan);
+
+        window.graph()->item(mask)->setSelected(true);
+        QCOMPARE(window.editedMask(), mask);
+        QCOMPARE(window.preview()->tool(), ui::ImagePreview::Tool::Rectangle);
+
+        // A rectangle drawn on the preview becomes an area of the node, in pixels of the page.
+        const QSize page(controller.document().width(), controller.document().height());
+        const QImage &shown = window.preview()->image();
+        QVERIFY(!shown.isNull());
+        QTest::mousePress(window.preview(), Qt::LeftButton, {}, QPoint(window.preview()->width() / 3, window.preview()->height() / 3));
+        QTest::mouseMove(window.preview(), QPoint(window.preview()->width() / 2, window.preview()->height() / 2));
+        QTest::mouseRelease(window.preview(), Qt::LeftButton, {}, QPoint(window.preview()->width() / 2, window.preview()->height() / 2));
+        QList<compositing::MaskShape> shapes = compositing::parseMaskShapes(network.node(mask)->data);
+        QCOMPARE(shapes.size(), 1);
+        QVERIFY(QRectF(QPointF(0, 0), QSizeF(page)).contains(shapes[0].rect));
+        // And the preview tints it: the image has an overlay now (the evaluator is asked for the mask).
+        QVERIFY(window.preview()->hasOverlay());
+
+        // Another node selected, or none: back to the result.
+        window.graph()->item(mask)->setSelected(false);
+        QCOMPARE(window.editedMask(), compositing::NodeId(0));
+        QVERIFY(!window.preview()->hasOverlay());
+        QCOMPARE(window.preview()->tool(), ui::ImagePreview::Tool::Pan);
+        window.graph()->item(other)->setSelected(true);
+        QCOMPARE(window.editedMask(), compositing::NodeId(0));
+        // The mask node goes away while edited: no mask is edited any more.
+        window.graph()->item(other)->setSelected(false);
+        window.graph()->item(mask)->setSelected(true);
+        QCOMPARE(window.editedMask(), mask);
+        network.removeNode(mask);
+        QCOMPARE(window.editedMask(), compositing::NodeId(0));
+    }
+
     void videoFramesCarryTheCompositing()
     {
         doc::Document d(64, 48);

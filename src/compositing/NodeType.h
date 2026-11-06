@@ -108,9 +108,19 @@ public:
     }
 
     // `inputs` has one image per input socket, null where nothing is connected. Settings come as
-    // key -> value, with every key of params() present.
+    // key -> value, with every key of params() present (and kDataKey, if the node has data).
     virtual QImage process(const QList<QImage> &inputs, const QVariantMap &params, const EvalContext &context) const = 0;
+    // One image for each output socket, in order. The default is the one of process(); a type with several
+    // outputs overrides this (and process() gives the first).
+    virtual QList<QImage> processOutputs(const QList<QImage> &inputs, const QVariantMap &params,
+                                         const EvalContext &context) const
+    {
+        return {process(inputs, params, context)};
+    }
 };
+
+// Where a type finds the node's `data` (Node::data) among the settings it is handed. Only there when it is not empty.
+inline const QString kDataKey = QStringLiteral("data");
 
 // Every kind of node there is. To add one: write a NodeType and list it in NodeType.cpp.
 class NodeRegistry
