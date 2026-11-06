@@ -7,6 +7,7 @@
 #include "io/FrameExport.h"
 #include "io/ProjectFile.h"
 #include "tools/BrushLibrary.h"
+#include "tools/ColorSetLibrary.h"
 #include "tools/ToolState.h"
 #include "audio/AudioPlayer.h"
 #include "ui/AutoplayWindow.h"
@@ -113,6 +114,7 @@ MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , m_toolState(new tools::ToolState(this))
     , m_brushes(new tools::BrushLibrary(this))
+    , m_colorSets(new tools::ColorSetLibrary({}, this))
     , m_document(new document::DocumentController(this))
     , m_canvas(new canvas::CanvasView(m_toolState, m_document, this))
 {
@@ -134,7 +136,7 @@ MainWindow::MainWindow(QWidget *parent)
     panels.brushSliders = new BrushSlidersPanel(m_toolState, this);
     panels.brushSize = new BrushSizePanel(m_toolState, this);
     panels.colorWheel = new ColorWheelPanel(m_toolState, this);
-    panels.colorSet = new ColorSetPanel(m_toolState, this);
+    panels.colorSet = new ColorSetPanel(m_toolState, m_colorSets, this);
     panels.navigator = new NavigatorPanel(m_canvas, this);
     panels.layers = new LayersPanel(m_document, this);
     panels.timeline = new TimelinePanel(m_document, m_toolState, m_audioPlayer, this);

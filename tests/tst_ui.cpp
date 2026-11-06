@@ -50,6 +50,8 @@
 #include "ui/panels/LayersPanel.h"
 #include "ui/AdvancedToolSettings.h"
 #include "ui/SplashScreen.h"
+#include "tools/ColorSetLibrary.h"
+#include "ui/panels/ColorSetPanel.h"
 #include "ui/panels/BrushSlidersPanel.h"
 #include "ui/panels/ToolPalettePanel.h"
 #include "ui/panels/VerticalValueSlider.h"
@@ -472,6 +474,89 @@ private slots:
         QVERIFY(controller.layerChosen());
         QVERIFY(controller.beginPaint(true, &reason));
         controller.cancelPaint();
+    }
+
+    // The Color set panel: the library's active set as swatches; a click sets the color, the "+" adds the current
+    // color, a drag reorders, the built-in set can only be clicked.
+    void colorSetPanelShowsAndEditsTheSets()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        tools::ToolState state;
+        tools::ColorSetLibrary library(dir.path());
+        ui::ColorSetPanel panel(&state, &library);
+        panel.resize(260, 300);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        ui::ColorSwatchGrid *grid = panel.grid();
+
+        // The built-in set: a click sets the main color; nothing can be added or dragged.
+        QCOMPARE(grid->current()->id, tools::ColorSetLibrary::kDefaultId);
+        QVERIFY(!panel.addButton()->isEnabled());
+        const QColor third = library.set(tools::ColorSetLibrary::kDefaultId)->swatches[2].color;
+        QTest::mouseClick(grid, Qt::LeftButton, {}, grid->cellRect(2).center());
+        QCOMPARE(state.color().rgba(), third.rgba());
+        const auto defaultBefore = library.set(tools::ColorSetLibrary::kDefaultId)->swatches;
+        QTest::mousePress(grid, Qt::LeftButton, {}, grid->cellRect(0).center());
+        QTest::mouseMove(grid, grid->cellRect(5).center());
+        QTest::mouseRelease(grid, Qt::LeftButton, {}, grid->cellRect(5).center());
+        QCOMPARE(library.set(tools::ColorSetLibrary::kDefaultId)->swatches, defaultBefore);
+
+        // Another set, made and chosen: empty at first, the list follows.
+        const QString id = library.create(QStringLiteral("Mine"));
+        library.setActive(id);
+        QCOMPARE(panel.setList()->currentText(), QStringLiteral("Mine"));
+        QCOMPARE(panel.setList()->count(), 2);
+        QVERIFY(panel.addButton()->isEnabled());
+        QCOMPARE(grid->swatchAt(QPoint(5, 5)), -1);
+
+        // The "+" adds the current color, and the grid shows it at once.
+        state.setColor(QColor(200, 30, 40));
+        panel.addButton()->click();
+        state.setColor(QColor(10, 220, 30));
+        panel.addButton()->click();
+        state.setColor(QColor(20, 30, 250));
+        panel.addButton()->click();
+        QCOMPARE(library.set(id)->swatches.size(), 3);
+        QCOMPARE(grid->swatchAt(grid->cellRect(2).center()), 2);
+        QTest::mouseClick(grid, Qt::LeftButton, {}, grid->cellRect(0).center());
+        QCOMPARE(state.color(), QColor(200, 30, 40));
+
+        // Dragging a swatch to another place moves it; a click does not.
+        QTest::mousePress(grid, Qt::LeftButton, {}, grid->cellRect(0).center());
+        QTest::mouseMove(grid, grid->cellRect(1).center());
+        QTest::mouseMove(grid, grid->cellRect(2).center());
+        QTest::mouseRelease(grid, Qt::LeftButton, {}, grid->cellRect(2).center());
+        QCOMPARE(library.set(id)->swatches[2].color, QColor(200, 30, 40));
+        QCOMPARE(library.set(id)->swatches[0].color, QColor(10, 220, 30));
+
+        // A swatch's own color picker: opened without blocking, and the color is the swatch's when it is accepted.
+        const QColor first = library.set(id)->swatches[1].color;
+        const QColor untouched = library.set(id)->swatches[2].color;
+        grid->editColor(1);
+        QColorDialog *picker = nullptr;
+        for (QWidget *top : QApplication::topLevelWidgets())
+            if (auto *d = qobject_cast<QColorDialog *>(top))
+                picker = d;
+        QVERIFY(picker);
+        QCOMPARE(picker->currentColor(), library.set(id)->swatches[1].color); // starts from the swatch's color
+        picker->setCurrentColor(QColor(90, 80, 70, 200));
+        QCOMPARE(library.set(id)->swatches[1].color, first); // not yet
+        picker->accept();
+        QCOMPARE(library.set(id)->swatches[1].color, QColor(90, 80, 70, 200));
+        QCOMPARE(library.set(id)->swatches[2].color, untouched); // the others are untouched
+        const auto dialogs = QApplication::topLevelWidgets().size();
+        grid->editColor(99); // no such swatch: nothing opens
+        QCOMPARE(QApplication::topLevelWidgets().size(), dialogs);
+
+        // Changes made elsewhere (the library) show in the grid, and a set chosen from the list is the active one.
+        library.setColor(id, 0, QColor(1, 2, 3));
+        QTest::mouseClick(grid, Qt::LeftButton, {}, grid->cellRect(0).center());
+        QCOMPARE(state.color(), QColor(1, 2, 3));
+        panel.setList()->setCurrentIndex(0);
+        emit panel.setList()->activated(0);
+        QCOMPARE(library.activeId(), tools::ColorSetLibrary::kDefaultId);
+        QVERIFY(!panel.addButton()->isEnabled());
     }
 
     // The effect brushes and the shape tool have a size too: the palette, the [ ] keys and the size slider work

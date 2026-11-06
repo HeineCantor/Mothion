@@ -13,6 +13,7 @@ class DocumentController;
 }
 namespace mothion::tools {
 class BrushLibrary;
+class ColorSetLibrary;
 class ToolState;
 }
 
@@ -91,6 +92,7 @@ private:
 
     tools::ToolState *m_toolState = nullptr;
     tools::BrushLibrary *m_brushes = nullptr;
+    tools::ColorSetLibrary *m_colorSets = nullptr;
     // Declared before m_canvas: the canvas needs the controller at construction.
     document::DocumentController *m_document = nullptr;
     canvas::CanvasView *m_canvas = nullptr;
