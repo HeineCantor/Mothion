@@ -50,7 +50,6 @@
 #include <QCloseEvent>
 #include <QDialog>
 #include <QDataStream>
-#include <QCollator>
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFileDialog>
@@ -548,16 +547,47 @@ QString sequenceName(const QString &firstFile)
     return name.isEmpty() ? QFileInfo(firstFile).completeBaseName() : name;
 }
 
+// Name order with numbers as numbers (frame2 before frame10), without case. Written out rather than left to
+// QCollator, whose numeric mode depends on the locale (in the "C" one it does nothing).
+bool naturalLess(const QString &a, const QString &b)
+{
+    qsizetype i = 0, j = 0;
+    while (i < a.size() && j < b.size()) {
+        if (a[i].isDigit() && b[j].isDigit()) {
+            qsizetype ie = i, je = j;
+            while (ie < a.size() && a[ie].isDigit())
+                ++ie;
+            while (je < b.size() && b[je].isDigit())
+                ++je;
+            QStringView x = QStringView(a).mid(i, ie - i), y = QStringView(b).mid(j, je - j);
+            while (x.size() > 1 && x.front() == QLatin1Char('0'))
+                x = x.mid(1);
+            while (y.size() > 1 && y.front() == QLatin1Char('0'))
+                y = y.mid(1);
+            if (x.size() != y.size()) // more digits, a bigger number
+                return x.size() < y.size();
+            if (const int c = x.compare(y))
+                return c < 0;
+            i = ie;
+            j = je;
+        } else {
+            const QChar x = a[i].toCaseFolded(), y = b[j].toCaseFolded();
+            if (x != y)
+                return x < y;
+            ++i;
+            ++j;
+        }
+    }
+    return (a.size() - i) < (b.size() - j); // the shorter one first
+}
+
 } // namespace
 
 int MainWindow::importSequenceFiles(QStringList files, const QString &name, int startFrame, int hold)
 {
     // In name order, numbers as numbers (frame2 before frame10).
-    QCollator collator;
-    collator.setNumericMode(true);
-    collator.setCaseSensitivity(Qt::CaseInsensitive);
-    std::sort(files.begin(), files.end(), [&](const QString &a, const QString &b) {
-        return collator.compare(QFileInfo(a).fileName(), QFileInfo(b).fileName()) < 0;
+    std::stable_sort(files.begin(), files.end(), [](const QString &a, const QString &b) {
+        return naturalLess(QFileInfo(a).fileName(), QFileInfo(b).fileName());
     });
     // Reading and adding take a while for a long sequence: a progress bar (shown only if it does), which
     // keeps the window answering, and a Cancel while nothing has been added yet.
