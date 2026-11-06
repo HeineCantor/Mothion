@@ -138,6 +138,9 @@ private:
     int audioTop() const;
     QRect audioHeaderRect() const;
     QRect audioMuteRect() const;
+    QRect audioScrubRect() const; // beside it, where a cel has its lock
+    QRect audioVolumeRect() const; // the slider under them
+    float audioVolumeAt(int x) const;
     // The block at `offset` frames, as long as the sound (a few frames wide until it is known).
     QRect audioBlockRect(int offset) const;
     bool inAudioRow(int y) const;
@@ -163,6 +166,7 @@ private:
         bool moved = false;
     };
     std::optional<AudioDrag> m_audioDrag;
+    std::optional<float> m_volumeBefore; // the volume slider is being dragged: what it was when it began
     std::optional<Resize> m_resize;
     doc::Timing m_previewTiming; // the resized cel's timing during a drag
 

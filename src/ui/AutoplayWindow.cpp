@@ -173,6 +173,7 @@ AutoplayWindow::AutoplayWindow(document::DocumentController *document, audio::Au
     , m_play(new QPushButton(this))
     , m_goTo(new QPushButton(tr("Go to frame"), this))
     , m_flip(new QPushButton(icon(IconId::FlipHorizontal), tr("Flip"), this))
+    , m_sound(new QPushButton(this))
     , m_speed(new QComboBox(this))
 {
     setWindowTitle(tr("Autoplay"));
@@ -211,6 +212,7 @@ AutoplayWindow::AutoplayWindow(document::DocumentController *document, audio::Au
     controls->addWidget(m_play);
     controls->addWidget(m_goTo);
     controls->addWidget(m_flip);
+    controls->addWidget(m_sound);
     controls->addWidget(m_loopLabel);
     controls->addStretch(1);
     controls->addWidget(new QLabel(tr("Speed"), this));
@@ -230,6 +232,25 @@ AutoplayWindow::AutoplayWindow(document::DocumentController *document, audio::Au
         updateRange();
         showFrame(std::min(m_frame, m_frameCount - 1));
     });
+    // The sound button: on and off for this window (the project's track keeps its own mute).
+    m_sound->setObjectName(QStringLiteral("sound"));
+    m_sound->setCheckable(true);
+    m_sound->setChecked(!m_audio || !m_audio->isSilenced());
+    m_sound->setFocusPolicy(Qt::NoFocus); // Space keeps playing and stopping
+    connect(m_sound, &QPushButton::toggled, this, [this](bool on) {
+        if (m_audio)
+            m_audio->setSilenced(!on);
+        updateSoundButton();
+        syncAudio();
+    });
+    if (m_audio)
+        connect(m_audio, &audio::AudioPlayer::silencedChanged, this, [this](bool silenced) {
+            const QSignalBlocker block(m_sound);
+            m_sound->setChecked(!silenced);
+            updateSoundButton();
+        });
+    connect(m_document, &document::DocumentController::structureChanged, this, &AutoplayWindow::updateSoundButton);
+    updateSoundButton();
     m_goTo->setToolTip(tr("Set the timeline to the time slot shown now"));
     m_goTo->setFocusPolicy(Qt::NoFocus); // Space keeps playing and stopping
     m_flip->setCheckable(true);
@@ -294,12 +315,25 @@ void AutoplayWindow::syncAudio()
 {
     if (!m_audio)
         return;
-    // The sound is made for the document's rate: at another speed it would be too fast or too slow.
-    const bool atRate = std::abs(fps() - m_document->document().frameRate().fps()) < 0.01;
-    if (m_timer.isActive() && atRate)
+    // The sound is made for the document's rate: at another speed it goes slower or faster with the frames.
+    const double rate = fps() / std::max(m_document->document().frameRate().fps(), 0.01);
+    if (m_timer.isActive()) {
+        m_audio->setRate(rate);
         m_audio->play(m_frame);
-    else
+    } else {
         m_audio->stop();
+    }
+}
+
+void AutoplayWindow::updateSoundButton()
+{
+    const bool track = m_document->audioTrack().has_value();
+    const bool on = m_sound->isChecked();
+    m_sound->setEnabled(m_audio && track);
+    m_sound->setIcon(icon(on ? IconId::Speaker : IconId::SpeakerOff, IconTone::Plain)); // checked: no highlight behind
+    m_sound->setText(on ? tr("Sound") : tr("Muted"));
+    m_sound->setToolTip(!track ? tr("The project has no audio track")
+                               : on ? tr("Mute the sound here (the project is not changed)") : tr("Play the sound"));
 }
 
 void AutoplayWindow::showEvent(QShowEvent *event)
@@ -312,7 +346,7 @@ void AutoplayWindow::updatePlayButton()
 {
     const bool playing = m_play->isChecked();
     m_play->setText(playing ? tr("Stop") : tr("Play"));
-    m_play->setIcon(icon(playing ? IconId::Stop : IconId::Play));
+    m_play->setIcon(icon(playing ? IconId::Stop : IconId::Play, IconTone::Plain)); // checked: no highlight behind
     m_play->setToolTip(playing ? tr("Stop (Space)") : tr("Play (Space)"));
 }
 
@@ -386,7 +420,7 @@ void AutoplayWindow::advance()
     const int next = m_frame >= loopEnd() ? loopStart() : std::max(m_frame + 1, loopStart());
     const bool wrapped = next <= m_frame;
     showFrame(next);
-    if (m_audio && m_audio->isPlaying()) {
+    if (m_audio && m_audio->isRequested()) {
         if (wrapped)
             m_audio->play(next); // the loop begins again: so does the sound
         else

@@ -30,7 +30,8 @@ namespace mothion::ui {
 // loop to the frames between them. "Play" starts and stops it; the
 // slider under the picture follows the playback and, dragged, picks the
 // frame; "Flip" shows it mirrored left to right; "Go to frame" sets the timeline's current time slot to the one shown; the speed is chosen in frames per second (the document's rate to
-// begin with). Space plays and stops too. It plays on its own, apart from
+// begin with). A sound button turns the audio track on and off (for this window; the project is left as it is).
+// Space plays and stops too. It plays on its own, apart from
 // the canvas's current frame, and follows the document as it is edited.
 class AutoplayWindow : public QWidget
 {
@@ -67,8 +68,10 @@ private:
     void updateRange();
     void updateLoopBar();
     void updateTimer();
-    // The sound plays while the frames do at the document's rate, and not otherwise.
+    // The sound plays while the frames do, as fast as they go (slower or faster than the document's rate, it goes
+    // slower or faster with them).
     void syncAudio();
+    void updateSoundButton();
     void updatePlayButton();
     // What a frame shows: each layer's drawing, if visible. Frames that show
     // the same are not composed again.
@@ -85,6 +88,7 @@ private:
     QPushButton *m_play; // checked while playing: then it offers Stop
     QPushButton *m_goTo;
     QPushButton *m_flip; // mirrors the picture
+    QPushButton *m_sound; // the audio track on or off, here only (checked: it plays)
     QComboBox *m_speed;
     QTimer m_timer;
     QTimer m_refresh; // edits come in bursts (a stroke): composed again once after them

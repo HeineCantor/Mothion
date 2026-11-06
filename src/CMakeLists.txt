@@ -127,6 +127,7 @@ qt_add_library(mothion_gui STATIC
     ui/panels/BlendModes.h
     ui/panels/LayersPanel.h ui/panels/LayersPanel.cpp
     ui/panels/timeline/TimelineMetrics.h
+    ui/panels/timeline/TimelinePlayer.h ui/panels/timeline/TimelinePlayer.cpp
     ui/panels/timeline/TimelineView.h ui/panels/timeline/TimelineView.cpp
     ui/panels/timeline/TimelinePanel.h ui/panels/timeline/TimelinePanel.cpp
 )

@@ -47,6 +47,7 @@
 #include "ui/panels/SubToolPanel.h"
 #include "ui/panels/ToolPropertiesPanel.h"
 #include "ui/panels/timeline/TimelinePanel.h"
+#include "ui/panels/timeline/TimelinePlayer.h"
 #include "ui/panels/timeline/TimelineView.h"
 
 #include <numbers>
@@ -5033,10 +5034,33 @@ private slots:
         QCOMPARE(controller.undoText(), QStringLiteral("Undo audio")); // the length is not a step
 
         QVERIFY(!controller.audioTrack()->muted);
-        QTest::mouseClick(viewport, Qt::LeftButton, {}, QPoint(20, audioY + 22)); // the speaker
+        QTest::mouseClick(viewport, Qt::LeftButton, {}, QPoint(20, audioY + 12)); // the speaker
         QVERIFY(controller.audioTrack()->muted);
-        QTest::mouseClick(viewport, Qt::LeftButton, {}, QPoint(20, audioY + 22));
+        QTest::mouseClick(viewport, Qt::LeftButton, {}, QPoint(20, audioY + 12));
         QVERIFY(!controller.audioTrack()->muted);
+
+        // Next to the speaker, where a cel has its lock: the scrubbing button.
+        QVERIFY(controller.audioTrack()->scrub);
+        QTest::mouseClick(viewport, Qt::LeftButton, {}, QPoint(38, audioY + 12));
+        QVERIFY(!controller.audioTrack()->scrub);
+        QTest::mouseClick(viewport, Qt::LeftButton, {}, QPoint(38, audioY + 12));
+        QVERIFY(controller.audioTrack()->scrub);
+
+        // The volume slider under them (x 12..101): heard as it is dragged, one undo step when it is let go.
+        QCOMPARE(controller.audioTrack()->volume, 1.0f);
+        QTest::mousePress(viewport, Qt::LeftButton, {}, QPoint(101, audioY + 32));
+        QTest::mouseMove(viewport, QPoint(12 + 45, audioY + 32)); // about the middle
+        QVERIFY(std::abs(controller.audioTrack()->volume - 0.5f) < 0.06f);
+        QTest::mouseMove(viewport, QPoint(12 + 20, audioY + 32));
+        QTest::mouseMove(viewport, QPoint(12 + 45, audioY + 32));
+        QTest::mouseRelease(viewport, Qt::LeftButton, {}, QPoint(12 + 45, audioY + 32));
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo audio change"));
+        controller.undo(); // one undo for the whole drag, back to where it began (the scrub setting kept)
+        QCOMPARE(controller.audioTrack()->volume, 1.0f);
+        QVERIFY(controller.audioTrack()->scrub);
+        controller.redo();
+        QVERIFY(std::abs(controller.audioTrack()->volume - 0.5f) < 0.06f);
+        controller.setAudioVolume(1.0f);
 
         // The block from frame 0: 2 s at 24 fps is 48 frames. Dragged 5 frames on.
         QTest::mousePress(viewport, Qt::LeftButton, {}, QPoint(200, audioY + 20));
@@ -5052,7 +5076,7 @@ private slots:
         QTest::mouseClick(viewport, Qt::LeftButton, {}, QPoint(130 + 60 * 16, audioY + 20));
         QCOMPARE(controller.currentFrame(), 60);
         controller.removeAudio();
-        QTest::mouseClick(viewport, Qt::LeftButton, {}, QPoint(20, audioY + 22)); // gone: no speaker to click
+        QTest::mouseClick(viewport, Qt::LeftButton, {}, QPoint(20, audioY + 12)); // gone: no speaker to click
         QVERIFY(!controller.audioTrack());
     }
 
@@ -5103,8 +5127,7 @@ private slots:
         QVERIFY(!player.isPlaying()); // the track is gone
     }
 
-    // The Autoplay window plays the sound with the frames at the document's rate, and not at another speed,
-    // and stops it when it stops.
+    // The Autoplay window plays the sound with the frames, and stops it when it stops.
     void autoplayPlaysTheSoundAtTheDocumentsRate()
     {
         QTemporaryDir dir;
@@ -5131,12 +5154,107 @@ private slots:
         const int own = speed->currentIndex();
         speed->setCurrentIndex(other);
         QVERIFY(window.isPlaying());
-        QVERIFY(!player.isPlaying()); // another speed: the sound would be stretched
+        QVERIFY(player.isPlaying()); // another speed: the sound goes along with it
         speed->setCurrentIndex(own);
         QVERIFY(player.isPlaying());
         QTest::keyClick(&window, Qt::Key_Space); // stop
         QVERIFY(!window.isPlaying());
         QVERIFY(!player.isPlaying());
+    }
+
+    // Slower or faster than the document's rate the sound goes slower or faster with the frames; the sound button
+    // of the window silences it (for the session: the project's track is not touched) and brings it back.
+    void autoplaySlowsTheSoundAndCanSilenceIt()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        QFile file(dir.filePath(QStringLiteral("song.wav")));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(QByteArray(4000, 'x'));
+        file.close();
+        document::DocumentController controller;
+        QVERIFY(controller.importAudio(file.fileName()));
+        audio::AudioPlayer player(&controller);
+        ui::AutoplayWindow window(&controller, &player);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *speed = window.findChild<QComboBox *>();
+        auto *sound = window.findChild<QPushButton *>(QStringLiteral("sound"));
+        QVERIFY(speed && sound);
+        QVERIFY(sound->isEnabled() && sound->isChecked());
+        auto choose = [&](double fps) {
+            for (int i = 0; i < speed->count(); ++i)
+                if (std::abs(speed->itemData(i).toDouble() - fps) < 0.01)
+                    speed->setCurrentIndex(i);
+        };
+        QVERIFY(player.isPlaying());
+        QCOMPARE(player.rate(), 1.0);
+        choose(12.0); // half the speed of the timeline's 24
+        QVERIFY(player.isPlaying());
+        QVERIFY(std::abs(player.rate() - 0.5) < 0.01);
+        choose(48.0); // twice as fast: the sound too
+        QVERIFY(player.isPlaying());
+        QVERIFY(std::abs(player.rate() - 2.0) < 0.01);
+        choose(24.0);
+        QVERIFY(player.isPlaying());
+
+        QTest::mouseClick(sound, Qt::LeftButton); // sound off here
+        QVERIFY(!sound->isChecked() && player.isSilenced());
+        QVERIFY(!player.isPlaying());
+        QVERIFY(!controller.audioTrack()->muted); // the project is not changed
+        QTest::mouseClick(sound, Qt::LeftButton);
+        QVERIFY(sound->isChecked() && !player.isSilenced());
+        QVERIFY(player.isPlaying());
+
+        controller.removeAudio(); // no track: nothing to switch
+        QVERIFY(!sound->isEnabled());
+    }
+
+    // The timeline's play button plays the animation on the canvas from the current frame, round the scene, with
+    // the sound, and pauses it where it is; the frame moved by hand while it plays is where it plays on from.
+    void timelinePlayButtonPlaysAndPauses()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        QFile file(dir.filePath(QStringLiteral("song.wav")));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(QByteArray(4000, 'x'));
+        file.close();
+        tools::ToolState state;
+        document::DocumentController controller;
+        QVERIFY(controller.importAudio(file.fileName()));
+        audio::AudioPlayer sound(&controller);
+        ui::TimelinePanel panel(&controller, &state, &sound);
+        panel.show();
+        auto *play = panel.findChild<QToolButton *>(QStringLiteral("playPause"));
+        QVERIFY(play);
+        QVERIFY(!panel.player()->isPlaying() && !play->isChecked());
+
+        controller.setCurrentFrame(10);
+        QTest::mouseClick(play, Qt::LeftButton);
+        QVERIFY(panel.player()->isPlaying() && play->isChecked());
+        QVERIFY(sound.isPlaying()); // the sound goes with it
+        QTRY_VERIFY(controller.currentFrame() > 12); // the frames move on, by the clock
+        controller.setAudioMuted(true); // muted while it plays...
+        QVERIFY(!sound.isPlaying());
+        controller.setAudioMuted(false); // ...and back: the sound returns by itself with the next frames
+        QTRY_VERIFY(sound.isPlaying());
+        QVERIFY(panel.player()->isPlaying());
+        QTest::mouseClick(play, Qt::LeftButton); // pause: where it is
+        QVERIFY(!panel.player()->isPlaying() && !play->isChecked());
+        QVERIFY(!sound.isPlaying());
+        const int paused = controller.currentFrame();
+        QTest::qWait(150);
+        QCOMPARE(controller.currentFrame(), paused);
+
+        // From the last frame of the scene: round to the first.
+        controller.setCurrentFrame(controller.document().frameCount() - 1);
+        QTest::mouseClick(play, Qt::LeftButton);
+        QTRY_VERIFY(controller.currentFrame() < 20);
+        // The frame moved by hand while it plays: it goes on from there.
+        controller.setCurrentFrame(60);
+        QTRY_VERIFY(controller.currentFrame() >= 60 && controller.currentFrame() < 80);
+        panel.player()->stop();
     }
 
     // Muting (or silencing) while the animation plays and unmuting again: the sound comes back at the frame it is at,

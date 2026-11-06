@@ -6,6 +6,8 @@
 #include "ui/IconFactory.h"
 #include "ui/panels/BlendModes.h"
 #include "ui/panels/SliderField.h"
+#include "ui/Shortcuts.h"
+#include "ui/panels/timeline/TimelinePlayer.h"
 #include "ui/panels/timeline/TimelineView.h"
 
 #include <QColorDialog>
@@ -14,6 +16,7 @@
 #include <QHBoxLayout>
 #include <QMenu>
 #include <QPainter>
+#include <QShortcut>
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QWidgetAction>
@@ -117,11 +120,28 @@ QToolButton *celButton(IconId id, const QString &name, const QString &tip, QWidg
 
 } // namespace
 
-TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *toolState, QWidget *parent)
+TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *toolState, audio::AudioPlayer *audio,
+                             QWidget *parent)
     : QWidget(parent)
     , m_document(document)
     , m_view(new TimelineView(document, this))
+    , m_player(new TimelinePlayer(document, audio, this))
 {
+    // Play and pause: the animation plays on the canvas from the current frame, round the scene.
+    auto *play = celButton(IconId::Play, QStringLiteral("playPause"), QString(), this);
+    play->setCheckable(true);
+    auto showPlaying = [play](bool playing) {
+        play->setChecked(playing);
+        play->setIcon(icon(playing ? IconId::Pause : IconId::Play));
+        play->setToolTip(playing ? tr("Pause") : tr("Play the animation from the current frame"));
+    };
+    showPlaying(false);
+    connect(play, &QToolButton::clicked, m_player, &TimelinePlayer::toggle);
+    connect(m_player, &TimelinePlayer::playingChanged, play, showPlaying);
+    auto *playKey = new QShortcut(this); // no key until one is chosen in Settings
+    Shortcuts::instance().bind(playKey, QStringLiteral("anim.playPause"));
+    connect(playKey, &QShortcut::activated, m_player, &TimelinePlayer::toggle);
+
     auto *prev = new QToolButton(this);
     prev->setArrowType(Qt::LeftArrow);
     prev->setAutoRaise(true);
@@ -171,6 +191,7 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
     auto *bar = new QHBoxLayout;
     bar->setContentsMargins(4, 2, 4, 2);
     bar->setSpacing(4);
+    bar->addWidget(play);
     bar->addWidget(prevFrame);
     bar->addWidget(prev);
     bar->addWidget(next);

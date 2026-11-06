@@ -110,6 +110,32 @@ void drawGlyph(QPainter &p, IconId id)
         p.setBrush(p.pen().color());
         p.drawRoundedRect(QRectF(6, 6, 12, 12), 1.5, 1.5);
         return;
+    case IconId::Pause: // two filled bars
+        p.setBrush(p.pen().color());
+        p.drawRoundedRect(QRectF(6.5, 5, 4, 14), 1, 1);
+        p.drawRoundedRect(QRectF(13.5, 5, 4, 14), 1, 1);
+        return;
+    case IconId::Speaker:
+    case IconId::SpeakerOff: { // a loudspeaker; waves when on, a slash when off
+        path.moveTo(4, 9.5);
+        path.lineTo(8.5, 9.5);
+        path.lineTo(13, 5.5);
+        path.lineTo(13, 18.5);
+        path.lineTo(8.5, 14.5);
+        path.lineTo(4, 14.5);
+        path.closeSubpath();
+        p.setBrush(p.pen().color());
+        p.drawPath(path);
+        p.setBrush(Qt::NoBrush);
+        if (id == IconId::Speaker) {
+            p.drawArc(QRectF(11, 8, 6, 8), -60 * 16, 120 * 16);
+            p.drawArc(QRectF(11, 4.5, 11, 15), -60 * 16, 120 * 16);
+        } else {
+            p.drawLine(QPointF(16, 9), QPointF(22, 15));
+            p.drawLine(QPointF(22, 9), QPointF(16, 15));
+        }
+        return;
+    }
     case IconId::Eraser:
         p.translate(12, 12);
         p.rotate(-45);

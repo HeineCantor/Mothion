@@ -54,6 +54,7 @@ TimelineView::TimelineView(DocumentController *document, QWidget *parent)
         viewport()->update();
     });
     connect(m_document, &DocumentController::currentCelChanged, viewport(), qOverload<>(&QWidget::update));
+    connect(m_document, &DocumentController::audioChanged, viewport(), qOverload<>(&QWidget::update));
     connect(&m_analyzer, &audio::AudioAnalyzer::finished, this,
             [this](const void *key, const audio::Waveform &wave) {
                 const auto &track = m_document->audioTrack();
@@ -373,7 +374,23 @@ QRect TimelineView::audioHeaderRect() const
 
 QRect TimelineView::audioMuteRect() const
 {
-    return QRect(12, audioTop() + (kAudioRowHeight - 16) / 2, 16, 16);
+    return QRect(12, audioTop() + 4, 16, 16);
+}
+
+QRect TimelineView::audioScrubRect() const
+{
+    return audioMuteRect().translated(18, 0);
+}
+
+QRect TimelineView::audioVolumeRect() const
+{
+    return QRect(12, audioTop() + 26, 90, 12);
+}
+
+float TimelineView::audioVolumeAt(int x) const
+{
+    const QRect r = audioVolumeRect();
+    return std::clamp(float(x - r.left()) / float(std::max(1, r.width() - 1)), 0.0f, 1.0f);
 }
 
 bool TimelineView::inAudioRow(int y) const
@@ -449,32 +466,67 @@ void TimelineView::paintAudioHeader(QPainter &p) const
     const QRect r = audioHeaderRect();
     p.fillRect(r.adjusted(0, 0, 1, 0), palette().window());
     p.fillRect(QRect(r.left() + 4, r.top() + 8, 4, r.height() - 16), QColor(0x4a, 0xa8, 0xa8));
-    // The mute button: a loudspeaker, crossed out when the sound is off. In its slot, as the cels' eyes.
-    const QRect slot = audioMuteRect();
-    p.setPen(palette().placeholderText().color());
-    p.drawRect(slot.adjusted(0, 0, -1, -1));
+    const QColor textColor = palette().text().color();
+    const QColor offColor = palette().color(QPalette::Disabled, QPalette::Text);
     p.save();
     p.setRenderHint(QPainter::Antialiasing);
-    const QColor ink = track->muted ? palette().color(QPalette::Disabled, QPalette::Text) : palette().text().color();
-    p.setPen(QPen(ink, 1.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-    p.setBrush(ink);
-    const QPointF c = slot.center() + QPointF(-1.5, 0);
+
+    // The mute button, in the slot of a cel's eye: a loudspeaker, crossed out when the sound is off.
+    const QRect mute = audioMuteRect();
+    p.setPen(palette().placeholderText().color());
+    p.drawRect(mute.adjusted(0, 0, -1, -1));
+    const QColor muteInk = track->muted ? offColor : textColor;
+    p.setPen(QPen(muteInk, 1.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    p.setBrush(muteInk);
+    const QPointF c = mute.center() + QPointF(-1.5, 0);
     QPolygonF cone;
     cone << QPointF(c.x() - 3, c.y() - 2) << QPointF(c.x(), c.y() - 2) << QPointF(c.x() + 3, c.y() - 5)
          << QPointF(c.x() + 3, c.y() + 5) << QPointF(c.x(), c.y() + 2) << QPointF(c.x() - 3, c.y() + 2);
     p.drawPolygon(cone);
     p.setBrush(Qt::NoBrush);
-    if (track->muted) {
-        p.drawLine(QPointF(slot.left() + 3, slot.top() + 3), QPointF(slot.right() - 3, slot.bottom() - 3));
-    } else {
+    if (track->muted)
+        p.drawLine(QPointF(mute.left() + 3, mute.top() + 3), QPointF(mute.right() - 3, mute.bottom() - 3));
+    else
         p.drawArc(QRectF(c.x() + 2, c.y() - 3, 5, 6), -60 * 16, 120 * 16);
-    }
-    p.restore();
-    p.setPen(track->muted ? palette().color(QPalette::Disabled, QPalette::Text) : palette().text().color());
-    const QRect text = r.adjusted(slot.right() + 6, 2, -4, -2);
-    p.drawText(text, Qt::AlignTop | Qt::AlignLeft, p.fontMetrics().elidedText(QString::fromStdString(track->name), Qt::ElideRight, text.width()));
+
+    // The scrubbing button, in the slot of a cel's lock: bars of a waveform with the play head through them,
+    // crossed out when the sound is not heard while scrubbing.
+    const QRect scrub = audioScrubRect();
     p.setPen(palette().placeholderText().color());
-    p.drawText(text, Qt::AlignBottom | Qt::AlignLeft, tr("Audio · %1%").arg(int(std::lround(track->volume * 100.0f))));
+    p.drawRect(scrub.adjusted(0, 0, -1, -1));
+    const QColor scrubInk = track->scrub ? textColor : offColor;
+    p.setPen(QPen(scrubInk, 1.4, Qt::SolidLine, Qt::RoundCap));
+    const QPointF m(scrub.center().x(), scrub.center().y());
+    for (const auto &[dx, half] : {std::pair{-4.5, 2.0}, std::pair{-2.0, 4.0}, std::pair{2.0, 3.0}, std::pair{4.5, 1.5}})
+        p.drawLine(QPointF(m.x() + dx, m.y() - half), QPointF(m.x() + dx, m.y() + half));
+    p.setPen(QPen(scrubInk, 1.0));
+    p.drawLine(QPointF(m.x() + 0.2, scrub.top() + 2), QPointF(m.x() + 0.2, scrub.bottom() - 2)); // the play head
+    if (!track->scrub) {
+        p.setPen(QPen(offColor, 1.4, Qt::SolidLine, Qt::RoundCap));
+        p.drawLine(QPointF(scrub.left() + 3, scrub.top() + 3), QPointF(scrub.right() - 3, scrub.bottom() - 3));
+    }
+
+    // The name, after the buttons.
+    p.setPen(track->muted ? offColor : textColor);
+    const QRect text(scrub.right() + 6, r.top() + 3, r.right() - scrub.right() - 10, 17);
+    p.drawText(text, Qt::AlignVCenter | Qt::AlignLeft,
+               p.fontMetrics().elidedText(QString::fromStdString(track->name), Qt::ElideRight, text.width()));
+
+    // The volume slider: a groove filled up to the volume, a handle, and the number.
+    const QRect slider = audioVolumeRect();
+    const int grooveY = slider.center().y();
+    p.setPen(QPen(palette().mid().color().darker(130), 3, Qt::SolidLine, Qt::RoundCap));
+    p.drawLine(slider.left() + 4, grooveY, slider.right() - 4, grooveY);
+    const double handleX = double(slider.left() + 4) + double(track->volume) * double(slider.width() - 8);
+    p.setPen(QPen(palette().highlight().color(), 3, Qt::SolidLine, Qt::RoundCap));
+    p.drawLine(QPointF(slider.left() + 4, grooveY), QPointF(handleX, grooveY));
+    p.setPen(QPen(QColor(0x4a, 0x4a, 0x4a), 1));
+    p.setBrush(Qt::white);
+    p.drawEllipse(QPointF(handleX, grooveY), 4.5, 4.5);
+    p.restore();
+    p.setPen(palette().placeholderText().color());
+    p.drawText(QRect(slider.right() + 3, slider.top() - 2, r.right() - slider.right() - 4, slider.height() + 4),
+               Qt::AlignVCenter | Qt::AlignRight, QStringLiteral("%1").arg(int(std::lround(track->volume * 100.0f))));
     p.setPen(palette().mid().color());
     p.drawLine(r.bottomLeft(), r.bottomRight());
 }
@@ -501,15 +553,10 @@ void TimelineView::showAudioMenu(const QPoint &globalPos)
     QAction *mute = menu.addAction(tr("Mute"), this, [this](bool on) { m_document->setAudioMuted(on); });
     mute->setCheckable(true);
     mute->setChecked(track->muted);
-    QMenu *volume = menu.addMenu(tr("Volume"));
-    auto *group = new QActionGroup(volume);
-    for (int percent : {0, 25, 50, 75, 100}) {
-        const float level = float(percent) / 100.0f;
-        QAction *a = volume->addAction(tr("%1%").arg(percent), this, [this, level] { m_document->setAudioVolume(level); });
-        a->setCheckable(true);
-        a->setChecked(std::abs(track->volume - level) < 0.005f);
-        group->addAction(a);
-    }
+    QAction *scrub = menu.addAction(tr("Hear it while scrubbing"), this, [this](bool on) { m_document->setAudioScrub(on); });
+    scrub->setCheckable(true);
+    scrub->setChecked(track->scrub);
+    scrub->setToolTip(tr("A short burst of the sound as the timeline is scrubbed or stepped"));
     menu.addAction(tr("Start at the first frame"), this, [this] { m_document->setAudioOffset(0); })
         ->setEnabled(track->offset != 0);
     menu.addSeparator();
@@ -622,8 +669,17 @@ void TimelineView::mousePressEvent(QMouseEvent *event)
     if (event->button() != Qt::LeftButton || event->position().x() < m_metrics.headerWidth) {
         // In a header: the toggles, or the cel made current.
         if (event->button() == Qt::LeftButton && inAudioRow(int(event->position().y()))) {
-            if (const auto &track = m_document->audioTrack(); track && audioMuteRect().contains(event->position().toPoint()))
-                m_document->setAudioMuted(!track->muted);
+            const QPoint at = event->position().toPoint();
+            if (const auto &track = m_document->audioTrack()) {
+                if (audioMuteRect().contains(at)) {
+                    m_document->setAudioMuted(!track->muted);
+                } else if (audioScrubRect().contains(at)) {
+                    m_document->setAudioScrub(!track->scrub);
+                } else if (audioVolumeRect().adjusted(-2, -2, 2, 2).contains(at)) {
+                    m_volumeBefore = track->volume; // dragged: heard as it goes, one step when it is let go
+                    m_document->previewAudioVolume(audioVolumeAt(at.x()));
+                }
+            }
             return;
         }
         const int row = rowAt(int(event->position().y()));
@@ -773,6 +829,10 @@ void TimelineView::dropFrames()
 void TimelineView::mouseMoveEvent(QMouseEvent *event)
 {
     const QPoint pos = event->position().toPoint();
+    if (m_volumeBefore) {
+        m_document->previewAudioVolume(audioVolumeAt(pos.x()));
+        return;
+    }
     if (m_audioDrag) {
         const int offset = m_audioDrag->startOffset + m_metrics.frameAt(pos.x()) - m_audioDrag->pressFrame;
         if (offset != m_audioDrag->offset) {
@@ -808,6 +868,13 @@ void TimelineView::mouseMoveEvent(QMouseEvent *event)
 void TimelineView::mouseReleaseEvent(QMouseEvent *)
 {
     m_scrubbing = false;
+    if (m_volumeBefore) {
+        const float before = *m_volumeBefore;
+        m_volumeBefore.reset();
+        m_document->commitAudioVolume(before);
+        viewport()->update();
+        return;
+    }
     if (m_audioDrag) {
         const AudioDrag drag = *m_audioDrag;
         m_audioDrag.reset();

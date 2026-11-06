@@ -88,6 +88,7 @@ Shortcuts::Shortcuts()
     add(QStringLiteral("view.rotateReset"), view, tr("Reset rotation"), {ctrl(Qt::Key_Slash)});
     add(QStringLiteral("view.debugOverlay"), view, tr("Input debug overlay"), {seq(Qt::Key_F12)});
 
+    add(QStringLiteral("anim.playPause"), animation, tr("Play / pause the timeline"), {});
     add(QStringLiteral("anim.previousSlot"), animation, tr("Previous time slot"), {seq(Qt::Key_Comma)});
     add(QStringLiteral("anim.nextSlot"), animation, tr("Next time slot"), {seq(Qt::Key_Period)});
     add(QStringLiteral("anim.previousFrame"), animation, tr("Previous frame"), {seq(Qt::Key_Comma, Qt::ShiftModifier)});
