@@ -3,6 +3,7 @@
 #include "canvas/FrameRenderer.h"
 #include "core/document/Ids.h"
 
+#include <QPointer>
 #include <QTimer>
 #include <QWidget>
 
@@ -13,6 +14,9 @@ class QLabel;
 class QPushButton;
 class QSlider;
 
+namespace mothion::audio {
+class AudioPlayer;
+}
 namespace mothion::document {
 class DocumentController;
 }
@@ -33,7 +37,11 @@ class AutoplayWindow : public QWidget
     Q_OBJECT
 
 public:
-    explicit AutoplayWindow(document::DocumentController *document, QWidget *parent = nullptr);
+    // With `audio`, the project's audio track plays with the frames (when the speed is the document's own: the
+    // sound is not stretched), and is heard in short bursts when the slider is dragged.
+    explicit AutoplayWindow(document::DocumentController *document, audio::AudioPlayer *audio = nullptr,
+                            QWidget *parent = nullptr);
+    ~AutoplayWindow() override;
 
     int frame() const { return m_frame; }
     int frameCount() const { return m_frameCount; } // of the loop
@@ -59,12 +67,15 @@ private:
     void updateRange();
     void updateLoopBar();
     void updateTimer();
+    // The sound plays while the frames do at the document's rate, and not otherwise.
+    void syncAudio();
     void updatePlayButton();
     // What a frame shows: each layer's drawing, if visible. Frames that show
     // the same are not composed again.
     std::vector<doc::DrawingId> exposedAt(int frame) const;
 
     document::DocumentController *m_document;
+    QPointer<audio::AudioPlayer> m_audio; // may go before the window (both are the main window's children)
     canvas::FrameRenderer m_renderer;
     QWidget *m_picture;
     QSlider *m_slider;

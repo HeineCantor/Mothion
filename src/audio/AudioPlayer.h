@@ -1,0 +1,74 @@
+#pragma once
+
+#include <QBuffer>
+#include <QByteArray>
+#include <QElapsedTimer>
+#include <QObject>
+#include <QTimer>
+
+#include <memory>
+#include <vector>
+
+class QAudioOutput;
+class QMediaPlayer;
+
+namespace mothion::document {
+class DocumentController;
+}
+
+namespace mothion::audio {
+
+// Plays the project's audio track (document::DocumentController::audioTrack()) against the frames: from a frame
+// on, as the animation plays, or a short burst of the sound at a frame, to hear it while the timeline is
+// stepped or scrubbed. The sound is read from the project's own copy of the file; it follows the track as it
+// changes (a new song, the volume, mute).
+//
+// The frames and the sound are not locked together: the one that plays the frames (the Autoplay window)
+// tells here which frame it is at, and the sound is put back where it should be if it has drifted.
+class AudioPlayer : public QObject
+{
+    Q_OBJECT
+
+public:
+    explicit AudioPlayer(document::DocumentController *document, QObject *parent = nullptr);
+    ~AudioPlayer() override;
+
+    // Where the sound is at `frame`: seconds from its start, negative before it begins.
+    static double secondsAt(int frame, int offsetFrames, double fps);
+
+    // There is a sound that would be heard: a track, not muted, not at volume 0.
+    bool isAudible() const;
+    // Playing from a frame (see play()).
+    bool isPlaying() const { return m_playing; }
+
+    // The sound from `frame` on, as long as it is not stopped: it starts at once when it has begun by then, or
+    // when the frames get to where it begins.
+    void play(int frame);
+    // The frame the animation is at now: the sound is moved if it is more than `toleranceMs` from it.
+    // Not in the first moments after play(): the backend takes a few hundred ms to start, and putting it back
+    // then would only start it over.
+    void resync(int frame, int toleranceMs = 250);
+    void stop();
+    // A short burst of the sound at `frame` (a stop in the timeline, a step), unless it is playing.
+    void scrub(int frame);
+
+private:
+    void sync();
+    double fps() const;
+    // The position of the sound in the player, in ms: -1 when it is not known.
+    qint64 positionMs() const;
+
+    document::DocumentController *m_document;
+    QMediaPlayer *m_player;
+    QAudioOutput *m_output;
+    QBuffer *m_buffer = nullptr;
+    QByteArray m_bytes;
+    std::shared_ptr<const std::vector<unsigned char>> m_data;
+    const void *m_key = nullptr;
+    bool m_playing = false;
+    QElapsedTimer m_started; // since the sound was last started at a frame
+    QTimer m_delay; // plays from the start when the frames get to where the sound begins
+    QTimer m_burst; // ends a scrub's burst
+};
+
+} // namespace mothion::audio

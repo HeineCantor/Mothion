@@ -106,6 +106,8 @@ qt_add_library(mothion_gui STATIC
     ui/AutoplayWindow.h ui/AutoplayWindow.cpp
     ui/AdvancedToolSettings.h ui/AdvancedToolSettings.cpp
     ui/IconFactory.h ui/IconFactory.cpp
+    audio/AudioAnalyzer.h audio/AudioAnalyzer.cpp
+    audio/AudioPlayer.h audio/AudioPlayer.cpp
     ui/Shortcuts.h ui/Shortcuts.cpp
     ui/SettingsDialog.h ui/SettingsDialog.cpp
     ui/ImportSequenceDialog.h ui/ImportSequenceDialog.cpp
@@ -148,7 +150,7 @@ endif()
 target_include_directories(mothion_gui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 find_package(Qt6 REQUIRED COMPONENTS Sql) # .sut brushes and .moth projects are SQLite databases
 find_package(Qt6 REQUIRED COMPONENTS Network) # the local socket of Discord's Rich Presence
-target_link_libraries(mothion_gui PUBLIC mothion_core Qt6::Widgets PRIVATE Qt6::Sql Qt6::Network)
+target_link_libraries(mothion_gui PUBLIC mothion_core Qt6::Widgets PRIVATE Qt6::Sql Qt6::Network Qt6::Multimedia)
 mothion_set_warnings(mothion_gui)
 
 # ---------------------------------------------------------------------------

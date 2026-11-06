@@ -16,7 +16,7 @@ option(MOTHION_BUILD_DEVTOOLS "Build developer tools (brush test sheet)" OFF)
 # It is isolated in src/input/TabletBackend_wintab.cpp: turn this off if a Qt update breaks it.
 option(MOTHION_ENABLE_WINTAB "Allow switching the Windows tablet backend to Wintab (--wintab)" ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets Multimedia) # Multimedia: decoding and playing the audio track
 qt_standard_project_setup()
 
 # Qt is LGPL: it must be linked dynamically so the application can stay closed source.

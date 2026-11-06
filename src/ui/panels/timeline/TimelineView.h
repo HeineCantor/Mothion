@@ -3,6 +3,7 @@
 #include "core/document/Timing.h"
 #include "core/document/commands/DrawingCommands.h"
 #include "core/document/commands/TimingCommands.h"
+#include "audio/AudioAnalyzer.h"
 #include "ui/panels/timeline/TimelineMetrics.h"
 
 #include <QAbstractScrollArea>
@@ -68,6 +69,12 @@ public:
 
 signals:
     void frameWidthChanged(int width);
+    // "Import audio…" was chosen in a menu of the timeline (the window asks for the file).
+    void audioImportRequested();
+    // The current frame was moved by the person, with the pointer or the arrow keys (the sound is heard).
+    void frameScrubbed(int frame);
+    // The sound of the track could not be decoded (so there is no waveform, and the length is unknown).
+    void audioFailed(const QString &reason);
 
 protected:
     void paintEvent(QPaintEvent *event) override;
@@ -123,11 +130,39 @@ private:
     void paintRuler(QPainter &p) const;
     void paintHeaders(QPainter &p) const;
     void paintCursor(QPainter &p) const;
+
+    // The audio track: a row at the bottom, under the cels, taller than theirs for its waveform. The header has a
+    // mute button and the name; the block, from where the sound begins for as long as it lasts, can be dragged
+    // along the frames (one undo step on release). Without a track there is no row.
+    bool hasAudio() const;
+    int audioTop() const;
+    QRect audioHeaderRect() const;
+    QRect audioMuteRect() const;
+    // The block at `offset` frames, as long as the sound (a few frames wide until it is known).
+    QRect audioBlockRect(int offset) const;
+    bool inAudioRow(int y) const;
+    double audioSeconds() const;
+    void paintAudio(QPainter &p) const;
+    void paintAudioHeader(QPainter &p) const;
+    // Decodes the track's sound when it is a new one (for the waveform and its length), or forgets it.
+    void syncAudio();
+    void showAudioMenu(const QPoint &globalPos);
     static QColor colorForCel(int celIndex);
 
     document::DocumentController *m_document;
     TimelineMetrics m_metrics;
     bool m_scrubbing = false;
+    audio::AudioAnalyzer m_analyzer;
+    audio::Waveform m_wave;
+    const void *m_waveKey = nullptr; // the sound the waveform is of (the address of its bytes)
+    struct AudioDrag
+    {
+        int pressFrame = 0;
+        int startOffset = 0;
+        int offset = 0;
+        bool moved = false;
+    };
+    std::optional<AudioDrag> m_audioDrag;
     std::optional<Resize> m_resize;
     doc::Timing m_previewTiming; // the resized cel's timing during a drag
 

@@ -16,6 +16,10 @@ class BrushLibrary;
 class ToolState;
 }
 
+namespace mothion::audio {
+class AudioPlayer;
+}
+
 namespace mothion::ui {
 
 class AutoplayWindow;
@@ -77,6 +81,8 @@ private:
     void copyPixels(bool cut);
     void pastePixels();
     void importBrush();
+    // The audio track: asks for a sound file and puts it in the project (a song under the animation).
+    void importAudio();
     void openSettings(); // the Settings window
 
     tools::ToolState *m_toolState = nullptr;
@@ -86,6 +92,7 @@ private:
     canvas::CanvasView *m_canvas = nullptr;
     DockLayout *m_dockLayout = nullptr;
     QMenu *m_viewMenu = nullptr;
+    audio::AudioPlayer *m_audioPlayer = nullptr; // the audio track, heard with the frames and as they are stepped
     QPointer<AutoplayWindow> m_autoplay; // one at a time, made when first asked for
     QList<QAction *> m_fileActions;
     QList<QAction *> m_editActions;

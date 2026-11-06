@@ -7,6 +7,7 @@
 #include "ui/IconFactory.h"
 #include "ui/Shortcuts.h"
 
+#include <QActionGroup>
 #include <QApplication>
 #include <QClipboard>
 #include <QContextMenuEvent>
@@ -34,6 +35,9 @@ const QColor kSecondLine(0x60, 0x60, 0x68);
 constexpr int kEdgeGrab = 4;          // pixels around a block's right edge that start a resize
 constexpr int kExtraFrames = 24;      // shown past the last exposure, room to keep animating
 
+constexpr int kAudioRowHeight = 44; // the waveform wants more than a cel's row
+constexpr int kMinAudioFrames = 4;   // the block's width until the length of the sound is known
+
 } // namespace
 
 TimelineView::TimelineView(DocumentController *document, QWidget *parent)
@@ -50,6 +54,24 @@ TimelineView::TimelineView(DocumentController *document, QWidget *parent)
         viewport()->update();
     });
     connect(m_document, &DocumentController::currentCelChanged, viewport(), qOverload<>(&QWidget::update));
+    connect(&m_analyzer, &audio::AudioAnalyzer::finished, this,
+            [this](const void *key, const audio::Waveform &wave) {
+                const auto &track = m_document->audioTrack();
+                if (!track || !track->data || track->data.get() != key)
+                    return; // the track has changed since
+                m_wave = wave;
+                m_waveKey = key;
+                m_document->setAudioDuration(wave.duration);
+                updateScrollBars();
+                viewport()->update();
+            });
+    connect(&m_analyzer, &audio::AudioAnalyzer::failed, this, [this](const void *, const QString &reason) {
+        m_wave = {};
+        m_waveKey = nullptr;
+        viewport()->update();
+        emit audioFailed(reason);
+    });
+    syncAudio();
     updateScrollBars();
 }
 
@@ -162,6 +184,7 @@ void TimelineView::pruneSelection()
 
 void TimelineView::onStructureChanged()
 {
+    syncAudio();
     pruneSelection();
     updateScrollBars();
     viewport()->update();
@@ -171,7 +194,7 @@ void TimelineView::updateScrollBars()
 {
     const QSize vp = viewport()->size();
     const int contentW = displayedFrames() * m_metrics.frameWidth;
-    const int contentH = rowCount() * m_metrics.rowHeight;
+    const int contentH = rowCount() * m_metrics.rowHeight + (hasAudio() ? kAudioRowHeight : 0);
     const int visibleW = std::max(0, vp.width() - m_metrics.headerWidth);
     const int visibleH = std::max(0, vp.height() - m_metrics.rulerHeight);
 
@@ -264,6 +287,8 @@ void TimelineView::paintCells(QPainter &p) const
                                   : (row % 2 ? palette().alternateBase().color() : palette().base().color());
         p.fillRect(QRect(m.headerWidth, m.rowY(row), endX - m.headerWidth, m.rowHeight), bg);
     }
+    if (hasAudio()) // the audio row, under the cels
+        p.fillRect(QRect(m.headerWidth, audioTop(), endX - m.headerWidth, kAudioRowHeight), palette().alternateBase());
     // Past the scene length: dimmed.
     p.fillRect(QRect(m.frameX(d.frameCount()), m.rulerHeight, std::max(0, endX - m.frameX(d.frameCount())), bottom),
                QColor(0, 0, 0, 60));
@@ -300,6 +325,7 @@ void TimelineView::paintCells(QPainter &p) const
                 if (isSelected(cel.id(), e.start))
                     paintBlockedExposure(p, {e.start + m_frameDrag->offset, e.length, e.drawing}, m.rowY(row));
     }
+    paintAudio(p);
 }
 
 void TimelineView::paintExposure(QPainter &p, const doc::Exposure &e, const QString &name, const QColor &color,
@@ -326,6 +352,169 @@ void TimelineView::paintExposure(QPainter &p, const doc::Exposure &e, const QStr
         const int cy = block.center().y();
         p.drawLine(lineStart, cy, block.right() - 4, cy);
     }
+}
+
+// --- audio track ------------------------------------------------------------------
+
+bool TimelineView::hasAudio() const
+{
+    return m_document->audioTrack().has_value();
+}
+
+int TimelineView::audioTop() const
+{
+    return m_metrics.rowY(rowCount());
+}
+
+QRect TimelineView::audioHeaderRect() const
+{
+    return QRect(0, audioTop(), m_metrics.headerWidth - 1, kAudioRowHeight);
+}
+
+QRect TimelineView::audioMuteRect() const
+{
+    return QRect(12, audioTop() + (kAudioRowHeight - 16) / 2, 16, 16);
+}
+
+bool TimelineView::inAudioRow(int y) const
+{
+    return hasAudio() && y >= m_metrics.rulerHeight && y >= audioTop() && y < audioTop() + kAudioRowHeight;
+}
+
+double TimelineView::audioSeconds() const
+{
+    const auto &track = m_document->audioTrack();
+    if (!track)
+        return 0.0;
+    return track->duration > 0.0 ? track->duration : m_wave.duration;
+}
+
+QRect TimelineView::audioBlockRect(int offset) const
+{
+    const double fps = m_document->document().frameRate().fps();
+    const double seconds = audioSeconds();
+    const int width = seconds > 0.0 ? std::max(1, int(std::lround(seconds * fps * m_metrics.frameWidth)))
+                                    : kMinAudioFrames * m_metrics.frameWidth;
+    return QRect(m_metrics.frameX(offset), audioTop() + 2, width, kAudioRowHeight - 4);
+}
+
+void TimelineView::paintAudio(QPainter &p) const
+{
+    const auto &track = m_document->audioTrack();
+    if (!track)
+        return;
+    const TimelineMetrics &m = m_metrics;
+    const int offset = m_audioDrag ? m_audioDrag->offset : track->offset;
+    const QRect row(m.headerWidth, audioTop(), viewport()->width() - m.headerWidth, kAudioRowHeight);
+    p.setPen(palette().mid().color());
+    p.drawLine(row.left(), row.top(), row.right(), row.top());
+
+    const QRect block = audioBlockRect(offset);
+    const QColor color(0x4a, 0xa8, 0xa8);
+    const QColor fill = track->muted ? color.darker(300) : color.darker(190);
+    p.fillRect(block, fill);
+    p.setPen(track->muted ? color.darker(220) : color.darker(110));
+    p.drawRect(block.adjusted(0, 0, -1, -1));
+
+    // The waveform: a line for each column of pixels, as long as the largest peak of the slices under it.
+    const double fps = m_document->document().frameRate().fps();
+    const double pixelsPerSecond = fps * m.frameWidth;
+    if (!m_wave.isEmpty() && m_waveKey == track->data.get() && pixelsPerSecond > 0.0) {
+        const int middle = block.center().y();
+        const double half = (block.height() - 4) / 2.0;
+        const QRect visible = block & row;
+        p.setPen(track->muted ? color.darker(160) : QColor(0xd8, 0xf2, 0xf2));
+        for (int x = visible.left(); x <= visible.right(); ++x) {
+            const double from = (x - block.left()) / pixelsPerSecond;
+            const double to = (x + 1 - block.left()) / pixelsPerSecond;
+            const int first = std::max(0, int(from / audio::Waveform::kPeakSeconds));
+            const int last = std::min(int(m_wave.peaks.size()) - 1, std::max(first, int(to / audio::Waveform::kPeakSeconds)));
+            float peak = 0.0f;
+            for (int i = first; i <= last; ++i)
+                peak = std::max(peak, m_wave.peaks[std::size_t(i)]);
+            const int h = std::max(1, int(std::lround(peak * track->volume * half)));
+            p.drawLine(x, middle - h, x, middle + h);
+        }
+    } else if (m_analyzer.isRunning()) {
+        p.setPen(palette().text().color());
+        p.drawText(block.adjusted(6, 0, 0, 0), Qt::AlignVCenter | Qt::AlignLeft, tr("Reading the sound…"));
+    }
+}
+
+void TimelineView::paintAudioHeader(QPainter &p) const
+{
+    const auto &track = m_document->audioTrack();
+    if (!track)
+        return;
+    const QRect r = audioHeaderRect();
+    p.fillRect(r.adjusted(0, 0, 1, 0), palette().window());
+    p.fillRect(QRect(r.left() + 4, r.top() + 8, 4, r.height() - 16), QColor(0x4a, 0xa8, 0xa8));
+    // The mute button: a loudspeaker, crossed out when the sound is off. In its slot, as the cels' eyes.
+    const QRect slot = audioMuteRect();
+    p.setPen(palette().placeholderText().color());
+    p.drawRect(slot.adjusted(0, 0, -1, -1));
+    p.save();
+    p.setRenderHint(QPainter::Antialiasing);
+    const QColor ink = track->muted ? palette().color(QPalette::Disabled, QPalette::Text) : palette().text().color();
+    p.setPen(QPen(ink, 1.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    p.setBrush(ink);
+    const QPointF c = slot.center() + QPointF(-1.5, 0);
+    QPolygonF cone;
+    cone << QPointF(c.x() - 3, c.y() - 2) << QPointF(c.x(), c.y() - 2) << QPointF(c.x() + 3, c.y() - 5)
+         << QPointF(c.x() + 3, c.y() + 5) << QPointF(c.x(), c.y() + 2) << QPointF(c.x() - 3, c.y() + 2);
+    p.drawPolygon(cone);
+    p.setBrush(Qt::NoBrush);
+    if (track->muted) {
+        p.drawLine(QPointF(slot.left() + 3, slot.top() + 3), QPointF(slot.right() - 3, slot.bottom() - 3));
+    } else {
+        p.drawArc(QRectF(c.x() + 2, c.y() - 3, 5, 6), -60 * 16, 120 * 16);
+    }
+    p.restore();
+    p.setPen(track->muted ? palette().color(QPalette::Disabled, QPalette::Text) : palette().text().color());
+    const QRect text = r.adjusted(slot.right() + 6, 2, -4, -2);
+    p.drawText(text, Qt::AlignTop | Qt::AlignLeft, p.fontMetrics().elidedText(QString::fromStdString(track->name), Qt::ElideRight, text.width()));
+    p.setPen(palette().placeholderText().color());
+    p.drawText(text, Qt::AlignBottom | Qt::AlignLeft, tr("Audio · %1%").arg(int(std::lround(track->volume * 100.0f))));
+    p.setPen(palette().mid().color());
+    p.drawLine(r.bottomLeft(), r.bottomRight());
+}
+
+void TimelineView::syncAudio()
+{
+    const auto &track = m_document->audioTrack();
+    const void *key = track && track->data ? track->data.get() : nullptr;
+    if (key == m_waveKey)
+        return;
+    m_wave = {};
+    m_waveKey = nullptr;
+    if (key)
+        m_analyzer.analyze(track->data, key); // the answer comes in the background: finished() or failed()
+}
+
+void TimelineView::showAudioMenu(const QPoint &globalPos)
+{
+    const auto &track = m_document->audioTrack();
+    if (!track)
+        return;
+    QMenu menu(this);
+    menu.addAction(tr("Replace the audio…"), this, &TimelineView::audioImportRequested);
+    QAction *mute = menu.addAction(tr("Mute"), this, [this](bool on) { m_document->setAudioMuted(on); });
+    mute->setCheckable(true);
+    mute->setChecked(track->muted);
+    QMenu *volume = menu.addMenu(tr("Volume"));
+    auto *group = new QActionGroup(volume);
+    for (int percent : {0, 25, 50, 75, 100}) {
+        const float level = float(percent) / 100.0f;
+        QAction *a = volume->addAction(tr("%1%").arg(percent), this, [this, level] { m_document->setAudioVolume(level); });
+        a->setCheckable(true);
+        a->setChecked(std::abs(track->volume - level) < 0.005f);
+        group->addAction(a);
+    }
+    menu.addAction(tr("Start at the first frame"), this, [this] { m_document->setAudioOffset(0); })
+        ->setEnabled(track->offset != 0);
+    menu.addSeparator();
+    menu.addAction(tr("Remove the audio"), this, [this] { m_document->removeAudio(); });
+    menu.exec(globalPos);
 }
 
 void TimelineView::paintBlockedExposure(QPainter &p, const doc::Exposure &e, int y) const
@@ -396,6 +585,7 @@ void TimelineView::paintHeaders(QPainter &p) const
         p.setPen(palette().mid().color());
         p.drawLine(r.bottomLeft(), r.bottomRight());
     }
+    paintAudioHeader(p);
 }
 
 void TimelineView::paintCursor(QPainter &p) const
@@ -422,13 +612,20 @@ void TimelineView::scrubTo(const QPoint &pos, bool selectCel)
         if (row >= 0)
             m_document->setCurrentCel(m_document->document().celAt(celIndexForRow(row)).id());
     }
-    m_document->setCurrentFrame(frameAt(pos.x()));
+    const int frame = frameAt(pos.x());
+    m_document->setCurrentFrame(frame);
+    emit frameScrubbed(m_document->currentFrame());
 }
 
 void TimelineView::mousePressEvent(QMouseEvent *event)
 {
     if (event->button() != Qt::LeftButton || event->position().x() < m_metrics.headerWidth) {
         // In a header: the toggles, or the cel made current.
+        if (event->button() == Qt::LeftButton && inAudioRow(int(event->position().y()))) {
+            if (const auto &track = m_document->audioTrack(); track && audioMuteRect().contains(event->position().toPoint()))
+                m_document->setAudioMuted(!track->muted);
+            return;
+        }
         const int row = rowAt(int(event->position().y()));
         if (event->button() != Qt::LeftButton || row < 0)
             return;
@@ -445,6 +642,18 @@ void TimelineView::mousePressEvent(QMouseEvent *event)
         return;
     }
     const QPoint pos = event->position().toPoint();
+    if (inAudioRow(pos.y())) {
+        // On the sound's block: dragged along the frames; elsewhere in the row: the frame under the pointer.
+        const int start = m_document->audioTrack()->offset;
+        if (audioBlockRect(start).contains(pos)) {
+            m_audioDrag = AudioDrag{m_metrics.frameAt(pos.x()), start, start, false};
+            viewport()->update();
+            return;
+        }
+        m_scrubbing = true;
+        scrubTo(pos, false);
+        return;
+    }
     if (auto edge = edgeAt(pos)) {
         m_resize = edge;
         m_previewTiming = m_document->document().celAt(edge->celIndex).timing();
@@ -564,6 +773,15 @@ void TimelineView::dropFrames()
 void TimelineView::mouseMoveEvent(QMouseEvent *event)
 {
     const QPoint pos = event->position().toPoint();
+    if (m_audioDrag) {
+        const int offset = m_audioDrag->startOffset + m_metrics.frameAt(pos.x()) - m_audioDrag->pressFrame;
+        if (offset != m_audioDrag->offset) {
+            m_audioDrag->offset = offset;
+            m_audioDrag->moved = true;
+            viewport()->update();
+        }
+        return;
+    }
     if (m_resize) {
         // New length: up to the frame under the pointer, at least one frame.
         const int length = std::max(1, m_metrics.frameAt(pos.x() + m_metrics.frameWidth / 2) - m_resize->start);
@@ -590,6 +808,14 @@ void TimelineView::mouseMoveEvent(QMouseEvent *event)
 void TimelineView::mouseReleaseEvent(QMouseEvent *)
 {
     m_scrubbing = false;
+    if (m_audioDrag) {
+        const AudioDrag drag = *m_audioDrag;
+        m_audioDrag.reset();
+        if (drag.moved && drag.offset != drag.startOffset)
+            m_document->setAudioOffset(drag.offset); // one undo step
+        viewport()->update();
+        return;
+    }
     if (m_frameDrag) {
         dropFrames();
         return;
@@ -694,6 +920,10 @@ bool TimelineView::event(QEvent *event)
 
 void TimelineView::contextMenuEvent(QContextMenuEvent *event)
 {
+    if (inAudioRow(event->pos().y())) {
+        showAudioMenu(event->globalPos());
+        return;
+    }
     const int row = rowAt(event->pos().y());
     if (row < 0 || event->pos().x() < m_metrics.headerWidth)
         return;
@@ -750,6 +980,10 @@ void TimelineView::contextMenuEvent(QContextMenuEvent *event)
     QAction *pasteCopies = menu.addAction(tr("Paste frames as copies"), this, [this] { pasteFrames(true); });
     pasteCopies->setShortcut(Shortcuts::instance().key(QStringLiteral("timeline.pasteCopies")));
     pasteCopies->setEnabled(fits);
+    if (!hasAudio()) {
+        menu.addSeparator();
+        menu.addAction(tr("Import audio…"), this, &TimelineView::audioImportRequested);
+    }
     menu.setToolTipsVisible(true);
     menu.exec(event->globalPos());
 }
@@ -783,10 +1017,10 @@ void TimelineView::keyPressEvent(QKeyEvent *event)
     const doc::Document &d = m_document->document();
     const int celIndex = d.indexOf(m_document->currentCel());
     switch (event->key()) {
-    case Qt::Key_Left: m_document->setCurrentFrame(frame - 1); break;
-    case Qt::Key_Right: m_document->setCurrentFrame(frame + 1); break;
-    case Qt::Key_Home: m_document->setCurrentFrame(0); break;
-    case Qt::Key_End: m_document->setCurrentFrame(d.frameCount() - 1); break;
+    case Qt::Key_Left: m_document->setCurrentFrame(frame - 1); emit frameScrubbed(m_document->currentFrame()); break;
+    case Qt::Key_Right: m_document->setCurrentFrame(frame + 1); emit frameScrubbed(m_document->currentFrame()); break;
+    case Qt::Key_Home: m_document->setCurrentFrame(0); emit frameScrubbed(0); break;
+    case Qt::Key_End: m_document->setCurrentFrame(d.frameCount() - 1); emit frameScrubbed(m_document->currentFrame()); break;
     case Qt::Key_Up: // up the list = higher cel
         if (celIndex >= 0 && celIndex + 1 < d.celCount())
             m_document->setCurrentCel(d.celAt(celIndex + 1).id());

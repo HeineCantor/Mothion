@@ -7,6 +7,7 @@
 #include "io/ProjectFile.h"
 #include "tools/BrushLibrary.h"
 #include "tools/ToolState.h"
+#include "audio/AudioPlayer.h"
 #include "ui/AutoplayWindow.h"
 #include "tools/Preferences.h"
 #include "core/Parallel.h"
@@ -110,6 +111,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_document(new document::DocumentController(this))
     , m_canvas(new canvas::CanvasView(m_toolState, m_document, this))
 {
+    m_audioPlayer = new audio::AudioPlayer(m_document, this);
     setWindowTitle(QStringLiteral("Mothion"));
     resize(1400, 900);
 
@@ -151,6 +153,14 @@ MainWindow::MainWindow(QWidget *parent)
     statusBar()->showMessage(tr("Ready"));
     connect(m_canvas, &canvas::CanvasView::statusMessage, this,
             [this](const QString &text) { statusBar()->showMessage(text, 4000); });
+    {
+        TimelineView *timeline = static_cast<TimelinePanel *>(panels.timeline)->view();
+        connect(timeline, &TimelineView::audioImportRequested, this, &MainWindow::importAudio);
+        connect(timeline, &TimelineView::frameScrubbed, m_audioPlayer, &audio::AudioPlayer::scrub);
+        connect(timeline, &TimelineView::audioFailed, this, [this](const QString &reason) {
+            statusBar()->showMessage(tr("The audio cannot be read: %1").arg(reason), 8000);
+        });
+    }
     static_cast<LayersPanel *>(panels.layers)->setToolState(m_toolState);
     connect(static_cast<LayersPanel *>(panels.layers), &LayersPanel::statusMessage, this,
             [this](const QString &text) { statusBar()->showMessage(text, 4000); });
@@ -320,6 +330,7 @@ void MainWindow::createMenus()
     file->addSeparator();
     file->addAction(tr("Import image…"), this, &MainWindow::importImage);
     file->addAction(tr("Import image sequence…"), this, &MainWindow::chooseSequence);
+    file->addAction(tr("Import audio…"), this, &MainWindow::importAudio);
     file->addAction(tr("Import brush (.sut)…"), this, &MainWindow::importBrush);
     file->addSeparator();
     Shortcuts &keymap = Shortcuts::instance();
@@ -362,7 +373,7 @@ void MainWindow::createMenus()
     QMenu *animation = menuBar()->addMenu(tr("&Animation"));
     animation->addAction(tr("Autoplay"), this, [this] {
         if (!m_autoplay) {
-            m_autoplay = new AutoplayWindow(m_document, this);
+            m_autoplay = new AutoplayWindow(m_document, m_audioPlayer, this);
             m_autoplay->setAttribute(Qt::WA_DeleteOnClose); // closed: made again, playing, next time
         }
         m_autoplay->show();
@@ -375,6 +386,7 @@ void MainWindow::createMenus()
     auto step = [this](int by) {
         m_document->setCurrentFrame(
             std::clamp(m_document->currentFrame() + by, 0, m_document->document().frameCount() - 1));
+        m_audioPlayer->scrub(m_document->currentFrame()); // the sound of the slot stepped to
     };
     keymap.bind(animation->addAction(tr("Previous time slot"), this, [step] { step(-1); }),
                 QStringLiteral("anim.previousSlot"));
@@ -623,6 +635,21 @@ void MainWindow::chooseSequence()
     const QStringList files = dialog.selectedFiles();
     if (!files.isEmpty())
         importSequence(files, sequenceName(files.first()));
+}
+
+void MainWindow::importAudio()
+{
+    const QString file = QFileDialog::getOpenFileName(
+        this, tr("Import audio"), QString(),
+        tr("Audio (*.mp3 *.wav *.ogg *.oga *.flac *.m4a *.aac *.opus *.wma);;All files (*)"));
+    if (file.isEmpty())
+        return;
+    QString reason;
+    if (!m_document->importAudio(file, &reason)) {
+        QMessageBox::warning(this, tr("Import audio"), reason);
+        return;
+    }
+    statusBar()->showMessage(tr("Audio imported: %1").arg(QFileInfo(file).fileName()), 4000);
 }
 
 void MainWindow::importBrush()

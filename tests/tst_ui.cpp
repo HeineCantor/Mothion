@@ -1,5 +1,7 @@
 // Tests for the UI layer: panel layouts, document controller actions.
 
+#include "audio/AudioAnalyzer.h"
+#include "audio/AudioPlayer.h"
 #include "canvas/CanvasView.h"
 #include "canvas/EffectBrushTools.h"
 #include "canvas/FillTool.h"
@@ -31,6 +33,7 @@
 #include "tools/Preferences.h"
 #include "ui/ImportSequenceDialog.h"
 #include "ui/SettingsDialog.h"
+#include "ui/Theme.h"
 #include "ui/ShapeBar.h"
 #include "ui/Shortcuts.h"
 #include "ui/TransformBar.h"
@@ -4945,6 +4948,195 @@ private slots:
         controller.undo();
         QVERIFY(controller.audioTrack()); // back with its sound
         QCOMPARE(controller.audioTrack()->bytes(), std::size_t(5000));
+    }
+
+    // A sound file is decoded in the background into its length and a peak for each hundredth of a second: here
+    // a WAV of one second of silence and one of a sine at half scale; a file that is not sound fails.
+    void audioAnalyzerReadsTheLoudness()
+    {
+        constexpr int rate = 22050;
+        QByteArray pcm;
+        for (int i = 0; i < 2 * rate; ++i) {
+            const qint16 v = i < rate ? 0 : qint16(16384 * std::sin(2.0 * 3.14159265358979 * 440.0 * i / rate));
+            pcm.append(reinterpret_cast<const char *>(&v), 2);
+        }
+        QByteArray wav;
+        QDataStream out(&wav, QIODevice::WriteOnly);
+        out.setByteOrder(QDataStream::LittleEndian);
+        out.writeRawData("RIFF", 4);
+        out << quint32(36 + pcm.size());
+        out.writeRawData("WAVEfmt ", 8);
+        out << quint32(16) << quint16(1) << quint16(1) << quint32(rate) << quint32(rate * 2) << quint16(2) << quint16(16);
+        out.writeRawData("data", 4);
+        out << quint32(pcm.size());
+        out.writeRawData(pcm.constData(), pcm.size());
+
+        audio::AudioAnalyzer analyzer;
+        QSignalSpy finished(&analyzer, &audio::AudioAnalyzer::finished);
+        QSignalSpy failed(&analyzer, &audio::AudioAnalyzer::failed);
+        const auto data = std::make_shared<const std::vector<unsigned char>>(wav.cbegin(), wav.cend());
+        analyzer.analyze(data, data.get());
+        QVERIFY(finished.wait(10000));
+        QCOMPARE(failed.count(), 0);
+        QCOMPARE(finished.first().at(0).value<const void *>(), static_cast<const void *>(data.get()));
+        const auto wave = finished.first().at(1).value<audio::Waveform>();
+        QVERIFY(std::abs(wave.duration - 2.0) < 0.05);
+        QVERIFY(wave.peaks.size() >= 195 && wave.peaks.size() <= 205);
+        QVERIFY(wave.peaks[50] < 0.02f);                           // the silence
+        QVERIFY(wave.peaks[150] > 0.4f && wave.peaks[150] < 0.6f); // the sine, at half scale
+
+        const auto junk = std::make_shared<const std::vector<unsigned char>>(std::vector<unsigned char>(2000, 'x'));
+        finished.clear();
+        analyzer.analyze(junk, junk.get());
+        QVERIFY(failed.count() > 0 || failed.wait(10000)); // at once, or when the backend gives up
+        QCOMPARE(finished.count(), 0);
+    }
+
+    // The audio track is a row at the bottom of the timeline: a mute button in its header, a block that is
+    // dragged along the frames (one undo step), the waveform once the sound is read, and no row without a track.
+    void timelineHasAnAudioRowAtTheBottom()
+    {
+        tools::Preferences::instance().resetAll();
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        constexpr int rate = 22050;
+        QByteArray pcm(rate * 2 * 2, '\0'); // two seconds of silence, 16 bits
+        QByteArray wav;
+        QDataStream out(&wav, QIODevice::WriteOnly);
+        out.setByteOrder(QDataStream::LittleEndian);
+        out.writeRawData("RIFF", 4);
+        out << quint32(36 + pcm.size());
+        out.writeRawData("WAVEfmt ", 8);
+        out << quint32(16) << quint16(1) << quint16(1) << quint32(rate) << quint32(rate * 2) << quint16(2) << quint16(16);
+        out.writeRawData("data", 4);
+        out << quint32(pcm.size());
+        out.writeRawData(pcm.constData(), pcm.size());
+        QFile file(dir.filePath(QStringLiteral("song.wav")));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(wav);
+        file.close();
+
+        document::DocumentController controller;
+        ui::TimelineView view(&controller);
+        view.resize(600, 300);
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        // The cel's row is 22 px under the ruler (24 px), the audio row follows it; frames are 16 px, from x = 130.
+        const int audioY = 24 + 22;
+        QWidget *viewport = view.viewport();
+        QTest::mouseClick(viewport, Qt::LeftButton, {}, QPoint(20, audioY + 20)); // no track: nothing here
+        QVERIFY(!controller.audioTrack());
+
+        QString reason;
+        QVERIFY(controller.importAudio(file.fileName(), &reason));
+        QTRY_VERIFY(controller.audioTrack()->duration > 1.5); // read in the background
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo audio")); // the length is not a step
+
+        QVERIFY(!controller.audioTrack()->muted);
+        QTest::mouseClick(viewport, Qt::LeftButton, {}, QPoint(20, audioY + 22)); // the speaker
+        QVERIFY(controller.audioTrack()->muted);
+        QTest::mouseClick(viewport, Qt::LeftButton, {}, QPoint(20, audioY + 22));
+        QVERIFY(!controller.audioTrack()->muted);
+
+        // The block from frame 0: 2 s at 24 fps is 48 frames. Dragged 5 frames on.
+        QTest::mousePress(viewport, Qt::LeftButton, {}, QPoint(200, audioY + 20));
+        QTest::mouseMove(viewport, QPoint(200 + 5 * 16, audioY + 20));
+        QCOMPARE(controller.audioTrack()->offset, 0); // not until it is dropped
+        QTest::mouseRelease(viewport, Qt::LeftButton, {}, QPoint(200 + 5 * 16, audioY + 20));
+        QCOMPARE(controller.audioTrack()->offset, 5);
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo audio change"));
+        controller.undo();
+        QCOMPARE(controller.audioTrack()->offset, 0);
+
+        // Outside the block, the row scrubs.
+        QTest::mouseClick(viewport, Qt::LeftButton, {}, QPoint(130 + 60 * 16, audioY + 20));
+        QCOMPARE(controller.currentFrame(), 60);
+        controller.removeAudio();
+        QTest::mouseClick(viewport, Qt::LeftButton, {}, QPoint(20, audioY + 22)); // gone: no speaker to click
+        QVERIFY(!controller.audioTrack());
+    }
+
+    // Where the sound is at a frame: seconds from its start, negative before it begins.
+    void audioPlayerKnowsWhereTheSoundIs()
+    {
+        QCOMPARE(audio::AudioPlayer::secondsAt(0, 0, 24.0), 0.0);
+        QCOMPARE(audio::AudioPlayer::secondsAt(48, 0, 24.0), 2.0);
+        QCOMPARE(audio::AudioPlayer::secondsAt(48, 24, 24.0), 1.0); // it begins at frame 25
+        QVERIFY(audio::AudioPlayer::secondsAt(10, 24, 24.0) < 0.0);
+    }
+
+    // The sound plays from a frame on, stops, and is not heard muted or at volume 0 or without a track.
+    void audioPlayerPlaysAndStops()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        QFile file(dir.filePath(QStringLiteral("song.wav")));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(QByteArray(4000, 'x')); // the player reads it in the background; here it is only a track
+        file.close();
+        document::DocumentController controller;
+        audio::AudioPlayer player(&controller);
+        player.play(5);
+        QVERIFY(!player.isPlaying()); // no track
+        QVERIFY(controller.importAudio(file.fileName()));
+        QVERIFY(player.isAudible());
+        player.play(5);
+        QVERIFY(player.isPlaying());
+        player.stop();
+        QVERIFY(!player.isPlaying());
+        controller.setAudioMuted(true);
+        QVERIFY(!player.isAudible());
+        player.play(5);
+        QVERIFY(!player.isPlaying());
+        controller.setAudioMuted(false);
+        player.play(5);
+        QVERIFY(player.isPlaying());
+        controller.setAudioMuted(true); // muted while playing: it stops
+        QVERIFY(!player.isPlaying());
+        controller.setAudioMuted(false);
+        controller.setAudioVolume(0.0f);
+        player.play(5);
+        QVERIFY(!player.isPlaying());
+        controller.setAudioVolume(1.0f);
+        player.play(5);
+        controller.removeAudio();
+        QVERIFY(!player.isPlaying()); // the track is gone
+    }
+
+    // The Autoplay window plays the sound with the frames at the document's rate, and not at another speed,
+    // and stops it when it stops.
+    void autoplayPlaysTheSoundAtTheDocumentsRate()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        QFile file(dir.filePath(QStringLiteral("song.wav")));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(QByteArray(4000, 'x'));
+        file.close();
+        document::DocumentController controller;
+        QVERIFY(controller.importAudio(file.fileName()));
+        audio::AudioPlayer player(&controller);
+        ui::AutoplayWindow window(&controller, &player);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        QVERIFY(window.isPlaying());
+        QVERIFY(player.isPlaying()); // playing, at the document's rate (24 fps)
+        auto *speed = window.findChild<QComboBox *>();
+        QVERIFY(speed);
+        int other = -1;
+        for (int i = 0; i < speed->count(); ++i)
+            if (std::abs(speed->itemData(i).toDouble() - 24.0) > 0.5)
+                other = i;
+        QVERIFY(other >= 0);
+        const int own = speed->currentIndex();
+        speed->setCurrentIndex(other);
+        QVERIFY(window.isPlaying());
+        QVERIFY(!player.isPlaying()); // another speed: the sound would be stretched
+        speed->setCurrentIndex(own);
+        QVERIFY(player.isPlaying());
+        QTest::keyClick(&window, Qt::Key_Space); // stop
+        QVERIFY(!window.isPlaying());
+        QVERIFY(!player.isPlaying());
     }
 
     void largeImagesAreScaledToFit()

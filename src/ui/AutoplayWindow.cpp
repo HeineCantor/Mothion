@@ -1,5 +1,6 @@
 #include "ui/AutoplayWindow.h"
 
+#include "audio/AudioPlayer.h"
 #include "document/DocumentController.h"
 #include "ui/IconFactory.h"
 
@@ -160,9 +161,10 @@ const QList<double> &AutoplayWindow::speeds()
     return fps;
 }
 
-AutoplayWindow::AutoplayWindow(document::DocumentController *document, QWidget *parent)
+AutoplayWindow::AutoplayWindow(document::DocumentController *document, audio::AudioPlayer *audio, QWidget *parent)
     : QWidget(parent, Qt::Window)
     , m_document(document)
+    , m_audio(audio)
     , m_picture(new FramePicture(&m_renderer.image(), this))
     , m_slider(new QSlider(Qt::Horizontal, this))
     , m_position(new QLabel(this))
@@ -239,8 +241,17 @@ AutoplayWindow::AutoplayWindow(document::DocumentController *document, QWidget *
     connect(m_play, &QPushButton::toggled, this, &AutoplayWindow::updatePlayButton);
     connect(m_play, &QPushButton::toggled, this, &AutoplayWindow::updateTimer);
     connect(m_speed, &QComboBox::currentIndexChanged, this, &AutoplayWindow::updateTimer);
-    // Dragged (or clicked, or keys): that frame, and the playback goes on from it.
-    connect(m_slider, &QSlider::valueChanged, this, &AutoplayWindow::showFrame);
+    // Dragged (or clicked, or keys): that frame, and the playback goes on from it; the sound with it, or a
+    // burst of it when the playback is stopped.
+    connect(m_slider, &QSlider::valueChanged, this, [this](int frame) {
+        showFrame(frame);
+        if (!m_audio)
+            return;
+        if (m_timer.isActive())
+            m_audio->play(m_frame);
+        else
+            m_audio->scrub(m_frame);
+    });
 
     using document::DocumentController;
     connect(m_document, &DocumentController::pixelsChanged, this, &AutoplayWindow::documentChanged);
@@ -251,6 +262,12 @@ AutoplayWindow::AutoplayWindow(document::DocumentController *document, QWidget *
     updateRange();
     showFrame(0);
     updateTimer();
+}
+
+AutoplayWindow::~AutoplayWindow()
+{
+    if (m_audio)
+        m_audio->stop(); // the window goes: the sound with it
 }
 
 bool AutoplayWindow::isPlaying() const
@@ -270,6 +287,19 @@ void AutoplayWindow::updateTimer()
         m_timer.start();
     else
         m_timer.stop();
+    syncAudio();
+}
+
+void AutoplayWindow::syncAudio()
+{
+    if (!m_audio)
+        return;
+    // The sound is made for the document's rate: at another speed it would be too fast or too slow.
+    const bool atRate = std::abs(fps() - m_document->document().frameRate().fps()) < 0.01;
+    if (m_timer.isActive() && atRate)
+        m_audio->play(m_frame);
+    else
+        m_audio->stop();
 }
 
 void AutoplayWindow::showEvent(QShowEvent *event)
@@ -289,6 +319,7 @@ void AutoplayWindow::updatePlayButton()
 void AutoplayWindow::hideEvent(QHideEvent *event)
 {
     m_timer.stop(); // nothing to play to
+    syncAudio();
     QWidget::hideEvent(event);
 }
 
@@ -353,7 +384,14 @@ void AutoplayWindow::advance()
     // Round the looped frames: past the last (or before the first, when the
     // slider was left outside them) it goes back to the first.
     const int next = m_frame >= loopEnd() ? loopStart() : std::max(m_frame + 1, loopStart());
+    const bool wrapped = next <= m_frame;
     showFrame(next);
+    if (m_audio && m_audio->isPlaying()) {
+        if (wrapped)
+            m_audio->play(next); // the loop begins again: so does the sound
+        else
+            m_audio->resync(next); // the sound is put back if the frames have drifted from it
+    }
 }
 
 std::vector<doc::DrawingId> AutoplayWindow::exposedAt(int frame) const
