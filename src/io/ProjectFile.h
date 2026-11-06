@@ -41,10 +41,13 @@ namespace mothion::io {
 // Format 7 adds the compositing network: the table "compositing" (at most one row) holds it as JSON text (see
 // GraphData). Older files have none.
 //
+// Format 8 adds the camera: the table "camera" (at most one row) holds it as JSON text (see doc::Camera). Older
+// files have none.
+//
 // A save writes a new file next to the target and renames it over the old
 // one at the end, so a failed save never damages the previous file.
 
-inline constexpr int kProjectFormatVersion = 7;
+inline constexpr int kProjectFormatVersion = 8;
 inline constexpr char kProjectSuffix[] = "moth";
 inline constexpr char kOldProjectSuffix[] = "mothion"; // what projects were named before; they still open
 

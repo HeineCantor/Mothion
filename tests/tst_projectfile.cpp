@@ -76,6 +76,12 @@ std::unique_ptr<doc::Document> sampleDocument()
     song.scrub = false;
     song.duration = 187.25;
     d->setAudio(song);
+    doc::Camera camera;
+    camera.visible = false;
+    camera.setKey(0, {160, 120, 1, 0}, doc::Easing::hold());
+    camera.setKey(12, {200.5, 90.25, 2.5, -45}, doc::Easing::bezier(0.42, 0, 0.58, 1));
+    camera.setKey(30, {160, 120, 1, 720}, doc::Easing::linear());
+    d->setCamera(camera);
     doc::GraphData graph;
     graph.nodes.push_back({1, "frame", -330.5, 12, {}});
     graph.nodes.push_back({4, "blur", 20, -7.25, {{"radius", 17}}});
@@ -103,6 +109,7 @@ void compareDocuments(const doc::Document &x, const doc::Document &y)
     QCOMPARE(x.nextDrawingId(), y.nextDrawingId());
     QCOMPARE(x.nextLayerId(), y.nextLayerId());
     QVERIFY(x.compositing() == y.compositing());
+    QVERIFY(x.camera() == y.camera());
     QVERIFY(x.compositingView() == y.compositingView());
     QCOMPARE(x.audio().has_value(), y.audio().has_value());
     if (x.audio() && y.audio()) {
@@ -195,6 +202,7 @@ private slots:
         original->setAudio(std::nullopt); // the audio table came with format 5
         original->setCompositing({});     // and the compositing one with format 7
         original->setCompositingView({});
+        original->setCamera(std::nullopt); // and the camera with format 8
         const QString path = dir.filePath(QStringLiteral("old.moth"));
         QString error;
         QVERIFY2(io::saveProject(*original, path, &error), qPrintable(error));

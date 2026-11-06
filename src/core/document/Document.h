@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/document/Audio.h"
+#include "core/document/Camera.h"
 #include "core/document/Cel.h"
 #include "core/document/Compositing.h"
 
@@ -44,6 +45,10 @@ public:
     const std::optional<AudioTrack> &audio() const { return m_audio; }
     void setAudio(std::optional<AudioTrack> track) { m_audio = std::move(track); }
 
+    // The camera, if the project has one (see Camera): what the picture of each frame is cut from the sheet.
+    const std::optional<Camera> &camera() const { return m_camera; }
+    void setCamera(std::optional<Camera> camera) { m_camera = std::move(camera); }
+
     // The compositing network (see GraphData); empty until the editor makes one.
     const GraphData &compositing() const { return m_compositing; }
     void setCompositing(GraphData graph) { m_compositing = std::move(graph); }
@@ -85,6 +90,7 @@ private:
     int m_frameCount;
     Pixel m_paperColor = 0xffffffff;
     std::optional<AudioTrack> m_audio;
+    std::optional<Camera> m_camera;
     GraphData m_compositing;
     GraphView m_compositingView;
     std::vector<std::unique_ptr<Cel>> m_cels;

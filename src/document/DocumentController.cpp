@@ -7,6 +7,7 @@
 #include "core/document/commands/DrawingCommands.h"
 #include "core/document/commands/GroupCommand.h"
 #include "core/document/commands/AudioCommands.h"
+#include "core/document/commands/CameraCommands.h"
 #include "core/document/commands/CompositingCommands.h"
 #include "core/document/commands/CelCommands.h"
 #include "core/document/commands/LayerCommands.h"
@@ -616,6 +617,97 @@ void DocumentController::commitAudioVolume(float before)
     setAudioVolume(after);
 }
 
+void DocumentController::addCamera()
+{
+    if (m_document->camera())
+        return; // one for now
+    execute(std::make_unique<doc::SetCameraCommand>(
+        doc::Camera::wholeSheet(m_document->width(), m_document->height())));
+}
+
+void DocumentController::removeCamera()
+{
+    if (m_document->camera())
+        execute(std::make_unique<doc::SetCameraCommand>(std::nullopt));
+}
+
+void DocumentController::setCameraVisible(bool visible)
+{
+    if (!m_document->camera() || m_document->camera()->visible == visible)
+        return;
+    doc::Camera camera = *m_document->camera();
+    camera.visible = visible;
+    execute(std::make_unique<doc::SetCameraCommand>(std::move(camera)));
+}
+
+void DocumentController::setCameraKey(int frame, const doc::CameraPose &pose)
+{
+    doc::Camera camera = m_document->camera() ? *m_document->camera() : doc::Camera();
+    if (const doc::CameraKey *key = camera.keyAt(frame); key && key->pose == pose)
+        return;
+    camera.setKey(frame, pose);
+    execute(std::make_unique<doc::SetCameraCommand>(std::move(camera)));
+}
+
+bool DocumentController::removeCameraKey(int frame)
+{
+    if (!m_document->camera())
+        return false;
+    doc::Camera camera = *m_document->camera();
+    if (!camera.removeKey(frame))
+        return false;
+    execute(std::make_unique<doc::SetCameraCommand>(std::move(camera)));
+    return true;
+}
+
+bool DocumentController::moveCameraKey(int from, int to)
+{
+    if (!m_document->camera() || from == to)
+        return false;
+    doc::Camera camera = *m_document->camera();
+    if (!camera.moveKey(from, to))
+        return false;
+    execute(std::make_unique<doc::SetCameraCommand>(std::move(camera)));
+    return true;
+}
+
+bool DocumentController::setCameraEasing(int frame, const doc::Easing &easing)
+{
+    if (!m_document->camera())
+        return false;
+    doc::Camera camera = *m_document->camera();
+    if (!camera.setEasing(frame, easing))
+        return false;
+    if (camera == *m_document->camera())
+        return true; // already so
+    execute(std::make_unique<doc::SetCameraCommand>(std::move(camera)));
+    return true;
+}
+
+doc::CameraPose DocumentController::cameraPoseAt(int frame) const
+{
+    const auto &camera = m_document->camera();
+    if (camera && camera->visible && !camera->isEmpty())
+        return camera->poseAt(frame);
+    return doc::CameraPose::wholeSheet(m_document->width(), m_document->height());
+}
+
+void DocumentController::previewCamera(const std::optional<doc::Camera> &camera)
+{
+    m_document->setCamera(camera);
+    emit cameraChanged();
+}
+
+void DocumentController::commitCamera(const std::optional<doc::Camera> &before, const std::optional<doc::Camera> &after)
+{
+    if (before == after) {
+        previewCamera(before);
+        return;
+    }
+    previewCamera(before); // so the step records the whole change, not the part after the last preview
+    execute(std::make_unique<doc::SetCameraCommand>(after));
+}
+
 void DocumentController::setCompositing(doc::GraphData graph)
 {
     if (graph != m_document->compositing())
@@ -1034,6 +1126,7 @@ QString DocumentController::commandName(doc::CommandKind kind)
     case doc::CommandKind::SetAudio: return tr("audio");
     case doc::CommandKind::ChangeAudio: return tr("audio change");
     case doc::CommandKind::EditCompositing: return tr("compositing");
+    case doc::CommandKind::EditCamera: return tr("camera");
     case doc::CommandKind::ClearLayer: return tr("clear");
     case doc::CommandKind::Move: return tr("move");
     case doc::CommandKind::Select: return tr("selection");
@@ -1069,6 +1162,8 @@ QString DocumentController::redoText() const
 
 void DocumentController::publish(const doc::ChangeSet &changes)
 {
+    if (changes.camera)
+        emit cameraChanged();
     if (changes.structure) {
         ensureValidCurrentCel();
         resolveCurrentLayer();

@@ -118,6 +118,22 @@ public:
     // What decoding found out (not an undo step: it is a fact about the file).
     void setAudioDuration(double seconds);
 
+    // The camera (see doc::Camera): at most one for now. Each change is one undo step.
+    const std::optional<doc::Camera> &camera() const { return m_document->camera(); }
+    void addCamera();                                      // one that shows the whole sheet, from the first frame
+    void removeCamera();
+    void setCameraVisible(bool visible);                   // an invisible camera is not applied
+    void setCameraKey(int frame, const doc::CameraPose &pose); // a key at `frame` (a camera is made if there is none)
+    bool removeCameraKey(int frame);
+    bool moveCameraKey(int from, int to);
+    bool setCameraEasing(int frame, const doc::Easing &easing); // from the key at `frame` to the next
+    // The camera as it is at `frame` (the whole sheet if there is none or it is invisible).
+    doc::CameraPose cameraPoseAt(int frame) const;
+    // For a drag: shows `camera` without recording it, and commitCamera() then records the whole change as one
+    // step, from what it was before the drag.
+    void previewCamera(const std::optional<doc::Camera> &camera);
+    void commitCamera(const std::optional<doc::Camera> &before, const std::optional<doc::Camera> &after);
+
     // The compositing network kept in the project: one undo step puts `graph` in place of it.
     const doc::GraphData &compositing() const { return m_document->compositing(); }
     void setCompositing(doc::GraphData graph);
@@ -278,6 +294,8 @@ public slots:
 signals:
     // The audio track changed without a structure change (a volume being dragged): the views and the player take it up.
     void audioChanged();
+    // The camera changed (a key, whether it is on, or it was added or taken away; also a preview).
+    void cameraChanged();
     // Pixels of (a layer of) `drawing` changed in `rect` (document coordinates).
     void pixelsChanged(doc::CelId cel, doc::DrawingId drawing, const QRect &rect);
     // Cels, drawings, layers, timing or document properties changed.
