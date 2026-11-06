@@ -109,8 +109,69 @@ void Graph::setParam(NodeId id, const QString &key, const QVariant &value)
 
 void Graph::setPosition(NodeId id, const QPointF &pos)
 {
-    if (Node *n = mutableNode(id))
-        n->pos = pos;
+    Node *n = mutableNode(id);
+    if (!n || n->pos == pos)
+        return;
+    n->pos = pos;
+    notify({GraphChange::Kind::Moved, id, {}});
+}
+
+doc::GraphData Graph::toData() const
+{
+    doc::GraphData data;
+    data.nextId = m_nextId;
+    for (const Node &n : m_nodes) {
+        doc::GraphNodeData node;
+        node.id = n.id;
+        node.type = n.type.toStdString();
+        node.x = n.pos.x();
+        node.y = n.pos.y();
+        if (const NodeType *type = NodeRegistry::instance().find(n.type))
+            for (const ParamInfo &param : type->params()) {
+                const QVariant value = n.params.value(param.key);
+                node.params.emplace_back(param.key.toStdString(),
+                                         param.kind == ParamInfo::Kind::Color ? static_cast<int>(value.value<QColor>().rgba())
+                                                                              : value.toInt());
+            }
+        data.nodes.push_back(std::move(node));
+    }
+    for (const Link &l : m_links)
+        data.links.push_back({l.from, l.fromPort, l.to, l.toPort});
+    return data;
+}
+
+void Graph::load(const doc::GraphData &data)
+{
+    const auto listeners = std::move(m_listeners); // quiet while it is rebuilt: one Reset at the end
+    m_listeners.clear();
+    m_nodes.clear();
+    m_links.clear();
+    m_nextId = std::max(1, data.nextId);
+    for (const doc::GraphNodeData &stored : data.nodes) {
+        const QString typeName = QString::fromStdString(stored.type);
+        const NodeType *type = NodeRegistry::instance().find(typeName);
+        if (!type || stored.id < 1 || node(stored.id))
+            continue;
+        Node n;
+        n.id = stored.id;
+        n.type = typeName;
+        n.pos = {stored.x, stored.y};
+        n.stamp = ++m_stamp;
+        for (const ParamInfo &param : type->params()) {
+            n.params[param.key] = param.initial;
+            for (const auto &[key, value] : stored.params)
+                if (QString::fromStdString(key) == param.key)
+                    n.params[param.key] = param.kind == ParamInfo::Kind::Color
+                                              ? QVariant::fromValue(QColor::fromRgba(static_cast<QRgb>(value)))
+                                              : QVariant(std::clamp(value, param.min, param.max));
+        }
+        m_nodes.push_back(std::move(n));
+        m_nextId = std::max(m_nextId, stored.id + 1);
+    }
+    for (const doc::GraphLinkData &l : data.links)
+        connect(l.from, l.fromPort, l.to, l.toPort); // checks the sockets and loops
+    m_listeners = listeners;
+    notify({GraphChange::Kind::Reset, 0, {}});
 }
 
 const Node *Graph::node(NodeId id) const

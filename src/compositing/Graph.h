@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/document/Compositing.h"
+
 #include <QPointF>
 #include <QString>
 #include <QVariantMap>
@@ -31,10 +33,11 @@ struct Link
 
 struct GraphChange
 {
-    enum class Kind { NodeAdded, NodeRemoved, Links, Param };
+    enum class Kind { NodeAdded, NodeRemoved, Links, Param, Moved, Reset };
     Kind kind;
     NodeId node = 0; // not for Links
     QString key;     // Param: the setting
+    // Moved: a node was put somewhere else (nothing to compute anew). Reset: load() replaced everything.
 };
 
 // The compositing network: nodes, their settings and the wires between them. No pictures and no widgets,
@@ -55,7 +58,13 @@ public:
     // Takes out the wire into an input, if there is one.
     void disconnect(NodeId to, int toPort);
     void setParam(NodeId id, const QString &key, const QVariant &value);
-    void setPosition(NodeId id, const QPointF &pos); // not a change the listeners hear of: nothing is computed anew
+    void setPosition(NodeId id, const QPointF &pos);
+
+    // The network as the document stores it, and the other way round: load() replaces everything with what
+    // was stored (nodes of unknown types and wires that do not fit are dropped, missing settings start over),
+    // and the listeners hear one Reset.
+    doc::GraphData toData() const;
+    void load(const doc::GraphData &data);
 
     const Node *node(NodeId id) const;
     const std::vector<Node> &nodes() const { return m_nodes; }

@@ -116,6 +116,10 @@ public:
     // What decoding found out (not an undo step: it is a fact about the file).
     void setAudioDuration(double seconds);
 
+    // The compositing network kept in the project: one undo step puts `graph` in place of it.
+    const doc::GraphData &compositing() const { return m_document->compositing(); }
+    void setCompositing(doc::GraphData graph);
+
     // An image sequence as one new cel: image i is a drawing of its own, shown for `hold` frames from
     // startFrame + i * hold (the scene gets longer if it needs). Images that are null are skipped; returns how
     // many were imported. One undo step.

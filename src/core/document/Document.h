@@ -2,6 +2,7 @@
 
 #include "core/document/Audio.h"
 #include "core/document/Cel.h"
+#include "core/document/Compositing.h"
 
 #include <memory>
 #include <optional>
@@ -43,6 +44,10 @@ public:
     const std::optional<AudioTrack> &audio() const { return m_audio; }
     void setAudio(std::optional<AudioTrack> track) { m_audio = std::move(track); }
 
+    // The compositing network (see GraphData); empty until the editor makes one.
+    const GraphData &compositing() const { return m_compositing; }
+    void setCompositing(GraphData graph) { m_compositing = std::move(graph); }
+
     // Cels from bottom (index 0) to top.
     int celCount() const { return int(m_cels.size()); }
     Cel &celAt(int index) { return *m_cels[std::size_t(index)]; }
@@ -78,6 +83,7 @@ private:
     int m_frameCount;
     Pixel m_paperColor = 0xffffffff;
     std::optional<AudioTrack> m_audio;
+    GraphData m_compositing;
     std::vector<std::unique_ptr<Cel>> m_cels;
     CelId m_nextCelId = 1;
     DrawingId m_nextDrawingId = 1;

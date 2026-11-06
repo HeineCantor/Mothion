@@ -68,6 +68,7 @@ enum class CommandKind {
     Shape,
     SetAudio,
     ChangeAudio,
+    EditCompositing,
 };
 
 // An undoable change to a Document.

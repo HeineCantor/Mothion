@@ -76,6 +76,14 @@ std::unique_ptr<doc::Document> sampleDocument()
     song.scrub = false;
     song.duration = 187.25;
     d->setAudio(song);
+    doc::GraphData graph;
+    graph.nodes.push_back({1, "frame", -330.5, 12, {}});
+    graph.nodes.push_back({4, "blur", 20, -7.25, {{"radius", 17}}});
+    graph.nodes.push_back({7, "output", 400, 0, {}});
+    graph.links.push_back({1, 0, 4, 0});
+    graph.links.push_back({4, 0, 7, 0});
+    graph.nextId = 9;
+    d->setCompositing(graph);
     d->allocateCelId(); // ids used by a cel and a layer since deleted: must not come back
     d->allocateLayerId();
     return d;
@@ -91,6 +99,7 @@ void compareDocuments(const doc::Document &x, const doc::Document &y)
     QCOMPARE(x.nextCelId(), y.nextCelId());
     QCOMPARE(x.nextDrawingId(), y.nextDrawingId());
     QCOMPARE(x.nextLayerId(), y.nextLayerId());
+    QVERIFY(x.compositing() == y.compositing());
     QCOMPARE(x.audio().has_value(), y.audio().has_value());
     if (x.audio() && y.audio()) {
         const doc::AudioTrack &ax = *x.audio(), &ay = *y.audio();
@@ -180,6 +189,7 @@ private slots:
         QVERIFY(dir.isValid());
         const auto original = sampleDocument();
         original->setAudio(std::nullopt); // the audio table came with format 5
+        original->setCompositing({});     // and the compositing one with format 7
         const QString path = dir.filePath(QStringLiteral("old.moth"));
         QString error;
         QVERIFY2(io::saveProject(*original, path, &error), qPrintable(error));

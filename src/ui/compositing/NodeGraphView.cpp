@@ -1,6 +1,8 @@
 #include "ui/compositing/NodeGraphView.h"
 
+#include <QCheckBox>
 #include <QColorDialog>
+#include <QComboBox>
 #include <QPair>
 #include <QContextMenuEvent>
 #include <QGraphicsProxyWidget>
@@ -78,6 +80,26 @@ NodeItem::NodeItem(compositing::Graph &graph, NodeId id)
                 const QSignalBlocker block(slider);
                 slider->setValue(v.toInt());
                 static_cast<QLabel *>(slider->parentWidget()->layout()->itemAt(2)->widget())->setText(QString::number(v.toInt()));
+            };
+        } else if (param.kind == compositing::ParamInfo::Kind::Choice) {
+            auto *combo = new QComboBox(row);
+            combo->addItems(param.choices);
+            combo->setCurrentIndex(initial.toInt());
+            layout->addWidget(combo, 1);
+            connect(combo, &QComboBox::currentIndexChanged, this, [this, key](int i) { m_graph.setParam(m_id, key, i); });
+            m_shown[key] = [combo](const QVariant &v) {
+                const QSignalBlocker block(combo);
+                combo->setCurrentIndex(v.toInt());
+            };
+        } else if (param.kind == compositing::ParamInfo::Kind::Toggle) {
+            auto *box = new QCheckBox(row);
+            box->setChecked(initial.toInt() != 0);
+            layout->addWidget(box);
+            layout->addStretch(1);
+            connect(box, &QCheckBox::toggled, this, [this, key](bool on) { m_graph.setParam(m_id, key, on ? 1 : 0); });
+            m_shown[key] = [box](const QVariant &v) {
+                const QSignalBlocker block(box);
+                box->setChecked(v.toInt() != 0);
             };
         } else {
             auto *swatch = new QPushButton(row);
@@ -307,7 +329,7 @@ NodeGraphView::NodeGraphView(compositing::Graph &graph, QWidget *parent)
     setViewportUpdateMode(FullViewportUpdate);
 
     for (const compositing::Node &node : m_graph.nodes())
-        graphChanged({compositing::GraphChange::Kind::NodeAdded, node.id, {}});
+        addNodeItem(node.id);
     rebuildEdges();
     m_listener = m_graph.addListener([this](const compositing::GraphChange &change) { graphChanged(change); });
 }
@@ -321,13 +343,18 @@ void NodeGraphView::graphChanged(const compositing::GraphChange &change)
 {
     using Kind = compositing::GraphChange::Kind;
     switch (change.kind) {
-    case Kind::NodeAdded: {
-        auto *node = new NodeItem(m_graph, change.node);
-        node->setPos(m_graph.node(change.node)->pos);
-        m_scene->addItem(node);
-        m_items.insert(change.node, node);
+    case Kind::NodeAdded:
+        addNodeItem(change.node);
         break;
-    }
+    case Kind::Moved: // an item was dragged: it is already there
+        break;
+    case Kind::Reset: // everything was replaced
+        qDeleteAll(m_items);
+        m_items.clear();
+        for (const compositing::Node &node : m_graph.nodes())
+            addNodeItem(node.id);
+        rebuildEdges();
+        break;
     case Kind::NodeRemoved:
         delete m_items.take(change.node); // its wires were taken out before (and redrawn)
         break;
@@ -339,6 +366,14 @@ void NodeGraphView::graphChanged(const compositing::GraphChange &change)
             node->showParam(change.key);
         break;
     }
+}
+
+void NodeGraphView::addNodeItem(NodeId id)
+{
+    auto *node = new NodeItem(m_graph, id);
+    m_scene->addItem(node);
+    node->setPos(m_graph.node(id)->pos);
+    m_items.insert(id, node);
 }
 
 void NodeGraphView::rebuildEdges()
@@ -523,6 +558,11 @@ void NodeGraphView::mouseMoveEvent(QMouseEvent *event)
 
 void NodeGraphView::mouseReleaseEvent(QMouseEvent *event)
 {
+    struct Done // whichever way this goes, the gesture is over
+    {
+        NodeGraphView *view;
+        ~Done() { emit view->gestureEnded(); }
+    } done{this};
     if (m_panning && event->button() == Qt::MiddleButton) {
         m_panning = false;
         unsetCursor();
@@ -635,11 +675,36 @@ void NodeGraphView::deleteSelection()
 void NodeGraphView::contextMenuEvent(QContextMenuEvent *event)
 {
     const QPointF scenePos = mapToScene(event->pos());
+    // On a node (or the settings inside it) or on a wire: what can be done to it. Elsewhere: add a node.
+    NodeItem *onNode = nullptr;
+    EdgeItem *onWire = nullptr;
+    for (QGraphicsItem *item : m_scene->items(scenePos)) {
+        for (QGraphicsItem *up = item; up && !onNode; up = up->parentItem())
+            onNode = dynamic_cast<NodeItem *>(up);
+        if (onNode)
+            break;
+        if (!onWire)
+            onWire = dynamic_cast<EdgeItem *>(item);
+    }
     QMenu menu(this);
-    menu.addSection(tr("Add node"));
-    for (const auto &type : compositing::NodeRegistry::instance().all())
-        menu.addAction(type->title())->setData(type->id());
-    if (QAction *chosen = menu.exec(event->globalPos()))
+    if (onNode) {
+        // Right-clicking a node of a selection means the whole selection.
+        if (!onNode->isSelected()) {
+            m_scene->clearSelection();
+            onNode->setSelected(true);
+        }
+        menu.addAction(m_scene->selectedItems().size() > 1 ? tr("Delete nodes") : tr("Delete node"), this,
+                       [this] { deleteSelection(); });
+    } else if (onWire && onWire->to && onWire->from) {
+        const NodeId to = onWire->to->nodeId();
+        const int port = onWire->toIndex;
+        menu.addAction(tr("Delete wire"), this, [this, to, port] { m_graph.disconnect(to, port); });
+    } else {
+        menu.addSection(tr("Add node"));
+        for (const auto &type : compositing::NodeRegistry::instance().all())
+            menu.addAction(type->title())->setData(type->id());
+    }
+    if (QAction *chosen = menu.exec(event->globalPos()); chosen && chosen->data().isValid())
         if (NodeItem *node = item(addNode(chosen->data().toString(), scenePos)))
             node->setSelected(true);
 }

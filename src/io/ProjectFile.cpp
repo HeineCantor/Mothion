@@ -55,6 +55,8 @@ const char *const kSchema[] = {
     "create table audio (name text not null, format text not null, offset integer not null,"
     " volume real not null, muted integer not null, duration real not null, data blob not null,"
     " scrub integer not null default 1)",
+    // Format 7: the compositing network, as JSON.
+    "create table compositing (graph text not null)",
 };
 
 // Stored by name, so reordering the enum cannot change old files.
@@ -265,6 +267,51 @@ QByteArray thumbnailBlob(const doc::Document &d)
     return {};
 }
 
+// The compositing network as JSON text.
+QString graphToJson(const doc::GraphData &graph)
+{
+    QJsonArray nodes, links;
+    for (const doc::GraphNodeData &n : graph.nodes) {
+        QJsonObject params;
+        for (const auto &[key, value] : n.params)
+            params[QString::fromStdString(key)] = value;
+        nodes.append(QJsonObject{{"id", n.id}, {"type", QString::fromStdString(n.type)}, {"x", n.x}, {"y", n.y},
+                                 {"params", params}});
+    }
+    for (const doc::GraphLinkData &l : graph.links)
+        links.append(QJsonArray{l.from, l.fromPort, l.to, l.toPort});
+    return QString::fromUtf8(QJsonDocument(QJsonObject{{"next", graph.nextId}, {"nodes", nodes}, {"links", links}})
+                                 .toJson(QJsonDocument::Compact));
+}
+
+doc::GraphData graphFromJson(const QString &text)
+{
+    doc::GraphData graph;
+    const QJsonObject root = QJsonDocument::fromJson(text.toUtf8()).object();
+    graph.nextId = std::max(1, root.value("next").toInt(1));
+    for (const QJsonValue &value : root.value("nodes").toArray()) {
+        const QJsonObject o = value.toObject();
+        doc::GraphNodeData n;
+        n.id = o.value("id").toInt();
+        n.type = o.value("type").toString().toStdString();
+        n.x = o.value("x").toDouble();
+        n.y = o.value("y").toDouble();
+        const QJsonObject params = o.value("params").toObject();
+        for (auto it = params.begin(); it != params.end(); ++it)
+            n.params.emplace_back(it.key().toStdString(), it.value().toInt());
+        if (n.id > 0 && !n.type.empty()) {
+            graph.nextId = std::max(graph.nextId, n.id + 1);
+            graph.nodes.push_back(std::move(n));
+        }
+    }
+    for (const QJsonValue &value : root.value("links").toArray()) {
+        const QJsonArray a = value.toArray();
+        if (a.size() == 4)
+            graph.links.push_back({a[0].toInt(), a[1].toInt(), a[2].toInt(), a[3].toInt()});
+    }
+    return graph;
+}
+
 bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
 {
     QSqlQuery q(db);
@@ -376,6 +423,15 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
         audio.addBindValue(track->scrub);
         if (!audio.exec()) {
             failure = sqlError(audio);
+            return false;
+        }
+    }
+    if (!d.compositing().nodes.empty()) {
+        QSqlQuery graph(db);
+        graph.prepare(QStringLiteral("insert into compositing values (?)"));
+        graph.addBindValue(graphToJson(d.compositing()));
+        if (!graph.exec()) {
+            failure = sqlError(graph);
             return false;
         }
     }
@@ -569,6 +625,9 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
         track.scrub = q.value(7).toBool();
         d->setAudio(std::move(track));
     }
+
+    if (version >= 7 && q.exec(QStringLiteral("select graph from compositing")) && q.next())
+        d->setCompositing(graphFromJson(q.value(0).toString()));
 
     d->restoreIdCounters(nextCel, nextDrawing, nextLayer);
     for (auto &[id, layer] : v1Layers)

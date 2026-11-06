@@ -38,10 +38,13 @@ namespace mothion::io {
 //
 // Format 6 adds to it whether the sound is heard while the timeline is scrubbed (older files: it is).
 //
+// Format 7 adds the compositing network: the table "compositing" (at most one row) holds it as JSON text (see
+// GraphData). Older files have none.
+//
 // A save writes a new file next to the target and renames it over the old
 // one at the end, so a failed save never damages the previous file.
 
-inline constexpr int kProjectFormatVersion = 6;
+inline constexpr int kProjectFormatVersion = 7;
 inline constexpr char kProjectSuffix[] = "moth";
 inline constexpr char kOldProjectSuffix[] = "mothion"; // what projects were named before; they still open
 

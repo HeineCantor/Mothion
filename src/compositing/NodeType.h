@@ -13,23 +13,72 @@
 
 namespace mothion::compositing {
 
-// A setting of a node: a slider (an integer from min to max) or a color (a QColor with alpha).
+// A setting of a node. Every kind is stored as an integer (a color as its packed ARGB value): a slider, the
+// index of a choice, 0 or 1 for a toggle. Make one with slider(), color(), choice() or toggle().
 struct ParamInfo
 {
-    enum class Kind { Slider, Color };
+    enum class Kind { Slider, Color, Choice, Toggle };
 
     QString key;
     QString label;
     Kind kind = Kind::Slider;
     int min = 0;
     int max = 100;
-    QVariant initial; // an int, or a QColor
+    QVariant initial;     // an int, or a QColor
+    QStringList choices; // Choice: what the menu offers
+
+    static ParamInfo slider(const QString &key, const QString &label, int min, int max, int initial)
+    {
+        ParamInfo p;
+        p.key = key;
+        p.label = label;
+        p.min = min;
+        p.max = max;
+        p.initial = initial;
+        return p;
+    }
+    static ParamInfo color(const QString &key, const QString &label, const QColor &initial)
+    {
+        ParamInfo p;
+        p.key = key;
+        p.label = label;
+        p.kind = Kind::Color;
+        p.initial = initial;
+        return p;
+    }
+    static ParamInfo choice(const QString &key, const QString &label, const QStringList &choices, int initial = 0)
+    {
+        ParamInfo p;
+        p.key = key;
+        p.label = label;
+        p.kind = Kind::Choice;
+        p.min = 0;
+        p.max = static_cast<int>(choices.size()) - 1;
+        p.initial = initial;
+        p.choices = choices;
+        return p;
+    }
+    static ParamInfo toggle(const QString &key, const QString &label, bool initial)
+    {
+        ParamInfo p;
+        p.key = key;
+        p.label = label;
+        p.kind = Kind::Toggle;
+        p.min = 0;
+        p.max = 1;
+        p.initial = initial ? 1 : 0;
+        return p;
+    }
 };
 
-// What a node may look at while it works: the frame the Frame nodes hold.
+// What a node may look at while it works: the frame the Frame nodes hold, which frame of the animation it is, and
+// how big that picture is next to the document (a preview is smaller): sizes in pixels, like a blur's radius, are
+// given for the document and are to be multiplied by `scale`.
 struct EvalContext
 {
     QImage frame;
+    int frameIndex = 0;
+    double scale = 1.0;
 };
 
 inline QString nodeTr(const char *text) { return QCoreApplication::translate("Compositing", text); }
@@ -50,6 +99,12 @@ public:
     virtual QList<ParamInfo> params() const { return {}; }
     // True if the result changes with the frame being shown (the cache then looks at the frame).
     virtual bool dependsOnFrame() const { return false; }
+    // True if, with these settings, the result changes with the number of the frame (an animated grain).
+    virtual bool usesFrameIndex(const QVariantMap &params) const
+    {
+        Q_UNUSED(params)
+        return false;
+    }
 
     // `inputs` has one image per input socket, null where nothing is connected. Settings come as
     // key -> value, with every key of params() present.

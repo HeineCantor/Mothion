@@ -7,6 +7,7 @@
 #include "core/document/commands/DrawingCommands.h"
 #include "core/document/commands/GroupCommand.h"
 #include "core/document/commands/AudioCommands.h"
+#include "core/document/commands/CompositingCommands.h"
 #include "core/document/commands/CelCommands.h"
 #include "core/document/commands/LayerCommands.h"
 #include "core/document/commands/PaintCommand.h"
@@ -609,6 +610,12 @@ void DocumentController::commitAudioVolume(float before)
     setAudioVolume(after);
 }
 
+void DocumentController::setCompositing(doc::GraphData graph)
+{
+    if (graph != m_document->compositing())
+        execute(std::make_unique<doc::SetCompositingCommand>(std::move(graph)));
+}
+
 void DocumentController::setAudioScrub(bool scrub)
 {
     execute(audioChange(m_document->audio(), [scrub](doc::AudioTrack &t) { t.scrub = scrub; }));
@@ -1020,6 +1027,7 @@ QString DocumentController::commandName(doc::CommandKind kind)
     case doc::CommandKind::ImportSequence: return tr("import image sequence");
     case doc::CommandKind::SetAudio: return tr("audio");
     case doc::CommandKind::ChangeAudio: return tr("audio change");
+    case doc::CommandKind::EditCompositing: return tr("compositing");
     case doc::CommandKind::ClearLayer: return tr("clear");
     case doc::CommandKind::Move: return tr("move");
     case doc::CommandKind::Select: return tr("selection");

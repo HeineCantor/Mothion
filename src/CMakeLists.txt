@@ -43,6 +43,8 @@ add_library(mothion_core STATIC
     core/document/commands/CelCommands.h core/document/commands/CelCommands.cpp
     core/document/commands/LayerCommands.h core/document/commands/LayerCommands.cpp
     core/document/commands/AudioCommands.h core/document/commands/AudioCommands.cpp
+    core/document/commands/CompositingCommands.h core/document/commands/CompositingCommands.cpp
+    core/document/Compositing.h
 )
 set_target_properties(mothion_core PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
 target_include_directories(mothion_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -112,6 +114,8 @@ qt_add_library(mothion_gui STATIC
     compositing/nodes/MergeNode.h compositing/nodes/MergeNode.cpp
     compositing/nodes/ColorNode.h compositing/nodes/ColorNode.cpp
     compositing/nodes/OutputNode.h compositing/nodes/OutputNode.cpp
+    compositing/nodes/ChromaticAberrationNode.h compositing/nodes/ChromaticAberrationNode.cpp
+    compositing/nodes/SensorNoiseNode.h compositing/nodes/SensorNoiseNode.cpp
     ui/compositing/NodeGraphView.h ui/compositing/NodeGraphView.cpp
     ui/compositing/CompositingWindow.h ui/compositing/CompositingWindow.cpp
     ui/AdvancedToolSettings.h ui/AdvancedToolSettings.cpp

@@ -15,7 +15,7 @@ public:
     QStringList outputs() const override { return {nodeTr("Image")}; }
     QList<ParamInfo> params() const override
     {
-        return {{QStringLiteral("opacity"), nodeTr("Opacity"), ParamInfo::Kind::Slider, 0, 100, 100}};
+        return {ParamInfo::slider(QStringLiteral("opacity"), nodeTr("Opacity"), 0, 100, 100)};
     }
     QImage process(const QList<QImage> &inputs, const QVariantMap &params, const EvalContext &context) const override;
 };

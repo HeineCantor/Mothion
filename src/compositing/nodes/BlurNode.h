@@ -4,7 +4,7 @@
 
 namespace mothion::compositing {
 
-// A box blur of Radius pixels.
+// A box blur of Radius pixels (of the document: the preview, being smaller, blurs less pixels).
 class BlurNode : public NodeType
 {
 public:
@@ -15,7 +15,7 @@ public:
     QStringList outputs() const override { return {nodeTr("Image")}; }
     QList<ParamInfo> params() const override
     {
-        return {{QStringLiteral("radius"), nodeTr("Radius"), ParamInfo::Kind::Slider, 0, 60, 8}};
+        return {ParamInfo::slider(QStringLiteral("radius"), nodeTr("Radius"), 0, 60, 8)};
     }
     QImage process(const QList<QImage> &inputs, const QVariantMap &params, const EvalContext &context) const override;
 };

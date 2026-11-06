@@ -14,7 +14,7 @@ public:
     QStringList outputs() const override { return {nodeTr("Image")}; }
     QList<ParamInfo> params() const override
     {
-        return {{QStringLiteral("color"), nodeTr("Color"), ParamInfo::Kind::Color, 0, 0, QColor(150, 60, 190, 110)}};
+        return {ParamInfo::color(QStringLiteral("color"), nodeTr("Color"), QColor(150, 60, 190, 110))};
     }
     QImage process(const QList<QImage> &inputs, const QVariantMap &params, const EvalContext &context) const override;
 };

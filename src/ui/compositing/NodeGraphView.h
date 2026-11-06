@@ -115,6 +115,8 @@ public:
 signals:
     // The user panned, zoomed or clicked in the view: it is not to be framed again by itself.
     void viewTouched();
+    // A mouse button was released in the view: a drag, a slider or a wire is done (a good moment to keep the work).
+    void gestureEnded();
 
 protected:
     void mousePressEvent(QMouseEvent *event) override;
@@ -129,6 +131,7 @@ protected:
 
 private:
     void graphChanged(const compositing::GraphChange &change);
+    void addNodeItem(compositing::NodeId id);
     void rebuildEdges(); // the wires drawn are the graph's links
     void deleteSelection();
     void beginWire(NodeItem *node, bool output, int index, const QPointF &scenePos);

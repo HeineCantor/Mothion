@@ -37,8 +37,11 @@ Evaluator::Result Evaluator::compute(const Graph &graph, NodeId id, const EvalCo
     quint64 signature = static_cast<quint64>(id);
     combine(signature, node->stamp);
     combine(signature, static_cast<quint64>(context.frame.width()) << 32 | static_cast<quint64>(context.frame.height()));
+    combine(signature, static_cast<quint64>(context.scale * 1e6));
     if (type->dependsOnFrame())
         combine(signature, static_cast<quint64>(context.frame.cacheKey()));
+    if (type->usesFrameIndex(node->params))
+        combine(signature, static_cast<quint64>(context.frameIndex));
     for (int port = 0; port < type->inputs().size(); ++port) {
         const Link *link = graph.linkInto(id, port);
         const Result upstream = link ? compute(graph, link->from, context, done) : Result{};
