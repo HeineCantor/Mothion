@@ -35,6 +35,7 @@ add_library(mothion_core STATIC
     core/document/Document.h core/document/Document.cpp
     core/document/Command.h
     core/document/Audio.h
+    core/document/Camera.h core/document/Camera.cpp
     core/document/History.h core/document/History.cpp
     core/document/commands/GroupCommand.h core/document/commands/GroupCommand.cpp
     core/document/commands/PaintCommand.h core/document/commands/PaintCommand.cpp
