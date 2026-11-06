@@ -5321,28 +5321,34 @@ private slots:
         document::DocumentController controller;
         ui::CompositingWindow window(&controller);
         QVERIFY(controller.compositing().nodes.empty()); // nothing is stored until the user edits
-        QCOMPARE(window.network().nodes().size(), size_t(5)); // the starting network
-        // A slider moved, then a node: kept as one step each, after the gesture.
-        compositing::NodeId blur = 0;
-        for (const compositing::Node &n : window.network().nodes())
-            if (n.type == QLatin1String("blur"))
-                blur = n.id;
+        QCOMPARE(window.network().nodes().size(), size_t(2)); // the starting network: Frame to Output
+        // A node added, then a slider moved: kept as one step each, after the gesture.
+        const compositing::NodeId blur = window.network().addNode(QStringLiteral("blur"), {0, 100});
+        QTRY_VERIFY(!controller.compositing().nodes.empty()); // the idle timer commits
+        QCOMPARE(controller.document().compositing().nodes.size(), size_t(3));
         window.network().setParam(blur, QStringLiteral("radius"), 3);
         window.network().setParam(blur, QStringLiteral("radius"), 4);
         window.network().setParam(blur, QStringLiteral("radius"), 5);
-        QTRY_VERIFY(!controller.compositing().nodes.empty()); // the idle timer commits
-        QCOMPARE(controller.document().compositing().nodes.size(), size_t(5));
-        int radius = 0;
-        for (const auto &[key, value] : controller.compositing().nodes[1].params)
-            radius = key == "radius" ? value : radius;
-        QCOMPARE(radius, 5);
-        // Undo: back to no network stored, and the window shows its starting one again.
+        auto storedRadius = [&controller] {
+            int radius = 0;
+            for (const auto &node : controller.compositing().nodes)
+                for (const auto &[key, value] : node.params)
+                    radius = (node.type == "blur" && key == "radius") ? value : radius;
+            return radius;
+        };
+        QTRY_COMPARE(storedRadius(), 5);
+        // Undo: the slider goes back, the node stays.
         controller.undo();
-        QVERIFY(controller.compositing().nodes.empty());
+        QCOMPARE(storedRadius(), 8);
         QCOMPARE(window.network().node(blur)->params.value(QStringLiteral("radius")).toInt(), 8);
         controller.redo();
         QCOMPARE(window.network().node(blur)->params.value(QStringLiteral("radius")).toInt(), 5);
-        QCOMPARE(controller.compositing().nodes.size(), size_t(5));
+        QCOMPARE(controller.compositing().nodes.size(), size_t(3));
+        // Undo twice: back to nothing stored, and the window shows its starting network again.
+        controller.undo();
+        controller.undo();
+        QVERIFY(controller.compositing().nodes.empty());
+        QCOMPARE(window.network().nodes().size(), size_t(2));
     }
 
     void compositingPreviewZoomsAndMoves()
@@ -5473,7 +5479,7 @@ private slots:
         const compositing::NodeId mask = network.addNode(QStringLiteral("mask"), {0, 200});
         compositing::NodeId other = 0;
         for (const compositing::Node &n : network.nodes())
-            if (n.type == QLatin1String("blur"))
+            if (n.type == QLatin1String("frame"))
                 other = n.id;
         QCOMPARE(window.editedMask(), compositing::NodeId(0));
         QCOMPARE(window.preview()->tool(), ui::ImagePreview::Tool::Pan);

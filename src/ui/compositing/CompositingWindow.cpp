@@ -202,16 +202,10 @@ CompositingWindow::CompositingWindow(document::DocumentController *document, QWi
 
 void CompositingWindow::seed()
 {
-    // A frame through a blur, merged with a color.
-    const compositing::NodeId source = m_network.addNode(QStringLiteral("frame"), {-330, -70});
-    const compositing::NodeId blur = m_network.addNode(QStringLiteral("blur"), {-90, -110});
-    const compositing::NodeId color = m_network.addNode(QStringLiteral("color"), {-330, 60});
-    const compositing::NodeId merge = m_network.addNode(QStringLiteral("merge"), {160, -40});
-    const compositing::NodeId out = m_network.addNode(QStringLiteral("output"), {400, -30});
-    m_network.connect(source, 0, blur, 0);
-    m_network.connect(blur, 0, merge, 0);
-    m_network.connect(color, 0, merge, 1);
-    m_network.connect(merge, 0, out, 0);
+    // The frame straight to the output.
+    const compositing::NodeId source = m_network.addNode(QStringLiteral("frame"), {-200, -30});
+    const compositing::NodeId out = m_network.addNode(QStringLiteral("output"), {200, -30});
+    m_network.connect(source, 0, out, 0);
 }
 
 void CompositingWindow::commit()
