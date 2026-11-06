@@ -192,6 +192,20 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
     importAudio->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     connect(importAudio, &QToolButton::clicked, m_view, &TimelineView::audioImportRequested);
 
+    // A keyframe of the camera at the current frame, at the pose the camera has there (the camera is made if there
+    // is none: it then shows the whole sheet).
+    auto *cameraKey = celButton(IconId::Camera, QStringLiteral("cameraKey"),
+                                tr("Camera keyframe at this frame (makes the camera if there is none)"), this);
+    cameraKey->setText(tr("Key"));
+    cameraKey->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    connect(cameraKey, &QToolButton::clicked, this, [this] {
+        const int frame = m_document->currentFrame();
+        const auto &camera = m_document->camera();
+        const doc::Document &d = m_document->document();
+        m_document->setCameraKey(frame, camera && !camera->isEmpty() ? camera->poseAt(frame)
+                                                                       : doc::CameraPose::wholeSheet(d.width(), d.height()));
+    });
+
     auto *zoom = new QSlider(Qt::Horizontal, this);
     zoom->setRange(6, 60);
     zoom->setValue(m_view->frameWidth());
@@ -210,6 +224,7 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
     bar->addWidget(newDrawing);
     bar->addWidget(onion);
     bar->addWidget(importAudio);
+    bar->addWidget(cameraKey);
     bar->addStretch(1);
     bar->addWidget(new QLabel(tr("Zoom"), this));
     bar->addWidget(zoom);

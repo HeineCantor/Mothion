@@ -55,6 +55,11 @@ TimelineView::TimelineView(DocumentController *document, QWidget *parent)
     });
     connect(m_document, &DocumentController::currentCelChanged, viewport(), qOverload<>(&QWidget::update));
     connect(m_document, &DocumentController::audioChanged, viewport(), qOverload<>(&QWidget::update));
+    connect(m_document, &DocumentController::cameraChanged, this, [this] {
+        updateScrollBars(); // the row appears with the camera
+        viewport()->update();
+    });
+    connect(m_document, &DocumentController::cameraSelectionChanged, viewport(), qOverload<>(&QWidget::update));
     connect(&m_analyzer, &audio::AudioAnalyzer::finished, this,
             [this](const void *key, const audio::Waveform &wave) {
                 const auto &track = m_document->audioTrack();
@@ -195,7 +200,7 @@ void TimelineView::updateScrollBars()
 {
     const QSize vp = viewport()->size();
     const int contentW = displayedFrames() * m_metrics.frameWidth;
-    const int contentH = rowCount() * m_metrics.rowHeight + (hasAudio() ? kAudioRowHeight : 0);
+    const int contentH = rowCount() * m_metrics.rowHeight + cameraHeight() + (hasAudio() ? kAudioRowHeight : 0);
     const int visibleW = std::max(0, vp.width() - m_metrics.headerWidth);
     const int visibleH = std::max(0, vp.height() - m_metrics.rulerHeight);
 
@@ -326,6 +331,7 @@ void TimelineView::paintCells(QPainter &p) const
                 if (isSelected(cel.id(), e.start))
                     paintBlockedExposure(p, {e.start + m_frameDrag->offset, e.length, e.drawing}, m.rowY(row));
     }
+    paintCamera(p);
     paintAudio(p);
 }
 
@@ -355,6 +361,127 @@ void TimelineView::paintExposure(QPainter &p, const doc::Exposure &e, const QStr
     }
 }
 
+// --- camera -----------------------------------------------------------------------
+
+bool TimelineView::hasCamera() const
+{
+    return m_document->camera().has_value();
+}
+
+int TimelineView::cameraHeight() const
+{
+    return hasCamera() ? m_metrics.rowHeight : 0;
+}
+
+int TimelineView::cameraTop() const
+{
+    return m_metrics.rowY(rowCount());
+}
+
+QRect TimelineView::cameraEyeRect() const
+{
+    return QRect(12, cameraTop() + 3, 16, 16);
+}
+
+bool TimelineView::inCameraRow(int y) const
+{
+    return hasCamera() && y >= m_metrics.rulerHeight && y >= cameraTop() && y < cameraTop() + cameraHeight();
+}
+
+void TimelineView::paintCamera(QPainter &p) const
+{
+    const auto &camera = m_document->camera();
+    if (!camera)
+        return;
+    const TimelineMetrics &m = m_metrics;
+    const int top = cameraTop();
+    const bool selected = m_document->cameraSelected();
+    const QRect row(m.headerWidth, top, viewport()->width() - m.headerWidth, m.rowHeight);
+    p.fillRect(row, selected ? palette().highlight().color().darker(260) : palette().base().color());
+    p.setPen(palette().mid().color());
+    p.drawLine(row.left(), row.bottom(), row.right(), row.bottom());
+
+    const QColor red(235, 55, 55);
+    const QColor ink = camera->visible ? red : QColor(150, 150, 150);
+    const int midY = top + m.rowHeight / 2;
+    // A line from a key to the next, unless the first holds.
+    const auto &keys = camera->keys();
+    for (std::size_t i = 0; i + 1 < keys.size(); ++i) {
+        if (keys[i].easing.kind == doc::Easing::Kind::Hold)
+            continue;
+        p.setPen(QPen(ink, 1.5));
+        p.drawLine(m.frameX(keys[i].frame) + m.frameWidth / 2, midY, m.frameX(keys[i + 1].frame) + m.frameWidth / 2, midY);
+    }
+    const int current = m_document->currentFrame();
+    p.setRenderHint(QPainter::Antialiasing);
+    for (const doc::CameraKey &key : keys) {
+        int frame = key.frame;
+        const bool dragged = m_cameraDrag && m_cameraDrag->from == frame;
+        if (dragged)
+            frame = m_cameraDrag->to;
+        const int cx = m.frameX(frame) + m.frameWidth / 2;
+        const int r = key.frame == current || dragged ? 7 : 5;
+        const QPolygon diamond({QPoint(cx, midY - r), QPoint(cx + r, midY), QPoint(cx, midY + r), QPoint(cx - r, midY)});
+        p.setPen(QPen(key.frame == current ? Qt::white : ink.darker(150), 1));
+        p.setBrush(dragged ? ink.lighter(130) : ink);
+        p.drawPolygon(diamond);
+    }
+    p.setRenderHint(QPainter::Antialiasing, false);
+}
+
+void TimelineView::paintCameraHeader(QPainter &p) const
+{
+    const auto &camera = m_document->camera();
+    if (!camera)
+        return;
+    const TimelineMetrics &m = m_metrics;
+    const bool selected = m_document->cameraSelected();
+    const QRect r(0, cameraTop(), m.headerWidth - 1, m.rowHeight);
+    if (selected)
+        p.fillRect(r, palette().highlight().color().darker(200));
+    const QColor ink = selected ? palette().highlightedText().color() : palette().text().color();
+    const IconTone tone = selected ? IconTone::Selected : IconTone::Plain;
+    p.fillRect(QRect(r.left() + 4, r.top() + 6, 4, r.height() - 12), QColor(235, 55, 55));
+    p.setPen(selected ? palette().highlightedText().color() : palette().placeholderText().color());
+    p.drawRect(cameraEyeRect().adjusted(0, 0, -1, -1));
+    if (camera->visible)
+        icon(IconId::Eye, tone).paint(&p, cameraEyeRect().adjusted(1, 1, -1, -1));
+    p.setPen(camera->visible ? ink : palette().color(QPalette::Disabled, QPalette::Text));
+    p.drawText(r.adjusted(cameraEyeRect().right() + 8, 0, -4, 0), Qt::AlignVCenter | Qt::AlignLeft, tr("Camera"));
+    p.setPen(palette().mid().color());
+    p.drawLine(r.bottomLeft(), r.bottomRight());
+}
+
+void TimelineView::showCameraMenu(const QPoint &globalPos, int frame)
+{
+    const auto &camera = m_document->camera();
+    if (!camera)
+        return;
+    QMenu menu(this);
+    if (const doc::CameraKey *key = camera->keyAt(frame)) {
+        QMenu *easing = menu.addMenu(tr("To the next key"));
+        auto add = [&](const QString &text, const doc::Easing &e) {
+            QAction *action = easing->addAction(text, this, [this, frame, e] { m_document->setCameraEasing(frame, e); });
+            action->setCheckable(true);
+            action->setChecked(key->easing == e);
+        };
+        add(tr("Linear"), doc::Easing::linear());
+        add(tr("Hold"), doc::Easing::hold());
+        add(tr("Ease in"), doc::Easing::easeIn());
+        add(tr("Ease out"), doc::Easing::easeOut());
+        add(tr("Ease in and out"), doc::Easing::easeInOut());
+        menu.addAction(tr("Delete keyframe"), this, [this, frame] { m_document->removeCameraKey(frame); });
+    } else {
+        menu.addAction(tr("Add keyframe here"), this,
+                       [this, frame] { m_document->setCameraKey(frame, m_document->camera()->poseAt(frame)); });
+    }
+    menu.addSeparator();
+    menu.addAction(camera->visible ? tr("Turn the camera off") : tr("Turn the camera on"), this,
+                   [this] { m_document->setCameraVisible(!m_document->camera()->visible); });
+    menu.addAction(tr("Delete the camera"), this, [this] { m_document->removeCamera(); });
+    menu.exec(globalPos);
+}
+
 // --- audio track ------------------------------------------------------------------
 
 bool TimelineView::hasAudio() const
@@ -364,7 +491,7 @@ bool TimelineView::hasAudio() const
 
 int TimelineView::audioTop() const
 {
-    return m_metrics.rowY(rowCount());
+    return cameraTop() + cameraHeight();
 }
 
 QRect TimelineView::audioHeaderRect() const
@@ -632,6 +759,7 @@ void TimelineView::paintHeaders(QPainter &p) const
         p.setPen(palette().mid().color());
         p.drawLine(r.bottomLeft(), r.bottomRight());
     }
+    paintCameraHeader(p);
     paintAudioHeader(p);
 }
 
@@ -668,6 +796,13 @@ void TimelineView::mousePressEvent(QMouseEvent *event)
 {
     if (event->button() != Qt::LeftButton || event->position().x() < m_metrics.headerWidth) {
         // In a header: the toggles, or the cel made current.
+        if (event->button() == Qt::LeftButton && inCameraRow(int(event->position().y()))) {
+            if (cameraEyeRect().contains(event->position().toPoint()))
+                m_document->setCameraVisible(!m_document->camera()->visible);
+            else
+                m_document->selectCamera(true); // the camera is what the canvas moves now
+            return;
+        }
         if (event->button() == Qt::LeftButton && inAudioRow(int(event->position().y()))) {
             const QPoint at = event->position().toPoint();
             if (const auto &track = m_document->audioTrack()) {
@@ -698,6 +833,16 @@ void TimelineView::mousePressEvent(QMouseEvent *event)
         return;
     }
     const QPoint pos = event->position().toPoint();
+    if (inCameraRow(pos.y())) {
+        // On a keyframe: its frame is shown, and a drag moves the key; elsewhere in the row: the frame under the pointer.
+        const int frame = frameAt(pos.x());
+        if (m_document->camera()->keyAt(frame))
+            m_cameraDrag = CameraDrag{frame, frame};
+        else
+            m_scrubbing = true;
+        scrubTo(pos, false);
+        return;
+    }
     if (inAudioRow(pos.y())) {
         // On the sound's block: dragged along the frames; elsewhere in the row: the frame under the pointer.
         const int start = m_document->audioTrack()->offset;
@@ -833,6 +978,14 @@ void TimelineView::mouseMoveEvent(QMouseEvent *event)
         m_document->previewAudioVolume(audioVolumeAt(pos.x()));
         return;
     }
+    if (m_cameraDrag) {
+        const int to = std::max(0, frameAt(pos.x()));
+        if (to != m_cameraDrag->to) {
+            m_cameraDrag->to = to;
+            viewport()->update();
+        }
+        return;
+    }
     if (m_audioDrag) {
         const int offset = m_audioDrag->startOffset + m_metrics.frameAt(pos.x()) - m_audioDrag->pressFrame;
         if (offset != m_audioDrag->offset) {
@@ -875,6 +1028,17 @@ void TimelineView::mouseReleaseEvent(QMouseEvent *)
         viewport()->update();
         return;
     }
+    if (m_cameraDrag) {
+        const CameraDrag drag = *m_cameraDrag;
+        m_cameraDrag.reset();
+        // A key goes where there is none (one on the way is not jumped: it is a place taken).
+        if (drag.to != drag.from && m_document->moveCameraKey(drag.from, drag.to)) {
+            m_document->setCurrentFrame(drag.to);
+            emit frameScrubbed(m_document->currentFrame());
+        }
+        viewport()->update();
+        return;
+    }
     if (m_audioDrag) {
         const AudioDrag drag = *m_audioDrag;
         m_audioDrag.reset();
@@ -901,6 +1065,12 @@ void TimelineView::mouseDoubleClickEvent(QMouseEvent *event)
 {
     const int row = rowAt(int(event->position().y()));
     const QPoint pos = event->position().toPoint();
+    if (event->button() == Qt::LeftButton && inCameraRow(pos.y()) && pos.x() >= m_metrics.headerWidth) {
+        const int frame = frameAt(pos.x()); // a key here, at the pose the camera has
+        if (frame >= 0 && !m_document->camera()->keyAt(frame))
+            m_document->setCameraKey(frame, m_document->camera()->poseAt(frame));
+        return;
+    }
     if (event->button() == Qt::LeftButton && row >= 0 && pos.x() < m_metrics.headerWidth
         && !eyeRect(row).contains(pos) && !lockRect(row).contains(pos)) {
         renameCel(celIndexForRow(row));
@@ -987,6 +1157,12 @@ bool TimelineView::event(QEvent *event)
 
 void TimelineView::contextMenuEvent(QContextMenuEvent *event)
 {
+    if (inCameraRow(event->pos().y())) {
+        const int frame = event->pos().x() < m_metrics.headerWidth ? m_document->currentFrame() : frameAt(event->pos().x());
+        if (frame >= 0)
+            showCameraMenu(event->globalPos(), frame);
+        return;
+    }
     if (inAudioRow(event->pos().y())) {
         showAudioMenu(event->globalPos());
         return;
@@ -1082,6 +1258,10 @@ void TimelineView::keyPressEvent(QKeyEvent *event)
     }
     const int frame = m_document->currentFrame();
     const doc::Document &d = m_document->document();
+    // The camera selected, on one of its keys: Delete takes the key away.
+    if ((event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) && m_document->cameraSelected()
+        && m_document->removeCameraKey(m_document->currentFrame()))
+        return;
     const int celIndex = d.indexOf(m_document->currentCel());
     switch (event->key()) {
     case Qt::Key_Left: m_document->setCurrentFrame(frame - 1); emit frameScrubbed(m_document->currentFrame()); break;

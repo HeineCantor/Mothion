@@ -131,6 +131,20 @@ private:
     void paintHeaders(QPainter &p) const;
     void paintCursor(QPainter &p) const;
 
+    // The camera: a row under the cels (and over the audio's), one cell tall, with a diamond at each keyframe and a
+    // line between two keys that are not held. In its header an eye turns the camera on and off, and a click on the
+    // name selects it (the canvas then moves it). A click on a diamond goes to its frame and, dragged, moves the
+    // key to another frame (one undo step on release); a double click on an empty cell makes a key there at the pose
+    // the camera has; right click: how the camera goes from that key to the next, and delete.
+    bool hasCamera() const;
+    int cameraHeight() const; // 0 without a camera
+    int cameraTop() const;
+    QRect cameraEyeRect() const;
+    bool inCameraRow(int y) const;
+    void paintCamera(QPainter &p) const;
+    void paintCameraHeader(QPainter &p) const;
+    void showCameraMenu(const QPoint &globalPos, int frame);
+
     // The audio track: a row at the bottom, under the cels, taller than theirs for its waveform. The header has a
     // mute button and the name; the block, from where the sound begins for as long as it lasts, can be dragged
     // along the frames (one undo step on release). Without a track there is no row.
@@ -166,6 +180,12 @@ private:
         bool moved = false;
     };
     std::optional<AudioDrag> m_audioDrag;
+    struct CameraDrag
+    {
+        int from = 0; // the key's frame
+        int to = 0;   // where it would go
+    };
+    std::optional<CameraDrag> m_cameraDrag;
     std::optional<float> m_volumeBefore; // the volume slider is being dragged: what it was when it began
     std::optional<Resize> m_resize;
     doc::Timing m_previewTiming; // the resized cel's timing during a drag
