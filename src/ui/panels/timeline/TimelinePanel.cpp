@@ -133,13 +133,16 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
     auto showPlaying = [play](bool playing) {
         play->setChecked(playing);
         play->setIcon(icon(playing ? IconId::Pause : IconId::Play));
-        play->setToolTip(playing ? tr("Pause") : tr("Play the animation from the current frame"));
+        const QString key = Shortcuts::instance().key(QStringLiteral("anim.playPause")).toString(QKeySequence::NativeText);
+        const QString tip = playing ? tr("Pause") : tr("Play the animation from the current frame");
+        play->setToolTip(key.isEmpty() ? tip : QStringLiteral("%1 (%2)").arg(tip, key));
     };
     showPlaying(false);
     connect(play, &QToolButton::clicked, m_player, &TimelinePlayer::toggle);
     connect(m_player, &TimelinePlayer::playingChanged, play, showPlaying);
-    auto *playKey = new QShortcut(this); // no key until one is chosen in Settings
+    auto *playKey = new QShortcut(this);
     Shortcuts::instance().bind(playKey, QStringLiteral("anim.playPause"));
+    playKey->setContext(Qt::WidgetWithChildrenShortcut); // only with the focus in the timeline: on the canvas Space pans
     connect(playKey, &QShortcut::activated, m_player, &TimelinePlayer::toggle);
 
     auto *prev = new QToolButton(this);

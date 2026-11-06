@@ -88,7 +88,9 @@ Shortcuts::Shortcuts()
     add(QStringLiteral("view.rotateReset"), view, tr("Reset rotation"), {ctrl(Qt::Key_Slash)});
     add(QStringLiteral("view.debugOverlay"), view, tr("Input debug overlay"), {seq(Qt::Key_F12)});
 
-    add(QStringLiteral("anim.playPause"), animation, tr("Play / pause the timeline"), {});
+    // Space, but only while the keys are the timeline's (its panel has the focus: the pointer is over it): over the
+    // canvas Space is the held key that pans the view.
+    add(QStringLiteral("anim.playPause"), animation, tr("Play / pause the timeline"), {seq(Qt::Key_Space)});
     add(QStringLiteral("anim.previousSlot"), animation, tr("Previous time slot"), {seq(Qt::Key_Comma)});
     add(QStringLiteral("anim.nextSlot"), animation, tr("Next time slot"), {seq(Qt::Key_Period)});
     add(QStringLiteral("anim.previousFrame"), animation, tr("Previous frame"), {seq(Qt::Key_Comma, Qt::ShiftModifier)});

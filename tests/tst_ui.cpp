@@ -75,6 +75,7 @@
 #include <QStandardPaths>
 #include <QTabletEvent>
 #include <QTemporaryDir>
+#include <QVBoxLayout>
 #include <QMenu>
 #include <QSettings>
 #include <QMenuBar>
@@ -5368,6 +5369,38 @@ private slots:
         for (float peak : wave.peaks)
             loudest = std::max(loudest, peak);
         QVERIFY(loudest > 0.3f); // the tone is there
+    }
+
+    // Space plays and pauses the timeline while the focus is in it (the pointer is over it); with the focus
+    // anywhere else in the window it does not (over the canvas it is the key that pans).
+    void spacePlaysAndPausesTheTimeline()
+    {
+        ui::Shortcuts::instance().resetAll();
+        tools::ToolState state;
+        document::DocumentController controller;
+        QWidget window;
+        auto *layout = new QVBoxLayout(&window);
+        auto *panel = new ui::TimelinePanel(&controller, &state, nullptr, &window);
+        auto *elsewhere = new QPushButton(QStringLiteral("elsewhere"), &window);
+        layout->addWidget(panel);
+        layout->addWidget(elsewhere);
+        window.show();
+        window.activateWindow();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+        auto *view = panel->view();
+        QCOMPARE(ui::Shortcuts::instance().key(QStringLiteral("anim.playPause")), QKeySequence(Qt::Key_Space));
+
+        view->setFocus();
+        QVERIFY(view->hasFocus());
+        QTest::keyClick(view, Qt::Key_Space);
+        QVERIFY(panel->player()->isPlaying());
+        QTest::keyClick(view, Qt::Key_Space);
+        QVERIFY(!panel->player()->isPlaying());
+
+        elsewhere->setFocus();
+        QVERIFY(elsewhere->hasFocus());
+        QTest::keyClick(&window, Qt::Key_Space);
+        QVERIFY(!panel->player()->isPlaying()); // not from outside the timeline
     }
 
     void largeImagesAreScaledToFit()
