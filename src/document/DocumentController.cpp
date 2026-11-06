@@ -162,6 +162,12 @@ void DocumentController::markSaved()
     emit historyChanged();
 }
 
+void DocumentController::markUnsaved()
+{
+    m_history.markUnsaved();
+    emit historyChanged();
+}
+
 // --- commands ------------------------------------------------------------------
 
 void DocumentController::execute(std::unique_ptr<doc::Command> command)

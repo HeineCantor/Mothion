@@ -54,6 +54,10 @@ public:
     bool brushOutline() const { return m_brushOutline; }
     void setBrushOutline(bool on);
 
+    // Minutes between the autosaves of a project that has unsaved work (0: no autosave).
+    int autosaveMinutes() const { return m_autosaveMinutes; }
+    void setAutosaveMinutes(int minutes);
+
     // Everything back to the defaults.
     void resetAll();
 
@@ -65,6 +69,7 @@ public:
     static constexpr int kDefaultFrameRate = 24;
     static constexpr int kDefaultFrames = 120;
     static constexpr int kDefaultUndoSteps = 500;
+    static constexpr int kDefaultAutosaveMinutes = 5;
 
 signals:
     void changed();
@@ -85,6 +90,7 @@ private:
     QColor m_paper = Qt::white;
     int m_undoSteps = kDefaultUndoSteps;
     int m_mousePressure = 100;
+    int m_autosaveMinutes = kDefaultAutosaveMinutes;
 };
 
 } // namespace mothion::tools

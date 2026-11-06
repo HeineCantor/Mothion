@@ -44,6 +44,8 @@ public:
     bool isModified() const { return !m_history.isClean(); }
     // The document now matches the saved file.
     void markSaved();
+    // The document holds work that is not in its file (a recovered autosave).
+    void markUnsaved();
     // Applies edits left open (a puppet warp) and cancels a stroke in
     // progress, so that the document is complete, e.g. before saving.
     void finishEdits() { interruptStroke(); }

@@ -61,6 +61,7 @@ qt_add_library(mothion_gui STATIC
 
     io/ProjectFile.h io/ProjectFile.cpp
     io/ProjectThumbnail.h
+    io/Autosave.h io/Autosave.cpp
     io/FrameExport.h io/FrameExport.cpp
     io/VideoExport.h io/VideoExport.cpp
 

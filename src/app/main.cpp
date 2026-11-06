@@ -64,6 +64,7 @@ int main(int argc, char *argv[])
         window.checkPreviousCrash();
         if (!parser.positionalArguments().isEmpty())
             window.openFile(parser.positionalArguments().constFirst());
+        window.checkRecovery();
     });
     return app.exec();
 }

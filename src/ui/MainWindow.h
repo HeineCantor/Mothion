@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QElapsedTimer>
 #include <QMainWindow>
 #include <QPointer>
 
@@ -16,6 +17,8 @@ class BrushLibrary;
 class ColorSetLibrary;
 class ToolState;
 }
+
+class QTimer;
 
 namespace mothion::audio {
 class AudioPlayer;
@@ -43,6 +46,14 @@ public:
     bool openFile(const QString &path);
     // Tells the user, once, that an earlier run crashed, and where the report and the copy of the project are.
     void checkPreviousCrash();
+    // Offers back, one project at a time, the work that autosave copies of an earlier run hold: a copy is of no use
+    // (and is taken away) if the project was saved after it was made.
+    void checkRecovery();
+    // Keeps a copy of the project now if it has unsaved work the last copy lacks (what the timer does, when the
+    // user is not drawing). Returns whether one was written.
+    bool autosaveNow();
+    // Saves the project to `path` (and takes the autosave copies of it away).
+    bool saveTo(const QString &path);
 
 protected:
     void closeEvent(QCloseEvent *event) override;
@@ -60,10 +71,12 @@ private:
     void fillRecentMenu();
     bool save();
     bool saveAs();
-    bool saveTo(const QString &path);
     // Asks what to do with unsaved changes; false if the user cancels.
     bool maybeSave();
     void updateTitle();
+    void applyAutosaveInterval();
+    void autosaveTick();
+    void discardAutosave(); // the project is saved or its changes given up: its copy is of no use
     void exportFrames();
     void exportVideo();
     void importImage();
@@ -109,6 +122,10 @@ private:
     QList<QAction *> m_rotateActions;
     QAction *m_clearAction = nullptr;
     QString m_filePath; // empty until saved or opened
+    QTimer *m_autosaveTimer = nullptr;
+    bool m_autosaveDirty = false; // the project changed since the last copy
+    int m_autosaveWaits = 0;      // times the copy was put off for the user's drawing
+    QElapsedTimer m_lastInput;
 };
 
 } // namespace mothion::ui

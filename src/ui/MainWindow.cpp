@@ -2,6 +2,7 @@
 
 #include "canvas/CanvasView.h"
 #include "diagnostics/CrashHandler.h"
+#include "io/Autosave.h"
 #include "document/DocumentController.h"
 #include "input/ProximityFilter.h"
 #include "io/FrameExport.h"
@@ -126,6 +127,14 @@ MainWindow::MainWindow(QWidget *parent)
     connect(this, &QObject::destroyed, [] { diagnostics::setEmergencySave({}); });
     setWindowTitle(QStringLiteral("Mothion"));
     resize(1400, 900);
+
+    // A copy of the project with unsaved work, now and then (see autosaveTick()).
+    m_autosaveTimer = new QTimer(this);
+    m_lastInput.start();
+    connect(m_autosaveTimer, &QTimer::timeout, this, &MainWindow::autosaveTick);
+    connect(m_document, &document::DocumentController::historyChanged, this, [this] { m_autosaveDirty = true; });
+    connect(&tools::Preferences::instance(), &tools::Preferences::changed, this, &MainWindow::applyAutosaveInterval);
+    applyAutosaveInterval();
 
     auto *properties = new ToolPropertiesPanel(m_toolState, this);
     WorkspacePanels panels;
@@ -809,6 +818,7 @@ void MainWindow::newDocument()
 {
     if (!maybeSave())
         return;
+    discardAutosave();
     m_document->newDocument();
     m_filePath.clear();
     updateTitle();
@@ -864,8 +874,10 @@ bool MainWindow::openFile(const QString &path)
         QMessageBox::warning(this, tr("Open project"), error);
         return false;
     }
+    discardAutosave(); // what the project was before
     m_document->replaceDocument(std::move(loaded));
     m_filePath = QFileInfo(path).absoluteFilePath();
+    m_autosaveDirty = false;
     diagnostics::setProjectPath(m_filePath);
     diagnostics::note(QStringLiteral("Opened %1").arg(m_filePath));
     rememberProjectDirectory(m_filePath);
@@ -873,6 +885,93 @@ bool MainWindow::openFile(const QString &path)
     updateTitle();
     statusBar()->showMessage(tr("Opened %1").arg(QFileInfo(path).fileName()), 4000);
     return true;
+}
+
+void MainWindow::applyAutosaveInterval()
+{
+    const int minutes = tools::Preferences::instance().autosaveMinutes();
+    if (minutes <= 0) {
+        m_autosaveTimer->stop();
+        return;
+    }
+    m_autosaveTimer->start(minutes * 60 * 1000);
+}
+
+void MainWindow::autosaveTick()
+{
+    if (!m_autosaveDirty || !m_document->isModified())
+        return;
+    // Not in the middle of a stroke, nor while the pen or the keys are busy: a copy of a big project takes a moment.
+    // After a minute of waiting it is made anyway.
+    constexpr int kPauseMs = 1500, kMaxWaits = 60;
+    if ((m_document->isPainting() || m_lastInput.elapsed() < kPauseMs) && m_autosaveWaits < kMaxWaits) {
+        ++m_autosaveWaits;
+        QTimer::singleShot(1000, this, &MainWindow::autosaveTick);
+        return;
+    }
+    m_autosaveWaits = 0;
+    autosaveNow();
+}
+
+bool MainWindow::autosaveNow()
+{
+    if (!m_autosaveDirty || !m_document->isModified() || m_document->isPainting())
+        return false;
+    QString error;
+    if (!io::autosave::write(m_document->document(), m_filePath, &error)) {
+        diagnostics::note(QStringLiteral("Autosave failed: %1").arg(error));
+        return false;
+    }
+    m_autosaveDirty = false;
+    diagnostics::note(QStringLiteral("Autosaved %1").arg(m_filePath.isEmpty() ? QStringLiteral("(untitled)") : m_filePath));
+    return true;
+}
+
+// The copy of the project in the window, if the project is one that was worked on: a pristine untitled project
+// leaves alone the copy of an earlier run, which may still be waiting to be recovered.
+void MainWindow::discardAutosave()
+{
+    if (!m_filePath.isEmpty() || m_document->isModified())
+        io::autosave::remove(m_filePath);
+    m_autosaveDirty = false;
+}
+
+void MainWindow::checkRecovery()
+{
+    QList<io::autosave::Entry> entries = io::autosave::all();
+    std::reverse(entries.begin(), entries.end()); // the latest first
+    for (const io::autosave::Entry &entry : std::as_const(entries)) {
+        if (io::autosave::isStale(entry)) {
+            io::autosave::remove(entry.projectPath);
+            continue;
+        }
+        const QString text = tr("Mothion found unsaved work on “%1”, kept at %2.\n\nRecover it? You can then save it "
+                                "over the project, or elsewhere.")
+                                 .arg(entry.name, QLocale().toString(entry.when, QLocale::ShortFormat));
+        QMessageBox box(QMessageBox::Question, tr("Recover unsaved work"), text, QMessageBox::NoButton, this);
+        QPushButton *recover = box.addButton(tr("Recover"), QMessageBox::AcceptRole);
+        QPushButton *discard = box.addButton(tr("Discard"), QMessageBox::DestructiveRole);
+        box.addButton(tr("Later"), QMessageBox::RejectRole);
+        box.exec();
+        if (box.clickedButton() == discard) {
+            io::autosave::remove(entry.projectPath);
+        } else if (box.clickedButton() == recover) {
+            QString error;
+            std::unique_ptr<doc::Document> loaded = io::loadProject(entry.file, &error);
+            if (!loaded) {
+                QMessageBox::warning(this, tr("Recover unsaved work"), error);
+                continue;
+            }
+            m_document->replaceDocument(std::move(loaded));
+            m_filePath = entry.projectPath;
+            diagnostics::setProjectPath(m_filePath);
+            diagnostics::note(QStringLiteral("Recovered the autosave of %1").arg(entry.name));
+            m_document->markUnsaved(); // it is not what the project's file holds
+            m_autosaveDirty = true;    // the copy goes on being kept
+            updateTitle();
+            return; // one project fits the window; the others wait for the next start
+        }
+    }
 }
 
 void MainWindow::checkPreviousCrash()
@@ -926,7 +1025,10 @@ bool MainWindow::saveTo(const QString &path)
         QMessageBox::critical(this, tr("Save project"), error);
         return false;
     }
+    io::autosave::remove(m_filePath); // the copy of what it was before (a project saved for the first time: untitled)
     m_filePath = QFileInfo(path).absoluteFilePath();
+    io::autosave::remove(m_filePath);
+    m_autosaveDirty = false;
     diagnostics::setProjectPath(m_filePath);
     diagnostics::note(QStringLiteral("Saved %1").arg(m_filePath));
     rememberProjectDirectory(m_filePath);
@@ -1067,6 +1169,18 @@ bool isPartOf(const QWidget *widget, const QWidget *window)
 
 bool MainWindow::eventFilter(QObject *watched, QEvent *event)
 {
+    switch (event->type()) { // the user is working: an autosave waits for a pause
+    case QEvent::MouseButtonPress:
+    case QEvent::MouseMove:
+    case QEvent::TabletPress:
+    case QEvent::TabletMove:
+    case QEvent::KeyPress:
+        m_lastInput.restart();
+        break;
+    default:
+        break;
+    }
+
     // The pan keys (Space, Tab) are for the canvas wherever the focus is,
     // unless typing: after picking a brush from a list, say, holding Tab
     // must pan at the first touch, not move the focus around the panel.
@@ -1103,6 +1217,7 @@ void MainWindow::closeEvent(QCloseEvent *event)
         event->ignore();
         return;
     }
+    discardAutosave(); // closed on purpose: nothing to recover
     m_dockLayout->save();
     QMainWindow::closeEvent(event);
 }

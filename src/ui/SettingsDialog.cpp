@@ -148,6 +148,17 @@ QWidget *SettingsDialog::generalPage()
     recentRow->addWidget(clear);
     recentRow->addStretch(1);
     form->addRow(tr("Recent projects to remember"), recentRow);
+
+    auto *autosave = new QSpinBox(page);
+    autosave->setObjectName(QStringLiteral("autosave"));
+    autosave->setRange(0, 120);
+    autosave->setSpecialValueText(tr("Off"));
+    autosave->setSuffix(tr(" min"));
+    autosave->setToolTip(tr("A copy of the project with unsaved work is kept this often, apart from the project's "
+                            "file, and offered back if the program closes badly"));
+    autosave->setValue(prefs.autosaveMinutes());
+    connect(autosave, &QSpinBox::valueChanged, this, [](int v) { tools::Preferences::instance().setAutosaveMinutes(v); });
+    form->addRow(tr("Autosave every"), autosave);
     return page;
 }
 

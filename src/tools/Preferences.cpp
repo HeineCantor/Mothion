@@ -21,6 +21,7 @@ constexpr auto kNewFrames = "newFrames";
 constexpr auto kPaper = "paperColor";
 constexpr auto kUndoSteps = "undoSteps";
 constexpr auto kMousePressure = "mousePressure";
+constexpr auto kAutosave = "autosaveMinutes";
 
 QString path(const char *key)
 {
@@ -51,6 +52,7 @@ Preferences::Preferences()
     m_paper = paper.isValid() ? paper : QColor(Qt::white);
     m_undoSteps = std::clamp(settings.value(path(kUndoSteps), kDefaultUndoSteps).toInt(), 10, 5000);
     m_mousePressure = std::clamp(settings.value(path(kMousePressure), 100).toInt(), 10, 100);
+    m_autosaveMinutes = std::clamp(settings.value(path(kAutosave), kDefaultAutosaveMinutes).toInt(), 0, 120);
 }
 
 void Preferences::save(const char *key, const QVariant &value)
@@ -151,6 +153,15 @@ void Preferences::setUndoSteps(int steps)
     save(kUndoSteps, steps);
 }
 
+void Preferences::setAutosaveMinutes(int minutes)
+{
+    minutes = std::clamp(minutes, 0, 120);
+    if (minutes == m_autosaveMinutes)
+        return;
+    m_autosaveMinutes = minutes;
+    save(kAutosave, minutes);
+}
+
 void Preferences::setMousePressurePercent(int percent)
 {
     percent = std::clamp(percent, 10, 100);
@@ -173,6 +184,7 @@ void Preferences::resetAll()
     setZoomStepPercent(kDefaultZoomStep);
     setRotateStep(kDefaultRotateStep);
     setBrushOutline(true);
+    setAutosaveMinutes(kDefaultAutosaveMinutes);
 }
 
 } // namespace mothion::tools

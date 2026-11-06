@@ -47,6 +47,8 @@ public:
 
     void markClean() { m_cleanIndex = m_applied; }
     bool isClean() const { return m_cleanIndex == m_applied; }
+    // The state matches no saved file (a project recovered from an autosave is not what its file holds).
+    void markUnsaved() { m_cleanIndex.reset(); }
 
     void clear();
 
