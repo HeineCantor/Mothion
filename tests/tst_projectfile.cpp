@@ -66,6 +66,15 @@ std::unique_ptr<doc::Document> sampleDocument()
     ink.timing().setExposure(0, 3, a.id);
     ink.timing().setExposure(5, 2, b.id);
     ink.timing().setExposure(7, 4, a.id);
+    doc::AudioTrack song;
+    song.name = "Canção ✓";
+    song.format = "wav";
+    song.data = std::make_shared<const std::vector<unsigned char>>(std::vector<unsigned char>{'R', 'I', 'F', 'F', 0, 1, 2, 255});
+    song.offset = -12;
+    song.volume = 0.4f;
+    song.muted = true;
+    song.duration = 187.25;
+    d->setAudio(song);
     d->allocateCelId(); // ids used by a cel and a layer since deleted: must not come back
     d->allocateLayerId();
     return d;
@@ -81,6 +90,17 @@ void compareDocuments(const doc::Document &x, const doc::Document &y)
     QCOMPARE(x.nextCelId(), y.nextCelId());
     QCOMPARE(x.nextDrawingId(), y.nextDrawingId());
     QCOMPARE(x.nextLayerId(), y.nextLayerId());
+    QCOMPARE(x.audio().has_value(), y.audio().has_value());
+    if (x.audio() && y.audio()) {
+        const doc::AudioTrack &ax = *x.audio(), &ay = *y.audio();
+        QCOMPARE(ay.name, ax.name);
+        QCOMPARE(ay.format, ax.format);
+        QCOMPARE(ay.offset, ax.offset);
+        QCOMPARE(ay.volume, ax.volume);
+        QCOMPARE(ay.muted, ax.muted);
+        QCOMPARE(ay.duration, ax.duration);
+        QVERIFY(ax.data && ay.data && *ax.data == *ay.data); // the sound, byte for byte
+    }
     QCOMPARE(x.celCount(), y.celCount());
     for (int i = 0; i < x.celCount(); ++i) {
         const doc::Cel &lx = x.celAt(i), &ly = y.celAt(i);
@@ -157,6 +177,7 @@ private slots:
         QTemporaryDir dir;
         QVERIFY(dir.isValid());
         const auto original = sampleDocument();
+        original->setAudio(std::nullopt); // the audio table came with format 5
         const QString path = dir.filePath(QStringLiteral("old.moth"));
         QString error;
         QVERIFY2(io::saveProject(*original, path, &error), qPrintable(error));

@@ -1,8 +1,10 @@
 #pragma once
 
+#include "core/document/Audio.h"
 #include "core/document/Cel.h"
 
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace mothion::doc {
@@ -36,6 +38,10 @@ public:
 
     Pixel paperColor() const { return m_paperColor; }
     void setPaperColor(Pixel color) { m_paperColor = color; }
+
+    // The audio track, if the project has one (see AudioTrack).
+    const std::optional<AudioTrack> &audio() const { return m_audio; }
+    void setAudio(std::optional<AudioTrack> track) { m_audio = std::move(track); }
 
     // Cels from bottom (index 0) to top.
     int celCount() const { return int(m_cels.size()); }
@@ -71,6 +77,7 @@ private:
     FrameRate m_frameRate;
     int m_frameCount;
     Pixel m_paperColor = 0xffffffff;
+    std::optional<AudioTrack> m_audio;
     std::vector<std::unique_ptr<Cel>> m_cels;
     CelId m_nextCelId = 1;
     DrawingId m_nextDrawingId = 1;

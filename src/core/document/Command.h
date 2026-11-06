@@ -66,6 +66,8 @@ enum class CommandKind {
     Blend,
     Liquify,
     Shape,
+    SetAudio,
+    ChangeAudio,
 };
 
 // An undoable change to a Document.

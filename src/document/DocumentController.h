@@ -99,6 +99,18 @@ public:
     // drawing held for the whole scene: centered, scaled down to fit the
     // document if larger. One undo step; the new cel becomes current.
     void importImage(const QImage &image, const QString &name);
+    // --- audio track ------------------------------------------------------------------
+    // The song under the animation, if there is one (one at most): the file is read into the project, so it
+    // goes where the project goes. False, with `reason`, if it cannot be read. One undo step each.
+    const std::optional<doc::AudioTrack> &audioTrack() const { return m_document->audio(); }
+    bool importAudio(const QString &path, QString *reason = nullptr);
+    void removeAudio();
+    void setAudioOffset(int frames);
+    void setAudioVolume(float volume);
+    void setAudioMuted(bool muted);
+    // What decoding found out (not an undo step: it is a fact about the file).
+    void setAudioDuration(double seconds);
+
     // An image sequence as one new cel: image i is a drawing of its own, shown for `hold` frames from
     // startFrame + i * hold (the scene gets longer if it needs). Images that are null are skipped; returns how
     // many were imported. One undo step.

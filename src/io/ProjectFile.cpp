@@ -51,6 +51,9 @@ const char *const kSchema[] = {
     " length integer not null, drawing integer not null references drawings(id))",
     "create table tiles (layer integer not null references layers(id), x integer not null,"
     " y integer not null, pixels blob not null, primary key (layer, x, y))",
+    // Format 5: the audio track, the sound file whole.
+    "create table audio (name text not null, format text not null, offset integer not null,"
+    " volume real not null, muted integer not null, duration real not null, data blob not null)",
 };
 
 // Stored by name, so reordering the enum cannot change old files.
@@ -359,6 +362,21 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
             if (!exec(exposure, {idValue(l.id()), e.start, e.length, idValue(e.drawing)}))
                 return false;
     }
+    if (const auto &track = d.audio(); track && track->data) {
+        QSqlQuery audio(db);
+        audio.prepare(QStringLiteral("insert into audio values (?, ?, ?, ?, ?, ?, ?)"));
+        audio.addBindValue(QString::fromStdString(track->name));
+        audio.addBindValue(QString::fromStdString(track->format));
+        audio.addBindValue(track->offset);
+        audio.addBindValue(double(track->volume));
+        audio.addBindValue(track->muted);
+        audio.addBindValue(track->duration);
+        audio.addBindValue(QByteArray(reinterpret_cast<const char *>(track->data->data()), qsizetype(track->data->size())));
+        if (!audio.exec()) {
+            failure = sqlError(audio);
+            return false;
+        }
+    }
     if (!db.commit()) {
         failure = db.lastError().text();
         return false;
@@ -532,6 +550,20 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
         const int start = q.value(1).toInt(), length = q.value(2).toInt();
         if (cel && cel->drawing(drawing) && start >= 0 && length >= 1)
             cel->timing().setExposure(start, length, drawing);
+    }
+
+    if (version >= 5 && q.exec(QStringLiteral("select name, format, offset, volume, muted, duration, data from audio"))
+        && q.next()) {
+        doc::AudioTrack track;
+        track.name = q.value(0).toString().toStdString();
+        track.format = q.value(1).toString().toStdString();
+        track.offset = q.value(2).toInt();
+        track.volume = std::clamp(q.value(3).toFloat(), 0.0f, 1.0f);
+        track.muted = q.value(4).toBool();
+        track.duration = std::max(0.0, q.value(5).toDouble());
+        const QByteArray bytes = q.value(6).toByteArray();
+        track.data = std::make_shared<const std::vector<unsigned char>>(bytes.cbegin(), bytes.cend());
+        d->setAudio(std::move(track));
     }
 
     d->restoreIdCounters(nextCel, nextDrawing, nextLayer);

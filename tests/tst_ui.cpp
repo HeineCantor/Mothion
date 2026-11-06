@@ -4897,6 +4897,56 @@ private slots:
             QVERIFY(alphaAt(frame, 960, 540) > 0 && alphaAt(frame, 1160, 540) == 0);
     }
 
+    // The audio track: the file is read into the project, offset / volume / mute are undo steps, it can be
+    // taken away, and an unreadable file is refused with a reason.
+    void audioTrackIsKeptInTheProject()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        QFile song(dir.filePath(QStringLiteral("Theme Song.MP3")));
+        QVERIFY(song.open(QIODevice::WriteOnly));
+        song.write(QByteArray(5000, 'x'));
+        song.close();
+        document::DocumentController controller;
+        QVERIFY(!controller.audioTrack());
+        QString reason;
+        QVERIFY(!controller.importAudio(dir.filePath(QStringLiteral("missing.mp3")), &reason));
+        QVERIFY(!reason.isEmpty());
+
+        QVERIFY(controller.importAudio(song.fileName(), &reason));
+        QVERIFY(controller.audioTrack());
+        QCOMPARE(QString::fromStdString(controller.audioTrack()->name), QStringLiteral("Theme Song"));
+        QCOMPARE(QString::fromStdString(controller.audioTrack()->format), QStringLiteral("mp3"));
+        QCOMPARE(controller.audioTrack()->bytes(), std::size_t(5000));
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo audio"));
+        QVERIFY(controller.isModified());
+
+        controller.setAudioOffset(24);
+        controller.setAudioVolume(0.5f);
+        controller.setAudioMuted(true);
+        controller.setAudioMuted(true); // the same: no step
+        QCOMPARE(controller.audioTrack()->offset, 24);
+        QCOMPARE(controller.audioTrack()->volume, 0.5f);
+        QVERIFY(controller.audioTrack()->muted);
+        controller.undo();
+        QVERIFY(!controller.audioTrack()->muted);
+        controller.undo();
+        QCOMPARE(controller.audioTrack()->volume, 1.0f);
+        controller.undo();
+        QCOMPARE(controller.audioTrack()->offset, 0);
+        controller.setAudioDuration(61.5); // a fact about the file: not a step
+        QCOMPARE(controller.audioTrack()->duration, 61.5);
+        controller.undo(); // the import itself
+        QVERIFY(!controller.audioTrack());
+        controller.redo();
+        QVERIFY(controller.audioTrack());
+        controller.removeAudio();
+        QVERIFY(!controller.audioTrack());
+        controller.undo();
+        QVERIFY(controller.audioTrack()); // back with its sound
+        QCOMPARE(controller.audioTrack()->bytes(), std::size_t(5000));
+    }
+
     void largeImagesAreScaledToFit()
     {
         document::DocumentController controller;

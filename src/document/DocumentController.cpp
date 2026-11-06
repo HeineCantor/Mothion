@@ -6,10 +6,14 @@
 #include "canvas/TileQt.h"
 #include "core/document/commands/DrawingCommands.h"
 #include "core/document/commands/GroupCommand.h"
+#include "core/document/commands/AudioCommands.h"
 #include "core/document/commands/CelCommands.h"
 #include "core/document/commands/LayerCommands.h"
 #include "core/document/commands/PaintCommand.h"
 #include "core/document/commands/TimingCommands.h"
+
+#include <QFile>
+#include <QFileInfo>
 
 #include <algorithm>
 #include <functional>
@@ -515,6 +519,81 @@ void DocumentController::importImage(const QImage &image, const QString &name)
     setCurrentCel(celId);
 }
 
+bool DocumentController::importAudio(const QString &path, QString *reason)
+{
+    constexpr qint64 kMaxBytes = qint64(512) << 20; // a song, not an album
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        if (reason)
+            *reason = tr("Cannot read %1: %2").arg(QFileInfo(path).fileName(), file.errorString());
+        return false;
+    }
+    if (file.size() > kMaxBytes || file.size() == 0) {
+        if (reason)
+            *reason = file.size() == 0 ? tr("%1 is empty.").arg(QFileInfo(path).fileName())
+                                       : tr("%1 is too large for the project.").arg(QFileInfo(path).fileName());
+        return false;
+    }
+    const QByteArray bytes = file.readAll();
+    doc::AudioTrack track;
+    track.name = QFileInfo(path).completeBaseName().toStdString();
+    track.format = QFileInfo(path).suffix().toLower().toStdString();
+    track.data = std::make_shared<const std::vector<unsigned char>>(bytes.cbegin(), bytes.cend());
+    // A new song begins where the old one did, or at the start.
+    if (const auto &old = m_document->audio())
+        track.offset = old->offset;
+    execute(std::make_unique<doc::SetAudioCommand>(std::move(track), doc::CommandKind::SetAudio));
+    return true;
+}
+
+void DocumentController::removeAudio()
+{
+    if (m_document->audio())
+        execute(std::make_unique<doc::SetAudioCommand>(std::nullopt, doc::CommandKind::SetAudio));
+}
+
+namespace {
+
+// The same track, changed by `change`; none if there is no track or nothing changes.
+template <class Change>
+std::unique_ptr<doc::Command> audioChange(const std::optional<doc::AudioTrack> &track, Change change)
+{
+    if (!track)
+        return nullptr;
+    doc::AudioTrack changed = *track;
+    change(changed);
+    if (changed == *track)
+        return nullptr;
+    return std::make_unique<doc::SetAudioCommand>(std::move(changed), doc::CommandKind::ChangeAudio);
+}
+
+} // namespace
+
+void DocumentController::setAudioOffset(int frames)
+{
+    execute(audioChange(m_document->audio(), [frames](doc::AudioTrack &t) { t.offset = frames; }));
+}
+
+void DocumentController::setAudioVolume(float volume)
+{
+    execute(audioChange(m_document->audio(), [volume](doc::AudioTrack &t) { t.volume = std::clamp(volume, 0.0f, 1.0f); }));
+}
+
+void DocumentController::setAudioMuted(bool muted)
+{
+    execute(audioChange(m_document->audio(), [muted](doc::AudioTrack &t) { t.muted = muted; }));
+}
+
+void DocumentController::setAudioDuration(double seconds)
+{
+    auto track = m_document->audio();
+    if (!track || track->duration == seconds)
+        return;
+    track->duration = seconds;
+    m_document->setAudio(std::move(track));
+    emit structureChanged(); // not an undo step: the length of the block is a fact about the file
+}
+
 int DocumentController::importImageSequence(const QList<QImage> &images, const QString &name, int startFrame,
                                             int hold, const std::function<void(int)> &progress)
 {
@@ -909,6 +988,8 @@ QString DocumentController::commandName(doc::CommandKind kind)
     case doc::CommandKind::ChangeLayerProperties: return tr("layer properties");
     case doc::CommandKind::ImportImage: return tr("import image");
     case doc::CommandKind::ImportSequence: return tr("import image sequence");
+    case doc::CommandKind::SetAudio: return tr("audio");
+    case doc::CommandKind::ChangeAudio: return tr("audio change");
     case doc::CommandKind::ClearLayer: return tr("clear");
     case doc::CommandKind::Move: return tr("move");
     case doc::CommandKind::Select: return tr("selection");
