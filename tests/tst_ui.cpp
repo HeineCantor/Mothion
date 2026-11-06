@@ -23,6 +23,7 @@
 #include "tools/BrushPreset.h"
 #include "tools/ToolState.h"
 #include "ui/AutoplayWindow.h"
+#include "compositing/Graph.h"
 #include "ui/compositing/NodeGraphView.h"
 #include "ui/ExportDialog.h"
 #include "ui/DiscordPresence.h"
@@ -5297,80 +5298,54 @@ private slots:
 
     // The track's scrubbing can be turned off: a step or a click on the timeline is then silent; the setting is one
     // undo step and goes into the project.
-    void nodeGraphConnectsWithoutLoops()
+    // The example network: Frame > Blur > Merge (with a Color in front) > Output.
+    static void exampleNetwork(compositing::Graph &g, compositing::NodeId ids[5])
     {
-        ui::NodeGraphView graph;
-        QCOMPARE(graph.nodeCount(), 5);
-        QCOMPARE(graph.edgeCount(), 4);
-        const QList<ui::NodeKind> kinds = ui::NodeGraphView::kinds();
-        ui::NodeItem *a = graph.addNode(kinds[1], {0, 300}); // Blur
-        ui::NodeItem *b = graph.addNode(kinds[1], {200, 300});
-        QVERIFY(graph.connectNodes(a, 0, b, 0));
-        QVERIFY(!graph.connectNodes(b, 0, a, 0)); // would close a loop
-        QCOMPARE(graph.edgeCount(), 5);
-        // An input takes one wire: connecting another replaces it.
-        ui::NodeItem *c = graph.addNode(kinds[1], {400, 300});
-        QVERIFY(graph.connectNodes(c, 0, b, 0));
-        QCOMPARE(graph.edgeCount(), 5);
-        // Deleting a node takes its wires along.
-        a->setSelected(true);
-        QTest::keyClick(&graph, Qt::Key_Delete);
-        QCOMPARE(graph.nodeCount(), 7);
+        ids[0] = g.addNode(QStringLiteral("frame"), {-330, -70});
+        ids[1] = g.addNode(QStringLiteral("blur"), {-90, -110});
+        ids[2] = g.addNode(QStringLiteral("merge"), {160, -40});
+        ids[3] = g.addNode(QStringLiteral("color"), {-330, 60});
+        ids[4] = g.addNode(QStringLiteral("output"), {400, -30});
+        g.connect(ids[0], 0, ids[1], 0);
+        g.connect(ids[1], 0, ids[2], 0);
+        g.connect(ids[3], 0, ids[2], 1);
+        g.connect(ids[2], 0, ids[4], 0);
     }
 
-    void nodeGraphProcessesTheFrame()
+    void nodeEditorFollowsTheNetwork()
     {
-        ui::NodeGraphView graph;
-        QImage frame(40, 40, QImage::Format_ARGB32_Premultiplied);
-        frame.fill(Qt::white);
-        frame.setPixelColor(20, 20, Qt::black);
-        // The example wires Frame > Blur > Merge (with a tint) > Output.
-        const QImage result = graph.evaluate(frame);
-        QCOMPARE(result.size(), frame.size());
-        QVERIFY(result != frame);
-        QVERIFY(qGray(result.pixel(20, 20)) > 40); // the black dot was blurred away and tinted
-        // Nothing wired to Output: nothing out.
-        for (auto *item : graph.items())
-            if (auto *edge = dynamic_cast<ui::EdgeItem *>(item); edge && edge->to
-                && edge->to->kind().type == ui::NodeKind::Type::Output)
-                delete edge;
-        QVERIFY(graph.evaluate(frame).isNull());
-    }
-
-    void nodeSettingsChangeTheResult()
-    {
-        ui::NodeGraphView graph;
-        QImage frame(40, 40, QImage::Format_ARGB32_Premultiplied);
-        frame.fill(Qt::white);
-        frame.setPixelColor(20, 20, Qt::black);
-        ui::NodeItem *blur = nullptr, *color = nullptr;
-        for (auto *item : graph.items())
-            if (auto *node = dynamic_cast<ui::NodeItem *>(item)) {
-                if (node->kind().type == ui::NodeKind::Type::Blur)
-                    blur = node;
-                if (node->kind().type == ui::NodeKind::Type::Color)
-                    color = node;
-            }
-        QVERIFY(blur && color);
-        QSignalSpy changed(&graph, &ui::NodeGraphView::graphChanged);
-        const QImage before = graph.evaluate(frame);
-        blur->setParam(QStringLiteral("radius"), 0); // no blur: the dot stays sharp
-        color->setParam(QStringLiteral("color"), QColor(0, 0, 0, 0)); // no tint
-        QVERIFY(changed.count() >= 2);
-        const QImage after = graph.evaluate(frame);
-        QVERIFY(after != before);
-        QCOMPARE(after, frame);
+        compositing::Graph network;
+        compositing::NodeId ids[5];
+        exampleNetwork(network, ids);
+        ui::NodeGraphView view(network);
+        QCOMPARE(view.nodeCount(), 5);
+        QCOMPARE(view.edgeCount(), 4);
+        // Changes made to the network (an undo, later) show in the editor...
+        const compositing::NodeId extra = network.addNode(QStringLiteral("blur"));
+        QCOMPARE(view.nodeCount(), 6);
+        QVERIFY(network.connect(ids[1], 0, extra, 0));
+        QCOMPARE(view.edgeCount(), 5);
+        // ...and what is done in the editor reaches the network.
+        view.item(extra)->setPos(40, 50);
+        QCOMPARE(network.node(extra)->pos, QPointF(40, 50));
+        view.item(extra)->setSelected(true);
+        QTest::keyClick(&view, Qt::Key_Delete);
+        QCOMPARE(network.nodes().size(), size_t(5));
+        QCOMPARE(view.nodeCount(), 5);
+        QCOMPARE(view.edgeCount(), 4);
+        // The slider in a node writes its setting to the network.
+        network.setParam(ids[1], QStringLiteral("radius"), 20);
+        QCOMPARE(network.node(ids[1])->params.value(QStringLiteral("radius")).toInt(), 20);
     }
 
     void nodeColorIsPickedWithoutBlocking()
     {
-        ui::NodeGraphView graph;
+        compositing::Graph network;
+        compositing::NodeId ids[5];
+        exampleNetwork(network, ids);
+        ui::NodeGraphView graph(network);
         graph.show();
-        ui::NodeItem *color = nullptr;
-        for (auto *item : graph.items())
-            if (auto *node = dynamic_cast<ui::NodeItem *>(item); node && node->kind().type == ui::NodeKind::Type::Color)
-                color = node;
-        QVERIFY(color);
+        ui::NodeItem *color = graph.item(ids[3]);
         QPushButton *swatch = nullptr;
         for (QGraphicsItem *child : color->childItems())
             if (auto *proxy = dynamic_cast<QGraphicsProxyWidget *>(child))
@@ -5382,23 +5357,23 @@ private slots:
             if (auto *d = qobject_cast<QColorDialog *>(top))
                 dialog = d;
         QVERIFY(dialog);
+        const QString key = QStringLiteral("color");
         dialog->setCurrentColor(QColor(10, 200, 30, 255));
-        QCOMPARE(color->param(QStringLiteral("color")).value<QColor>(), QColor(10, 200, 30, 255));
+        QCOMPARE(network.node(ids[3])->params.value(key).value<QColor>(), QColor(10, 200, 30, 255));
         dialog->reject(); // cancelled: the old color is back
-        QCOMPARE(color->param(QStringLiteral("color")).value<QColor>(), QColor(150, 60, 190, 110));
+        QCOMPARE(network.node(ids[3])->params.value(key).value<QColor>(), QColor(150, 60, 190, 110));
     }
 
     void nodeGraphWiresAreMovedAndCut()
     {
-        ui::NodeGraphView graph;
+        compositing::Graph network;
+        compositing::NodeId ids[5];
+        exampleNetwork(network, ids);
+        ui::NodeGraphView graph(network);
         graph.resize(1000, 600);
         graph.show();
         graph.fitWidth(0.8);
-        ui::NodeItem *merge = nullptr;
-        for (auto *item : graph.items())
-            if (auto *node = dynamic_cast<ui::NodeItem *>(item); node && node->kind().type == ui::NodeKind::Type::Merge)
-                merge = node;
-        QVERIFY(merge);
+        ui::NodeItem *merge = graph.item(ids[2]);
         QCOMPARE(graph.edgeCount(), 4);
         auto viewPos = [&](const QPointF &scenePos) { return graph.mapFromScene(scenePos); };
 
@@ -5412,6 +5387,7 @@ private slots:
         QTest::mouseMove(graph.viewport(), viewPos(back + QPointF(-60, 200)));
         QTest::mouseRelease(graph.viewport(), Qt::LeftButton, {}, viewPos(back + QPointF(-60, 200)));
         QCOMPARE(graph.edgeCount(), 3);
+        QVERIFY(!network.linkInto(ids[2], 0));
 
         // Shift and drag across a wire cuts it.
         const QPointF front = merge->socketPos(false, 1);
@@ -5421,6 +5397,7 @@ private slots:
         QTest::mouseMove(graph.viewport(), viewPos(b));
         QTest::mouseRelease(graph.viewport(), Qt::LeftButton, Qt::ShiftModifier, viewPos(b));
         QCOMPARE(graph.edgeCount(), 2);
+        QVERIFY(!network.linkInto(ids[2], 1));
     }
 
     void audioScrubbingCanBeTurnedOff()

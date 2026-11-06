@@ -53,11 +53,24 @@ private:
 CompositingWindow::CompositingWindow(document::DocumentController *document, QWidget *parent)
     : QWidget(parent, Qt::Window)
     , m_document(document)
-    , m_graph(new NodeGraphView(this))
+    , m_graph(nullptr)
     , m_preview(new ImagePreview(this))
     , m_timer(new QTimer(this))
     , m_frameTimer(new QTimer(this))
 {
+    // A small network to look at: a frame through a blur, merged with a color.
+    namespace nodes = compositing;
+    const nodes::NodeId source = m_network.addNode(QStringLiteral("frame"), {-330, -70});
+    const nodes::NodeId blur = m_network.addNode(QStringLiteral("blur"), {-90, -110});
+    const nodes::NodeId color = m_network.addNode(QStringLiteral("color"), {-330, 60});
+    const nodes::NodeId merge = m_network.addNode(QStringLiteral("merge"), {160, -40});
+    const nodes::NodeId out = m_network.addNode(QStringLiteral("output"), {400, -30});
+    m_network.connect(source, 0, blur, 0);
+    m_network.connect(blur, 0, merge, 0);
+    m_network.connect(color, 0, merge, 1);
+    m_network.connect(merge, 0, out, 0);
+    m_graph = new NodeGraphView(m_network, this);
+
     setWindowTitle(tr("Compositing"));
     resize(1100, 700); // what restoring from maximized gives
 
@@ -90,7 +103,7 @@ CompositingWindow::CompositingWindow(document::DocumentController *document, QWi
     m_timer->setSingleShot(true);
     m_timer->setInterval(30);
     connect(m_timer, &QTimer::timeout, this, &CompositingWindow::refresh);
-    connect(m_graph, &NodeGraphView::graphChanged, this, &CompositingWindow::scheduleRefresh);
+    m_listener = m_network.addListener([this](const compositing::GraphChange &) { scheduleRefresh(); });
     if (m_document) {
         connect(m_document, &document::DocumentController::currentFrameChanged, this, &CompositingWindow::scheduleRefresh);
         connect(m_document, &document::DocumentController::structureChanged, this, &CompositingWindow::scheduleRefresh);
@@ -104,6 +117,13 @@ CompositingWindow::CompositingWindow(document::DocumentController *document, QWi
     connect(m_graph, &NodeGraphView::viewTouched, this, [this] { m_autoFrame = false; });
     connect(split, &QSplitter::splitterMoved, this, [this] { m_autoFrame = false; });
     refresh();
+}
+
+CompositingWindow::~CompositingWindow()
+{
+    // The editor listens to the network, which goes first among the members: it cannot wait for the children.
+    m_network.removeListener(m_listener);
+    delete m_graph;
 }
 
 void CompositingWindow::resizeEvent(QResizeEvent *event)
@@ -139,7 +159,7 @@ void CompositingWindow::refresh()
         if (frame.width() > limit.width() || frame.height() > limit.height())
             frame = frame.scaled(limit, Qt::KeepAspectRatio, Qt::SmoothTransformation);
     }
-    m_preview->setImage(m_graph->evaluate(frame));
+    m_preview->setImage(m_evaluator.evaluate(m_network, {frame}));
 }
 
 } // namespace mothion::ui

@@ -7,6 +7,9 @@
 class QSplitter;
 class QTimer;
 
+#include "compositing/Evaluator.h"
+#include "compositing/Graph.h"
+
 namespace mothion::document {
 class DocumentController;
 }
@@ -24,8 +27,10 @@ class CompositingWindow : public QWidget
     Q_OBJECT
 public:
     explicit CompositingWindow(document::DocumentController *document, QWidget *parent = nullptr);
+    ~CompositingWindow() override;
 
     NodeGraphView *graph() const { return m_graph; }
+    compositing::Graph &network() { return m_network; }
     ImagePreview *preview() const { return m_preview; }
 
     // Takes the frame again and runs the nodes, at once.
@@ -39,6 +44,9 @@ private:
     void frame();
 
     QPointer<document::DocumentController> m_document;
+    compositing::Graph m_network; // the nodes; the editor and the evaluator both read it
+    compositing::Evaluator m_evaluator;
+    int m_listener = 0;
     NodeGraphView *m_graph;
     ImagePreview *m_preview;
     QTimer *m_timer;

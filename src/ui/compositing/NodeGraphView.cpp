@@ -1,6 +1,7 @@
 #include "ui/compositing/NodeGraphView.h"
 
 #include <QColorDialog>
+#include <QPair>
 #include <QContextMenuEvent>
 #include <QGraphicsProxyWidget>
 #include <QHBoxLayout>
@@ -21,6 +22,8 @@
 
 namespace mothion::ui {
 
+using compositing::NodeId;
+
 namespace {
 
 constexpr qreal kNodeWidth = 150;
@@ -35,17 +38,20 @@ constexpr qreal kParamHeight = 28;
 
 // ---- NodeItem -------------------------------------------------------------
 
-NodeItem::NodeItem(const NodeKind &kind)
-    : m_kind(kind)
+NodeItem::NodeItem(compositing::Graph &graph, NodeId id)
+    : m_graph(graph)
+    , m_id(id)
+    , m_type(compositing::NodeRegistry::instance().find(graph.node(id)->type))
 {
     setFlags(ItemIsMovable | ItemIsSelectable | ItemSendsGeometryChanges);
     setZValue(1);
 
     // The settings, as widgets under the sockets.
-    const qreal rows = static_cast<qreal>(std::max<qsizetype>(1, std::max(m_kind.inputs.size(), m_kind.outputs.size())));
+    const qreal rows = static_cast<qreal>(std::max<qsizetype>(1, std::max(m_type->inputs().size(), m_type->outputs().size())));
     qreal y = kHeaderHeight + 6 + rows * kRowHeight;
-    for (const NodeParam &param : std::as_const(m_kind.params)) {
-        m_values[param.key] = param.initial;
+    const QVariantMap values = graph.node(id)->params;
+    for (const compositing::ParamInfo &param : m_type->params()) {
+        const QVariant initial = values.value(param.key);
         auto *row = new QWidget;
         row->setAttribute(Qt::WA_NoSystemBackground);
         auto *layout = new QHBoxLayout(row);
@@ -55,18 +61,18 @@ NodeItem::NodeItem(const NodeKind &kind)
         label->setMinimumWidth(48);
         layout->addWidget(label);
         const QString key = param.key;
-        if (param.kind == NodeParam::Kind::Slider) {
+        if (param.kind == compositing::ParamInfo::Kind::Slider) {
             auto *slider = new QSlider(Qt::Horizontal, row);
             slider->setRange(param.min, param.max);
-            slider->setValue(param.initial.toInt());
-            auto *number = new QLabel(QString::number(param.initial.toInt()), row);
+            slider->setValue(initial.toInt());
+            auto *number = new QLabel(QString::number(initial.toInt()), row);
             number->setMinimumWidth(24);
             number->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
             layout->addWidget(slider, 1);
             layout->addWidget(number);
             connect(slider, &QSlider::valueChanged, this, [this, key, number](int v) {
                 number->setText(QString::number(v));
-                setParam(key, v);
+                m_graph.setParam(m_id, key, v);
             });
             m_shown[key] = [slider](const QVariant &v) {
                 const QSignalBlocker block(slider);
@@ -81,20 +87,20 @@ NodeItem::NodeItem(const NodeKind &kind)
                                                      "border: 1px solid palette(mid); border-radius: 3px; }")
                                           .arg(c.red()).arg(c.green()).arg(c.blue()).arg(c.alpha()));
             };
-            paint(param.initial.value<QColor>());
+            paint(initial.value<QColor>());
             layout->addWidget(swatch, 1);
             connect(swatch, &QPushButton::clicked, this, [this, key] {
                 // The swatch lives inside the scene and has no window of its own: the dialog hangs on the view's.
                 // It is opened without blocking (the picture follows the color as it is picked), with Qt's own
                 // dialog: the system's can hang over a window like this one.
                 const QList<QGraphicsView *> views = scene() ? scene()->views() : QList<QGraphicsView *>();
-                const QColor original = m_values.value(key).value<QColor>();
+                const QColor original = m_graph.node(m_id)->params.value(key).value<QColor>();
                 auto *dialog = new QColorDialog(original, views.isEmpty() ? nullptr : views.first()->window());
                 dialog->setAttribute(Qt::WA_DeleteOnClose);
                 dialog->setOptions(QColorDialog::ShowAlphaChannel | QColorDialog::DontUseNativeDialog);
                 dialog->setWindowTitle(tr("Color"));
-                connect(dialog, &QColorDialog::currentColorChanged, this, [this, key](const QColor &c) { setParam(key, c); });
-                connect(dialog, &QColorDialog::rejected, this, [this, key, original] { setParam(key, original); });
+                connect(dialog, &QColorDialog::currentColorChanged, this, [this, key](const QColor &c) { m_graph.setParam(m_id, key, c); });
+                connect(dialog, &QColorDialog::rejected, this, [this, key, original] { m_graph.setParam(m_id, key, original); });
                 dialog->open();
             });
             m_shown[key] = [paint](const QVariant &v) { paint(v.value<QColor>()); };
@@ -113,18 +119,14 @@ QRectF NodeItem::boundingRect() const
 
 qreal NodeItem::bodyHeight() const
 {
-    const qreal rows = static_cast<qreal>(std::max<qsizetype>(1, std::max(m_kind.inputs.size(), m_kind.outputs.size())));
-    return kHeaderHeight + rows * kRowHeight + 6 + static_cast<qreal>(m_kind.params.size()) * kParamHeight;
+    const qreal rows = static_cast<qreal>(std::max<qsizetype>(1, std::max(m_type->inputs().size(), m_type->outputs().size())));
+    return kHeaderHeight + rows * kRowHeight + 6 + static_cast<qreal>(m_type->params().size()) * kParamHeight;
 }
 
-void NodeItem::setParam(const QString &key, const QVariant &value)
+void NodeItem::showParam(const QString &key)
 {
-    if (m_values.value(key) == value)
-        return;
-    m_values[key] = value;
     if (const auto shown = m_shown.value(key))
-        shown(value);
-    emit paramChanged();
+        shown(m_graph.node(m_id)->params.value(key));
 }
 
 QPointF NodeItem::socketLocal(bool output, int index) const
@@ -145,7 +147,7 @@ bool NodeItem::socketAt(const QPointF &scenePos, bool *output, int *index, int o
     for (int side = 0; side < 2; ++side) {
         if (onlySide >= 0 && side != onlySide)
             continue;
-        const int count = static_cast<int>(side ? m_kind.outputs.size() : m_kind.inputs.size());
+        const int count = static_cast<int>(side ? m_type->outputs().size() : m_type->inputs().size());
         for (int i = 0; i < count; ++i) {
             const QPointF d = local - socketLocal(side, i);
             const qreal dist = std::hypot(d.x(), d.y());
@@ -199,21 +201,21 @@ void NodeItem::paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *wid
     QPainterPath cut;
     cut.addRect(QRectF(0, kHeaderHeight, kNodeWidth, 10));
     p->setPen(Qt::NoPen);
-    p->setBrush(m_kind.tint);
+    p->setBrush(m_type->tint());
     p->drawPath(head.subtracted(cut));
     p->setPen(Qt::white);
     QFont bold = p->font();
     bold.setBold(true);
     p->setFont(bold);
-    p->drawText(QRectF(10, 0, kNodeWidth - 20, kHeaderHeight), Qt::AlignVCenter | Qt::AlignLeft, m_kind.title);
+    p->drawText(QRectF(10, 0, kNodeWidth - 20, kHeaderHeight), Qt::AlignVCenter | Qt::AlignLeft, m_type->title());
     p->setFont(widget ? widget->font() : QFont());
 
     for (int side = 0; side < 2; ++side) {
-        const QStringList &names = side ? m_kind.outputs : m_kind.inputs;
+        const QStringList names = side ? m_type->outputs() : m_type->inputs();
         for (int i = 0; i < static_cast<int>(names.size()); ++i) {
             const QPointF c = socketLocal(side, i);
             p->setPen(QPen(pal.color(QPalette::Base), 1.5));
-            p->setBrush(m_kind.tint.lighter(130));
+            p->setBrush(m_type->tint().lighter(130));
             p->drawEllipse(c, kSocketRadius, kSocketRadius);
             if (m_hotIndex == i && m_hotOutput == static_cast<bool>(side)) { // near enough to connect
                 p->setPen(QPen(pal.color(QPalette::Highlight), 2));
@@ -229,9 +231,11 @@ void NodeItem::paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *wid
 
 QVariant NodeItem::itemChange(GraphicsItemChange change, const QVariant &value)
 {
-    if (change == ItemPositionHasChanged)
+    if (change == ItemPositionHasChanged) {
+        m_graph.setPosition(m_id, pos());
         for (EdgeItem *edge : std::as_const(m_edges))
             edge->updatePath();
+    }
     return QGraphicsObject::itemChange(change, value);
 }
 
@@ -288,8 +292,9 @@ void EdgeItem::paint(QPainter *p, const QStyleOptionGraphicsItem *option, QWidge
 
 // ---- NodeGraphView --------------------------------------------------------
 
-NodeGraphView::NodeGraphView(QWidget *parent)
+NodeGraphView::NodeGraphView(compositing::Graph &graph, QWidget *parent)
     : QGraphicsView(parent)
+    , m_graph(graph)
     , m_scene(new QGraphicsScene(this))
 {
     m_scene->setSceneRect(-5000, -5000, 10000, 10000);
@@ -301,173 +306,75 @@ NodeGraphView::NodeGraphView(QWidget *parent)
     setDragMode(RubberBandDrag);
     setViewportUpdateMode(FullViewportUpdate);
 
-    // A small graph to look at: a frame through a blur, merged with a color.
-    const QList<NodeKind> all = kinds();
-    auto *source = addNode(all[0], {-330, -70});
-    auto *blur = addNode(all[1], {-90, -110});
-    auto *color = addNode(all[3], {-330, 60});
-    auto *merge = addNode(all[2], {160, -40});
-    auto *out = addNode(all[4], {400, -30});
-    connectNodes(source, 0, blur, 0);
-    connectNodes(blur, 0, merge, 0);
-    connectNodes(color, 0, merge, 1);
-    connectNodes(merge, 0, out, 0);
+    for (const compositing::Node &node : m_graph.nodes())
+        graphChanged({compositing::GraphChange::Kind::NodeAdded, node.id, {}});
+    rebuildEdges();
+    m_listener = m_graph.addListener([this](const compositing::GraphChange &change) { graphChanged(change); });
 }
 
-QList<NodeKind> NodeGraphView::kinds()
+NodeGraphView::~NodeGraphView()
 {
-    return {
-        {NodeKind::Type::Frame, tr("Frame"), QColor(70, 110, 170), {}, {tr("Image")}, {}},
-        {NodeKind::Type::Blur, tr("Blur"), QColor(150, 90, 60), {tr("Image")}, {tr("Image")},
-         {{QStringLiteral("radius"), tr("Radius"), NodeParam::Kind::Slider, 0, 60, 8}}},
-        {NodeKind::Type::Merge, tr("Merge"), QColor(60, 130, 100), {tr("Back"), tr("Front")}, {tr("Image")},
-         {{QStringLiteral("opacity"), tr("Opacity"), NodeParam::Kind::Slider, 0, 100, 100}}},
-        {NodeKind::Type::Color, tr("Color"), QColor(140, 80, 140), {}, {tr("Image")},
-         {{QStringLiteral("color"), tr("Color"), NodeParam::Kind::Color, 0, 0, QColor(150, 60, 190, 110)}}},
-        {NodeKind::Type::Output, tr("Output"), QColor(150, 70, 80), {tr("Image")}, {}, {}},
-    };
+    m_graph.removeListener(m_listener);
 }
 
-NodeItem *NodeGraphView::addNode(const NodeKind &kind, const QPointF &scenePos)
+void NodeGraphView::graphChanged(const compositing::GraphChange &change)
 {
-    auto *node = new NodeItem(kind);
-    node->setPos(scenePos);
-    m_scene->addItem(node);
-    connect(node, &NodeItem::paramChanged, this, &NodeGraphView::graphChanged);
-    emit graphChanged();
-    return node;
+    using Kind = compositing::GraphChange::Kind;
+    switch (change.kind) {
+    case Kind::NodeAdded: {
+        auto *node = new NodeItem(m_graph, change.node);
+        node->setPos(m_graph.node(change.node)->pos);
+        m_scene->addItem(node);
+        m_items.insert(change.node, node);
+        break;
+    }
+    case Kind::NodeRemoved:
+        delete m_items.take(change.node); // its wires were taken out before (and redrawn)
+        break;
+    case Kind::Links:
+        rebuildEdges();
+        break;
+    case Kind::Param:
+        if (NodeItem *node = m_items.value(change.node))
+            node->showParam(change.key);
+        break;
+    }
+}
+
+void NodeGraphView::rebuildEdges()
+{
+    // Only the wires of the graph: the one being dragged (a free end) is left alone.
+    QList<EdgeItem *> old;
+    for (QGraphicsItem *item : m_scene->items())
+        if (auto *edge = dynamic_cast<EdgeItem *>(item); edge && edge->to && edge->from)
+            old.append(edge);
+    qDeleteAll(old);
+    for (const compositing::Link &link : m_graph.links()) {
+        NodeItem *from = m_items.value(link.from);
+        NodeItem *to = m_items.value(link.to);
+        if (!from || !to)
+            continue;
+        auto *edge = new EdgeItem;
+        m_scene->addItem(edge);
+        edge->connect(from, link.fromPort, to, link.toPort);
+    }
+}
+
+NodeId NodeGraphView::addNode(const QString &type, const QPointF &scenePos)
+{
+    return m_graph.addNode(type, scenePos);
 }
 
 bool NodeGraphView::connectNodes(NodeItem *from, int out, NodeItem *to, int in)
 {
-    if (!from || !to || from == to)
-        return false;
-    // An input takes one wire: a new one replaces the old.
-    const QList<EdgeItem *> existing = to->edges();
-    for (EdgeItem *edge : existing)
-        if (edge->to == to && edge->toIndex == in)
-            delete edge;
-    // No loops: the source must not depend on the target.
-    QList<NodeItem *> stack{from};
-    QSet<NodeItem *> seen;
-    while (!stack.isEmpty()) {
-        NodeItem *n = stack.takeLast();
-        if (n == to)
-            return false;
-        if (seen.contains(n))
-            continue;
-        seen.insert(n);
-        for (EdgeItem *edge : n->edges())
-            if (edge->to == n && edge->from)
-                stack.append(edge->from);
-    }
-    auto *edge = new EdgeItem;
-    m_scene->addItem(edge);
-    edge->connect(from, out, to, in);
-    emit graphChanged();
-    return true;
-}
-
-namespace {
-
-// A box blur of `radius` pixels, done as two running-sum passes.
-QImage boxBlur(const QImage &source, int radius)
-{
-    QImage image = source.convertToFormat(QImage::Format_ARGB32_Premultiplied);
-    if (radius < 1 || image.isNull())
-        return image;
-    const int w = image.width(), h = image.height();
-    QImage temp(w, h, image.format());
-    const int window = radius * 2 + 1;
-    auto pass = [&](const QImage &in, QImage &out, bool horizontal) {
-        const int lines = horizontal ? h : w;
-        const int length = horizontal ? w : h;
-        for (int line = 0; line < lines; ++line) {
-            auto at = [&](int i) {
-                i = std::clamp(i, 0, length - 1);
-                return horizontal ? reinterpret_cast<const QRgb *>(in.constScanLine(line))[i]
-                                  : reinterpret_cast<const QRgb *>(in.constScanLine(i))[line];
-            };
-            int sum[4] = {0, 0, 0, 0};
-            for (int i = -radius; i <= radius; ++i) {
-                const QRgb c = at(i);
-                sum[0] += qAlpha(c); sum[1] += qRed(c); sum[2] += qGreen(c); sum[3] += qBlue(c);
-            }
-            for (int i = 0; i < length; ++i) {
-                const QRgb px = qRgba(sum[1] / window, sum[2] / window, sum[3] / window, sum[0] / window);
-                if (horizontal)
-                    reinterpret_cast<QRgb *>(out.scanLine(line))[i] = px;
-                else
-                    reinterpret_cast<QRgb *>(out.scanLine(i))[line] = px;
-                const QRgb add = at(i + radius + 1), drop = at(i - radius);
-                sum[0] += qAlpha(add) - qAlpha(drop); sum[1] += qRed(add) - qRed(drop);
-                sum[2] += qGreen(add) - qGreen(drop); sum[3] += qBlue(add) - qBlue(drop);
-            }
-        }
-    };
-    pass(image, temp, true);
-    pass(temp, image, false);
-    return image;
-}
-
-} // namespace
-
-QImage NodeGraphView::evaluate(const QImage &frame) const
-{
-    // The image a node's input socket receives: that of the output it is wired to.
-    std::function<QImage(const NodeItem *, int)> input = [&](const NodeItem *node, int index) -> QImage {
-        for (const EdgeItem *edge : node->edges())
-            if (edge->to == node && edge->toIndex == index && edge->from) {
-                const NodeItem *source = edge->from;
-                const QImage first = source->kind().inputs.isEmpty() ? QImage() : input(source, 0);
-                switch (source->kind().type) {
-                case NodeKind::Type::Frame:
-                    return frame;
-                case NodeKind::Type::Blur:
-                    return boxBlur(first, source->param(QStringLiteral("radius")).toInt());
-                case NodeKind::Type::Color: {
-                    QImage solid(frame.size(), QImage::Format_ARGB32_Premultiplied);
-                    solid.fill(source->param(QStringLiteral("color")).value<QColor>());
-                    return solid;
-                }
-                case NodeKind::Type::Merge: {
-                    QImage back = first;
-                    const QImage front = input(source, 1);
-                    if (back.isNull())
-                        return front;
-                    back = back.convertToFormat(QImage::Format_ARGB32_Premultiplied);
-                    if (!front.isNull()) {
-                        QPainter p(&back);
-                        p.setOpacity(source->param(QStringLiteral("opacity")).toInt() / 100.0);
-                        p.drawImage(QRect(QPoint(), back.size()), front);
-                    }
-                    return back;
-                }
-                case NodeKind::Type::Output:
-                    return {};
-                }
-            }
-        return {};
-    };
-    for (QGraphicsItem *item : m_scene->items())
-        if (auto *node = dynamic_cast<NodeItem *>(item); node && node->kind().type == NodeKind::Type::Output)
-            return input(node, 0);
-    return {};
-}
-
-int NodeGraphView::nodeCount() const
-{
-    int n = 0;
-    for (QGraphicsItem *item : m_scene->items())
-        n += qgraphicsitem_cast<QGraphicsObject *>(item) && dynamic_cast<NodeItem *>(item);
-    return n;
+    return from && to && m_graph.connect(from->nodeId(), out, to->nodeId(), in);
 }
 
 int NodeGraphView::edgeCount() const
 {
     int n = 0;
     for (QGraphicsItem *item : m_scene->items())
-        n += dynamic_cast<EdgeItem *>(item) && static_cast<EdgeItem *>(item)->to;
+        n += dynamic_cast<EdgeItem *>(item) && static_cast<EdgeItem *>(item)->to && static_cast<EdgeItem *>(item)->from;
     return n;
 }
 
@@ -563,9 +470,8 @@ void NodeGraphView::mousePressEvent(QMouseEvent *event)
                 if (wire) {
                     node = wire->from;
                     index = wire->fromIndex;
+                    m_graph.disconnect(wire->to->nodeId(), wire->toIndex); // redraws the wires: `wire` is gone
                     output = true;
-                    delete wire;
-                    emit graphChanged();
                 }
             }
             setHot(nullptr, false, -1);
@@ -635,11 +541,13 @@ void NodeGraphView::mouseReleaseEvent(QMouseEvent *event)
         for (QGraphicsItem *item : m_scene->items(strip.boundingRect()))
             if (auto *edge = dynamic_cast<EdgeItem *>(item); edge && edge->to && edge->from && edge->shape().intersects(strip))
                 cut.append(edge);
-        qDeleteAll(cut);
+        QList<QPair<NodeId, int>> inputs; // read before the first cut redraws the wires
+        for (const EdgeItem *edge : std::as_const(cut))
+            inputs.append({edge->to->nodeId(), edge->toIndex});
+        for (const auto &input : std::as_const(inputs))
+            m_graph.disconnect(input.first, input.second);
         m_cutLine.clear();
         viewport()->update();
-        if (!cut.isEmpty())
-            emit graphChanged();
         return;
     }
     if (m_dragEdge && event->button() == Qt::LeftButton) {
@@ -710,18 +618,18 @@ void NodeGraphView::keyPressEvent(QKeyEvent *event)
 
 void NodeGraphView::deleteSelection()
 {
-    const QList<QGraphicsItem *> selected = m_scene->selectedItems();
-    for (QGraphicsItem *item : selected) {
-        if (auto *node = dynamic_cast<NodeItem *>(item)) {
-            const QList<EdgeItem *> edges = node->edges();
-            for (EdgeItem *edge : edges)
-                delete edge;
-        }
+    QList<NodeId> nodes;
+    QList<QPair<NodeId, int>> inputs;
+    for (QGraphicsItem *item : m_scene->selectedItems()) {
+        if (auto *node = dynamic_cast<NodeItem *>(item))
+            nodes.append(node->nodeId());
+        else if (auto *edge = dynamic_cast<EdgeItem *>(item); edge && edge->to)
+            inputs.append({edge->to->nodeId(), edge->toIndex});
     }
-    // Edges may be gone with their nodes: look the rest up again.
-    for (QGraphicsItem *item : m_scene->selectedItems())
-        delete item;
-    emit graphChanged();
+    for (const auto &input : std::as_const(inputs))
+        m_graph.disconnect(input.first, input.second);
+    for (NodeId id : std::as_const(nodes))
+        m_graph.removeNode(id);
 }
 
 void NodeGraphView::contextMenuEvent(QContextMenuEvent *event)
@@ -729,13 +637,11 @@ void NodeGraphView::contextMenuEvent(QContextMenuEvent *event)
     const QPointF scenePos = mapToScene(event->pos());
     QMenu menu(this);
     menu.addSection(tr("Add node"));
-    const QList<NodeKind> all = kinds();
-    for (const NodeKind &kind : all)
-        menu.addAction(kind.title)->setData(kind.title);
+    for (const auto &type : compositing::NodeRegistry::instance().all())
+        menu.addAction(type->title())->setData(type->id());
     if (QAction *chosen = menu.exec(event->globalPos()))
-        for (const NodeKind &kind : all)
-            if (kind.title == chosen->data().toString())
-                addNode(kind, scenePos)->setSelected(true);
+        if (NodeItem *node = item(addNode(chosen->data().toString(), scenePos)))
+            node->setSelected(true);
 }
 
 void NodeGraphView::drawBackground(QPainter *p, const QRectF &rect)
