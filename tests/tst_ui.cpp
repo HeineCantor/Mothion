@@ -5593,6 +5593,110 @@ private slots:
         QCOMPARE(network.node(ids[1])->params.value(QStringLiteral("radius")).toInt(), 20);
     }
 
+    static QCheckBox *toggleOf(ui::NodeGraphView &view, compositing::NodeId id)
+    {
+        QCheckBox *box = nullptr;
+        for (QGraphicsItem *child : view.item(id)->childItems())
+            if (auto *proxy = dynamic_cast<QGraphicsProxyWidget *>(child))
+                if (auto *b = proxy->widget()->findChild<QCheckBox *>())
+                    box = b;
+        return box;
+    }
+
+    void nodeToggleIsKeptAndShownAgain()
+    {
+        compositing::Graph network;
+        const compositing::NodeId noise = network.addNode(QStringLiteral("sensornoise"));
+        ui::NodeGraphView view(network);
+        view.show();
+        QCheckBox *box = toggleOf(view, noise);
+        QVERIFY(box && !box->isChecked());
+        box->click();
+        QCOMPARE(network.node(noise)->params.value(QStringLiteral("animate")).toInt(), 1);
+        compositing::Graph reloaded; // stored and loaded again
+        reloaded.load(network.toData());
+        ui::NodeGraphView other(reloaded);
+        QCheckBox *again = toggleOf(other, noise);
+        QVERIFY(again && again->isChecked());
+    }
+
+    void toggleSurvivesTheWindowAndTheDocument()
+    {
+        document::DocumentController controller;
+        compositing::NodeId noise = 0;
+        {
+            ui::CompositingWindow window(&controller);
+            window.show();
+            noise = window.network().addNode(QStringLiteral("sensornoise"), {0, 300});
+            QCheckBox *box = toggleOf(*window.graph(), noise);
+            QVERIFY(box);
+            box->click();
+        } // closing keeps the edit
+        ui::CompositingWindow again(&controller);
+        QCOMPARE(again.network().node(noise)->params.value(QStringLiteral("animate")).toInt(), 1);
+    }
+
+    void resetLeavesNoOldWires()
+    {
+        compositing::Graph network;
+        compositing::NodeId ids[5];
+        exampleNetwork(network, ids);
+        ui::NodeGraphView view(network);
+        QCOMPARE(view.edgeCount(), 4);
+        network.load({}); // another project: nothing is left of the old network
+        QCOMPARE(view.nodeCount(), 0);
+        int wires = 0;
+        for (QGraphicsItem *item : view.scene()->items())
+            wires += dynamic_cast<ui::EdgeItem *>(item) ? 1 : 0;
+        QCOMPARE(wires, 0);
+    }
+
+    void compositingViewsHaveButtonsForZoomPanAndCut()
+    {
+        compositing::Graph network;
+        compositing::NodeId ids[5];
+        exampleNetwork(network, ids);
+        ui::NodeGraphView view(network);
+        view.resize(600, 400);
+        view.show();
+        view.fitAll();
+        const qreal before = view.transform().m11();
+        view.zoomBy(1.25);
+        QVERIFY(view.transform().m11() > before);
+        view.zoomBy(0.8);
+        QVERIFY(qAbs(view.transform().m11() - before) < 1e-6);
+        // Pan mode: the left button moves the view instead of selecting.
+        view.setMode(ui::NodeGraphView::Mode::Pan);
+        const QPointF centerBefore = view.mapToScene(view.viewport()->rect().center());
+        QTest::mousePress(view.viewport(), Qt::LeftButton, {}, QPoint(20, 20));
+        QTest::mouseMove(view.viewport(), QPoint(60, 50));
+        QTest::mouseRelease(view.viewport(), Qt::LeftButton, {}, QPoint(60, 50));
+        QVERIFY(view.mapToScene(view.viewport()->rect().center()) != centerBefore);
+        // Cut mode: a line across a wire cuts it, without Shift.
+        view.setMode(ui::NodeGraphView::Mode::Cut);
+        QCOMPARE(view.edgeCount(), 4);
+        ui::EdgeItem *wire = nullptr;
+        for (QGraphicsItem *item : view.scene()->items())
+            if (auto *e = dynamic_cast<ui::EdgeItem *>(item))
+                wire = e;
+        QVERIFY(wire);
+        const QPointF mid = wire->path().pointAtPercent(0.5);
+        const QPoint a = view.mapFromScene(mid + QPointF(0, -30)), b = view.mapFromScene(mid + QPointF(0, 30));
+        QTest::mousePress(view.viewport(), Qt::LeftButton, {}, a);
+        QTest::mouseMove(view.viewport(), (a + b) / 2);
+        QTest::mouseMove(view.viewport(), b);
+        QTest::mouseRelease(view.viewport(), Qt::LeftButton, {}, b);
+        QVERIFY(view.edgeCount() < 4);
+
+        ui::ImagePreview preview;
+        preview.resize(400, 300);
+        QImage image(200, 100, QImage::Format_ARGB32_Premultiplied);
+        image.fill(Qt::white);
+        preview.setImage(image);
+        preview.zoomBy(2);
+        QCOMPARE(preview.zoom(), 2.0);
+    }
+
     void nodeColorIsPickedWithoutBlocking()
     {
         compositing::Graph network;
