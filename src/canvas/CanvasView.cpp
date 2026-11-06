@@ -108,7 +108,9 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
                 // Only a drawing shown at the current frame changes the frame; one of another frame (a
                 // transform of a whole cel tells of every one of them) at most the onion skin, painted over it.
                 const doc::Cel *cel = m_document->document().cel(celId);
-                if (cel && cel->timing().drawingAt(m_document->currentFrame()) == drawing)
+                // doc::kNoId: a change of the cel itself (its opacity, say), which every drawing of it shows.
+                const doc::DrawingId shown = cel ? cel->timing().drawingAt(m_document->currentFrame()) : doc::kNoId;
+                if (cel && shown != doc::kNoId && (drawing == doc::kNoId || shown == drawing))
                     renderDocumentRect(rect);
                 else if (m_toolState->onionSkin().enabled)
                     update();

@@ -148,6 +148,29 @@ private slots:
 
     // Dragging the opacity slider shows the opacity on the canvas as it goes (for a layer and for a cel),
     // and the drag is one undo step.
+    // The cel's opacity, moved with the slider, changes the picture on the canvas as it moves (the layer's did).
+    void celOpacityPreviewRedrawsTheCanvas()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        QImage red(40, 40, QImage::Format_ARGB32);
+        red.fill(Qt::red);
+        controller.importImage(red, QStringLiteral("x"));
+        canvas::CanvasView view(&state, &controller);
+        const doc::CelId id = controller.currentCel();
+        const QPoint inside(controller.document().width() / 2, controller.document().height() / 2); // the image is centered
+        const QRgb opaque = view.documentImage().pixel(inside);
+        QCOMPARE(qRed(opaque), 255);
+        QCOMPARE(qGreen(opaque), 0); // red on the white paper
+        doc::CelProperties shown = controller.document().cel(id)->properties();
+        shown.opacity = 0.3f;
+        QVERIFY(controller.previewCelProperties(id, shown));
+        QVERIFY(qGreen(view.documentImage().pixel(inside)) > 100); // paler already, nothing recorded
+        shown.opacity = 1.0f;
+        QVERIFY(controller.previewCelProperties(id, shown));
+        QCOMPARE(view.documentImage().pixel(inside), opaque);
+    }
+
     void opacitySliderPreviewsWhileDragged()
     {
         ui::MainWindow window;
