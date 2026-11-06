@@ -4731,6 +4731,11 @@ private slots:
         QCOMPARE(canvas.cursor().shape(), Qt::BitmapCursor);
         state.setActiveTool(tools::ToolId::Fill);
         QVERIFY(canvas.cursor().shape() != Qt::BitmapCursor || !canvas.cursor().pixmap().isNull());
+        // The zoom tool has a magnifying glass of its own (not the arrows of a horizontal resize).
+        state.setActiveTool(tools::ToolId::Zoom);
+        QCOMPARE(canvas.cursor().shape(), Qt::BitmapCursor);
+        QVERIFY(!canvas.cursor().pixmap().isNull());
+        QCOMPARE(canvas.cursor().hotSpot(), QPoint(13, 13));
         // Something else changed the cursor of the window (a dock separator, a panel): the pen or mouse seen on the
         // canvas puts the canvas' own back, without waiting for the next enter.
         QWindow *handle = canvas.window()->windowHandle();

@@ -41,6 +41,35 @@ using tools::ToolState;
 
 namespace {
 
+// A magnifying glass with a plus, for the zoom tool (Qt has no cursor of the kind). Drawn in code, white
+// outlined in black so it shows on any paper; the hotspot is the center of the lens.
+QCursor zoomCursor()
+{
+    static const QCursor cursor = [] {
+        constexpr int size = 32;
+        QPixmap pixmap(size, size);
+        pixmap.fill(Qt::transparent);
+        QPainter p(&pixmap);
+        p.setRenderHint(QPainter::Antialiasing);
+        const QPointF center(13, 13);
+        constexpr double radius = 8.5;
+        const QPointF from = center + QPointF(6.4, 6.4), to(28, 28);
+        for (const auto &[color, extra] : {std::pair{QColor(0, 0, 0), 2.4}, std::pair{QColor(255, 255, 255), 0.0}}) {
+            p.setPen(QPen(color, 1.8 + extra, Qt::SolidLine, Qt::RoundCap));
+            p.setBrush(Qt::NoBrush);
+            p.drawEllipse(center, radius, radius);
+            p.setPen(QPen(color, 3.4 + extra, Qt::SolidLine, Qt::RoundCap));
+            p.drawLine(from, to); // the handle
+            p.setPen(QPen(color, 1.6 + extra, Qt::SolidLine, Qt::RoundCap));
+            p.drawLine(center - QPointF(4, 0), center + QPointF(4, 0)); // the plus
+            p.drawLine(center - QPointF(0, 4), center + QPointF(0, 4));
+        }
+        p.end();
+        return QCursor(pixmap, 13, 13);
+    }();
+    return cursor;
+}
+
 // A cursor that shows nothing. Qt::BlankCursor is not honoured everywhere
 // (some backends fall back to the arrow), a transparent image is.
 QCursor invisibleCursor()
@@ -1252,7 +1281,7 @@ void CanvasView::updateCursor()
     if (panKeyHeld() || m_toolState->activeTool() == ToolId::Hand)
         setCursor(Qt::OpenHandCursor);
     else if (m_toolState->activeTool() == ToolId::Zoom)
-        setCursor(Qt::SizeHorCursor);
+        setCursor(zoomCursor());
     else if (picksColor())
         setCursor(Qt::CrossCursor);
     else if (ToolState::isPaintTool(m_toolState->activeTool()) && Preferences::instance().brushOutline())
