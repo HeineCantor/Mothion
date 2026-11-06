@@ -28,6 +28,7 @@
 #include "ui/SelectionBar.h"
 #include "ui/PuppetBar.h"
 #include "ui/ShapeBar.h"
+#include "ui/Shortcuts.h"
 #include "ui/TransformBar.h"
 #include "ui/panels/BlendModes.h"
 #include "ui/panels/BrushSizePanel.h"
@@ -4517,6 +4518,55 @@ private slots:
         QVERIFY(alpha(1200, 540) > 0); // drawn at the release, not left for later
         QCOMPARE(alpha(1100, 540), 0);
         tool.cancel();
+    }
+
+    // The keys of the commands live in Shortcuts: defaults, the person's own on top (saved), conflicts, and what
+    // is bound follows a change.
+    void shortcutsAreRemappable()
+    {
+        ui::Shortcuts &keys = ui::Shortcuts::instance();
+        keys.resetAll();
+        const QString brush = QStringLiteral("tool.brush");
+        QCOMPARE(keys.key(brush), QKeySequence(Qt::Key_B));
+        QVERIFY(!keys.isCustom(brush));
+        for (const ui::ShortcutCommand &c : keys.commands()) // every command has a name and a group
+            QVERIFY(!c.text.isEmpty() && !c.category.isEmpty());
+        QCOMPARE(keys.conflictFor(QKeySequence(Qt::Key_B), QStringLiteral("tool.eraser")), brush);
+        QCOMPARE(keys.conflictFor(QKeySequence(Qt::Key_B), brush), QString()); // its own key is no conflict
+        QVERIFY(keys.conflictFor(QKeySequence(Qt::Key_F9), brush).isEmpty());
+
+        QAction action;
+        keys.bind(&action, QStringLiteral("file.export"));
+        QCOMPARE(action.shortcuts(), QList<QKeySequence>{QKeySequence(Qt::CTRL | Qt::Key_E)});
+        QSignalSpy changed(&keys, &ui::Shortcuts::changed);
+        keys.setKeys(QStringLiteral("file.export"), {QKeySequence(Qt::CTRL | Qt::Key_F9), QKeySequence(Qt::Key_F9)});
+        QCOMPARE(changed.count(), 1);
+        QVERIFY(keys.isCustom(QStringLiteral("file.export")));
+        QCOMPARE(action.shortcuts().size(), 2); // the bound action followed
+        QCOMPARE(keys.conflictFor(QKeySequence(Qt::Key_F9), brush), QStringLiteral("file.export"));
+
+        keys.setKeys(QStringLiteral("file.export"), {}); // no keys at all, kept
+        QVERIFY(keys.isCustom(QStringLiteral("file.export")) && action.shortcuts().isEmpty());
+        keys.setKeys(QStringLiteral("file.export"), keys.command(QStringLiteral("file.export"))->defaults);
+        QVERIFY(!keys.isCustom(QStringLiteral("file.export"))); // the defaults again: nothing kept
+        QCOMPARE(action.shortcuts().size(), 1);
+
+        // A tool's key: the palette takes the new one.
+        tools::ToolState state;
+        ui::ToolPalettePanel palette(&state);
+        palette.show();
+        palette.activateWindow();
+        QVERIFY(QTest::qWaitForWindowActive(&palette));
+        state.setActiveTool(tools::ToolId::Hand);
+        QTest::keyClick(&palette, Qt::Key_B);
+        QCOMPARE(state.activeTool(), tools::ToolId::Brush); // the default key works
+        keys.setKeys(brush, {QKeySequence(Qt::Key_J)});
+        state.setActiveTool(tools::ToolId::Hand);
+        QTest::keyClick(&palette, Qt::Key_B);
+        QCOMPARE(state.activeTool(), tools::ToolId::Hand); // not any more
+        QTest::keyClick(&palette, Qt::Key_J);
+        QCOMPARE(state.activeTool(), tools::ToolId::Brush);
+        keys.resetAll();
     }
 
     void largeImagesAreScaledToFit()

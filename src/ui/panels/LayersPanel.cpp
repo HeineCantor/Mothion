@@ -9,6 +9,7 @@
 #include "document/DocumentController.h"
 #include "tools/ToolState.h"
 #include "ui/IconFactory.h"
+#include "ui/Shortcuts.h"
 #include "ui/panels/BlendModes.h"
 
 #include <QComboBox>
@@ -372,7 +373,9 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     m_tree->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(m_tree, &QWidget::customContextMenuRequested, this, &LayersPanel::showContextMenu);
     // Delete in the tree: the same as the bin.
-    auto *remove = new QShortcut(QKeySequence::Delete, m_tree, this, [this] {
+    auto *remove = new QShortcut(m_tree);
+    Shortcuts::instance().bind(remove, QStringLiteral("layers.delete"));
+    connect(remove, &QShortcut::activated, this, [this] {
         if (m_remove->isEnabled())
             removeSelected();
     });

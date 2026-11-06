@@ -16,6 +16,7 @@
 #include "ui/SelectionBar.h"
 #include "ui/PuppetBar.h"
 #include "ui/ShapeBar.h"
+#include "ui/Shortcuts.h"
 #include "ui/TransformBar.h"
 #include "ui/Theme.h"
 #include "ui/panels/BrushSizePanel.h"
@@ -164,18 +165,19 @@ MainWindow::MainWindow(QWidget *parent)
 
 void MainWindow::createCommandBar()
 {
-    auto make = [this](IconId id, const QString &text, QKeySequence::StandardKey key, auto slot) {
+    // The keys of every command come from Shortcuts, by id.
+    Shortcuts &keymap = Shortcuts::instance();
+    auto make = [this, &keymap](IconId id, const QString &text, const QString &command, auto slot) {
         auto *a = new QAction(icon(id), text, this);
-        a->setShortcut(key);
+        keymap.bind(a, command);
         connect(a, &QAction::triggered, this, slot);
         return a;
     };
-    m_fileActions << make(IconId::New, tr("New"), QKeySequence::New, &MainWindow::newDocument)
-                  << make(IconId::Open, tr("Open…"), QKeySequence::Open, &MainWindow::open)
-                  << make(IconId::Save, tr("Save"), QKeySequence::Save, &MainWindow::save);
+    m_fileActions << make(IconId::New, tr("New"), QStringLiteral("file.new"), &MainWindow::newDocument)
+                  << make(IconId::Open, tr("Open…"), QStringLiteral("file.open"), &MainWindow::open)
+                  << make(IconId::Save, tr("Save"), QStringLiteral("file.save"), &MainWindow::save);
     m_saveAsAction = new QAction(tr("Save as…"), this);
-    // Not every platform has a standard Save As key (Windows has none).
-    m_saveAsAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S));
+    keymap.bind(m_saveAsAction, QStringLiteral("file.saveAs"));
     connect(m_saveAsAction, &QAction::triggered, this, &MainWindow::saveAs);
 
     // Undo/redo run on the document's History; labels ("Undo stroke") and
@@ -183,17 +185,10 @@ void MainWindow::createCommandBar()
     // open on the canvas (puppet warp, transform) goes back through its own
     // steps first.
     QAction *undo = new QAction(icon(IconId::Undo), tr("Undo"), this);
-    undo->setShortcuts(QKeySequence::Undo); // Ctrl+Z
     QAction *redo = new QAction(icon(IconId::Redo), tr("Redo"), this);
-    // Platform standard (Ctrl+Shift+Z on Linux, Ctrl+Y on Windows) plus both everywhere.
-    QList<QKeySequence> redoKeys = QKeySequence::keyBindings(QKeySequence::Redo);
-    for (const QKeySequence &k : {QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Z), QKeySequence(Qt::CTRL | Qt::Key_Y)})
-        if (!redoKeys.contains(k))
-            redoKeys << k;
-    redo->setShortcuts(redoKeys);
     // Also from floating panels, which are windows of their own.
-    undo->setShortcutContext(Qt::ApplicationShortcut);
-    redo->setShortcutContext(Qt::ApplicationShortcut);
+    keymap.bind(undo, QStringLiteral("edit.undo"), Qt::ApplicationShortcut);
+    keymap.bind(redo, QStringLiteral("edit.redo"), Qt::ApplicationShortcut);
     connect(undo, &QAction::triggered, this, [this] {
         if (!m_canvas->undoInEdit())
             m_document->undo();
@@ -226,27 +221,23 @@ void MainWindow::createCommandBar()
 void MainWindow::createCanvasArea()
 {
     // View commands: on the canvas bar and in the View menu.
-    // Provisional shortcuts; real keymap comes with the UX design.
-    auto view = [this](IconId id, const QString &text, const QList<QKeySequence> &keys, auto slot) {
+    auto view = [this](IconId id, const QString &text, const QString &command, auto slot) {
         auto *a = new QAction(icon(id), text, this);
-        a->setShortcuts(keys);
+        Shortcuts::instance().bind(a, command);
         connect(a, &QAction::triggered, m_canvas, slot);
         return a;
     };
-    m_zoomActions << view(IconId::ZoomOut, tr("Zoom out"), {QKeySequence(Qt::CTRL | Qt::Key_Minus)},
-                          &canvas::CanvasView::zoomOut)
-                  << view(IconId::Zoom, tr("Zoom in"),
-                          {QKeySequence(Qt::CTRL | Qt::Key_Plus), QKeySequence(Qt::CTRL | Qt::Key_Equal)},
-                          &canvas::CanvasView::zoomIn)
-                  << view(IconId::ZoomFit, tr("Fit to window"), {QKeySequence(Qt::CTRL | Qt::Key_0)},
+    m_zoomActions << view(IconId::ZoomOut, tr("Zoom out"), QStringLiteral("view.zoomOut"), &canvas::CanvasView::zoomOut)
+                  << view(IconId::Zoom, tr("Zoom in"), QStringLiteral("view.zoomIn"), &canvas::CanvasView::zoomIn)
+                  << view(IconId::ZoomFit, tr("Fit to window"), QStringLiteral("view.fit"),
                           &canvas::CanvasView::fitToView)
-                  << view(IconId::ZoomActual, tr("Actual size"), {QKeySequence(Qt::CTRL | Qt::Key_1)},
+                  << view(IconId::ZoomActual, tr("Actual size"), QStringLiteral("view.actualSize"),
                           &canvas::CanvasView::actualSize);
-    m_rotateActions << view(IconId::RotateLeft, tr("Rotate left"), {QKeySequence(Qt::CTRL | Qt::Key_Comma)},
+    m_rotateActions << view(IconId::RotateLeft, tr("Rotate left"), QStringLiteral("view.rotateLeft"),
                             &canvas::CanvasView::rotateLeft)
-                    << view(IconId::RotateRight, tr("Rotate right"), {QKeySequence(Qt::CTRL | Qt::Key_Period)},
+                    << view(IconId::RotateRight, tr("Rotate right"), QStringLiteral("view.rotateRight"),
                             &canvas::CanvasView::rotateRight)
-                    << view(IconId::RotateReset, tr("Reset rotation"), {QKeySequence(Qt::CTRL | Qt::Key_Slash)},
+                    << view(IconId::RotateReset, tr("Reset rotation"), QStringLiteral("view.rotateReset"),
                             &canvas::CanvasView::resetRotation);
 
     // Clear: enabled only when the current drawing has pixels and may be changed.
@@ -317,28 +308,30 @@ void MainWindow::createMenus()
     file->addAction(tr("Import image…"), this, &MainWindow::importImage);
     file->addAction(tr("Import brush (.sut)…"), this, &MainWindow::importBrush);
     file->addSeparator();
-    file->addAction(tr("Export frames…"), QKeySequence(Qt::CTRL | Qt::Key_E), this, &MainWindow::exportFrames);
+    Shortcuts &keymap = Shortcuts::instance();
+    keymap.bind(file->addAction(tr("Export frames…"), this, &MainWindow::exportFrames), QStringLiteral("file.export"));
     file->addSeparator();
-    QAction *quit = file->addAction(tr("Quit"), this, &QWidget::close);
-    quit->setShortcut(QKeySequence::Quit);
+    keymap.bind(file->addAction(tr("Quit"), this, &QWidget::close), QStringLiteral("file.quit"));
 
     QMenu *edit = menuBar()->addMenu(tr("&Edit"));
     edit->addActions(m_editActions);
     edit->addSeparator();
     edit->addAction(m_clearAction);
     edit->addSeparator();
-    edit->addAction(tr("Select all"), QKeySequence::SelectAll, m_document, &document::DocumentController::selectAll);
-    edit->addAction(tr("Deselect"), QKeySequence(Qt::CTRL | Qt::Key_D), m_document,
-                    &document::DocumentController::clearSelection);
-    edit->addAction(tr("Invert selection"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_I), m_document,
-                    &document::DocumentController::invertSelection);
+    keymap.bind(edit->addAction(tr("Select all"), m_document, &document::DocumentController::selectAll),
+                QStringLiteral("edit.selectAll"));
+    keymap.bind(edit->addAction(tr("Deselect"), m_document, &document::DocumentController::clearSelection),
+                QStringLiteral("edit.deselect"));
+    keymap.bind(edit->addAction(tr("Invert selection"), m_document, &document::DocumentController::invertSelection),
+                QStringLiteral("edit.invertSelection"));
     edit->addSeparator();
-    edit->addAction(tr("Cut"), QKeySequence::Cut, this, [this] { copyPixels(true); });
-    edit->addAction(tr("Copy"), QKeySequence::Copy, this, [this] { copyPixels(false); });
-    edit->addAction(tr("Paste"), QKeySequence::Paste, this, &MainWindow::pastePixels);
+    keymap.bind(edit->addAction(tr("Cut"), this, [this] { copyPixels(true); }), QStringLiteral("edit.cut"));
+    keymap.bind(edit->addAction(tr("Copy"), this, [this] { copyPixels(false); }), QStringLiteral("edit.copy"));
+    keymap.bind(edit->addAction(tr("Paste"), this, &MainWindow::pastePixels), QStringLiteral("edit.paste"));
     edit->addSeparator();
-    edit->addAction(icon(IconId::Transform), tr("Transform"), QKeySequence(Qt::CTRL | Qt::Key_T), this,
-                    [this] { m_toolState->setActiveTool(tools::ToolId::Transform); });
+    keymap.bind(edit->addAction(icon(IconId::Transform), tr("Transform"), this,
+                                [this] { m_toolState->setActiveTool(tools::ToolId::Transform); }),
+                QStringLiteral("edit.transform"));
 
     m_viewMenu = menuBar()->addMenu(tr("&View"));
     m_viewMenu->addActions(m_zoomActions);
@@ -347,8 +340,7 @@ void MainWindow::createMenus()
     m_viewMenu->addSeparator();
     QAction *debug = m_viewMenu->addAction(tr("Input debug overlay"));
     debug->setCheckable(true);
-    debug->setShortcut(QKeySequence(Qt::Key_F12));
-    debug->setShortcutContext(Qt::ApplicationShortcut); // also when a floating panel has focus
+    keymap.bind(debug, QStringLiteral("view.debugOverlay"), Qt::ApplicationShortcut); // also from a floating panel
     connect(debug, &QAction::toggled, m_canvas, &canvas::CanvasView::setDebugOverlayVisible);
 
     QMenu *animation = menuBar()->addMenu(tr("&Animation"));
@@ -368,20 +360,22 @@ void MainWindow::createMenus()
         m_document->setCurrentFrame(
             std::clamp(m_document->currentFrame() + by, 0, m_document->document().frameCount() - 1));
     };
-    animation->addAction(tr("Previous time slot"), QKeySequence(Qt::Key_Comma), this, [step] { step(-1); });
-    animation->addAction(tr("Next time slot"), QKeySequence(Qt::Key_Period), this, [step] { step(+1); });
+    keymap.bind(animation->addAction(tr("Previous time slot"), this, [step] { step(-1); }),
+                QStringLiteral("anim.previousSlot"));
+    keymap.bind(animation->addAction(tr("Next time slot"), this, [step] { step(+1); }),
+                QStringLiteral("anim.nextSlot"));
     // Over holds and empty slots, to where the current cel's frames start.
-    animation->addAction(tr("Previous frame"), QKeySequence(Qt::SHIFT | Qt::Key_Comma), this,
-                         [this] { m_document->stepToFrame(-1); });
-    animation->addAction(tr("Next frame"), QKeySequence(Qt::SHIFT | Qt::Key_Period), this,
-                         [this] { m_document->stepToFrame(+1); });
+    keymap.bind(animation->addAction(tr("Previous frame"), this, [this] { m_document->stepToFrame(-1); }),
+                QStringLiteral("anim.previousFrame"));
+    keymap.bind(animation->addAction(tr("Next frame"), this, [this] { m_document->stepToFrame(+1); }),
+                QStringLiteral("anim.nextFrame"));
     animation->addSeparator();
     // The hold of the frame at the current point, one frame longer or shorter;
     // the frames after it move along.
     QAction *longer = animation->addAction(tr("Lengthen frame"), this, [this] { m_document->changeCurrentHold(+1); });
-    longer->setShortcuts({QKeySequence(Qt::Key_Plus), QKeySequence(Qt::KeypadModifier | Qt::Key_Plus)});
+    keymap.bind(longer, QStringLiteral("anim.lengthen"));
     QAction *shorter = animation->addAction(tr("Shorten frame"), this, [this] { m_document->changeCurrentHold(-1); });
-    shorter->setShortcuts({QKeySequence(Qt::Key_Minus), QKeySequence(Qt::KeypadModifier | Qt::Key_Minus)});
+    keymap.bind(shorter, QStringLiteral("anim.shorten"));
 
     QMenu *window = menuBar()->addMenu(tr("&Window"));
     for (PanelDock *dock : m_dockLayout->docks())

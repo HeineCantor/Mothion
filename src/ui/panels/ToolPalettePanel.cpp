@@ -1,6 +1,7 @@
 #include "ui/panels/ToolPalettePanel.h"
 
 #include "ui/IconFactory.h"
+#include "ui/Shortcuts.h"
 #include "ui/panels/BrushSizePanel.h"
 
 #include <QAbstractButton>
@@ -165,29 +166,29 @@ ToolPalettePanel::ToolPalettePanel(tools::ToolState *state, QWidget *parent)
     {
         ToolId tool;
         IconId icon;
-        QKeySequence shortcut;
         bool button = true; // false: a key only
+        // The key is the command's in Shortcuts, "tool.brush"...
     };
     // The groups of the palette, top to bottom, a line between them.
     const std::vector<std::vector<Entry>> groups = {
         {   // drawing
-            {ToolId::Brush, IconId::Brush, QKeySequence(Qt::Key_B)},
-            {ToolId::Eraser, IconId::Eraser, QKeySequence(Qt::Key_E)},
-            {ToolId::Eyedropper, IconId::Eyedropper, QKeySequence(Qt::Key_I)},
-            {ToolId::Blend, IconId::Blend, QKeySequence(Qt::Key_U)},
-            {ToolId::Liquify, IconId::Liquify, QKeySequence(Qt::Key_Q)},
-            {ToolId::Shape, IconId::Shape, QKeySequence(Qt::Key_S)},
+            {ToolId::Brush, IconId::Brush},
+            {ToolId::Eraser, IconId::Eraser},
+            {ToolId::Eyedropper, IconId::Eyedropper},
+            {ToolId::Blend, IconId::Blend},
+            {ToolId::Liquify, IconId::Liquify},
+            {ToolId::Shape, IconId::Shape},
         },
         {   // selection and fill
-            {ToolId::RectSelect, IconId::RectSelect, QKeySequence(Qt::Key_M)}, // the selection tool
-            {ToolId::LassoSelect, IconId::LassoSelect, QKeySequence(Qt::Key_L), false},
-            {ToolId::Fill, IconId::Fill, QKeySequence(Qt::Key_G)},
+            {ToolId::RectSelect, IconId::RectSelect}, // the selection tool
+            {ToolId::LassoSelect, IconId::LassoSelect, false},
+            {ToolId::Fill, IconId::Fill},
         },
         {   // general
-            {ToolId::Hand, IconId::Hand, QKeySequence(Qt::Key_H)},
-            {ToolId::Zoom, IconId::Zoom, QKeySequence(Qt::Key_Z)},
-            {ToolId::Move, IconId::Move, QKeySequence(Qt::Key_V)},
-            {ToolId::Puppet, IconId::Puppet, QKeySequence(Qt::Key_P)},
+            {ToolId::Hand, IconId::Hand},
+            {ToolId::Zoom, IconId::Zoom},
+            {ToolId::Move, IconId::Move},
+            {ToolId::Puppet, IconId::Puppet},
         },
     };
 
@@ -201,12 +202,16 @@ ToolPalettePanel::ToolPalettePanel(tools::ToolState *state, QWidget *parent)
         for (const Entry &e : groups[g]) {
             // The key is a shortcut of its own, not the button's: pressed while the
             // eraser is active it goes back to the previous tool, a click does not.
-            auto *shortcut = new QShortcut(e.shortcut, this);
+            const QString command = Shortcuts::toolCommand(int(e.tool));
+            auto *shortcut = new QShortcut(this);
+            Shortcuts::instance().bind(shortcut, command);
             shortcut->setAutoRepeat(false); // a held key selects once
             const bool toggles = e.tool == ToolId::Eraser;
             const bool selection = e.tool == ToolId::RectSelect && e.button;
             connect(shortcut, &QShortcut::activated, this,
-                    [this, state, key = e.shortcut[0].key(), tool = e.tool, toggles, selection] {
+                    [this, state, command, tool = e.tool, toggles, selection] {
+                const QKeySequence now = Shortcuts::instance().key(command);
+                const int key = now.isEmpty() ? 0 : int(now[0].key());
                 const ToolId before = state->activeTool();
                 if (toggles)
                     state->toggleTool(tool);
@@ -225,18 +230,31 @@ ToolPalettePanel::ToolPalettePanel(tools::ToolState *state, QWidget *parent)
             button->setCheckable(true);
             button->setAutoRaise(true);
             const QString name = selection ? tr("Selection") : tools::ToolState::displayName(e.tool);
-            button->setToolTip(toggles ? tr("%1 (%2; again to go back)").arg(name, e.shortcut.toString())
-                                       : QStringLiteral("%1 (%2)").arg(name, e.shortcut.toString()));
+            // The tip shows the key now, and follows a change of it.
+            auto tip = [button, name, command, toggles] {
+                const QString key = Shortcuts::instance().key(command).toString(QKeySequence::NativeText);
+                button->setToolTip(key.isEmpty() ? name
+                                   : toggles     ? tr("%1 (%2; again to go back)").arg(name, key)
+                                                 : QStringLiteral("%1 (%2)").arg(name, key));
+            };
+            tip();
+            connect(&Shortcuts::instance(), &Shortcuts::changed, button, [tip, command](const QString &which) {
+                if (which == command)
+                    tip();
+            });
             m_group->addButton(button, static_cast<int>(e.tool));
             layout->addButton(button);
         }
     }
 
-    auto *swap = new QShortcut(QKeySequence(Qt::Key_X), this);
+    auto *swap = new QShortcut(this);
+    Shortcuts::instance().bind(swap, QStringLiteral("color.switch"));
     connect(swap, &QShortcut::activated, state, &tools::ToolState::switchColor);
-    auto *smaller = new QShortcut(QKeySequence(Qt::Key_BracketLeft), this);
+    auto *smaller = new QShortcut(this);
+    Shortcuts::instance().bind(smaller, QStringLiteral("brush.smaller"));
     connect(smaller, &QShortcut::activated, this, [this] { stepSize(-1); });
-    auto *bigger = new QShortcut(QKeySequence(Qt::Key_BracketRight), this);
+    auto *bigger = new QShortcut(this);
+    Shortcuts::instance().bind(bigger, QStringLiteral("brush.bigger"));
     connect(bigger, &QShortcut::activated, this, [this] { stepSize(+1); });
     qApp->installEventFilter(this); // the release of a held tool key, wherever the focus is
 

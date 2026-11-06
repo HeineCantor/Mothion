@@ -5,6 +5,7 @@
 #include "core/document/commands/TimingCommands.h"
 #include "document/DocumentController.h"
 #include "ui/IconFactory.h"
+#include "ui/Shortcuts.h"
 
 #include <QApplication>
 #include <QClipboard>
@@ -677,10 +678,10 @@ bool TimelineView::event(QEvent *event)
 {
     if (event->type() == QEvent::ShortcutOverride) {
         const auto *key = static_cast<QKeyEvent *>(event);
-        const auto mods = key->modifiers() & ~Qt::KeypadModifier;
-        const bool copy = key->key() == Qt::Key_C && mods == Qt::ControlModifier;
-        const bool paste = key->key() == Qt::Key_V
-                           && (mods == Qt::ControlModifier || mods == (Qt::ControlModifier | Qt::ShiftModifier));
+        const Shortcuts &keymap = Shortcuts::instance();
+        const bool copy = keymap.matches(QStringLiteral("edit.copy"), key);
+        const bool paste = keymap.matches(QStringLiteral("edit.paste"), key)
+                           || keymap.matches(QStringLiteral("timeline.pasteCopies"), key);
         // The timeline's own when it has blocks to copy, or blocks were copied last; else the window's copy and
         // paste (the pixels of the drawing) work from here too, as from the canvas.
         if ((copy && !m_selected.empty()) || (paste && m_blocksNewer)) {
@@ -739,15 +740,15 @@ void TimelineView::contextMenuEvent(QContextMenuEvent *event)
     }
     menu.addSeparator();
     QAction *copy = menu.addAction(tr("Copy frames"), this, &TimelineView::copyFrames);
-    copy->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_C));
+    copy->setShortcut(Shortcuts::instance().key(QStringLiteral("edit.copy")));
     copy->setEnabled(!m_selected.empty());
     const bool fits = canPasteFrames();
     QAction *paste = menu.addAction(tr("Paste frames"), this, [this] { pasteFrames(false); });
-    paste->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_V));
+    paste->setShortcut(Shortcuts::instance().key(QStringLiteral("edit.paste")));
     paste->setToolTip(tr("The same drawings again: a change to one shows on both"));
     paste->setEnabled(fits);
     QAction *pasteCopies = menu.addAction(tr("Paste frames as copies"), this, [this] { pasteFrames(true); });
-    pasteCopies->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_V));
+    pasteCopies->setShortcut(Shortcuts::instance().key(QStringLiteral("timeline.pasteCopies")));
     pasteCopies->setEnabled(fits);
     menu.setToolTipsVisible(true);
     menu.exec(event->globalPos());
@@ -766,6 +767,18 @@ void TimelineView::wheelEvent(QWheelEvent *event)
 
 void TimelineView::keyPressEvent(QKeyEvent *event)
 {
+    // Copy and paste of blocks: the window's keys for those commands (see event()).
+    const Shortcuts &keymap = Shortcuts::instance();
+    if (keymap.matches(QStringLiteral("edit.copy"), event)) {
+        copyFrames();
+        return;
+    }
+    const bool paste = keymap.matches(QStringLiteral("edit.paste"), event);
+    if (paste || keymap.matches(QStringLiteral("timeline.pasteCopies"), event)) {
+        if (!pasteFrames(!paste))
+            QApplication::beep(); // no room here
+        return;
+    }
     const int frame = m_document->currentFrame();
     const doc::Document &d = m_document->document();
     const int celIndex = d.indexOf(m_document->currentCel());
@@ -781,17 +794,6 @@ void TimelineView::keyPressEvent(QKeyEvent *event)
     case Qt::Key_Down:
         if (celIndex > 0)
             m_document->setCurrentCel(d.celAt(celIndex - 1).id());
-        break;
-    case Qt::Key_C:
-    case Qt::Key_V:
-        if (!(event->modifiers() & Qt::ControlModifier)) {
-            QAbstractScrollArea::keyPressEvent(event);
-            return;
-        }
-        if (event->key() == Qt::Key_C)
-            copyFrames();
-        else if (!pasteFrames(event->modifiers() & Qt::ShiftModifier))
-            QApplication::beep(); // no room here
         break;
     case Qt::Key_Escape: // a drag dropped, else the selection cleared
         if (m_frameDrag) {
