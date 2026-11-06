@@ -955,6 +955,7 @@ private slots:
         canvas::MoveTool tool(&controller, [](const QString &) {});
         tool.press({0, 0}, Qt::NoModifier);
         tool.move({40, 7}, Qt::ShiftModifier); // horizontal only
+        QCoreApplication::processEvents(); // the picture follows on the next turn of the event loop
         QCOMPARE(pixels.pixel(1000, 540), doc::Pixel(0xff00ff00));
         tool.cancel();
         QCOMPARE(pixels.pixel(960, 540), doc::Pixel(0xff00ff00));
@@ -1037,6 +1038,7 @@ private slots:
         canvas::MoveTool tool(&controller, [](const QString &) {});
         tool.press({0, 0}, Qt::NoModifier);
         tool.move({0, 50}, Qt::NoModifier);
+        QCoreApplication::processEvents(); // the picture follows on the next turn of the event loop
         QCOMPARE(controller.selection().boundingRect(), QRectF(900, 550, 60, 100)); // live
         tool.release({0, 100}, Qt::NoModifier);
         QCOMPARE(controller.selection().boundingRect(), QRectF(900, 600, 60, 100));
@@ -1051,6 +1053,7 @@ private slots:
 
         tool.press({0, 0}, Qt::NoModifier); // a cancelled move puts the selection back
         tool.move({30, 0}, Qt::NoModifier);
+        QCoreApplication::processEvents(); // the picture follows on the next turn of the event loop
         QCOMPARE(controller.selection().boundingRect(), QRectF(930, 600, 60, 100));
         tool.cancel();
         QCOMPARE(controller.selection().boundingRect(), QRectF(900, 600, 60, 100));
@@ -1223,6 +1226,30 @@ private slots:
         QCOMPARE(qAlpha(pixel(915, 540)), 0);
         tool.commit();
         QCOMPARE(controller.undoText(), QStringLiteral("Undo transform"));
+    }
+
+    // A burst of pen samples is drawn once, at the last position, and the end of the drag shows it at once.
+    void moveToolDrawsOnceForABurstOfSamples()
+    {
+        document::DocumentController controller;
+        QImage image(60, 60, QImage::Format_ARGB32_Premultiplied);
+        image.fill(Qt::red);
+        QVERIFY(controller.pasteImage(image, QPoint(100, 100)));
+        controller.setSelection({});
+        int painted = 0;
+        connect(&controller, &document::DocumentController::pixelsChanged, this, [&painted] { ++painted; });
+        canvas::MoveTool tool(&controller, [](const QString &) {});
+        tool.press({110, 110}, Qt::NoModifier);
+        painted = 0;
+        for (int i = 1; i <= 50; ++i)
+            tool.move({110.0 + i, 110.0}, Qt::NoModifier);
+        QCOMPARE(painted, 0); // nothing drawn until the event loop turns
+        QCoreApplication::processEvents();
+        QCOMPARE(painted, 1);
+        tool.move({200, 110}, Qt::NoModifier);
+        tool.release({200, 110}, Qt::NoModifier); // no wait at the end
+        const doc::Cel &cel = *controller.document().cel(controller.currentCel());
+        QCOMPARE(cel.drawingAt(controller.currentFrame())->layers.front().image.pixel(240, 130), doc::Pixel(0xffff0000));
     }
 
     // An image bigger than the page is pasted whole: the part off the page is kept and selected, so moving it

@@ -12,6 +12,16 @@ MoveTool::MoveTool(document::DocumentController *document, std::function<void(co
     : m_document(document)
     , m_status(std::move(status))
 {
+    m_timer.setSingleShot(true);
+    m_timer.setInterval(0);
+    QObject::connect(&m_timer, &QTimer::timeout, [this] { flush(); });
+}
+
+void MoveTool::flush()
+{
+    m_timer.stop();
+    if (m_session)
+        moveTo(m_wanted);
 }
 
 void MoveTool::press(const QPointF &docPos, Qt::KeyboardModifiers)
@@ -43,6 +53,7 @@ void MoveTool::press(const QPointF &docPos, Qt::KeyboardModifiers)
     if (mask)
         s.content = mask->bounds;
     s.start = docPos;
+    m_wanted = {};
     m_session = std::move(s);
 }
 
@@ -58,7 +69,10 @@ void MoveTool::move(const QPointF &docPos, Qt::KeyboardModifiers modifiers)
         else
             offset.setX(0);
     }
-    moveTo(offset);
+    // Only the last position of a burst of samples is drawn.
+    m_wanted = offset;
+    if (!m_timer.isActive())
+        m_timer.start();
 }
 
 void MoveTool::moveTo(QPoint offset)
@@ -87,6 +101,7 @@ void MoveTool::release(const QPointF &docPos, Qt::KeyboardModifiers modifiers)
     if (!m_session)
         return;
     move(docPos, modifiers);
+    flush();
     const Session s = std::move(*m_session);
     m_session.reset();
     // Pixels and selection in one undo step; nothing if it did not move.
@@ -98,6 +113,7 @@ void MoveTool::release(const QPointF &docPos, Qt::KeyboardModifiers modifiers)
 
 void MoveTool::cancel()
 {
+    m_timer.stop();
     if (!m_session)
         return;
     Session s = std::move(*m_session);
