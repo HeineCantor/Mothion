@@ -2,6 +2,7 @@
 
 #include "document/DocumentController.h"
 #include "io/FrameExport.h"
+#include "ui/compositing/ImagePreview.h"
 #include "ui/compositing/NodeGraphView.h"
 
 #include <QLabel>
@@ -11,44 +12,6 @@
 #include <QVBoxLayout>
 
 namespace mothion::ui {
-
-// Paints an image scaled to fit, centered on the desk color.
-class ImagePreview : public QWidget
-{
-public:
-    explicit ImagePreview(QWidget *parent)
-        : QWidget(parent)
-    {
-        setMinimumHeight(120);
-        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    }
-    void setImage(const QImage &image)
-    {
-        m_image = image;
-        update();
-    }
-    const QImage &image() const { return m_image; }
-
-protected:
-    void paintEvent(QPaintEvent *) override
-    {
-        QPainter p(this);
-        const QColor window = palette().color(QPalette::Window);
-        p.fillRect(rect(), window.lightness() < 128 ? window.lighter(135) : window.darker(115));
-        if (m_image.isNull()) {
-            p.setPen(palette().color(QPalette::PlaceholderText));
-            p.drawText(rect(), Qt::AlignCenter, tr("Nothing connected to Output"));
-            return;
-        }
-        const QSize fitted = m_image.size().scaled(size() - QSize(24, 24), Qt::KeepAspectRatio);
-        const QRect target(QPoint((width() - fitted.width()) / 2, (height() - fitted.height()) / 2), fitted);
-        p.setRenderHint(QPainter::SmoothPixmapTransform);
-        p.drawImage(target, m_image);
-    }
-
-private:
-    QImage m_image;
-};
 
 CompositingWindow::CompositingWindow(document::DocumentController *document, QWidget *parent)
     : QWidget(parent, Qt::Window)
@@ -72,7 +35,7 @@ CompositingWindow::CompositingWindow(document::DocumentController *document, QWi
     resize(1100, 700); // what restoring from maximized gives
 
     auto *hint = new QLabel(tr("Prototype: right-click to add a node, drag from a socket to connect, "
-                               "Delete removes, middle button pans, wheel zooms, F frames all."),
+                               "Delete removes, middle button pans, wheel zooms, F frames all. In the picture above: drag to move, wheel to zoom, double click to fit."),
                             this);
     hint->setContentsMargins(8, 4, 8, 4);
     hint->setEnabled(false);
@@ -227,6 +190,8 @@ void CompositingWindow::refresh()
     context.frame = m_frame;
     context.frameIndex = m_document ? m_document->currentFrame() : 0;
     context.scale = m_frameScale;
+    if (m_document)
+        context.paper = m_document->document().paperColor();
     m_preview->setImage(m_evaluator.evaluate(m_network, context));
 }
 

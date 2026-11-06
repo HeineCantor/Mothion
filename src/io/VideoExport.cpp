@@ -34,6 +34,7 @@ QImage renderFinalFrame(const doc::Document &document, int frame, compositing::E
     compositing::EvalContext context;
     context.frame = plain;
     context.frameIndex = frame;
+    context.paper = document.paperColor();
     const QImage result = evaluator.evaluate(*graph, context);
     if (result.isNull())
         return plain; // nothing wired to Output: the picture as it is

@@ -73,12 +73,13 @@ struct ParamInfo
 
 // What a node may look at while it works: the frame the Frame nodes hold, which frame of the animation it is, and
 // how big that picture is next to the document (a preview is smaller): sizes in pixels, like a blur's radius, are
-// given for the document and are to be multiplied by `scale`.
+// given for the document and are to be multiplied by `scale`. `paper` is the document's background color.
 struct EvalContext
 {
     QImage frame;
     int frameIndex = 0;
     double scale = 1.0;
+    QRgb paper = 0xffffffff; // the color of the page (ARGB): what some nodes leave alone
 };
 
 inline QString nodeTr(const char *text) { return QCoreApplication::translate("Compositing", text); }

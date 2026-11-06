@@ -4,6 +4,7 @@
 #include "compositing/nodes/ChromaticAberrationNode.h"
 #include "compositing/nodes/ColorNode.h"
 #include "compositing/nodes/FrameNode.h"
+#include "compositing/nodes/GlowNode.h"
 #include "compositing/nodes/MergeNode.h"
 #include "compositing/nodes/OutputNode.h"
 #include "compositing/nodes/SensorNoiseNode.h"
@@ -17,6 +18,7 @@ NodeRegistry::NodeRegistry()
     m_types.push_back(std::make_unique<BlurNode>());
     m_types.push_back(std::make_unique<ChromaticAberrationNode>());
     m_types.push_back(std::make_unique<SensorNoiseNode>());
+    m_types.push_back(std::make_unique<GlowNode>());
     m_types.push_back(std::make_unique<MergeNode>());
     m_types.push_back(std::make_unique<ColorNode>());
     m_types.push_back(std::make_unique<OutputNode>());

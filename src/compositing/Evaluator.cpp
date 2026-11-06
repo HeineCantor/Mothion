@@ -38,6 +38,7 @@ Evaluator::Result Evaluator::compute(const Graph &graph, NodeId id, const EvalCo
     combine(signature, node->stamp);
     combine(signature, static_cast<quint64>(context.frame.width()) << 32 | static_cast<quint64>(context.frame.height()));
     combine(signature, static_cast<quint64>(context.scale * 1e6));
+    combine(signature, static_cast<quint64>(context.paper));
     if (type->dependsOnFrame())
         combine(signature, static_cast<quint64>(context.frame.cacheKey()));
     if (type->usesFrameIndex(node->params))

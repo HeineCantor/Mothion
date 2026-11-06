@@ -27,6 +27,7 @@
 #include "compositing/Evaluator.h"
 #include "io/VideoExport.h"
 #include "ui/compositing/CompositingWindow.h"
+#include "ui/compositing/ImagePreview.h"
 #include "ui/compositing/NodeGraphView.h"
 #include "ui/ExportDialog.h"
 #include "ui/DiscordPresence.h"
@@ -5342,6 +5343,59 @@ private slots:
         controller.redo();
         QCOMPARE(window.network().node(blur)->params.value(QStringLiteral("radius")).toInt(), 5);
         QCOMPARE(controller.compositing().nodes.size(), size_t(5));
+    }
+
+    void compositingPreviewZoomsAndMoves()
+    {
+        ui::ImagePreview preview;
+        preview.resize(400, 300);
+        preview.show();
+        QImage image(200, 100, QImage::Format_ARGB32_Premultiplied);
+        image.fill(Qt::red);
+        preview.setImage(image);
+        QCOMPARE(preview.zoom(), 1.0); // fitted at first
+        const QPointF fittedCenter = preview.imagePointAt(QPointF(200, 150));
+        QCOMPARE(fittedCenter, QPointF(100, 50));
+
+        // The wheel zooms around the pointer: the point of the image under it stays there.
+        const QPoint pointer(300, 120);
+        const QPointF before = preview.imagePointAt(pointer);
+        QWheelEvent zoomIn(pointer, preview.mapToGlobal(pointer), {}, QPoint(0, 480), Qt::NoButton, Qt::NoModifier,
+                           Qt::NoScrollPhase, false);
+        QApplication::sendEvent(&preview, &zoomIn);
+        QVERIFY(preview.zoom() > 1.5);
+        QVERIFY(QLineF(preview.imagePointAt(pointer), before).length() < 0.01);
+        // ...and out again, to a limit.
+        for (int i = 0; i < 40; ++i) {
+            QWheelEvent out(pointer, preview.mapToGlobal(pointer), {}, QPoint(0, -1200), Qt::NoButton, Qt::NoModifier,
+                            Qt::NoScrollPhase, false);
+            QApplication::sendEvent(&preview, &out);
+        }
+        QVERIFY(preview.zoom() >= 0.1 && preview.zoom() < 0.11);
+
+        // A drag with the left button moves it (the pen does the same).
+        preview.fit();
+        QCOMPARE(preview.offset(), QPointF(0, 0));
+        QTest::mousePress(&preview, Qt::LeftButton, {}, QPoint(100, 100));
+        QTest::mouseMove(&preview, QPoint(130, 90));
+        QTest::mouseRelease(&preview, Qt::LeftButton, {}, QPoint(130, 90));
+        QCOMPARE(preview.offset(), QPointF(30, -10));
+        // Double click fits it again; Ctrl+1 shows it pixel for pixel.
+        QMouseEvent doubleClick(QEvent::MouseButtonDblClick, QPointF(200, 150), preview.mapToGlobal(QPointF(200, 150)),
+                                Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        QApplication::sendEvent(&preview, &doubleClick);
+        QCOMPARE(preview.zoom(), 1.0);
+        QCOMPARE(preview.offset(), QPointF(0, 0));
+        QTest::keyClick(&preview, Qt::Key_1, Qt::ControlModifier);
+        QVERIFY(std::abs(preview.scale() - 1.0) < 1e-9);
+        QTest::keyClick(&preview, Qt::Key_F);
+        QCOMPARE(preview.zoom(), 1.0);
+        // The same size again (the next frame) keeps the view; another size starts over.
+        QTest::keyClick(&preview, Qt::Key_1, Qt::ControlModifier);
+        preview.setImage(image.copy());
+        QVERIFY(preview.zoom() != 1.0);
+        preview.setImage(QImage(50, 50, QImage::Format_ARGB32_Premultiplied));
+        QCOMPARE(preview.zoom(), 1.0);
     }
 
     void videoFramesCarryTheCompositing()

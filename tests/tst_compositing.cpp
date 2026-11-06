@@ -208,6 +208,81 @@ private slots:
         QCOMPARE(runNode(type, clear, {{"luminance", 100}, {"chroma", 100}}), clear);
     }
 
+    // One Glow node over `input`, on a page of color `paper`.
+    static QImage runGlow(const QImage &input, const QVariantMap &settings, QRgb paper = 0xffffffff)
+    {
+        Graph g;
+        const NodeId frame = g.addNode(QStringLiteral("frame"));
+        const NodeId node = g.addNode(QStringLiteral("glow"));
+        const NodeId out = g.addNode(QStringLiteral("output"));
+        g.connect(frame, 0, node, 0);
+        g.connect(node, 0, out, 0);
+        for (auto it = settings.begin(); it != settings.end(); ++it)
+            g.setParam(node, it.key(), it.value());
+        Evaluator evaluator;
+        EvalContext context;
+        context.frame = input;
+        context.paper = paper;
+        return evaluator.evaluate(g, context);
+    }
+
+    static QImage squareOn(const QColor &background)
+    {
+        QImage image(64, 64, QImage::Format_ARGB32_Premultiplied);
+        image.fill(background);
+        for (int y = 28; y < 36; ++y)
+            for (int x = 28; x < 36; ++x)
+                image.setPixelColor(x, y, Qt::white);
+        return image;
+    }
+
+    void glowSpillsLightAroundTheBrightParts()
+    {
+        const QImage input = squareOn(Qt::black);
+        const QVariantMap settings{{"ignorePaper", 0}, {"size", 16}};
+        const QImage glow = runGlow(input, settings);
+        QCOMPARE(glow.size(), input.size());
+        const int near = glow.pixelColor(24, 32).red(), far = glow.pixelColor(2, 2).red();
+        QVERIFY(near > 10);   // light has spilled next to the square
+        QVERIFY(near > far);  // and fades with the distance
+        QCOMPARE(glow.pixelColor(32, 32), QColor(Qt::white)); // the square itself is as bright as it was
+        // Tinted: only the red channel is lit.
+        const QImage red = runGlow(input, {{"ignorePaper", 0}, {"size", 16}, {"tint", QColor(255, 0, 0)}});
+        QVERIFY(red.pixelColor(24, 32).red() > 10);
+        QCOMPARE(red.pixelColor(24, 32).green(), 0);
+        // No intensity, or nothing over the threshold: no change.
+        QCOMPARE(runGlow(input, {{"ignorePaper", 0}, {"intensity", 0}}), input);
+        QImage dim(64, 64, QImage::Format_ARGB32_Premultiplied);
+        dim.fill(QColor(100, 100, 100));
+        QCOMPARE(runGlow(dim, {{"ignorePaper", 0}, {"threshold", 90}, {"softness", 0}}), dim);
+        // A bigger Size takes the glow farther.
+        const QImage wide = runGlow(input, {{"ignorePaper", 0}, {"size", 64}});
+        QVERIFY(wide.pixelColor(8, 32).red() > glow.pixelColor(8, 32).red());
+    }
+
+    void glowCanLeaveThePaperOut()
+    {
+        QImage page(64, 64, QImage::Format_ARGB32_Premultiplied);
+        const QRgb paper = qRgb(128, 128, 128);
+        page.fill(paper);
+        // The page alone gives light, unless it is left out.
+        QVERIFY(runGlow(page, {{"threshold", 0}, {"softness", 0}, {"ignorePaper", 0}}, paper) != page);
+        QCOMPARE(runGlow(page, {{"threshold", 0}, {"softness", 0}, {"ignorePaper", 1}}, paper), page);
+        // A bright dot on it lights up its surroundings, the page's far side stays as it is.
+        page.setPixelColor(32, 32, Qt::white);
+        const QImage dot = runGlow(page, {{"threshold", 80}, {"ignorePaper", 1}, {"size", 8}}, paper);
+        QVERIFY(dot.pixelColor(34, 32).red() > 128);
+        QCOMPARE(dot.pixelColor(0, 0), QColor(128, 128, 128));
+    }
+
+    void glowGivesAlphaToTransparentPixelsItLights()
+    {
+        const QImage glow = runGlow(squareOn(Qt::transparent), {{"ignorePaper", 0}, {"size", 16}});
+        const QColor near = glow.pixelColor(24, 32);
+        QVERIFY(near.alpha() > 0);
+        QVERIFY(near.alpha() > glow.pixelColor(2, 2).alpha());
+    }
+
     void choicesAndTogglesAreStoredAsNumbers()
     {
         Graph g;
