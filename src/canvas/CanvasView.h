@@ -188,6 +188,11 @@ private:
     void updateBrushOutline(const QPointF &newPos);
     QRectF brushOutlineRect() const; // view coordinates, at the current size and zoom
     void updateCursor();
+    // Qt applies a widget's cursor to the window when the pointer enters it, and other widgets (the dock
+    // separators of the main window, a panel) change it at other times, leaving theirs over the canvas until
+    // the next enter. Here, whenever the pen or mouse is seen on the canvas, the window gets the canvas' own
+    // cursor if it has another.
+    void syncWindowCursor();
     void viewWasChanged();
 
     tools::ToolState *m_toolState;

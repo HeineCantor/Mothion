@@ -4712,6 +4712,44 @@ private slots:
         prefs.resetAll();
     }
 
+    // With a drawing tool and the outline on, the canvas shows no system pointer (the brush's outline is the
+    // pointer); with the outline off, or another tool, it does.
+    void paintToolsHideTheSystemPointer()
+    {
+        tools::Preferences &prefs = tools::Preferences::instance();
+        prefs.resetAll();
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        state.setActiveTool(tools::ToolId::Brush);
+        QCOMPARE(canvas.cursor().shape(), Qt::BitmapCursor);
+        QVERIFY(canvas.cursor().pixmap().hasAlphaChannel());
+        QCOMPARE(qAlpha(canvas.cursor().pixmap().toImage().pixel(4, 4)), 0); // transparent
+        state.setActiveTool(tools::ToolId::Eraser);
+        QCOMPARE(canvas.cursor().shape(), Qt::BitmapCursor);
+        state.setActiveTool(tools::ToolId::Fill);
+        QVERIFY(canvas.cursor().shape() != Qt::BitmapCursor || !canvas.cursor().pixmap().isNull());
+        // Something else changed the cursor of the window (a dock separator, a panel): the pen or mouse seen on the
+        // canvas puts the canvas' own back, without waiting for the next enter.
+        QWindow *handle = canvas.window()->windowHandle();
+        QVERIFY(handle);
+        state.setActiveTool(tools::ToolId::Brush);
+        handle->setCursor(Qt::SplitHCursor);
+        QTest::mouseMove(&canvas, QPoint(50, 50));
+        QCOMPARE(handle->cursor().shape(), Qt::BitmapCursor);
+        handle->setCursor(Qt::ArrowCursor);
+        QTest::mouseMove(&canvas, QPoint(60, 60));
+        QCOMPARE(handle->cursor().shape(), Qt::BitmapCursor);
+        prefs.setBrushOutline(false);
+        state.setActiveTool(tools::ToolId::Brush);
+        QCOMPARE(canvas.cursor().shape(), Qt::CrossCursor); // the pointer is back
+        prefs.setBrushOutline(true);
+        QCOMPARE(canvas.cursor().shape(), Qt::BitmapCursor);
+        prefs.resetAll();
+    }
+
     void largeImagesAreScaledToFit()
     {
         document::DocumentController controller;

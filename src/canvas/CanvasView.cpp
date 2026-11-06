@@ -20,6 +20,8 @@
 #include <QMouseEvent>
 #include <QMenu>
 #include <QPainter>
+#include <QPixmap>
+#include <QWindow>
 #include <QRandomGenerator>
 #include <QTabletEvent>
 #include <QTimer>
@@ -38,6 +40,18 @@ using tools::ToolId;
 using tools::ToolState;
 
 namespace {
+
+// A cursor that shows nothing. Qt::BlankCursor is not honoured everywhere
+// (some backends fall back to the arrow), a transparent image is.
+QCursor invisibleCursor()
+{
+    static const QCursor cursor = [] {
+        QPixmap pixmap(16, 16);
+        pixmap.fill(Qt::transparent);
+        return QCursor(pixmap, 0, 0);
+    }();
+    return cursor;
+}
 
 // How often the selection outline's black and white dashes swap.
 constexpr int kAntsIntervalMs = 200;
@@ -141,7 +155,10 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
         }
     });
     connect(m_toolState, &ToolState::toolSettingsChanged, this, [this] { updateBrushOutline(m_pointerPos); });
-    connect(&Preferences::instance(), &Preferences::changed, this, [this] { update(); }); // the outline on or off
+    connect(&Preferences::instance(), &Preferences::changed, this, [this] { // the outline on or off
+        updateCursor();
+        update();
+    });
     updateCursor();
 }
 
@@ -501,6 +518,7 @@ void CanvasView::handleSample(const PenSample &sample)
     emit sampleReceived(sample);
     m_pointerTool = sample.tool;
     m_pointerVisible = true;
+    syncWindowCursor();
     updateBrushOutline(QPointF(sample.x, sample.y));
 
     const bool busy = m_gesture.isActive() || m_stroke.has_value() || m_editTool || m_gizmo.isDragging();
@@ -1048,6 +1066,10 @@ void CanvasView::wheelEvent(QWheelEvent *event)
 
 bool CanvasView::event(QEvent *event)
 {
+    // The pointer comes back (from a panel, a floating bar over the canvas) or the window is
+    // activated again: the cursor is set again, whatever the system left there.
+    if (event->type() == QEvent::Enter || event->type() == QEvent::WindowActivate)
+        updateCursor();
     if (event->type() == QEvent::ShortcutOverride) {
         auto *key = static_cast<QKeyEvent *>(event);
         if (const CanvasTool *tool = canvasTool(); tool && key->modifiers() == Qt::NoModifier && tool->wantsKey(key->key())) {
@@ -1212,6 +1234,19 @@ void CanvasView::updateGizmoCursor()
         updateCursor();
 }
 
+void CanvasView::syncWindowCursor()
+{
+    QWindow *handle = window() ? window()->windowHandle() : nullptr;
+    if (!handle)
+        return;
+    const QCursor wanted = cursor();
+    const QCursor now = handle->cursor();
+    const bool same = now.shape() == wanted.shape()
+                      && (wanted.shape() != Qt::BitmapCursor || now.pixmap().cacheKey() == wanted.pixmap().cacheKey());
+    if (!same)
+        handle->setCursor(wanted);
+}
+
 void CanvasView::updateCursor()
 {
     if (panKeyHeld() || m_toolState->activeTool() == ToolId::Hand)
@@ -1220,6 +1255,8 @@ void CanvasView::updateCursor()
         setCursor(Qt::SizeHorCursor);
     else if (picksColor())
         setCursor(Qt::CrossCursor);
+    else if (ToolState::isPaintTool(m_toolState->activeTool()) && Preferences::instance().brushOutline())
+        setCursor(invisibleCursor()); // the brush's own outline, drawn in paintEvent(), is the cursor
     else if (const CanvasTool *tool = canvasTool())
         setCursor(tool->cursor());
     else
