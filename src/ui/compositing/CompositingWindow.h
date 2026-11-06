@@ -1,9 +1,12 @@
 #pragma once
 
 #include <QImage>
+#include <QElapsedTimer>
 #include <QPointer>
 #include <QWidget>
 
+class QLabel;
+class QSlider;
 class QSplitter;
 class QTimer;
 class QToolButton;
@@ -22,6 +25,7 @@ using compositing::MaskShape;
 
 class NodeGraphView;
 class ImagePreview;
+class RangeSlider;
 
 // The compositing panel, in its own window (maximized the first time): the
 // result of the nodes above, the node editor below. For now the only input
@@ -45,11 +49,24 @@ public:
     // Takes the frame again and runs the nodes, at once.
     void refresh();
 
+    // Plays the scene through the nodes at the document's frame rate, on a smaller picture; frames that cannot
+    // be made in time are skipped, so the speed is right. Stops at the end of the window's life or on stop().
+    void play();
+    void stop();
+    bool isPlaying() const { return m_playing; }
+    QSlider *playbar() const { return m_playbar; }
+    RangeSlider *rangeBar() const { return m_range; }
+    int framesShown() const { return m_shown; } // counted since playback started
+
 protected:
     void resizeEvent(QResizeEvent *event) override;
+    void hideEvent(QHideEvent *event) override;
 
 private:
     void scheduleRefresh();
+    void playTick();
+    void syncBars(); // the sliders follow the scene's length and the current frame
+    void updateLabels();
     void frame();
     void applyView();
     void keepView();
@@ -80,6 +97,21 @@ private:
     bool m_pending = false;     // edits not yet committed
     bool m_loading = false;     // the network is being replaced from the document: not an edit
     QTimer *m_commitTimer;      // commits a moment after the last edit
+    QTimer *m_playTimer;
+    QElapsedTimer m_playClock;
+    QToolButton *m_playButton = nullptr;
+    QLabel *m_playInfo = nullptr;
+    QSlider *m_playbar = nullptr; // the current frame
+    RangeSlider *m_range = nullptr; // the frames that play
+    QLabel *m_frameLabel = nullptr;
+    QLabel *m_rangeLabel = nullptr;
+    bool m_playing = false;
+    bool m_stepping = false; // the window itself is moving the current frame
+    int m_playFrom = 0;
+    int m_lastShown = -1;
+    int m_shown = 0;
+    qint64 m_infoAt = 0;
+    int m_infoShown = 0;
 };
 
 } // namespace mothion::ui

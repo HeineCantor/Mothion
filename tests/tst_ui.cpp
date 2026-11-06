@@ -29,6 +29,7 @@
 #include "ui/compositing/CompositingWindow.h"
 #include "ui/compositing/ImagePreview.h"
 #include "ui/compositing/NodeGraphView.h"
+#include "ui/compositing/RangeSlider.h"
 #include "ui/ExportDialog.h"
 #include "ui/DiscordPresence.h"
 #include "ui/MainWindow.h"
@@ -5349,6 +5350,65 @@ private slots:
         controller.undo();
         QVERIFY(controller.compositing().nodes.empty());
         QCOMPARE(window.network().nodes().size(), size_t(2));
+    }
+
+    void compositingPlaysTheSceneAndSkipsWhatIsLate()
+    {
+        document::DocumentController controller;
+        ui::CompositingWindow window(&controller);
+        window.show();
+        const int start = controller.currentFrame();
+        window.play();
+        QVERIFY(window.isPlaying());
+        QTRY_VERIFY(window.framesShown() >= 3);
+        QVERIFY(controller.currentFrame() != start); // the timeline follows
+        QVERIFY(window.preview()->image().width() <= 640); // a smaller picture while playing
+        window.stop();
+        QVERIFY(!window.isPlaying());
+        QVERIFY(window.preview()->image().width() > 640 || controller.document().width() <= 640);
+        const int where = controller.currentFrame();
+        QTest::qWait(150);
+        QCOMPARE(controller.currentFrame(), where); // stopped means stopped
+        // Hiding the window stops it too.
+        window.play();
+        window.hide();
+        QVERIFY(!window.isPlaying());
+    }
+
+    void playBarScrubsAndRangeLimitsThePlayback()
+    {
+        document::DocumentController controller;
+        ui::CompositingWindow window(&controller);
+        window.show();
+        const int last = controller.document().frameCount() - 1;
+        QCOMPARE(window.playbar()->maximum(), last);
+        QCOMPARE(window.rangeBar()->first(), 0);
+        QCOMPARE(window.rangeBar()->last(), last); // the whole scene, until narrowed
+        // The play bar moves the current frame, and follows it.
+        window.playbar()->setValue(7);
+        QCOMPARE(controller.currentFrame(), 7);
+        controller.setCurrentFrame(9);
+        QCOMPARE(window.playbar()->value(), 9);
+        // Dragging a handle of the range narrows it.
+        ui::RangeSlider *range = window.rangeBar();
+        range->resize(400, 26);
+        QTest::mousePress(range, Qt::LeftButton, {}, QPoint(12 + int(376.0 * 10 / last), 13));
+        QTest::mouseMove(range, QPoint(12 + int(376.0 * 12 / last), 13));
+        QTest::mouseRelease(range, Qt::LeftButton, {}, QPoint(12 + int(376.0 * 12 / last), 13));
+        QVERIFY(range->first() >= 11 && range->first() <= 13);
+        range->setRange(10, 13);
+        // Playing stays inside it, and starts from its beginning when the frame is outside.
+        controller.setCurrentFrame(2);
+        window.play();
+        QTRY_VERIFY(window.framesShown() >= 3);
+        QVERIFY(controller.currentFrame() >= 10 && controller.currentFrame() <= 13);
+        window.stop();
+        // An untouched range follows the scene's length (another project, here).
+        range->setRange(0, last);
+        auto longer = std::make_unique<doc::Document>(64, 48);
+        longer->setFrameCount(last + 11);
+        controller.replaceDocument(std::move(longer));
+        QCOMPARE(window.rangeBar()->last(), last + 10);
     }
 
     void nodeViewIsKeptInTheDocument()

@@ -4,8 +4,12 @@
 #include "io/FrameExport.h"
 #include "ui/compositing/ImagePreview.h"
 #include "ui/compositing/NodeGraphView.h"
+#include "ui/compositing/RangeSlider.h"
 
 #include <QButtonGroup>
+#include <QGridLayout>
+#include <QSignalBlocker>
+#include <QSlider>
 #include <QHBoxLayout>
 #include <QScrollBar>
 #include <QLabel>
@@ -30,6 +34,7 @@ CompositingWindow::CompositingWindow(document::DocumentController *document, QWi
     , m_viewTimer(new QTimer(this))
     , m_frameTimer(new QTimer(this))
     , m_commitTimer(new QTimer(this))
+    , m_playTimer(new QTimer(this))
 {
     // The project's network; a project that has none yet starts with a small one to look at.
     if (m_document && !m_document->compositing().nodes.empty())
@@ -137,6 +142,15 @@ CompositingWindow::CompositingWindow(document::DocumentController *document, QWi
     auto *viewActual = makeButton(viewBar, QStringLiteral("100%"), tr("One pixel of the picture for one on the screen"));
     for (QToolButton *b : {viewOut, viewIn, viewFit, viewActual})
         viewBarLayout->addWidget(b);
+    viewBarLayout->addSpacing(12);
+    m_playButton = makeButton(viewBar, tr("Play"), tr("Play the scene through the nodes, on a smaller picture"), true);
+    m_playButton->setMinimumWidth(56);
+    viewBarLayout->addWidget(m_playButton);
+    m_playInfo = new QLabel(viewBar);
+    viewBarLayout->addWidget(m_playInfo);
+    connect(m_playButton, &QToolButton::clicked, this, [this](bool on) { on ? play() : stop(); });
+    m_playTimer->setTimerType(Qt::PreciseTimer);
+    connect(m_playTimer, &QTimer::timeout, this, &CompositingWindow::playTick);
     viewBarLayout->addStretch(1);
     connect(viewOut, &QToolButton::clicked, m_preview, [this] { m_preview->zoomBy(1 / 1.25); });
     connect(viewIn, &QToolButton::clicked, m_preview, [this] { m_preview->zoomBy(1.25); });
@@ -144,6 +158,46 @@ CompositingWindow::CompositingWindow(document::DocumentController *document, QWi
     connect(viewActual, &QToolButton::clicked, m_preview, &ImagePreview::actualSize);
     upperLayout->addWidget(viewBar);
     upperLayout->addWidget(m_preview, 1);
+    // Under the picture: the play bar (the current frame) and the range of frames that play.
+    auto *bars = new QWidget(upper);
+    auto *barsLayout = new QGridLayout(bars);
+    barsLayout->setContentsMargins(8, 4, 8, 4);
+    barsLayout->setVerticalSpacing(2);
+    m_playbar = new QSlider(Qt::Horizontal, bars);
+    m_playbar->setMinimumHeight(26);
+    m_range = new RangeSlider(bars);
+    m_frameLabel = new QLabel(bars);
+    m_rangeLabel = new QLabel(bars);
+    m_frameLabel->setMinimumWidth(90);
+    m_rangeLabel->setMinimumWidth(90);
+    barsLayout->addWidget(new QLabel(tr("Frame"), bars), 0, 0);
+    barsLayout->addWidget(m_playbar, 0, 1);
+    barsLayout->addWidget(m_frameLabel, 0, 2);
+    barsLayout->addWidget(new QLabel(tr("Range"), bars), 1, 0);
+    barsLayout->addWidget(m_range, 1, 1);
+    barsLayout->addWidget(m_rangeLabel, 1, 2);
+    barsLayout->setColumnStretch(1, 1);
+    upperLayout->addWidget(bars);
+    connect(m_playbar, &QSlider::valueChanged, this, [this](int frame) {
+        if (!m_document)
+            return;
+        if (m_playing) { // scrubbing while playing: the clock goes on from where the pen put it
+            m_playFrom = frame;
+            m_playClock.restart();
+            m_infoAt = 0;
+            m_lastShown = -1;
+        }
+        m_document->setCurrentFrame(frame); // the window shows it through currentFrameChanged
+        updateLabels();
+    });
+    connect(m_range, &RangeSlider::rangeChanged, this, [this](int first, int last) {
+        if (m_playing) { // the new range: from the frame shown, or from its start if it is out
+            m_playFrom = std::clamp(m_document ? m_document->currentFrame() : first, first, last);
+            m_playClock.restart();
+            m_lastShown = -1;
+        }
+        updateLabels();
+    });
     connect(m_preview, &ImagePreview::rectangleDrawn, this,
             [this](const QRectF &r) { addMaskShape(MaskShape::rectangle(r)); });
     connect(m_preview, &ImagePreview::lassoDrawn, this,
@@ -182,9 +236,13 @@ CompositingWindow::CompositingWindow(document::DocumentController *document, QWi
     });
     if (m_document) {
         connect(m_document, &document::DocumentController::structureChanged, this, &CompositingWindow::documentChanged);
+        connect(m_document, &document::DocumentController::structureChanged, this, &CompositingWindow::syncBars);
+        connect(m_document, &document::DocumentController::currentFrameChanged, this, &CompositingWindow::syncBars);
         // The picture the Frame nodes hold is made again only when the drawing or the frame changed: while
         // only the nodes change it stays the same image, which is how the evaluator knows what it can keep.
         auto frameChanged = [this] {
+            if (m_stepping)
+                return; // playback: the frame is shown by the tick itself
             m_frameDirty = true;
             scheduleRefresh();
         };
@@ -212,6 +270,7 @@ CompositingWindow::CompositingWindow(document::DocumentController *document, QWi
             m_frameTimer->start();
         });
     connect(split, &QSplitter::splitterMoved, this, [this] { m_autoFrame = false; });
+    syncBars();
     refresh();
 }
 
@@ -253,6 +312,7 @@ void CompositingWindow::documentChanged()
 
 CompositingWindow::~CompositingWindow()
 {
+    m_playTimer->stop();
     commit();
     keepView();
     // The editor listens to the network, which goes first among the members: it cannot wait for the children.
@@ -295,6 +355,100 @@ void CompositingWindow::keepView()
     const doc::GraphView view{true, m_graph->viewZoom(), center.x(), center.y()};
     if (view != m_document->compositingView())
         m_document->setCompositingView(view);
+}
+
+void CompositingWindow::syncBars()
+{
+    if (!m_document || !m_playbar)
+        return;
+    const int last = std::max(0, m_document->document().frameCount() - 1);
+    const bool fullRange = m_range->first() == 0 && m_range->last() == m_range->maximum();
+    const QSignalBlocker blockPlaybar(m_playbar);
+    m_playbar->setRange(0, last);
+    m_playbar->setValue(std::clamp(m_document->currentFrame(), 0, last));
+    const int oldMaximum = m_range->maximum();
+    m_range->setMaximum(last);
+    if (fullRange || oldMaximum == 0)
+        m_range->setRange(0, last); // a range nobody narrowed follows the scene's length
+    updateLabels();
+}
+
+void CompositingWindow::updateLabels()
+{
+    m_frameLabel->setText(tr("%1 / %2").arg(m_playbar->value() + 1).arg(m_playbar->maximum() + 1));
+    m_rangeLabel->setText(tr("%1 – %2").arg(m_range->first() + 1).arg(m_range->last() + 1));
+}
+
+void CompositingWindow::play()
+{
+    if (m_playing || !m_document)
+        return;
+    m_playing = true;
+    m_playButton->setChecked(true);
+    m_playButton->setText(tr("Stop"));
+    m_playFrom = std::clamp(m_document->currentFrame(), m_range->first(), m_range->last()); // out of the range: from its start
+    if (m_document->currentFrame() < m_range->first() || m_document->currentFrame() > m_range->last())
+        m_playFrom = m_range->first();
+    m_lastShown = -1;
+    m_shown = 0;
+    m_infoShown = 0;
+    m_infoAt = 0;
+    m_frameDirty = true; // a smaller picture while playing
+    const double fps = m_document->document().frameRate().fps();
+    m_playTimer->setInterval(std::max(1, int(250.0 / std::max(1.0, fps))));
+    m_playClock.start();
+    m_playTimer->start();
+    playTick();
+}
+
+void CompositingWindow::stop()
+{
+    if (!m_playing)
+        return;
+    m_playing = false;
+    m_playTimer->stop();
+    m_playButton->setChecked(false);
+    m_playButton->setText(tr("Play"));
+    m_playInfo->clear();
+    m_frameDirty = true; // the full picture again
+    refresh();
+}
+
+void CompositingWindow::playTick()
+{
+    if (!m_playing || !m_document)
+        return;
+    const int first = m_range->first();
+    const int count = std::max(1, m_range->last() - first + 1);
+    const double fps = m_document->document().frameRate().fps();
+    // The frame the clock says, whatever was made so far: the frames that were too slow are skipped.
+    // Round and round the range.
+    const qint64 elapsed = m_playClock.elapsed();
+    const qint64 ticks = static_cast<qint64>(static_cast<double>(elapsed) * fps / 1000.0);
+    const int frame = first + int((m_playFrom - first + ticks) % count);
+    if (frame == m_lastShown)
+        return;
+    m_lastShown = frame;
+    m_stepping = true;
+    m_document->setCurrentFrame(frame);
+    m_stepping = false;
+    syncBars();
+    m_frameDirty = true;
+    refresh();
+    ++m_shown;
+    if (elapsed - m_infoAt >= 500) {
+        const double shownFps = m_infoAt > 0 ? (m_shown - m_infoShown) * 1000.0 / double(elapsed - m_infoAt) : 0.0;
+        if (m_infoAt > 0)
+            m_playInfo->setText(tr("%1 of %2 fps").arg(shownFps, 0, 'f', 1).arg(fps, 0, 'f', 0));
+        m_infoAt = elapsed;
+        m_infoShown = m_shown;
+    }
+}
+
+void CompositingWindow::hideEvent(QHideEvent *event)
+{
+    QWidget::hideEvent(event);
+    stop();
 }
 
 void CompositingWindow::scheduleRefresh()
@@ -351,7 +505,7 @@ void CompositingWindow::refresh()
         m_frameScale = 1.0;
         const int pageWidth = m_frame.width();
         // A preview needs no more than this; blurs get slow on big pages.
-        constexpr QSize limit(1280, 720);
+        const QSize limit = m_playing ? QSize(640, 360) : QSize(1280, 720); // playing: half of it
         if (m_frame.width() > limit.width() || m_frame.height() > limit.height())
             m_frame = m_frame.scaled(limit, Qt::KeepAspectRatio, Qt::SmoothTransformation);
         if (pageWidth > 0)
