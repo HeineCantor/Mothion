@@ -23,7 +23,8 @@ struct VideoOptions
 // The ffmpeg program, if it can be found (the search path, then next to the application); empty if not.
 QString findFfmpeg();
 
-// The frame as the video shows it: what renderFrame makes, at the full size of the page, and, if `graph` is
+// The frame as the video shows it: what renderOutputFrame makes (the page seen through the camera, if there is
+// one), at the full size of the page, and, if `graph` is
 // given and its Output has something wired to it, what the nodes make of it. Opaque (over the paper) unless
 // `transparent`.
 // With `transparent` the page is left out (no paper behind the layers) and the result keeps its alpha.

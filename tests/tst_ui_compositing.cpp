@@ -75,6 +75,31 @@ private slots:
     }
 
 
+    // The picture the compositing works on is the sheet seen through the camera, when the project has one and it is on.
+    void compositingStartsFromTheCameraPicture()
+    {
+        document::DocumentController controller;
+        const int w = controller.document().width(), h = controller.document().height();
+        QImage red(200, 100, QImage::Format_ARGB32);
+        red.fill(Qt::red);
+        controller.importImage(red, QStringLiteral("red"));
+        ui::CompositingWindow window(&controller);
+        window.show();
+        window.refresh();
+        const QImage plain = window.preview()->image();
+        QVERIFY(!plain.isNull());
+        QVERIFY(QColor(plain.pixel(5, 5)).green() > 240); // paper in the corner
+
+        controller.setCameraKey(0, {w / 2.0, h / 2.0, 12, 0}); // close up on the red
+        QTRY_VERIFY(window.preview()->image() != plain);
+        const QImage close = window.preview()->image();
+        QVERIFY(QColor(close.pixel(5, 5)).red() > 200 && QColor(close.pixel(5, 5)).green() < 60);
+        QVERIFY(QColor(close.pixel(close.width() - 6, close.height() - 6)).green() < 60);
+
+        controller.setCameraVisible(false);
+        QTRY_COMPARE(window.preview()->image(), plain);
+    }
+
     void compositingPlaysTheSceneAndSkipsWhatIsLate()
     {
         document::DocumentController controller;

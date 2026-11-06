@@ -108,6 +108,44 @@ private slots:
 
 
     // "Flip" shows the animation mirrored left to right, in the window only.
+    // The Autoplay shows the animation through the camera, when the project has one and it is on.
+    void autoplayShowsTheCamera()
+    {
+        document::DocumentController controller;
+        const int w = controller.document().width(), h = controller.document().height();
+        QImage square(400, 400, QImage::Format_ARGB32);
+        square.fill(Qt::blue);
+        QVERIFY(controller.pasteImage(square, QPoint(w / 2 - 200, h / 2 - 200)));
+        controller.clearSelection();
+
+        ui::AutoplayWindow window(&controller);
+        window.resize(720, 500);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        window.findChild<QPushButton *>(QStringLiteral("autoplayPlay"))->setChecked(false);
+        auto bluePixels = [&] {
+            const QImage shot = window.grab().toImage();
+            long n = 0;
+            for (int y = 0; y < shot.height(); ++y)
+                for (int x = 0; x < shot.width(); ++x) {
+                    const QColor c = shot.pixelColor(x, y);
+                    n += (c.blue() > 200 && c.red() < 60 && c.green() < 60) ? 1 : 0;
+                }
+            return n;
+        };
+        const long plain = bluePixels();
+        QVERIFY(plain > 1000);
+
+        controller.setCameraKey(0, {w / 2.0, h / 2.0, 2, 0}); // twice as close: the square is four times the area
+        QTRY_VERIFY(bluePixels() > 3 * plain);
+        controller.setCameraVisible(false); // off: the sheet as it is
+        QTRY_COMPARE(bluePixels(), plain);
+        controller.setCameraVisible(true);
+        QTRY_VERIFY(bluePixels() > 3 * plain);
+        controller.removeCamera();
+        QTRY_COMPARE(bluePixels(), plain);
+    }
+
     void autoplayFlipsHorizontally()
     {
         document::DocumentController controller;

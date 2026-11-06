@@ -568,6 +568,73 @@ private slots:
         QCOMPARE(none.pixel(10, 20), QRgb(kRed));
     }
 
+    // The picture of a frame is the sheet seen through the project's camera, when it has one and it is on.
+    void outputIsSeenThroughTheCamera()
+    {
+        doc::Document d(100, 100);
+        d.setPaperColor(0xffffffff);
+        d.setFrameCount(10);
+        doc::Cel &cel = d.insertCel(0, std::make_unique<doc::Cel>(d.allocateCelId(), doc::CelProperties{"Art"}));
+        doc::Drawing &drawing = cel.addDrawing({d.allocateDrawingId(), "1", {{d.allocateLayerId(), {"Paint"}, {}}}});
+        for (int y = 0; y < 100; ++y)
+            for (int x = 0; x < 50; ++x)
+                drawing.layers[0].image.setPixel(x, y, kRed); // the left half
+        cel.timing().setExposure(0, 10, drawing.id);
+        auto pixel = [](const QImage &image, int x, int y) { return QColor::fromRgba(image.pixel(x, y)); };
+        auto isRed = [&](const QImage &image, int x, int y) { return pixel(image, x, y).red() > 200 && pixel(image, x, y).green() < 60; };
+        auto isPaper = [&](const QImage &image, int x, int y) { return pixel(image, x, y).green() > 240; };
+
+        // No camera: the sheet itself.
+        QCOMPARE(io::renderOutputFrame(d, 0, false), io::renderFrame(d, 0, false));
+
+        doc::Camera camera;
+        camera.setKey(0, doc::CameraPose::wholeSheet(100, 100), doc::Easing::linear());
+        camera.setKey(9, {25, 50, 2, 0}); // twice as close, looking at the left half
+        d.setCamera(camera);
+        QCOMPARE(io::renderOutputFrame(d, 0, false), io::renderFrame(d, 0, false)); // looking at all of it
+        const QImage close = io::renderOutputFrame(d, 9, false);
+        QCOMPARE(close.size(), QSize(100, 100));
+        QVERIFY(isRed(close, 50, 50) && isRed(close, 5, 5) && isRed(close, 60, 90)); // all in the red half
+        const QImage midway = io::renderOutputFrame(d, 5, false);
+        QVERIFY(midway != io::renderFrame(d, 5, false)); // the frames in between are moved too
+        QVERIFY(isRed(midway, 10, 50) && isPaper(midway, 95, 50)); // the red half's edge, nearer the middle
+
+        // A camera that is off shows the whole sheet.
+        camera.visible = false;
+        d.setCamera(camera);
+        QCOMPARE(io::renderOutputFrame(d, 9, false), io::renderFrame(d, 9, false));
+
+        // Past the sheet's edge: the paper, or transparency.
+        doc::Camera away;
+        away.setKey(0, {-50, 50, 1, 0});
+        d.setCamera(away);
+        const QImage empty = io::renderOutputFrame(d, 0, false);
+        QVERIFY(isPaper(empty, 50, 50) && isPaper(empty, 5, 5));
+        QCOMPARE(qAlpha(io::renderOutputFrame(d, 0, true).pixel(50, 50)), 0);
+
+        // Turned: the camera a quarter clockwise puts the left half of the sheet at the bottom of the picture.
+        doc::Camera turned;
+        turned.setKey(0, {50, 50, 1, 90});
+        d.setCamera(turned);
+        const QImage quarter = io::renderOutputFrame(d, 0, false);
+        QVERIFY(isRed(quarter, 50, 90) && isPaper(quarter, 50, 10));
+
+        // Far out: the whole sheet small in the middle, the paper around it.
+        doc::Camera far;
+        far.setKey(0, {50, 50, 0.5, 0});
+        d.setCamera(far);
+        const QImage small = io::renderOutputFrame(d, 0, false);
+        QVERIFY(isRed(small, 35, 50) && isPaper(small, 65, 50) && isPaper(small, 5, 50));
+
+        // The exports show the same picture.
+        QTemporaryDir dir;
+        QString error;
+        const QString path = dir.filePath(QStringLiteral("camera.png"));
+        QVERIFY2(io::exportFrame(d, 0, path, {io::ImageFormat::Png, false, 90}, &error), qPrintable(error));
+        const QImage written(path);
+        QVERIFY(isRed(written, 35, 50) && isPaper(written, 65, 50));
+    }
+
     void exportSequenceWritesEveryFrame()
     {
         QTemporaryDir dir;

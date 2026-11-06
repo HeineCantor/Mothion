@@ -2,6 +2,7 @@
 
 #include "audio/AudioPlayer.h"
 #include "document/DocumentController.h"
+#include "io/FrameExport.h"
 #include "ui/IconFactory.h"
 
 #include <QComboBox>
@@ -37,6 +38,12 @@ public:
     }
 
     QSize sizeHint() const override { return {640, 360}; }
+    // What it shows from now on (the composed frame, or the same seen through the camera).
+    void setImage(const QImage *image)
+    {
+        m_image = image;
+        update();
+    }
     void setFlipped(bool flipped)
     {
         m_flipped = flipped;
@@ -276,6 +283,7 @@ AutoplayWindow::AutoplayWindow(document::DocumentController *document, audio::Au
 
     using document::DocumentController;
     connect(m_document, &DocumentController::pixelsChanged, this, &AutoplayWindow::documentChanged);
+    connect(m_document, &DocumentController::cameraChanged, this, &AutoplayWindow::documentChanged);
     connect(m_document, &DocumentController::structureChanged, this, &AutoplayWindow::documentChanged);
     connect(m_document, &DocumentController::documentReplaced, this, &AutoplayWindow::documentChanged);
 
@@ -452,6 +460,16 @@ void AutoplayWindow::showFrame(int frame)
         m_renderer.renderAll(m_document->document(), m_frame);
         m_shown = std::move(shown);
         m_stale = false;
+    }
+    // Through the camera, if the project has one that is on; else the whole sheet, as it is.
+    const doc::Document &d = m_document->document();
+    const doc::CameraPose pose = m_document->cameraPoseAt(m_frame);
+    auto *picture = static_cast<FramePicture *>(m_picture);
+    if (pose == doc::CameraPose::wholeSheet(d.width(), d.height())) {
+        picture->setImage(&m_renderer.image());
+    } else {
+        m_output = io::applyCamera(m_renderer.image(), pose, d.paperColor());
+        picture->setImage(&m_output);
     }
     m_picture->update();
 }

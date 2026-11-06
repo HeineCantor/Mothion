@@ -6,6 +6,8 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QImageWriter>
+#include <QPainter>
+#include <QTransform>
 #include <QObject>
 
 #include <algorithm>
@@ -65,6 +67,41 @@ QImage renderFrame(const doc::Document &document, int frame, bool transparent)
     return renderer.image();
 }
 
+QImage applyCamera(const QImage &sheet, const doc::CameraPose &pose, QRgb background)
+{
+    QImage out(sheet.size(), QImage::Format_ARGB32_Premultiplied);
+    out.fill(background);
+    const doc::Matrix2x3 m = pose.sheetToPicture(sheet.width(), sheet.height());
+    QTransform toPicture(m.a, m.b, m.c, m.d, m.e, m.f);
+    // Far out the sheet is brought down to about the picture's size first (an average of the pixels), or the
+    // resampling would pick some of them and the picture would shimmer.
+    QImage source = sheet;
+    if (pose.zoom > 0 && pose.zoom < 0.75) {
+        const double f = pose.zoom;
+        source = sheet.scaled(QSize(std::max(1, int(sheet.width() * f)), std::max(1, int(sheet.height() * f))),
+                              Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        toPicture = QTransform::fromScale(sheet.width() / double(source.width()), sheet.height() / double(source.height()))
+                    * toPicture;
+    }
+    QPainter p(&out);
+    p.setRenderHint(QPainter::SmoothPixmapTransform);
+    p.setTransform(toPicture);
+    p.drawImage(0, 0, source);
+    return out;
+}
+
+QImage renderOutputFrame(const doc::Document &document, int frame, bool transparent)
+{
+    QImage sheet = renderFrame(document, frame, transparent);
+    const auto &camera = document.camera();
+    if (!camera || !camera->visible || camera->isEmpty())
+        return sheet;
+    const doc::CameraPose pose = camera->poseAt(frame);
+    if (pose == doc::CameraPose::wholeSheet(document.width(), document.height()))
+        return sheet; // looking at all of it: nothing to resample
+    return applyCamera(sheet, pose, transparent ? QRgb(0) : document.paperColor());
+}
+
 namespace {
 
 // The frames of an export: plain, or through the document's compositing network when it is asked for and there
@@ -84,7 +121,7 @@ public:
     QImage frame(int frame)
     {
         if (!m_composited)
-            return renderFrame(m_document, frame, m_transparent);
+            return renderOutputFrame(m_document, frame, m_transparent);
         return renderFinalFrame(m_document, frame, m_evaluator, &m_graph, m_transparent);
     }
     bool transparent() const { return m_transparent; }
