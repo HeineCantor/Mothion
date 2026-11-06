@@ -29,9 +29,16 @@ Eigen is used by the puppet warp implementation. CMake looks for a system instal
 
 ## Continuous integration
 
-GitHub Actions builds the project and runs the CTest suite on every pull request and every push to `main`. The workflow can also be started manually from the repository's Actions tab.
+GitHub Actions runs three jobs on every pull request and every push to `main` (and by hand from the Actions tab):
 
-The CI environment uses Ubuntu 24.04, Qt 6.8.3 and the offscreen Qt platform plugin, so GUI tests can run without a display.
+- **Ubuntu**: builds with Qt 6.8.3 and runs the CTest suite on the offscreen Qt platform (no display needed), then
+  runs it again in the `C` locale, where Qt's locale-aware pieces behave differently.
+- **Sanitizers**: the same suite built with the address and undefined-behaviour sanitizers.
+- **Windows**: builds with MSVC and runs the suite.
+
+The UI tests are one executable for each area (`tst_ui_panels`, `tst_ui_tools`, `tst_ui_drawing`, `tst_ui_puppet`,
+`tst_ui_timeline`, `tst_ui_audio`, `tst_ui_compositing`, `tst_ui_window`), so `ctest --parallel` runs them side by side
+and a change only rebuilds the area it touches.
 
 To run the same checks locally:
 
@@ -43,7 +50,15 @@ cmake -S . -B build-ci -G Ninja \
 
 cmake --build build-ci --parallel
 
-QT_QPA_PLATFORM=offscreen ctest --test-dir build-ci --output-on-failure
+QT_QPA_PLATFORM=offscreen ctest --test-dir build-ci --output-on-failure --parallel 4
+LC_ALL=C QT_QPA_PLATFORM=offscreen ctest --test-dir build-ci --output-on-failure --parallel 4  # the C locale
+
+# With the sanitizers (leaks are not checked: Qt leaves allocations at exit)
+cmake -S . -B build-san -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DMOTHION_ENABLE_WINTAB=OFF \
+  -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined" \
+  -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+cmake --build build-san --parallel
+ASAN_OPTIONS=detect_leaks=0 QT_QPA_PLATFORM=offscreen ctest --test-dir build-san --output-on-failure --parallel 4
 ```
 
 ## Building
@@ -248,10 +263,18 @@ Mothion keeps a log of each run (the last three) and, if it dies, leaves what is
   `crash-<time>.dmp` minidump is written next to it, to open in Visual Studio or WinDbg with the build's `.pdb`.
 - **Backup**: after the report, the program tries to save a copy of the project as
   `crashes/<name>-backup-<time>.moth` (the stroke being drawn is not in it, and a badly damaged program may not
-  manage it).
+  manage it). The periodic autosave (below) covers what a crash cannot.
 
 The next start tells the user about the crash, with buttons to open the folder and the copy. A tester who hits a
 crash should send the report and the latest logs.
+
+## Autosave
+
+While a project has unsaved work, Mothion keeps a copy of it every few minutes (Settings > General > Autosave every;
+5 by default, 0 turns it off), apart from the project's file, in `autosave/` of the application data directory. The
+copy is made when the user is not drawing, and replaced at each autosave: there is one for each project. Saving the
+project, or closing it on purpose, takes the copy away. If the program (or the machine) dies, the next start offers to
+recover the work; a copy older than the project's file is dropped without asking.
 
 ## Controls (provisional)
 

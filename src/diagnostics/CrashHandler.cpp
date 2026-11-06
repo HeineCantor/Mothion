@@ -19,9 +19,16 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <cwchar>
 #include <exception>
 
 #ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
 #include <dbghelp.h>
 #else
@@ -59,10 +66,6 @@ char g_reportDirectory[kPath];
 char g_versionText[64];
 char g_projectText[kPath];
 std::atomic<bool> g_crashing{false};
-
-#ifdef _WIN32
-wchar_t g_dumpDirectory[kPath];
-#endif
 
 void copyText(char *to, int size, const QString &text)
 {
@@ -146,10 +149,38 @@ void onTerminate()
 
 // --- The report ------------------------------------------------------------------------------
 
+// fopen for a path in UTF-8: Windows' narrow fopen reads it in the ANSI code page, which does not hold every user name.
+FILE *openFile(const char *utf8Path, const char *mode)
+{
+#ifdef _WIN32
+    wchar_t widePath[kReportPath];
+    wchar_t wideMode[8];
+    if (MultiByteToWideChar(CP_UTF8, 0, utf8Path, -1, widePath, kReportPath) <= 0
+        || MultiByteToWideChar(CP_UTF8, 0, mode, -1, wideMode, 8) <= 0)
+        return nullptr;
+    return _wfopen(widePath, wideMode);
+#else
+    return std::fopen(utf8Path, mode);
+#endif
+}
+
+// The time as it is in the names of the report and the copy.
+void currentStamp(char *text, size_t size)
+{
+    const time_t now = std::time(nullptr);
+    struct tm local;
+#ifdef _WIN32
+    localtime_s(&local, &now);
+#else
+    localtime_r(&now, &local);
+#endif
+    std::strftime(text, size, "%Y-%m-%d_%H-%M-%S", &local);
+}
+
 // The part of the marker file that tells the next start where things are: a line per fact.
 void markerAppend(const char *key, const char *value)
 {
-    FILE *file = std::fopen(g_markerPath, "ab");
+    FILE *file = openFile(g_markerPath, "ab");
     if (!file)
         return;
     std::fprintf(file, "%s=%s\n", key, value);
@@ -174,8 +205,7 @@ void writeAll(int fd, const char *text)
 void writeReportFile(const char *reason, char *path, size_t pathSize)
 {
     char stampText[32];
-    const time_t now = std::time(nullptr);
-    std::strftime(stampText, sizeof stampText, "%Y-%m-%d_%H-%M-%S", std::localtime(&now));
+    currentStamp(stampText, sizeof stampText);
     std::snprintf(path, pathSize, "%s/crash-%s.txt", g_reportDirectory, stampText);
     const int fd = ::open(path, O_CREAT | O_WRONLY | O_TRUNC, 0644);
     if (fd < 0)
@@ -199,10 +229,9 @@ void writeReportFile(const char *reason, char *path, size_t pathSize)
 void writeReportFile(const char *reason, char *path, size_t pathSize)
 {
     char stampText[32];
-    const time_t now = std::time(nullptr);
-    std::strftime(stampText, sizeof stampText, "%Y-%m-%d_%H-%M-%S", std::localtime(&now));
+    currentStamp(stampText, sizeof stampText);
     std::snprintf(path, pathSize, "%s/crash-%s.txt", g_reportDirectory, stampText);
-    FILE *file = std::fopen(path, "wb");
+    FILE *file = openFile(path, "wb");
     if (!file)
         return;
     std::fprintf(file, "Mothion crash report\nVersion: %s\nReason: %s\nProject: %s\nTime: %s\n", g_versionText, reason,

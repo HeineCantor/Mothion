@@ -158,7 +158,10 @@ ColorWheelPanel::ColorWheelPanel(tools::ToolState *state, QWidget *parent)
         const QColor c = QColorDialog::getColor(m_state->color(), this, tr("Choose color"));
         m_state->setColor(c); // an invalid (cancelled) color is ignored by ToolState
     });
-    connect(m_hex, &QLineEdit::editingFinished, this, [this] { m_state->setColor(QColor(m_hex->text())); });
+    // A field that loses focus as its panel is being destroyed still finishes editing: what it needs is taken along,
+    // not read from the panel (which is half gone by then).
+    connect(m_hex, &QLineEdit::editingFinished, this,
+            [state = m_state, hex = m_hex] { state->setColor(QColor(hex->text())); });
     connect(m_state, &tools::ToolState::colorChanged, this, &ColorWheelPanel::showColor);
     connect(m_state, &tools::ToolState::secondaryColorChanged, this, [this] { showColor(m_state->color()); });
     connect(m_state, &tools::ToolState::selectedColorChanged, this, [this] { showColor(m_state->color()); });

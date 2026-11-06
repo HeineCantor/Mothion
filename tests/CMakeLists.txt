@@ -25,4 +25,9 @@ find_package(Qt6 REQUIRED COMPONENTS Sql)
 mothion_add_test(tst_brushimport mothion_gui Qt6::Sql)
 mothion_add_test(tst_projectfile mothion_gui Qt6::Sql)
 find_package(Qt6 REQUIRED COMPONENTS Network)
-mothion_add_test(tst_ui mothion_gui Qt6::Network) # a fake Discord for the Rich Presence
+# The UI tests, one executable for each area (they run side by side under ctest -j, and a build only redoes the
+# area that changed). The headers they all need are in test_common.h. A fake Discord for the Rich Presence
+# is in the window ones, so they link Network.
+foreach(area panels tools drawing puppet timeline audio compositing window)
+    mothion_add_test(tst_ui_${area} mothion_gui Qt6::Network)
+endforeach()
