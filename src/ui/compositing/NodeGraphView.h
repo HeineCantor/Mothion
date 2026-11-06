@@ -19,8 +19,7 @@ namespace mothion::ui {
 class NodeItem;
 class EdgeItem;
 
-// What a node does is not decided yet (this is the prototype of the interface):
-// a kind is a title, a tint and the names of its inputs and outputs.
+// What a node is drawn from: a title, a tint, the names of its inputs and outputs and its settings (see NodeType).
 // A box with its sockets: inputs on the left, outputs on the right.
 class NodeItem : public QGraphicsObject
 {
@@ -111,6 +110,14 @@ public:
     void fitAll();
     // Zooms so the graph is `fraction` of the view wide (less if it would not fit in height), centered.
     void fitWidth(qreal fraction);
+    // Zooms around the center of the view (buttons: no wheel on a tablet).
+    void zoomBy(qreal factor);
+
+    // What the left button does on empty ground: select with a rectangle, move the view, or cut wires
+    // (the pen has no middle button and no Shift).
+    enum class Mode { Select, Pan, Cut };
+    void setMode(Mode mode);
+    Mode mode() const { return m_mode; }
 
 signals:
     // The user panned, zoomed or clicked in the view: it is not to be framed again by itself.
@@ -154,7 +161,9 @@ private:
     QPointer<NodeItem> m_hotNode;
     bool m_cutting = false; // shift + drag: the wires the line crosses are cut
     QList<QPointF> m_cutLine;
+    Mode m_mode = Mode::Select;
     bool m_panning = false;
+    bool m_panByLeft = false;
     QPoint m_panFrom;
 };
 

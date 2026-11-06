@@ -39,6 +39,7 @@ public:
     QPointF imagePointAt(const QPointF &widgetPos) const;
 
     void fit();
+    void zoomBy(double factor); // around the center of the widget
     void actualSize(); // one pixel of the image for one on the screen
 
 signals:

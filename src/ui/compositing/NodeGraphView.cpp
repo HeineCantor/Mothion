@@ -446,6 +446,28 @@ void NodeGraphView::fitWidth(qreal fraction)
     centerOn(box.center());
 }
 
+void NodeGraphView::zoomBy(qreal factor)
+{
+    emit viewTouched();
+    const qreal next = std::clamp(transform().m11() * factor, 0.2, 3.0);
+    const QPointF center = mapToScene(viewport()->rect().center());
+    const qreal f = next / transform().m11();
+    scale(f, f);
+    centerOn(center);
+}
+
+void NodeGraphView::setMode(Mode mode)
+{
+    m_mode = mode;
+    setDragMode(mode == Mode::Select ? RubberBandDrag : NoDrag);
+    if (mode == Mode::Pan)
+        viewport()->setCursor(Qt::OpenHandCursor);
+    else if (mode == Mode::Cut)
+        viewport()->setCursor(Qt::CrossCursor);
+    else
+        viewport()->unsetCursor();
+}
+
 void NodeGraphView::fitAll()
 {
     const QRectF box = m_scene->itemsBoundingRect();
@@ -510,10 +532,21 @@ void NodeGraphView::mousePressEvent(QMouseEvent *event)
         setCursor(Qt::ClosedHandCursor);
         return;
     }
+    if (event->button() == Qt::LeftButton && m_mode == Mode::Pan) {
+        m_panning = m_panByLeft = true;
+        m_panFrom = event->pos();
+        viewport()->setCursor(Qt::ClosedHandCursor);
+        return;
+    }
     if (event->button() == Qt::LeftButton) {
         const QPointF scenePos = mapToScene(event->pos());
         bool output = false;
         int index = 0;
+        if (m_mode == Mode::Cut) {
+            m_cutting = true;
+            m_cutLine = {scenePos};
+            return;
+        }
         if (NodeItem *node = socketNear(scenePos, &output, &index, -1)) {
             // A socket with a wire into it: the wire is picked up by its end and goes on from its source;
             // let go over nothing and it is gone.
@@ -583,9 +616,11 @@ void NodeGraphView::mouseReleaseEvent(QMouseEvent *event)
         NodeGraphView *view;
         ~Done() { emit view->gestureEnded(); }
     } done{this};
-    if (m_panning && event->button() == Qt::MiddleButton) {
-        m_panning = false;
+    if (m_panning && (event->button() == Qt::MiddleButton || (m_panByLeft && event->button() == Qt::LeftButton))) {
+        m_panning = m_panByLeft = false;
         unsetCursor();
+        if (m_mode == Mode::Pan)
+            viewport()->setCursor(Qt::OpenHandCursor);
         return;
     }
     if (m_cutting && event->button() == Qt::LeftButton) {

@@ -93,6 +93,12 @@ void ImagePreview::fit()
     update();
 }
 
+void ImagePreview::zoomBy(double factor)
+{
+    if (!m_image.isNull())
+        zoomAround(QPointF(width() / 2.0, height() / 2.0), m_zoom * factor);
+}
+
 void ImagePreview::actualSize()
 {
     zoomAround(QPointF(width() / 2.0, height() / 2.0), 1.0 / fitScale());

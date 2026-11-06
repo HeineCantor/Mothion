@@ -41,17 +41,46 @@ CompositingWindow::CompositingWindow(document::DocumentController *document, QWi
     setWindowTitle(tr("Compositing"));
     resize(1100, 700); // what restoring from maximized gives
 
-    auto *hint = new QLabel(tr("Prototype: right-click to add a node, drag from a socket to connect, "
-                               "Delete removes, middle button pans, wheel zooms, F frames all. In the picture above: drag to move, wheel to zoom, double click to fit. Select a Mask node to draw its areas on the picture."),
-                            this);
-    hint->setContentsMargins(8, 4, 8, 4);
-    hint->setEnabled(false);
+    // Buttons for what the wheel, the middle button and Shift do: a tablet pen has none of them.
+    auto makeButton = [](QWidget *owner, const QString &text, const QString &tip, bool checkable = false) {
+        auto *button = new QToolButton(owner);
+        button->setText(text);
+        button->setToolTip(tip);
+        button->setCheckable(checkable);
+        button->setMinimumSize(36, 30);
+        return button;
+    };
 
     auto *lower = new QWidget(this);
     auto *lowerLayout = new QVBoxLayout(lower);
     lowerLayout->setContentsMargins(0, 0, 0, 0);
     lowerLayout->setSpacing(0);
-    lowerLayout->addWidget(hint);
+    auto *graphBar = new QWidget(lower);
+    auto *graphBarLayout = new QHBoxLayout(graphBar);
+    graphBarLayout->setContentsMargins(8, 4, 8, 4);
+    auto *graphOut = makeButton(graphBar, QStringLiteral("−"), tr("Zoom out the nodes"));
+    auto *graphIn = makeButton(graphBar, QStringLiteral("+"), tr("Zoom in the nodes"));
+    auto *graphFit = makeButton(graphBar, tr("Fit"), tr("Show all the nodes"));
+    auto *graphSelect = makeButton(graphBar, tr("Select"), tr("Drag on the empty ground to select nodes"), true);
+    auto *graphPan = makeButton(graphBar, tr("Pan"), tr("Drag to move the view of the nodes"), true);
+    auto *graphCut = makeButton(graphBar, tr("Cut"), tr("Drag across wires to cut them"), true);
+    graphSelect->setChecked(true);
+    auto *modes = new QButtonGroup(graphBar);
+    for (QToolButton *b : {graphSelect, graphPan, graphCut})
+        modes->addButton(b);
+    for (QToolButton *b : {graphOut, graphIn, graphFit})
+        graphBarLayout->addWidget(b);
+    graphBarLayout->addSpacing(12);
+    for (QToolButton *b : {graphSelect, graphPan, graphCut})
+        graphBarLayout->addWidget(b);
+    graphBarLayout->addStretch(1);
+    connect(graphOut, &QToolButton::clicked, m_graph, [this] { m_graph->zoomBy(1 / 1.25); });
+    connect(graphIn, &QToolButton::clicked, m_graph, [this] { m_graph->zoomBy(1.25); });
+    connect(graphFit, &QToolButton::clicked, m_graph, [this] { m_graph->fitAll(); });
+    connect(graphSelect, &QToolButton::clicked, m_graph, [this] { m_graph->setMode(NodeGraphView::Mode::Select); });
+    connect(graphPan, &QToolButton::clicked, m_graph, [this] { m_graph->setMode(NodeGraphView::Mode::Pan); });
+    connect(graphCut, &QToolButton::clicked, m_graph, [this] { m_graph->setMode(NodeGraphView::Mode::Cut); });
+    lowerLayout->addWidget(graphBar);
     lowerLayout->addWidget(m_graph, 1);
 
     // The picture, with the tools of the Mask node being edited above it (shown only then).
@@ -97,6 +126,21 @@ CompositingWindow::CompositingWindow(document::DocumentController *document, QWi
     upperLayout->setContentsMargins(0, 0, 0, 0);
     upperLayout->setSpacing(0);
     upperLayout->addWidget(m_maskBar);
+    auto *viewBar = new QWidget(upper);
+    auto *viewBarLayout = new QHBoxLayout(viewBar);
+    viewBarLayout->setContentsMargins(8, 4, 8, 4);
+    auto *viewOut = makeButton(viewBar, QStringLiteral("−"), tr("Zoom out the picture"));
+    auto *viewIn = makeButton(viewBar, QStringLiteral("+"), tr("Zoom in the picture"));
+    auto *viewFit = makeButton(viewBar, tr("Fit"), tr("Fit the picture in the view"));
+    auto *viewActual = makeButton(viewBar, QStringLiteral("100%"), tr("One pixel of the picture for one on the screen"));
+    for (QToolButton *b : {viewOut, viewIn, viewFit, viewActual})
+        viewBarLayout->addWidget(b);
+    viewBarLayout->addStretch(1);
+    connect(viewOut, &QToolButton::clicked, m_preview, [this] { m_preview->zoomBy(1 / 1.25); });
+    connect(viewIn, &QToolButton::clicked, m_preview, [this] { m_preview->zoomBy(1.25); });
+    connect(viewFit, &QToolButton::clicked, m_preview, &ImagePreview::fit);
+    connect(viewActual, &QToolButton::clicked, m_preview, &ImagePreview::actualSize);
+    upperLayout->addWidget(viewBar);
     upperLayout->addWidget(m_preview, 1);
     connect(m_preview, &ImagePreview::rectangleDrawn, this,
             [this](const QRectF &r) { addMaskShape(MaskShape::rectangle(r)); });
