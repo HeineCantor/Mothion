@@ -93,7 +93,11 @@ private:
     Pick pick(const QPointF &docPos) const;
 
     bool start();
+    // Draws the transform: the layers of the drawing shown now (the others, of other frames, only once it is
+    // applied: they are not in sight, and a cel of many frames would make every drag wait for all of them).
     void render();
+    // All the layers, at the transform as it is; `onlyLive` the ones shown now.
+    void renderParts(bool onlyLive);
     void requestRender(); // render(), or once the pending samples are in (see setDeferredRendering())
     void flushRender();
     // Draws the transform, or the drawing as it was when back at the start.
@@ -116,7 +120,9 @@ private:
         doc::TiledImage *image = nullptr; // the layer
         doc::TiledImage before;           // as it was when the transform started
         doc::TiledImage rest;             // what stays put (outside the selection)
-        QImage source;                    // the pixels transformed, over the box
+        doc::TiledImage moving;           // the pixels that move
+        QImage source;                    // those, over the box (made when first drawn, for a layer out of sight)
+        bool live = true;                 // in the drawing shown at the current frame
     };
     struct Session
     {
@@ -126,6 +132,7 @@ private:
         QTransform transform;
         QRect shown; // area last drawn by the transform
         bool changed = false;
+        bool everythingDrawn = true; // the layers out of sight are at the transform too
         std::vector<QTransform> undo; // the transform before each drag
         std::vector<QTransform> redo; // those undone
     };

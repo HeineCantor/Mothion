@@ -4853,6 +4853,50 @@ private slots:
         QVERIFY(end->text().contains(QStringLiteral("grows from 24 to 34")));
     }
 
+    // A transform of a whole cel (every frame's layers chosen): while it is dragged only the frame shown is
+    // drawn, the others when it is applied, and all of it is one undo step.
+    void transformOfAWholeCelDrawsTheOtherFramesWhenApplied()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        QList<QImage> images;
+        for (QColor color : {QColor(Qt::red), QColor(Qt::green), QColor(Qt::blue)}) {
+            QImage image(100, 100, QImage::Format_ARGB32);
+            image.fill(color);
+            images << image;
+        }
+        QCOMPARE(controller.importImageSequence(images, QStringLiteral("seq"), 0, 1), 3); // 910..1009, 490..589
+        const doc::Cel &cel = *controller.document().cel(controller.currentCel());
+        std::vector<document::DocumentController::LayerRef> refs;
+        for (const auto &[id, drawing] : cel.drawings())
+            for (const doc::Layer &layer : drawing.layers)
+                refs.push_back({cel.id(), id, layer.id});
+        controller.setLayerSelection(refs);
+        controller.setCurrentFrame(0);
+        auto alphaAt = [&](int frame, int x, int y) {
+            const doc::Drawing *d = cel.drawingAt(frame);
+            return d ? qAlpha(d->layers.front().image.pixel(x, y)) : -1;
+        };
+
+        canvas::TransformTool tool(&controller, &state, [](const QString &) {}, [] {});
+        tool.setViewZoom(1.0);
+        tool.activated();
+        QVERIFY(tool.hasPendingEdit());
+        tool.press({960, 540}, Qt::NoModifier); // inside the box: moves it
+        tool.move({1160, 540}, Qt::NoModifier); // 200 px to the right
+        tool.release({1160, 540}, Qt::NoModifier);
+        QVERIFY(alphaAt(0, 1160, 540) > 0 && alphaAt(0, 960, 540) == 0); // the frame shown: moved
+        QVERIFY(alphaAt(1, 960, 540) > 0 && alphaAt(1, 1160, 540) == 0); // the others: where they were
+        QVERIFY(alphaAt(2, 960, 540) > 0);
+
+        tool.commit(); // applied: every frame
+        QVERIFY(alphaAt(1, 1160, 540) > 0 && alphaAt(1, 960, 540) == 0);
+        QVERIFY(alphaAt(2, 1160, 540) > 0 && alphaAt(2, 960, 540) == 0);
+        controller.undo(); // one step for all of it
+        for (int frame : {0, 1, 2})
+            QVERIFY(alphaAt(frame, 960, 540) > 0 && alphaAt(frame, 1160, 540) == 0);
+    }
+
     void largeImagesAreScaledToFit()
     {
         document::DocumentController controller;

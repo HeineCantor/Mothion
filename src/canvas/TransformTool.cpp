@@ -1,6 +1,7 @@
 #include "canvas/TransformTool.h"
 
 #include "canvas/SelectionMask.h"
+#include "core/Parallel.h"
 #include "canvas/TileQt.h"
 #include "canvas/ViewTransform.h"
 #include "document/DocumentController.h"
@@ -64,6 +65,19 @@ double clampScale(double s)
 
 } // namespace
 
+namespace {
+
+// `moving`'s pixels over `box`.
+QImage sourceOf(const doc::TiledImage &moving, const QRect &box)
+{
+    QImage source(box.size(), QImage::Format_ARGB32_Premultiplied);
+    moving.read(box.x(), box.y(), box.width(), box.height(), reinterpret_cast<doc::Pixel *>(source.bits()),
+                source.bytesPerLine() / 4);
+    return source;
+}
+
+} // namespace
+
 TransformTool::TransformTool(document::DocumentController *document, tools::ToolState *toolState,
                              std::function<void(const QString &)> status, std::function<void()> repaint)
     : m_document(document)
@@ -97,28 +111,32 @@ bool TransformTool::start()
     s->selection = m_document->selection();
     const std::optional<SelectionMask> mask =
         s->selection.isEmpty() ? std::nullopt : std::optional(SelectionMask::fromPath(s->selection));
-    // What moves of each layer, and one box around all of it.
-    std::vector<doc::TiledImage> moving;
-    QRect box;
-    for (const auto &target : targets) {
-        Part part;
+    // What moves of each layer, and one box around all of it. Each layer is looked at on its own core.
+    std::vector<Part> parts(targets.size());
+    std::vector<QRect> opaque(targets.size());
+    const int shownFrame = m_document->currentFrame();
+    parallelFor(int(targets.size()), [&](int i) {
+        const auto &target = targets[std::size_t(i)];
+        Part &part = parts[std::size_t(i)];
         part.image = target.image;
         part.before = *target.image;
-        doc::TiledImage pixels;
         if (mask)
-            splitByMask(part.before, *mask, pixels, part.rest);
+            splitByMask(part.before, *mask, part.moving, part.rest);
         else
-            pixels = part.before;
-        const QRect tiles = tileBounds(pixels);
+            part.moving = part.before;
+        const QRect tiles = tileBounds(part.moving);
         if (!tiles.isEmpty()) {
             QImage area(tiles.size(), QImage::Format_ARGB32_Premultiplied);
-            pixels.read(tiles.x(), tiles.y(), tiles.width(), tiles.height(),
-                        reinterpret_cast<doc::Pixel *>(area.bits()), area.bytesPerLine() / 4);
-            box |= opaqueBounds(area).translated(tiles.topLeft());
+            part.moving.read(tiles.x(), tiles.y(), tiles.width(), tiles.height(),
+                             reinterpret_cast<doc::Pixel *>(area.bits()), area.bytesPerLine() / 4);
+            opaque[std::size_t(i)] = opaqueBounds(area).translated(tiles.topLeft());
         }
-        moving.push_back(std::move(pixels));
-        s->parts.push_back(std::move(part));
-    }
+        const doc::Cel *cel = m_document->document().cel(target.cel);
+        part.live = cel && cel->timing().drawingAt(shownFrame) == target.drawing;
+    });
+    QRect box;
+    for (const QRect &r : opaque)
+        box |= r;
     if (box.isEmpty()) {
         m_document->cancelPaint();
         m_status(QObject::tr("Nothing to transform here"));
@@ -132,12 +150,16 @@ bool TransformTool::start()
             box = selected;
         }
     }
-    for (std::size_t i = 0; i < s->parts.size(); ++i) {
-        QImage &source = s->parts[i].source;
-        source = QImage(box.size(), QImage::Format_ARGB32_Premultiplied);
-        moving[i].read(box.x(), box.y(), box.width(), box.height(), reinterpret_cast<doc::Pixel *>(source.bits()),
-                       source.bytesPerLine() / 4);
-    }
+    // Layers of other frames than the one shown are drawn only when the transform is applied. If none is in
+    // the frame shown, all are drawn at each step (there would be nothing to see otherwise).
+    if (std::none_of(parts.begin(), parts.end(), [](const Part &p) { return p.live; }))
+        for (Part &p : parts)
+            p.live = true;
+    parallelFor(int(parts.size()), [&](int i) {
+        if (parts[std::size_t(i)].live)
+            parts[std::size_t(i)].source = sourceOf(parts[std::size_t(i)].moving, box);
+    });
+    s->parts = std::move(parts);
     s->box = box;
     s->shown = box;
     m_session = std::move(s);
@@ -353,6 +375,7 @@ void TransformTool::show()
     // Back at the start: the layers and selection as they were, exactly.
     m_renderPending = false; // what was pending is moot
     m_renderTimer.stop();
+    s.everythingDrawn = true; // all of them as they were
     for (Part &part : s.parts)
         *part.image = part.before;
     if (!s.selection.isEmpty())
@@ -388,15 +411,32 @@ bool TransformTool::redoStep()
 
 void TransformTool::render()
 {
+    renderParts(true);
+}
+
+void TransformTool::renderParts(bool onlyLive)
+{
     m_renderPending = false;
     m_renderTimer.stop();
     Session &s = *m_session;
     const doc::Document &d = m_document->document();
     const QRect now = s.transform.mapRect(QRectF(s.box)).toAlignedRect().adjusted(-1, -1, 1, 1)
                       & QRect(0, 0, d.width(), d.height());
+    std::vector<Part *> todo;
+    bool skipped = false;
     for (Part &part : s.parts) {
+        if (!onlyLive || part.live)
+            todo.push_back(&part);
+        else
+            skipped = true;
+    }
+    // Each layer on its own core: they do not share anything but the transform.
+    parallelFor(int(todo.size()), [&](int i) {
+        Part &part = *todo[std::size_t(i)];
         doc::TiledImage result = part.rest;
         if (!now.isEmpty()) {
+            if (part.source.isNull())
+                part.source = sourceOf(part.moving, s.box);
             QImage moved(now.size(), QImage::Format_ARGB32_Premultiplied);
             moved.fill(Qt::transparent);
             {
@@ -409,9 +449,12 @@ void TransformTool::render()
             piece.write(now.x(), now.y(), now.width(), now.height(),
                         reinterpret_cast<const doc::Pixel *>(moved.constBits()), moved.bytesPerLine() / 4);
             compositeOver(result, piece);
+            if (!part.live)
+                part.source = QImage(); // out of sight and done: not kept (a cel of many frames would fill the memory)
         }
         *part.image = std::move(result);
-    }
+    });
+    s.everythingDrawn = !skipped;
     if (!s.selection.isEmpty())
         m_document->setSelection(s.transform.map(s.selection)); // the outline follows live
     m_document->notifyPainted(s.shown | now);
@@ -425,6 +468,8 @@ void TransformTool::commit()
     if (!m_session)
         return;
     flushRender();
+    if (m_session->changed && !m_session->everythingDrawn)
+        renderParts(false); // the layers of the other frames, now
     const std::unique_ptr<Session> s = std::move(m_session);
     m_drag.reset();
     if (s->changed) {

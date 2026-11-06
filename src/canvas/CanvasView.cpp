@@ -103,9 +103,15 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
 
     using document::DocumentController;
     connect(m_document, &DocumentController::pixelsChanged, this,
-            [this](doc::CelId, doc::DrawingId drawing, const QRect &rect) {
+            [this](doc::CelId celId, doc::DrawingId drawing, const QRect &rect) {
                 m_onionImages.erase(drawing);
-                renderDocumentRect(rect);
+                // Only a drawing shown at the current frame changes the frame; one of another frame (a
+                // transform of a whole cel tells of every one of them) at most the onion skin, painted over it.
+                const doc::Cel *cel = m_document->document().cel(celId);
+                if (cel && cel->timing().drawingAt(m_document->currentFrame()) == drawing)
+                    renderDocumentRect(rect);
+                else if (m_toolState->onionSkin().enabled)
+                    update();
             });
     connect(m_document, &DocumentController::structureChanged, this, [this] { m_onionImages.clear(); });
     connect(m_document, &DocumentController::documentReplaced, this, [this] { m_onionImages.clear(); });
