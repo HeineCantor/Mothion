@@ -9,6 +9,7 @@
 #include "tools/ToolState.h"
 #include "audio/AudioPlayer.h"
 #include "ui/AutoplayWindow.h"
+#include "ui/compositing/CompositingWindow.h"
 #include "tools/Preferences.h"
 #include "core/Parallel.h"
 #include "ui/DiscordPresence.h"
@@ -409,6 +410,17 @@ void MainWindow::createMenus()
     for (PanelDock *dock : m_dockLayout->docks())
         window->addAction(dock->toggleViewAction());
     window->addSeparator();
+    window->addAction(tr("Compositing"), this, [this] {
+        if (!m_compositing) {
+            m_compositing = new CompositingWindow(m_document, this);
+            m_compositing->showMaximized(); // full screen by default; it can be restored smaller
+        } else {
+            m_compositing->show();
+        }
+        m_compositing->refresh();
+        m_compositing->raise();
+        m_compositing->activateWindow();
+    });
     window->addAction(tr("Reset default layout"), m_dockLayout, &DockLayout::resetToDefault);
 }
 

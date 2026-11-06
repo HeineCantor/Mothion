@@ -23,6 +23,7 @@
 #include "tools/BrushPreset.h"
 #include "tools/ToolState.h"
 #include "ui/AutoplayWindow.h"
+#include "ui/compositing/NodeGraphView.h"
 #include "ui/ExportDialog.h"
 #include "ui/DiscordPresence.h"
 #include "ui/MainWindow.h"
@@ -5294,6 +5295,81 @@ private slots:
 
     // The track's scrubbing can be turned off: a step or a click on the timeline is then silent; the setting is one
     // undo step and goes into the project.
+    void nodeGraphConnectsWithoutLoops()
+    {
+        ui::NodeGraphView graph;
+        QCOMPARE(graph.nodeCount(), 5);
+        QCOMPARE(graph.edgeCount(), 4);
+        const QList<ui::NodeKind> kinds = ui::NodeGraphView::kinds();
+        ui::NodeItem *a = graph.addNode(kinds[1], {0, 300}); // Blur
+        ui::NodeItem *b = graph.addNode(kinds[1], {200, 300});
+        QVERIFY(graph.connectNodes(a, 0, b, 0));
+        QVERIFY(!graph.connectNodes(b, 0, a, 0)); // would close a loop
+        QCOMPARE(graph.edgeCount(), 5);
+        // An input takes one wire: connecting another replaces it.
+        ui::NodeItem *c = graph.addNode(kinds[1], {400, 300});
+        QVERIFY(graph.connectNodes(c, 0, b, 0));
+        QCOMPARE(graph.edgeCount(), 5);
+        // Deleting a node takes its wires along.
+        a->setSelected(true);
+        QTest::keyClick(&graph, Qt::Key_Delete);
+        QCOMPARE(graph.nodeCount(), 7);
+    }
+
+    void nodeGraphProcessesTheFrame()
+    {
+        ui::NodeGraphView graph;
+        QImage frame(40, 40, QImage::Format_ARGB32_Premultiplied);
+        frame.fill(Qt::white);
+        frame.setPixelColor(20, 20, Qt::black);
+        // The example wires Frame > Blur > Merge (with a tint) > Output.
+        const QImage result = graph.evaluate(frame);
+        QCOMPARE(result.size(), frame.size());
+        QVERIFY(result != frame);
+        QVERIFY(qGray(result.pixel(20, 20)) > 40); // the black dot was blurred away and tinted
+        // Nothing wired to Output: nothing out.
+        for (auto *item : graph.items())
+            if (auto *edge = dynamic_cast<ui::EdgeItem *>(item); edge && edge->to
+                && edge->to->kind().type == ui::NodeKind::Type::Output)
+                delete edge;
+        QVERIFY(graph.evaluate(frame).isNull());
+    }
+
+    void nodeGraphWiresAreMovedAndCut()
+    {
+        ui::NodeGraphView graph;
+        graph.resize(1000, 600);
+        graph.show();
+        graph.fitWidth(0.8);
+        ui::NodeItem *merge = nullptr;
+        for (auto *item : graph.items())
+            if (auto *node = dynamic_cast<ui::NodeItem *>(item); node && node->kind().type == ui::NodeKind::Type::Merge)
+                merge = node;
+        QVERIFY(merge);
+        QCOMPARE(graph.edgeCount(), 4);
+        auto viewPos = [&](const QPointF &scenePos) { return graph.mapFromScene(scenePos); };
+
+        // Near a socket (not on it) it lights up.
+        const QPointF back = merge->socketPos(false, 0);
+        QTest::mouseMove(graph.viewport(), viewPos(back + QPointF(-10, 6)));
+        QVERIFY(merge->hotSocket() == 0);
+
+        // Pick the wire up by its end and let go over nothing: it is gone.
+        QTest::mousePress(graph.viewport(), Qt::LeftButton, {}, viewPos(back));
+        QTest::mouseMove(graph.viewport(), viewPos(back + QPointF(-60, 200)));
+        QTest::mouseRelease(graph.viewport(), Qt::LeftButton, {}, viewPos(back + QPointF(-60, 200)));
+        QCOMPARE(graph.edgeCount(), 3);
+
+        // Shift and drag across a wire cuts it.
+        const QPointF front = merge->socketPos(false, 1);
+        const QPointF a = front + QPointF(-60, -30), b = front + QPointF(-60, 30);
+        QTest::mousePress(graph.viewport(), Qt::LeftButton, Qt::ShiftModifier, viewPos(a));
+        QTest::mouseMove(graph.viewport(), viewPos((a + b) / 2));
+        QTest::mouseMove(graph.viewport(), viewPos(b));
+        QTest::mouseRelease(graph.viewport(), Qt::LeftButton, Qt::ShiftModifier, viewPos(b));
+        QCOMPARE(graph.edgeCount(), 2);
+    }
+
     void audioScrubbingCanBeTurnedOff()
     {
         QTemporaryDir dir;

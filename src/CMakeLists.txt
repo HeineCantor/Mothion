@@ -104,6 +104,8 @@ qt_add_library(mothion_gui STATIC
     ui/ShapeBar.h ui/ShapeBar.cpp
     ui/PuppetBar.h ui/PuppetBar.cpp
     ui/AutoplayWindow.h ui/AutoplayWindow.cpp
+    ui/compositing/NodeGraphView.h ui/compositing/NodeGraphView.cpp
+    ui/compositing/CompositingWindow.h ui/compositing/CompositingWindow.cpp
     ui/AdvancedToolSettings.h ui/AdvancedToolSettings.cpp
     ui/IconFactory.h ui/IconFactory.cpp
     audio/AudioAnalyzer.h audio/AudioAnalyzer.cpp
