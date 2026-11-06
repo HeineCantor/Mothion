@@ -36,6 +36,7 @@ AudioPlayer::AudioPlayer(document::DocumentController *document, QObject *parent
     });
     connect(m_document, &document::DocumentController::structureChanged, this, &AudioPlayer::sync);
     connect(m_document, &document::DocumentController::documentReplaced, this, &AudioPlayer::sync);
+    connect(m_document, &document::DocumentController::audioChanged, this, &AudioPlayer::sync); // a volume being dragged
     sync();
 }
 
@@ -58,7 +59,27 @@ double AudioPlayer::fps() const
 bool AudioPlayer::isAudible() const
 {
     const auto &track = m_document->audioTrack();
-    return track && track->data && !track->muted && track->volume > 0.0f;
+    return track && track->data && !track->muted && track->volume > 0.0f && !m_silenced;
+}
+
+void AudioPlayer::setSilenced(bool silenced)
+{
+    if (silenced == m_silenced)
+        return;
+    m_silenced = silenced;
+    if (silenced)
+        pauseSound();
+    emit silencedChanged(silenced);
+}
+
+void AudioPlayer::setRate(double rate)
+{
+    m_player->setPlaybackRate(std::clamp(rate, 0.05, 4.0));
+}
+
+double AudioPlayer::rate() const
+{
+    return m_player->playbackRate();
 }
 
 void AudioPlayer::sync()
@@ -84,7 +105,7 @@ void AudioPlayer::sync()
         m_output->setVolume(track->volume);
         m_output->setMuted(track->muted);
         if (track->muted || track->volume <= 0.0f)
-            stop();
+            pauseSound();
     }
 }
 
@@ -98,6 +119,7 @@ void AudioPlayer::play(int frame)
     m_delay.stop();
     m_burst.stop();
     m_playing = false;
+    m_requested = true;
     if (!isAudible()) {
         m_player->pause();
         return;
@@ -123,6 +145,11 @@ void AudioPlayer::play(int frame)
 
 void AudioPlayer::resync(int frame, int toleranceMs)
 {
+    if (m_requested && !m_playing) { // it was quiet (muted, silenced) and can be heard again
+        if (isAudible())
+            play(frame);
+        return;
+    }
     if (!m_playing || (m_started.isValid() && m_started.elapsed() < kWarmUpMs))
         return;
     const auto &track = m_document->audioTrack();
@@ -137,6 +164,12 @@ void AudioPlayer::resync(int frame, int toleranceMs)
 
 void AudioPlayer::stop()
 {
+    m_requested = false;
+    pauseSound();
+}
+
+void AudioPlayer::pauseSound()
+{
     m_delay.stop();
     m_burst.stop();
     m_playing = false;
@@ -148,6 +181,8 @@ void AudioPlayer::scrub(int frame)
     if (m_playing || !isAudible())
         return;
     const auto &track = m_document->audioTrack();
+    if (!track->scrub)
+        return;
     const double seconds = secondsAt(frame, track->offset, fps());
     if (seconds < 0.0 || (track->duration > 0.0 && seconds >= track->duration))
         return;

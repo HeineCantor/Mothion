@@ -73,6 +73,7 @@ std::unique_ptr<doc::Document> sampleDocument()
     song.offset = -12;
     song.volume = 0.4f;
     song.muted = true;
+    song.scrub = false;
     song.duration = 187.25;
     d->setAudio(song);
     d->allocateCelId(); // ids used by a cel and a layer since deleted: must not come back
@@ -98,6 +99,7 @@ void compareDocuments(const doc::Document &x, const doc::Document &y)
         QCOMPARE(ay.offset, ax.offset);
         QCOMPARE(ay.volume, ax.volume);
         QCOMPARE(ay.muted, ax.muted);
+        QCOMPARE(ay.scrub, ax.scrub);
         QCOMPARE(ay.duration, ax.duration);
         QVERIFY(ax.data && ay.data && *ax.data == *ay.data); // the sound, byte for byte
     }

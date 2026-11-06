@@ -36,10 +36,21 @@ public:
     // Where the sound is at `frame`: seconds from its start, negative before it begins.
     static double secondsAt(int frame, int offsetFrames, double fps);
 
-    // There is a sound that would be heard: a track, not muted, not at volume 0.
+    // There is a sound that would be heard: a track, not muted (in the project, or here: see setSilenced()), not
+    // at volume 0.
     bool isAudible() const;
-    // Playing from a frame (see play()).
+    // Off for this session only, whatever the track says (the Autoplay window's sound button): the project is
+    // not changed. Silencing stops the sound that is playing.
+    void setSilenced(bool silenced);
+    bool isSilenced() const { return m_silenced; }
+    // How fast it plays, as a multiple of its own speed (0.5: half, lower, slower); 1 is as it was recorded.
+    void setRate(double rate);
+    double rate() const;
+    // The sound is sounding, from a frame (see play()).
     bool isPlaying() const { return m_playing; }
+    // Playing was asked for and not stopped, whether or not it is heard now (muted, silenced): when it can be
+    // heard again, resync() takes it up at the frame the animation is at.
+    bool isRequested() const { return m_requested; }
 
     // The sound from `frame` on, as long as it is not stopped: it starts at once when it has begun by then, or
     // when the frames get to where it begins.
@@ -52,8 +63,13 @@ public:
     // A short burst of the sound at `frame` (a stop in the timeline, a step), unless it is playing.
     void scrub(int frame);
 
+signals:
+    void silencedChanged(bool silenced);
+
 private:
     void sync();
+    // Quiet, but still wanted: see isRequested().
+    void pauseSound();
     double fps() const;
     // The position of the sound in the player, in ms: -1 when it is not known.
     qint64 positionMs() const;
@@ -66,6 +82,8 @@ private:
     std::shared_ptr<const std::vector<unsigned char>> m_data;
     const void *m_key = nullptr;
     bool m_playing = false;
+    bool m_requested = false;
+    bool m_silenced = false;
     QElapsedTimer m_started; // since the sound was last started at a frame
     QTimer m_delay; // plays from the start when the frames get to where the sound begins
     QTimer m_burst; // ends a scrub's burst

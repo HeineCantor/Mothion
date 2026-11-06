@@ -584,6 +584,36 @@ void DocumentController::setAudioMuted(bool muted)
     execute(audioChange(m_document->audio(), [muted](doc::AudioTrack &t) { t.muted = muted; }));
 }
 
+void DocumentController::previewAudioVolume(float volume)
+{
+    auto track = m_document->audio();
+    if (!track)
+        return;
+    volume = std::clamp(volume, 0.0f, 1.0f);
+    if (track->volume == volume)
+        return;
+    track->volume = volume;
+    m_document->setAudio(std::move(track));
+    emit audioChanged();
+}
+
+void DocumentController::commitAudioVolume(float before)
+{
+    const auto track = m_document->audio();
+    if (!track)
+        return;
+    const float after = track->volume;
+    if (after == before)
+        return;
+    previewAudioVolume(before); // the step goes from where the drag began
+    setAudioVolume(after);
+}
+
+void DocumentController::setAudioScrub(bool scrub)
+{
+    execute(audioChange(m_document->audio(), [scrub](doc::AudioTrack &t) { t.scrub = scrub; }));
+}
+
 void DocumentController::setAudioDuration(double seconds)
 {
     auto track = m_document->audio();

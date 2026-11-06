@@ -5139,6 +5139,119 @@ private slots:
         QVERIFY(!player.isPlaying());
     }
 
+    // Muting (or silencing) while the animation plays and unmuting again: the sound comes back at the frame it is at,
+    // on the next beat of the playback, without a stop and a play.
+    void soundComesBackAfterMutingWhilePlaying()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        QFile file(dir.filePath(QStringLiteral("song.wav")));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(QByteArray(4000, 'x'));
+        file.close();
+        document::DocumentController controller;
+        QVERIFY(controller.importAudio(file.fileName()));
+        audio::AudioPlayer player(&controller);
+        player.play(5);
+        QVERIFY(player.isPlaying() && player.isRequested());
+        controller.setAudioMuted(true);
+        QVERIFY(!player.isPlaying()); // quiet...
+        QVERIFY(player.isRequested()); // ...but the playback goes on
+        player.resync(8);
+        QVERIFY(!player.isPlaying()); // still muted
+        controller.setAudioMuted(false);
+        QVERIFY(!player.isPlaying());
+        player.resync(9); // the next frame of the playback
+        QVERIFY(player.isPlaying()); // back, from there
+        player.setSilenced(true);
+        QVERIFY(!player.isPlaying() && player.isRequested());
+        player.setSilenced(false);
+        player.resync(12);
+        QVERIFY(player.isPlaying());
+        player.stop();
+        player.resync(13);
+        QVERIFY(!player.isPlaying() && !player.isRequested()); // stopped is stopped
+    }
+
+    // The track's scrubbing can be turned off: a step or a click on the timeline is then silent; the setting is one
+    // undo step and goes into the project.
+    void audioScrubbingCanBeTurnedOff()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        QFile file(dir.filePath(QStringLiteral("song.wav")));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(QByteArray(4000, 'x'));
+        file.close();
+        document::DocumentController controller;
+        QVERIFY(controller.importAudio(file.fileName()));
+        QVERIFY(controller.audioTrack()->scrub); // on to begin with
+        controller.setAudioScrub(false);
+        QVERIFY(!controller.audioTrack()->scrub);
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo audio change"));
+        controller.setAudioScrub(false); // the same: no step
+        controller.undo();
+        QVERIFY(controller.audioTrack()->scrub);
+        controller.redo();
+        QVERIFY(!controller.audioTrack()->scrub);
+    }
+
+    // An mp3 is decoded too (the format of the samples is left to the file: asking for another once made it never
+    // end): its length and loudness come out, as for a WAV.
+    void audioAnalyzerReadsAnMp3()
+    {
+        const QByteArray mp3 = QByteArray::fromBase64(QByteArray( // 0.6 s of a 440 Hz sine, stereo, 44.1 kHz, 32 kbps (as the usual mp3s)
+            "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"));
+        QVERIFY(mp3.size() > 1000);
+        const auto data = std::make_shared<const std::vector<unsigned char>>(mp3.cbegin(), mp3.cend());
+        audio::AudioAnalyzer analyzer;
+        QSignalSpy finished(&analyzer, &audio::AudioAnalyzer::finished);
+        QSignalSpy failed(&analyzer, &audio::AudioAnalyzer::failed);
+        analyzer.analyze(data, data.get());
+        QVERIFY(finished.wait(20000) || finished.count() > 0);
+        QCOMPARE(failed.count(), 0);
+        const auto wave = finished.first().at(1).value<audio::Waveform>();
+        QVERIFY(std::abs(wave.duration - 0.6) < 0.15);
+        QVERIFY(wave.peaks.size() >= 50);
+        float loudest = 0.0f;
+        for (float peak : wave.peaks)
+            loudest = std::max(loudest, peak);
+        QVERIFY(loudest > 0.3f); // the tone is there
+    }
+
     void largeImagesAreScaledToFit()
     {
         document::DocumentController controller;

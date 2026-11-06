@@ -21,13 +21,14 @@ struct AudioTrack
     int offset = 0;
     float volume = 1.0f; // 0..1
     bool muted = false;
+    bool scrub = true; // heard in short bursts as the timeline is scrubbed or stepped
     double duration = 0.0; // seconds; 0 until it is known (by decoding it)
 
     std::size_t bytes() const { return data ? data->size() : 0; }
     bool operator==(const AudioTrack &o) const
     {
         return name == o.name && format == o.format && data == o.data && offset == o.offset && volume == o.volume
-               && muted == o.muted && duration == o.duration;
+               && muted == o.muted && scrub == o.scrub && duration == o.duration;
     }
 };
 

@@ -36,10 +36,12 @@ namespace mothion::io {
 // Format 5 adds the audio track: the table "audio" (at most one row) holds the sound file whole, as it was, and
 // where and how it plays. Older files have none.
 //
+// Format 6 adds to it whether the sound is heard while the timeline is scrubbed (older files: it is).
+//
 // A save writes a new file next to the target and renames it over the old
 // one at the end, so a failed save never damages the previous file.
 
-inline constexpr int kProjectFormatVersion = 5;
+inline constexpr int kProjectFormatVersion = 6;
 inline constexpr char kProjectSuffix[] = "moth";
 inline constexpr char kOldProjectSuffix[] = "mothion"; // what projects were named before; they still open
 

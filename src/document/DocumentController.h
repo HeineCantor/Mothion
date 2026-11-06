@@ -108,6 +108,11 @@ public:
     void setAudioOffset(int frames);
     void setAudioVolume(float volume);
     void setAudioMuted(bool muted);
+    void setAudioScrub(bool scrub); // whether it is heard as the timeline is scrubbed
+    // The volume while a slider is dragged: shown and heard at once, not an undo step; commitAudioVolume() then
+    // records the drag as one step (`before` is the volume when it began).
+    void previewAudioVolume(float volume);
+    void commitAudioVolume(float before);
     // What decoding found out (not an undo step: it is a fact about the file).
     void setAudioDuration(double seconds);
 
@@ -252,6 +257,8 @@ public slots:
     void setCurrentLayer(doc::LayerId layer);
 
 signals:
+    // The audio track changed without a structure change (a volume being dragged): the views and the player take it up.
+    void audioChanged();
     // Pixels of (a layer of) `drawing` changed in `rect` (document coordinates).
     void pixelsChanged(doc::CelId cel, doc::DrawingId drawing, const QRect &rect);
     // Cels, drawings, layers, timing or document properties changed.

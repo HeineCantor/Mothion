@@ -53,7 +53,8 @@ const char *const kSchema[] = {
     " y integer not null, pixels blob not null, primary key (layer, x, y))",
     // Format 5: the audio track, the sound file whole.
     "create table audio (name text not null, format text not null, offset integer not null,"
-    " volume real not null, muted integer not null, duration real not null, data blob not null)",
+    " volume real not null, muted integer not null, duration real not null, data blob not null,"
+    " scrub integer not null default 1)",
 };
 
 // Stored by name, so reordering the enum cannot change old files.
@@ -364,7 +365,7 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
     }
     if (const auto &track = d.audio(); track && track->data) {
         QSqlQuery audio(db);
-        audio.prepare(QStringLiteral("insert into audio values (?, ?, ?, ?, ?, ?, ?)"));
+        audio.prepare(QStringLiteral("insert into audio values (?, ?, ?, ?, ?, ?, ?, ?)"));
         audio.addBindValue(QString::fromStdString(track->name));
         audio.addBindValue(QString::fromStdString(track->format));
         audio.addBindValue(track->offset);
@@ -372,6 +373,7 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
         audio.addBindValue(track->muted);
         audio.addBindValue(track->duration);
         audio.addBindValue(QByteArray(reinterpret_cast<const char *>(track->data->data()), qsizetype(track->data->size())));
+        audio.addBindValue(track->scrub);
         if (!audio.exec()) {
             failure = sqlError(audio);
             return false;
@@ -552,7 +554,8 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
             cel->timing().setExposure(start, length, drawing);
     }
 
-    if (version >= 5 && q.exec(QStringLiteral("select name, format, offset, volume, muted, duration, data from audio"))
+    if (version >= 5 && q.exec(version >= 6 ? QStringLiteral("select name, format, offset, volume, muted, duration, data, scrub from audio")
+                                            : QStringLiteral("select name, format, offset, volume, muted, duration, data, 1 from audio"))
         && q.next()) {
         doc::AudioTrack track;
         track.name = q.value(0).toString().toStdString();
@@ -563,6 +566,7 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
         track.duration = std::max(0.0, q.value(5).toDouble());
         const QByteArray bytes = q.value(6).toByteArray();
         track.data = std::make_shared<const std::vector<unsigned char>>(bytes.cbegin(), bytes.cend());
+        track.scrub = q.value(7).toBool();
         d->setAudio(std::move(track));
     }
 

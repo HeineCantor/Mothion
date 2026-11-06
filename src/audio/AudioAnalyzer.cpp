@@ -84,12 +84,7 @@ void AudioAnalyzer::analyze(std::shared_ptr<const std::vector<unsigned char>> da
         stop();
         emit failed(failedKey, message.isEmpty() ? tr("This audio file cannot be read.") : message);
     });
-    // Ask for plain 16-bit samples, whatever the file has: nothing to tell apart below.
-    QAudioFormat format;
-    format.setSampleFormat(QAudioFormat::Int16);
-    format.setChannelCount(1);
-    format.setSampleRate(22050);
-    m_decoder->setAudioFormat(format);
+    // The samples as the file has them (asking for another format made some files, mp3 among them, never end).
     m_decoder->setSourceDevice(m_buffer);
     if (!m_decoder) // an error at once has already stopped it
         return;
