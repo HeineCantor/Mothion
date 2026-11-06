@@ -24,6 +24,8 @@ class History
 {
 public:
     explicit History(HistoryLimits limits = {});
+    // New limits; steps over them go at once (the oldest first).
+    void setLimits(HistoryLimits limits);
 
     // Applies the command and records it (a nullptr command does nothing).
     ChangeSet execute(Document &doc, std::unique_ptr<Command> command);

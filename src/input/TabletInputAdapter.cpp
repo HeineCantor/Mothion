@@ -1,5 +1,7 @@
 #include "input/TabletInputAdapter.h"
 
+#include "tools/Preferences.h"
+
 #include <QMouseEvent>
 #include <QPointingDevice>
 #include <QTabletEvent>
@@ -79,7 +81,7 @@ std::optional<PenSample> toPenSample(const QMouseEvent &event)
     s.tool = InputTool::Mouse;
     s.buttons = toButtons(event.buttons());
     s.phase = toPhase(event.type(), event.button(), event.buttons());
-    s.pressure = s.buttons ? kMousePressure : 0.0f;
+    s.pressure = s.buttons ? float(tools::Preferences::instance().mousePressurePercent()) / 100.0f : 0.0f;
     return s;
 }
 

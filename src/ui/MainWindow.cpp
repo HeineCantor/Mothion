@@ -8,6 +8,7 @@
 #include "tools/BrushLibrary.h"
 #include "tools/ToolState.h"
 #include "ui/AutoplayWindow.h"
+#include "tools/Preferences.h"
 #include "ui/DiscordPresence.h"
 #include "ui/DockLayout.h"
 #include "ui/ExportDialog.h"
@@ -16,6 +17,7 @@
 #include "ui/SelectionBar.h"
 #include "ui/PuppetBar.h"
 #include "ui/ShapeBar.h"
+#include "ui/SettingsDialog.h"
 #include "ui/Shortcuts.h"
 #include "ui/TransformBar.h"
 #include "ui/Theme.h"
@@ -150,7 +152,9 @@ MainWindow::MainWindow(QWidget *parent)
     new ShapeBar(m_canvas);
     new PuppetBar(m_canvas);
     // Rich Presence: Discord shows "Mothion", the time and the frame (nothing without an application id).
-    new DiscordPresence(m_document, DiscordPresence::defaultApplicationId(), this);
+    auto *discord = new DiscordPresence(m_document, DiscordPresence::defaultApplicationId(), this);
+    connect(&tools::Preferences::instance(), &tools::Preferences::changed, discord,
+            [discord] { discord->setEnabled(tools::Preferences::instance().discordEnabled()); });
     auto *viewInfo = new QLabel(this);
     statusBar()->addPermanentWidget(viewInfo);
     connect(m_canvas, &canvas::CanvasView::viewChanged, viewInfo, [viewInfo](double zoom, double rot) {
@@ -311,6 +315,8 @@ void MainWindow::createMenus()
     Shortcuts &keymap = Shortcuts::instance();
     keymap.bind(file->addAction(tr("Export frames…"), this, &MainWindow::exportFrames), QStringLiteral("file.export"));
     file->addSeparator();
+    file->addAction(tr("Settings…"), this, &MainWindow::openSettings); // only from here: no key
+    file->addSeparator();
     keymap.bind(file->addAction(tr("Quit"), this, &QWidget::close), QStringLiteral("file.quit"));
 
     QMenu *edit = menuBar()->addMenu(tr("&Edit"));
@@ -380,21 +386,6 @@ void MainWindow::createMenus()
     QMenu *window = menuBar()->addMenu(tr("&Window"));
     for (PanelDock *dock : m_dockLayout->docks())
         window->addAction(dock->toggleViewAction());
-    window->addSeparator();
-    QMenu *theme = window->addMenu(tr("Theme"));
-    auto *themeGroup = new QActionGroup(this);
-    const std::pair<QString, ThemeChoice> themes[] = {
-        {tr("System"), ThemeChoice::System},
-        {tr("Light"), ThemeChoice::Light},
-        {tr("Dark"), ThemeChoice::Dark},
-    };
-    for (const auto &[text, choice] : themes) {
-        QAction *a = theme->addAction(text);
-        a->setCheckable(true);
-        a->setChecked(choice == themeChoice());
-        themeGroup->addAction(a);
-        connect(a, &QAction::triggered, this, [choice] { setThemeChoice(*qApp, choice); });
-    }
     window->addSeparator();
     window->addAction(tr("Reset default layout"), m_dockLayout, &DockLayout::resetToDefault);
 }
@@ -532,7 +523,6 @@ void rememberProjectDirectory(const QString &file)
 }
 
 const QString kRecentFilesKey = QStringLiteral("recent/projects");
-constexpr int kMaxRecentFiles = 10;
 
 // Most recent first.
 QStringList recentFiles()
@@ -551,7 +541,7 @@ void rememberRecentFile(const QString &path)
     QStringList files = recentFiles();
     files.removeAll(path);
     files.prepend(path);
-    while (files.size() > kMaxRecentFiles)
+    while (files.size() > tools::Preferences::instance().recentLimit())
         files.removeLast();
     setRecentFiles(files);
 }
@@ -564,6 +554,13 @@ void forgetRecentFile(const QString &path)
 }
 
 } // namespace
+
+void MainWindow::openSettings()
+{
+    SettingsDialog dialog(this);
+    connect(&dialog, &SettingsDialog::recentListCleared, this, [] { setRecentFiles({}); });
+    dialog.exec();
+}
 
 void MainWindow::newDocument()
 {
@@ -600,6 +597,8 @@ void MainWindow::fillRecentMenu()
     files.removeIf([](const QString &file) { return !QFileInfo::exists(file); });
     if (files.size() != before)
         setRecentFiles(files);
+    while (files.size() > tools::Preferences::instance().recentLimit()) // the limit was lowered
+        files.removeLast();
     for (const QString &file : std::as_const(files)) {
         QAction *action = m_recentMenu->addAction(QFileInfo(file).fileName());
         action->setToolTip(QDir::toNativeSeparators(file));

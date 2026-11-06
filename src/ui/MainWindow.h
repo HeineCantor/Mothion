@@ -64,6 +64,7 @@ private:
     void copyPixels(bool cut);
     void pastePixels();
     void importBrush();
+    void openSettings(); // the Settings window
 
     tools::ToolState *m_toolState = nullptr;
     tools::BrushLibrary *m_brushes = nullptr;

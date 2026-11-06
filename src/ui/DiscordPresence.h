@@ -40,6 +40,9 @@ public:
     void setMinimumUpdateInterval(int ms) { m_minimumInterval = ms; }
     void setRetryInterval(int ms) { m_retry.setInterval(ms); }
 
+    // Off: disconnected and silent; on (the setting's value at construction): it connects, and stays on at it.
+    void setEnabled(bool on);
+    bool isEnabled() const { return m_enabled; }
     // Connect (done at construction when there is an application id).
     void start();
     // Discord answered the handshake: presence is being sent.
@@ -62,6 +65,7 @@ private:
     int m_next = 0;
     QByteArray m_buffer;
     bool m_ready = false;
+    bool m_enabled = true;
     qint64 m_startSeconds;
     QTimer m_retry;
     QTimer m_throttle;

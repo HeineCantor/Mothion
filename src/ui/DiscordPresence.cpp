@@ -1,6 +1,7 @@
 #include "ui/DiscordPresence.h"
 
 #include "document/DocumentController.h"
+#include "tools/Preferences.h"
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -80,8 +81,25 @@ DiscordPresence::DiscordPresence(document::DocumentController *document, const Q
     connect(m_document, &document::DocumentController::currentFrameChanged, this, &DiscordPresence::scheduleUpdate);
     connect(m_document, &document::DocumentController::documentReplaced, this, &DiscordPresence::scheduleUpdate);
     connect(m_document, &document::DocumentController::structureChanged, this, &DiscordPresence::scheduleUpdate);
+    m_enabled = tools::Preferences::instance().discordEnabled();
     if (!m_applicationId.isEmpty())
         start();
+}
+
+void DiscordPresence::setEnabled(bool on)
+{
+    if (on == m_enabled)
+        return;
+    m_enabled = on;
+    if (on) {
+        start();
+        return;
+    }
+    m_retry.stop();
+    m_throttle.stop();
+    m_ready = false;
+    m_lastText.clear();
+    m_socket->abort(); // the activity goes from Discord with the connection
 }
 
 void DiscordPresence::setCandidatePaths(const QStringList &paths)
@@ -91,7 +109,7 @@ void DiscordPresence::setCandidatePaths(const QStringList &paths)
 
 void DiscordPresence::start()
 {
-    if (m_applicationId.isEmpty() || m_ready || m_socket->state() != QLocalSocket::UnconnectedState)
+    if (!m_enabled || m_applicationId.isEmpty() || m_ready || m_socket->state() != QLocalSocket::UnconnectedState)
         return;
     m_next = 0;
     tryNext();
@@ -99,6 +117,8 @@ void DiscordPresence::start()
 
 void DiscordPresence::tryNext()
 {
+    if (!m_enabled)
+        return;
     if (m_next >= m_candidates.size()) { // Discord is not there (yet): look again later
         m_retry.start();
         return;
@@ -118,7 +138,8 @@ void DiscordPresence::onDisconnected()
 {
     m_ready = false;
     m_lastText.clear();
-    m_retry.start();
+    if (m_enabled)
+        m_retry.start();
 }
 
 void DiscordPresence::sendFrame(int opcode, const QByteArray &json)

@@ -73,6 +73,12 @@ void History::clear()
     m_bytes = 0;
 }
 
+void History::setLimits(HistoryLimits limits)
+{
+    m_limits = limits;
+    enforceLimits();
+}
+
 void History::recountBytes()
 {
     m_bytes = 0;

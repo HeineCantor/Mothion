@@ -38,6 +38,8 @@ public:
     // the top cel and frame 1 current, nothing selected.
     void replaceDocument(std::unique_ptr<doc::Document> document);
     // Changes since the last save (or since the document was created or loaded).
+    // The undo history's limits, from the preferences (at the start and when they change).
+    void applyUndoLimits();
     bool isModified() const { return !m_history.isClean(); }
     // The document now matches the saved file.
     void markSaved();

@@ -27,6 +27,9 @@
 #include "ui/PanelDock.h"
 #include "ui/SelectionBar.h"
 #include "ui/PuppetBar.h"
+#include "input/TabletInputAdapter.h"
+#include "tools/Preferences.h"
+#include "ui/SettingsDialog.h"
 #include "ui/ShapeBar.h"
 #include "ui/Shortcuts.h"
 #include "ui/TransformBar.h"
@@ -4567,6 +4570,146 @@ private slots:
         QTest::keyClick(&palette, Qt::Key_J);
         QCOMPARE(state.activeTool(), tools::ToolId::Brush);
         keys.resetAll();
+    }
+
+    // The preferences keep their values (clamped), say when they change, and go back to the defaults.
+    void preferencesChangeAndReset()
+    {
+        tools::Preferences &prefs = tools::Preferences::instance();
+        prefs.resetAll();
+        QCOMPARE(prefs.zoomFactor(), 1.25);
+        QCOMPARE(prefs.rotateStep(), 15);
+        QVERIFY(prefs.discordEnabled() && prefs.brushOutline());
+        QSignalSpy changed(&prefs, &tools::Preferences::changed);
+        prefs.setZoomStepPercent(50);
+        QCOMPARE(prefs.zoomFactor(), 1.5);
+        prefs.setZoomStepPercent(50); // the same: nothing to say
+        QCOMPARE(changed.count(), 1);
+        prefs.setRotateStep(500);
+        QCOMPARE(prefs.rotateStep(), 90); // clamped
+        prefs.setRecentLimit(0);
+        QCOMPARE(prefs.recentLimit(), 1);
+        prefs.resetAll();
+        QCOMPARE(prefs.zoomFactor(), 1.25);
+        QCOMPARE(prefs.recentLimit(), 10);
+    }
+
+    // The Discord presence can be switched off (disconnected, quiet) and on again.
+    void discordPresenceCanBeDisabled()
+    {
+        document::DocumentController controller;
+        ui::DiscordPresence presence(&controller, QStringLiteral("123"));
+        presence.setCandidatePaths({});
+        QVERIFY(presence.isEnabled());
+        presence.setEnabled(false);
+        QVERIFY(!presence.isEnabled() && !presence.isConnected());
+        presence.start(); // nothing while it is off
+        presence.setEnabled(true);
+        QVERIFY(presence.isEnabled());
+    }
+
+    // File > Settings (and nowhere else) opens the window; what is set in it applies at once.
+    void settingsWindowAppliesAtOnce()
+    {
+        tools::Preferences &prefs = tools::Preferences::instance();
+        prefs.resetAll();
+        ui::MainWindow window;
+        QAction *settings = nullptr;
+        for (QAction *a : window.menuBar()->actions())
+            if (a->menu() && a->menu()->title().contains(QStringLiteral("File")))
+                for (QAction *item : a->menu()->actions())
+                    if (item->text().startsWith(QStringLiteral("Settings")))
+                        settings = item;
+        QVERIFY(settings);
+        QVERIFY(settings->shortcuts().isEmpty()); // no key: only from the menu
+
+        ui::SettingsDialog dialog;
+        auto *discord = dialog.findChild<QCheckBox *>(QStringLiteral("discord"));
+        auto *zoom = dialog.findChild<QSpinBox *>(QStringLiteral("zoomStep"));
+        auto *outline = dialog.findChild<QCheckBox *>(QStringLiteral("brushOutline"));
+        auto *commands = dialog.findChild<QTreeWidget *>(QStringLiteral("commands"));
+        QVERIFY(discord && zoom && outline && commands);
+        QVERIFY(discord->isChecked());
+        discord->setChecked(false);
+        QVERIFY(!prefs.discordEnabled());
+        zoom->setValue(40);
+        QCOMPARE(prefs.zoomStepPercent(), 40);
+        outline->setChecked(false);
+        QVERIFY(!prefs.brushOutline());
+
+        int rows = 0; // every command is listed, under its group
+        for (int i = 0; i < commands->topLevelItemCount(); ++i)
+            rows += commands->topLevelItem(i)->childCount();
+        QCOMPARE(rows, int(ui::Shortcuts::instance().commands().size()));
+        prefs.resetAll();
+    }
+
+    // A key given to one command is taken off the one that had it.
+    void assigningAShortcutTakesItFromTheOther()
+    {
+        ui::Shortcuts &keys = ui::Shortcuts::instance();
+        keys.resetAll();
+        keys.assign(QStringLiteral("tool.eraser"), QKeySequence(Qt::Key_B)); // the brush's
+        QCOMPARE(keys.key(QStringLiteral("tool.eraser")), QKeySequence(Qt::Key_B));
+        QVERIFY(keys.keys(QStringLiteral("tool.brush")).isEmpty()); // lost it
+        QVERIFY(keys.isCustom(QStringLiteral("tool.brush")));
+        keys.resetAll();
+        QCOMPARE(keys.key(QStringLiteral("tool.brush")), QKeySequence(Qt::Key_B));
+        QCOMPARE(keys.key(QStringLiteral("tool.eraser")), QKeySequence(Qt::Key_E));
+    }
+
+    // The default keys of the standard commands are the usual ones, not the platform's dedicated keys for
+    // them (a "New" or "Paste" key some keyboards have), which would only clutter the list of shortcuts.
+    void standardShortcutsHaveNoDedicatedKeys()
+    {
+        const Qt::Key dedicated[] = {Qt::Key_New, Qt::Key_Open, Qt::Key_Save, Qt::Key_Undo, Qt::Key_Redo,
+                                     Qt::Key_Cut, Qt::Key_Copy, Qt::Key_Paste, Qt::Key_Exit};
+        for (const char *id : {"file.new", "file.open", "file.save", "edit.undo", "edit.redo", "edit.cut", "edit.copy",
+                               "edit.paste", "file.quit"}) {
+            const QList<QKeySequence> keys = ui::Shortcuts::instance().command(QLatin1String(id))->defaults;
+            QVERIFY2(!keys.isEmpty(), id);
+            for (const QKeySequence &k : keys)
+                for (Qt::Key bad : dedicated)
+                    QVERIFY2(k[0].key() != bad, id);
+        }
+    }
+
+    // File > New follows the new-project preferences; the undo history keeps as many steps as chosen; a mouse
+    // draws with the chosen pressure.
+    void projectUndoAndMousePreferencesApply()
+    {
+        tools::Preferences &prefs = tools::Preferences::instance();
+        prefs.resetAll();
+        document::DocumentController controller;
+        QCOMPARE(controller.document().width(), 1920);
+        prefs.setNewSize(640, 360);
+        prefs.setNewFrameRate(12);
+        prefs.setNewFrames(30);
+        prefs.setPaperColor(QColor(10, 20, 30));
+        controller.newDocument();
+        QCOMPARE(controller.document().width(), 640);
+        QCOMPARE(controller.document().height(), 360);
+        QCOMPARE(controller.document().frameCount(), 30);
+        QCOMPARE(controller.document().frameRate().fps(), 12.0);
+        QCOMPARE(QColor::fromRgba(controller.document().paperColor()), QColor(10, 20, 30));
+
+        prefs.setUndoSteps(10);
+        for (int i = 0; i < 14; ++i)
+            controller.addCel();
+        int undone = 0;
+        while (controller.canUndo()) {
+            controller.undo();
+            ++undone;
+        }
+        QCOMPARE(undone, 10);
+
+        prefs.setMousePressurePercent(50);
+        const QMouseEvent press(QEvent::MouseButtonPress, QPointF(5, 5), QPointF(5, 5), Qt::LeftButton, Qt::LeftButton,
+                                Qt::NoModifier);
+        const auto sample = input::toPenSample(press);
+        QVERIFY(sample);
+        QCOMPARE(sample->pressure, 0.5f);
+        prefs.resetAll();
     }
 
     void largeImagesAreScaledToFit()

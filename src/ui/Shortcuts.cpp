@@ -7,6 +7,9 @@
 #include <QSettings>
 #include <QShortcut>
 
+#include <algorithm>
+#include <iterator>
+
 namespace mothion::ui {
 
 namespace {
@@ -25,9 +28,17 @@ QKeySequence ctrl(Qt::Key k, Qt::KeyboardModifiers more = Qt::NoModifier)
     return seq(k, Qt::ControlModifier | more);
 }
 
+// The platform's keys for a standard command, without the dedicated keys some keyboards have for it
+// (Key_New, Key_Paste...): they are not keys to type, and would only clutter the list of shortcuts.
 QList<QKeySequence> standard(QKeySequence::StandardKey k)
 {
-    return QKeySequence::keyBindings(k);
+    static const Qt::Key dedicated[] = {Qt::Key_New, Qt::Key_Open, Qt::Key_Save, Qt::Key_Undo, Qt::Key_Redo,
+                                        Qt::Key_Cut, Qt::Key_Copy, Qt::Key_Paste, Qt::Key_Exit};
+    QList<QKeySequence> keys = QKeySequence::keyBindings(k);
+    keys.removeIf([](const QKeySequence &key) {
+        return !key.isEmpty() && std::find(std::begin(dedicated), std::end(dedicated), key[0].key()) != std::end(dedicated);
+    });
+    return keys;
 }
 
 } // namespace
@@ -47,7 +58,11 @@ Shortcuts::Shortcuts()
     add(QStringLiteral("file.save"), file, tr("Save"), standard(QKeySequence::Save));
     add(QStringLiteral("file.saveAs"), file, tr("Save as…"), {ctrl(Qt::Key_S, Qt::ShiftModifier)});
     add(QStringLiteral("file.export"), file, tr("Export frames…"), {ctrl(Qt::Key_E)});
-    add(QStringLiteral("file.quit"), file, tr("Quit"), standard(QKeySequence::Quit));
+    // Some platforms have only a dedicated Exit key for it: then Ctrl+Q.
+    QList<QKeySequence> quitKeys = standard(QKeySequence::Quit);
+    if (quitKeys.isEmpty())
+        quitKeys << ctrl(Qt::Key_Q);
+    add(QStringLiteral("file.quit"), file, tr("Quit"), quitKeys);
 
     // Undo and redo: the platform's keys, and for redo both Ctrl+Shift+Z and Ctrl+Y everywhere.
     QList<QKeySequence> redoKeys = standard(QKeySequence::Redo);
@@ -182,6 +197,19 @@ void Shortcuts::resetAll()
     const QList<QString> ids = m_custom.keys();
     for (const QString &id : ids)
         reset(id);
+}
+
+void Shortcuts::assign(const QString &id, const QKeySequence &key)
+{
+    if (key.isEmpty())
+        return;
+    const QString other = conflictFor(key, id);
+    if (!other.isEmpty()) {
+        QList<QKeySequence> rest = keys(other);
+        rest.removeAll(key);
+        setKeys(other, rest);
+    }
+    setKeys(id, {key});
 }
 
 QString Shortcuts::conflictFor(const QKeySequence &key, const QString &exceptId) const

@@ -1,6 +1,7 @@
 #include "document/DocumentController.h"
 
 #include "canvas/FrameRenderer.h"
+#include "tools/Preferences.h"
 #include "canvas/SelectionMask.h"
 #include "canvas/TileQt.h"
 #include "core/document/commands/DrawingCommands.h"
@@ -18,9 +19,6 @@ namespace mothion::document {
 
 namespace {
 
-constexpr int kDefaultWidth = 1920;
-constexpr int kDefaultHeight = 1080;
-constexpr int kDefaultFrames = 120;
 
 // Bounding rect of changed tiles, in document coordinates.
 QRect boundsOf(const std::vector<doc::TileCoord> &tiles)
@@ -91,14 +89,24 @@ DocumentController::DocumentController(QObject *parent)
     , m_document(makeDefaultDocument())
 {
     m_currentCel = m_document->celAt(0).id();
+    applyUndoLimits();
+    connect(&tools::Preferences::instance(), &tools::Preferences::changed, this, &DocumentController::applyUndoLimits);
+}
+
+void DocumentController::applyUndoLimits()
+{
+    const tools::Preferences &prefs = tools::Preferences::instance();
+    m_history.setLimits({std::size_t(prefs.undoSteps()), std::size_t(prefs.undoMegabytes()) << 20});
 }
 
 DocumentController::~DocumentController() = default;
 
 std::unique_ptr<doc::Document> DocumentController::makeDefaultDocument()
 {
-    auto d = std::make_unique<doc::Document>(kDefaultWidth, kDefaultHeight, doc::FrameRate{24, 1});
-    d->setFrameCount(kDefaultFrames);
+    const tools::Preferences &prefs = tools::Preferences::instance();
+    auto d = std::make_unique<doc::Document>(prefs.newWidth(), prefs.newHeight(), doc::FrameRate{prefs.newFrameRate(), 1});
+    d->setFrameCount(prefs.newFrames());
+    d->setPaperColor(prefs.paperColor().rgba());
     // The first layer is part of the new document, not an undoable step.
     doc::AddCelCommand first(*d, 0, {tr("Cel 1").toStdString()});
     first.apply(*d);

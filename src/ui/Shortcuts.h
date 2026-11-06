@@ -48,6 +48,9 @@ public:
     void reset(const QString &id);
     void resetAll();
 
+    // `key` becomes the command's only key; the command that had it loses it (see conflictFor() to ask first).
+    void assign(const QString &id, const QKeySequence &key);
+
     // The command that has `key` now, other than `exceptId`; empty when it is free.
     QString conflictFor(const QKeySequence &key, const QString &exceptId) const;
     // Whether `event` is one of the command's keys (the keypad does not count as a modifier).

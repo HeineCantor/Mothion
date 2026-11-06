@@ -60,6 +60,7 @@ qt_add_library(mothion_gui STATIC
     io/FrameExport.h io/FrameExport.cpp
 
     tools/ToolState.h tools/ToolState.cpp
+    tools/Preferences.h tools/Preferences.cpp
     tools/BrushDefinition.h
     tools/BrushPreset.h tools/BrushPreset.cpp
     tools/BrushLibrary.h tools/BrushLibrary.cpp
@@ -104,6 +105,7 @@ qt_add_library(mothion_gui STATIC
     ui/AdvancedToolSettings.h ui/AdvancedToolSettings.cpp
     ui/IconFactory.h ui/IconFactory.cpp
     ui/Shortcuts.h ui/Shortcuts.cpp
+    ui/SettingsDialog.h ui/SettingsDialog.cpp
     ui/Theme.h ui/Theme.cpp
     ui/panels/ToolPalettePanel.h ui/panels/ToolPalettePanel.cpp
     ui/panels/ToolPropertiesPanel.h ui/panels/ToolPropertiesPanel.cpp

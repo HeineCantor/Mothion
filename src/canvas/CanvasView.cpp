@@ -11,6 +11,7 @@
 #include "canvas/TransformTool.h"
 #include "document/DocumentController.h"
 #include "input/TabletInputAdapter.h"
+#include "tools/Preferences.h"
 #include "tools/ToolState.h"
 
 #include <QGuiApplication>
@@ -32,12 +33,12 @@
 namespace mothion::canvas {
 
 using Mode = NavigationGesture::Mode;
+using tools::Preferences;
 using tools::ToolId;
 using tools::ToolState;
 
 namespace {
-constexpr double kZoomStep = 1.25;
-constexpr double kRotateStep = 15.0;
+
 // How often the selection outline's black and white dashes swap.
 constexpr int kAntsIntervalMs = 200;
 } // namespace
@@ -140,6 +141,7 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
         }
     });
     connect(m_toolState, &ToolState::toolSettingsChanged, this, [this] { updateBrushOutline(m_pointerPos); });
+    connect(&Preferences::instance(), &Preferences::changed, this, [this] { update(); }); // the outline on or off
     updateCursor();
 }
 
@@ -255,13 +257,13 @@ bool CanvasView::canRedoInEdit() const
 
 void CanvasView::zoomIn()
 {
-    m_view.zoomAround(m_view.viewportCenter(), kZoomStep);
+    m_view.zoomAround(m_view.viewportCenter(), Preferences::instance().zoomFactor());
     viewWasChanged();
 }
 
 void CanvasView::zoomOut()
 {
-    m_view.zoomAround(m_view.viewportCenter(), 1.0 / kZoomStep);
+    m_view.zoomAround(m_view.viewportCenter(), 1.0 / Preferences::instance().zoomFactor());
     viewWasChanged();
 }
 
@@ -273,13 +275,13 @@ void CanvasView::fitToView()
 
 void CanvasView::rotateLeft()
 {
-    m_view.rotateAround(m_view.viewportCenter(), -kRotateStep);
+    m_view.rotateAround(m_view.viewportCenter(), -double(Preferences::instance().rotateStep()));
     viewWasChanged();
 }
 
 void CanvasView::rotateRight()
 {
-    m_view.rotateAround(m_view.viewportCenter(), kRotateStep);
+    m_view.rotateAround(m_view.viewportCenter(), double(Preferences::instance().rotateStep()));
     viewWasChanged();
 }
 
@@ -358,7 +360,8 @@ void CanvasView::paintEvent(QPaintEvent *)
     paintStraightLinePreview(p);
 
     m_paintedOutline = QRect();
-    if (m_pointerVisible && ToolState::isPaintTool(m_toolState->activeTool()) && !m_gesture.isActive()
+    if (m_pointerVisible && Preferences::instance().brushOutline() && ToolState::isPaintTool(m_toolState->activeTool())
+        && !m_gesture.isActive()
         && !picksColor() && m_editTool != m_eyedropperTool.get()) {
         p.setRenderHint(QPainter::Antialiasing);
         p.setBrush(Qt::NoBrush);
@@ -1036,7 +1039,7 @@ void CanvasView::wheelEvent(QWheelEvent *event)
         return;
     }
     if (event->modifiers() & Qt::ShiftModifier)
-        m_view.rotateAround(event->position(), delta > 0 ? -kRotateStep : kRotateStep);
+        m_view.rotateAround(event->position(), delta > 0 ? -double(Preferences::instance().rotateStep()) : double(Preferences::instance().rotateStep()));
     else
         m_view.zoomAround(event->position(), std::pow(1.0015, delta));
     viewWasChanged();
