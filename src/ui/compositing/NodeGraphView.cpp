@@ -363,6 +363,7 @@ void NodeGraphView::graphChanged(const compositing::GraphChange &change)
     case Kind::Moved: // an item was dragged: it is already there
         break;
     case Kind::Reset: // everything was replaced
+        removeEdges(); // before the nodes: a wire whose node is gone could no longer be told from the one being dragged
         qDeleteAll(m_items);
         m_items.clear();
         for (const compositing::Node &node : m_graph.nodes())
@@ -390,7 +391,7 @@ void NodeGraphView::addNodeItem(NodeId id)
     m_items.insert(id, node);
 }
 
-void NodeGraphView::rebuildEdges()
+void NodeGraphView::removeEdges()
 {
     // Only the wires of the graph: the one being dragged (a free end) is left alone.
     QList<EdgeItem *> old;
@@ -398,6 +399,11 @@ void NodeGraphView::rebuildEdges()
         if (auto *edge = dynamic_cast<EdgeItem *>(item); edge && edge->to && edge->from)
             old.append(edge);
     qDeleteAll(old);
+}
+
+void NodeGraphView::rebuildEdges()
+{
+    removeEdges();
     for (const compositing::Link &link : m_graph.links()) {
         NodeItem *from = m_items.value(link.from);
         NodeItem *to = m_items.value(link.to);

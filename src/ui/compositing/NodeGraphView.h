@@ -134,6 +134,7 @@ protected:
 private:
     void graphChanged(const compositing::GraphChange &change);
     void addNodeItem(compositing::NodeId id);
+    void removeEdges();  // the wires of the graph (not one being dragged)
     void rebuildEdges(); // the wires drawn are the graph's links
     void deleteSelection();
     void beginWire(NodeItem *node, bool output, int index, const QPointF &scenePos);
