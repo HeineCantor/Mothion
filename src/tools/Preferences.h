@@ -41,11 +41,9 @@ public:
     QColor paperColor() const { return m_paper; }
     void setPaperColor(const QColor &color);
 
-    // The undo history: the steps kept, and the memory they may take (MiB).
+    // The undo history: the steps kept (it also stops at 1 GiB of undo data).
     int undoSteps() const { return m_undoSteps; }
     void setUndoSteps(int steps);
-    int undoMegabytes() const { return m_undoMegabytes; }
-    void setUndoMegabytes(int megabytes);
 
     // The pressure a mouse draws with, in % (a pen sends its own).
     int mousePressurePercent() const { return m_mousePressure; }
@@ -67,7 +65,6 @@ public:
     static constexpr int kDefaultFrameRate = 24;
     static constexpr int kDefaultFrames = 120;
     static constexpr int kDefaultUndoSteps = 500;
-    static constexpr int kDefaultUndoMegabytes = 1024;
 
 signals:
     void changed();
@@ -87,7 +84,6 @@ private:
     int m_newFrames = kDefaultFrames;
     QColor m_paper = Qt::white;
     int m_undoSteps = kDefaultUndoSteps;
-    int m_undoMegabytes = kDefaultUndoMegabytes;
     int m_mousePressure = 100;
 };
 

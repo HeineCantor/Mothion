@@ -96,7 +96,9 @@ DocumentController::DocumentController(QObject *parent)
 void DocumentController::applyUndoLimits()
 {
     const tools::Preferences &prefs = tools::Preferences::instance();
-    m_history.setLimits({std::size_t(prefs.undoSteps()), std::size_t(prefs.undoMegabytes()) << 20});
+    doc::HistoryLimits limits; // the memory limit stays at its default
+    limits.maxSteps = std::size_t(prefs.undoSteps());
+    m_history.setLimits(limits);
 }
 
 DocumentController::~DocumentController() = default;

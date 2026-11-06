@@ -275,16 +275,6 @@ QWidget *SettingsDialog::advancedPage()
     connect(steps, &QSpinBox::valueChanged, this, [](int v) { tools::Preferences::instance().setUndoSteps(v); });
     form->addRow(tr("Undo steps"), steps);
 
-    auto *memory = new QSpinBox(page);
-    memory->setObjectName(QStringLiteral("undoMemory"));
-    memory->setRange(64, 16384);
-    memory->setSingleStep(64);
-    memory->setSuffix(QStringLiteral(" MiB"));
-    memory->setValue(prefs.undoMegabytes());
-    memory->setToolTip(tr("The memory the undo history may take; past it the oldest steps go"));
-    connect(memory, &QSpinBox::valueChanged, this, [](int v) { tools::Preferences::instance().setUndoMegabytes(v); });
-    form->addRow(tr("Undo memory"), memory);
-
     auto *folder = new QPushButton(tr("Open the data folder"), page);
     folder->setObjectName(QStringLiteral("dataFolder"));
     folder->setToolTip(tr("Where the imported brushes are kept"));

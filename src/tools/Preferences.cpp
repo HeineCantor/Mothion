@@ -20,7 +20,6 @@ constexpr auto kNewFps = "newFrameRate";
 constexpr auto kNewFrames = "newFrames";
 constexpr auto kPaper = "paperColor";
 constexpr auto kUndoSteps = "undoSteps";
-constexpr auto kUndoMegabytes = "undoMegabytes";
 constexpr auto kMousePressure = "mousePressure";
 
 QString path(const char *key)
@@ -51,7 +50,6 @@ Preferences::Preferences()
     const QColor paper(settings.value(path(kPaper), QStringLiteral("#ffffff")).toString());
     m_paper = paper.isValid() ? paper : QColor(Qt::white);
     m_undoSteps = std::clamp(settings.value(path(kUndoSteps), kDefaultUndoSteps).toInt(), 10, 5000);
-    m_undoMegabytes = std::clamp(settings.value(path(kUndoMegabytes), kDefaultUndoMegabytes).toInt(), 64, 16384);
     m_mousePressure = std::clamp(settings.value(path(kMousePressure), 100).toInt(), 10, 100);
 }
 
@@ -153,15 +151,6 @@ void Preferences::setUndoSteps(int steps)
     save(kUndoSteps, steps);
 }
 
-void Preferences::setUndoMegabytes(int megabytes)
-{
-    megabytes = std::clamp(megabytes, 64, 16384);
-    if (megabytes == m_undoMegabytes)
-        return;
-    m_undoMegabytes = megabytes;
-    save(kUndoMegabytes, megabytes);
-}
-
 void Preferences::setMousePressurePercent(int percent)
 {
     percent = std::clamp(percent, 10, 100);
@@ -178,7 +167,6 @@ void Preferences::resetAll()
     setNewFrames(kDefaultFrames);
     setPaperColor(Qt::white);
     setUndoSteps(kDefaultUndoSteps);
-    setUndoMegabytes(kDefaultUndoMegabytes);
     setMousePressurePercent(100);
     setDiscordEnabled(true);
     setRecentLimit(kDefaultRecentLimit);
