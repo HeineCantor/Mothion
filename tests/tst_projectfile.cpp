@@ -7,7 +7,10 @@
 #include "io/ProjectFile.h"
 #include "io/ProjectThumbnail.h"
 
+#include <QElapsedTimer>
+#include <QSet>
 #include <QFile>
+#include <QFileInfo>
 #include <QImage>
 #include <QSignalSpy>
 #include <QSqlDatabase>
@@ -15,6 +18,7 @@
 #include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QtEndian>
 
 #include <algorithm>
 
@@ -112,6 +116,80 @@ class TestProjectFile : public QObject
     Q_OBJECT
 
 private slots:
+    // Many tiles of noise and gradients: packed on all the cores, and filtered, they come back exactly (more
+    // tiles than one batch of the reader).
+    void manyTilesSurviveTheFilterAndTheCores()
+    {
+        auto d = std::make_unique<doc::Document>(4096, 4096, doc::FrameRate{24, 1});
+        const doc::CelId id = d->allocateCelId();
+        doc::Cel &cel = d->insertCel(0, std::make_unique<doc::Cel>(id, doc::CelProperties{"Noise"}));
+        doc::Drawing &dr = cel.addDrawing({d->allocateDrawingId(), "1", {{d->allocateLayerId(), {"Paint"}, {}}}});
+        cel.timing().setExposure(0, 1, dr.id);
+        quint32 state = 12345;
+        auto next = [&state] {
+            state = state * 1664525u + 1013904223u;
+            return state;
+        };
+        for (int ty = 0; ty < 48; ++ty)
+            for (int tx = 0; tx < 48; ++tx) { // 2304 tiles
+                auto tile = std::make_shared<doc::Tile>();
+                for (int i = 0; i < doc::kTilePixels; ++i) {
+                    const int x = i % doc::kTileSize, y = i / doc::kTileSize;
+                    tile->pixels[std::size_t(i)] = (tx + ty) % 3 == 0 ? next() // noise
+                                                   : (tx + ty) % 3 == 1 ? 0xff000000u | (x * 4) << 16 | (y * 4) << 8 | 77 // gradient
+                                                                        : 0;                                              // blank
+                }
+                dr.layers[0].image.setTile({tx, ty}, std::move(tile));
+            }
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString path = dir.filePath(QStringLiteral("noise.moth"));
+        QString error;
+        QVERIFY2(io::saveProject(*d, path, &error), qPrintable(error));
+        const auto loaded = io::loadProject(path, &error);
+        QVERIFY2(loaded, qPrintable(error));
+        compareDocuments(*d, *loaded);
+    }
+
+    // A project of format 3, its tiles stored as they are, still opens.
+    void projectsOfFormat3StillOpen()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const auto original = sampleDocument();
+        const QString path = dir.filePath(QStringLiteral("old.moth"));
+        QString error;
+        QVERIFY2(io::saveProject(*original, path, &error), qPrintable(error));
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), QStringLiteral("to-format-3"));
+            db.setDatabaseName(path);
+            QVERIFY(db.open());
+            QSqlQuery q(db);
+            QVERIFY(q.exec(QStringLiteral("begin")));
+            q.prepare(QStringLiteral("update tiles set pixels = ? where layer = ? and x = ? and y = ?"));
+            for (int i = 0; i < original->celCount(); ++i)
+                for (const auto &[id, drawing] : original->celAt(i).drawings())
+                    for (const doc::Layer &layer : drawing.layers)
+                        for (const doc::TileCoord &c : layer.image.tileCoords()) {
+                            const doc::TilePtr tile = layer.image.tile(c);
+                            QByteArray raw(doc::kTilePixels * 4, Qt::Uninitialized);
+                            qToLittleEndian<doc::Pixel>(tile->pixels.data(), doc::kTilePixels, raw.data());
+                            q.addBindValue(qCompress(raw));
+                            q.addBindValue(qlonglong(layer.id));
+                            q.addBindValue(c.x);
+                            q.addBindValue(c.y);
+                            QVERIFY(q.exec());
+                        }
+            QVERIFY(q.exec(QStringLiteral("commit")));
+            QVERIFY(q.exec(QStringLiteral("pragma user_version = 3")));
+            db.close();
+        }
+        QSqlDatabase::removeDatabase(QStringLiteral("to-format-3"));
+        const auto loaded = io::loadProject(path, &error);
+        QVERIFY2(loaded, qPrintable(error));
+        compareDocuments(*original, *loaded);
+    }
+
     void roundTrip()
     {
         QTemporaryDir dir;

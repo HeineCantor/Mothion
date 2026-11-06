@@ -30,10 +30,13 @@ namespace mothion::io {
 // its tiles belonged to drawings. Such a file opens with each drawing made
 // of one layer. Format 2 had no kinds of layers: all of them are raster.
 //
+// Format 3 stored each tile's pixels as they are (deflated); format 4 filters them first, with the PNG
+// "Paeth" predictor, which makes photographs and shaded drawings a fifth smaller.
+//
 // A save writes a new file next to the target and renames it over the old
 // one at the end, so a failed save never damages the previous file.
 
-inline constexpr int kProjectFormatVersion = 3;
+inline constexpr int kProjectFormatVersion = 4;
 inline constexpr char kProjectSuffix[] = "moth";
 inline constexpr char kOldProjectSuffix[] = "mothion"; // what projects were named before; they still open
 

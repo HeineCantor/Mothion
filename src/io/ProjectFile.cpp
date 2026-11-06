@@ -1,5 +1,6 @@
 #include "io/ProjectFile.h"
 
+#include "core/Parallel.h"
 #include "io/FrameExport.h"
 #include "io/ProjectThumbnail.h"
 
@@ -139,18 +140,69 @@ perspective::Grid gridFromJson(const QString &text)
 QVariant idValue(std::uint64_t id) { return QVariant(qlonglong(id)); }
 std::uint64_t idFrom(const QVariant &v) { return std::uint64_t(v.toLongLong()); }
 
+// Format 4: each byte of a tile, rows of 64 pixels of 4 bytes, minus what the PNG Paeth predictor guesses it
+// is from the byte before it (a pixel to the left), the one above and the one above that.
+constexpr int kTileRowBytes = doc::kTileSize * int(sizeof(doc::Pixel));
+
+inline int paeth(int a, int b, int c)
+{
+    const int p = a + b - c;
+    const int pa = std::abs(p - a), pb = std::abs(p - b), pc = std::abs(p - c);
+    return (pa <= pb && pa <= pc) ? a : (pb <= pc ? b : c);
+}
+
+void filterPaeth(const unsigned char *raw, unsigned char *out)
+{
+    for (int y = 0; y < doc::kTileSize; ++y) {
+        const unsigned char *row = raw + y * kTileRowBytes;
+        const unsigned char *up = y ? row - kTileRowBytes : nullptr;
+        unsigned char *o = out + y * kTileRowBytes;
+        for (int x = 0; x < kTileRowBytes; ++x) {
+            const int a = x >= 4 ? row[x - 4] : 0;
+            const int b = up ? up[x] : 0;
+            const int c = (up && x >= 4) ? up[x - 4] : 0;
+            o[x] = static_cast<unsigned char>(row[x] - paeth(a, b, c));
+        }
+    }
+}
+
+void unfilterPaeth(const unsigned char *filtered, unsigned char *raw)
+{
+    for (int y = 0; y < doc::kTileSize; ++y) {
+        const unsigned char *f = filtered + y * kTileRowBytes;
+        unsigned char *row = raw + y * kTileRowBytes;
+        const unsigned char *up = y ? row - kTileRowBytes : nullptr;
+        for (int x = 0; x < kTileRowBytes; ++x) {
+            const int a = x >= 4 ? row[x - 4] : 0;
+            const int b = up ? up[x] : 0;
+            const int c = (up && x >= 4) ? up[x - 4] : 0;
+            row[x] = static_cast<unsigned char>(f[x] + paeth(a, b, c));
+        }
+    }
+}
+
 QByteArray packTile(const doc::Tile &tile)
 {
     QByteArray raw(kTileBytes, Qt::Uninitialized);
     qToLittleEndian<doc::Pixel>(tile.pixels.data(), doc::kTilePixels, raw.data());
-    return qCompress(raw);
+    QByteArray filtered(kTileBytes, Qt::Uninitialized);
+    filterPaeth(reinterpret_cast<const unsigned char *>(raw.constData()),
+                reinterpret_cast<unsigned char *>(filtered.data()));
+    return qCompress(filtered);
 }
 
-std::shared_ptr<doc::Tile> unpackTile(const QByteArray &blob)
+// `filtered`: from a format 4 file (3 and older stored the pixels as they are).
+std::shared_ptr<doc::Tile> unpackTile(const QByteArray &blob, bool filtered)
 {
-    const QByteArray raw = qUncompress(blob);
+    QByteArray raw = qUncompress(blob);
     if (raw.size() != kTileBytes)
         return nullptr;
+    if (filtered) {
+        QByteArray plain(kTileBytes, Qt::Uninitialized);
+        unfilterPaeth(reinterpret_cast<const unsigned char *>(raw.constData()),
+                      reinterpret_cast<unsigned char *>(plain.data()));
+        raw = std::move(plain);
+    }
     auto tile = std::make_shared<doc::Tile>();
     qFromLittleEndian<doc::Pixel>(raw.constData(), doc::kTilePixels, tile->pixels.data());
     return tile;
@@ -286,10 +338,21 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
                                   perspective ? QStringLiteral("perspective") : QStringLiteral("raster"),
                                   perspective ? gridToJson(lp.perspective) : QStringLiteral("")}))
                     return false;
-                for (const doc::TileCoord &c : ly.image.tileCoords())
-                    if (const doc::TilePtr t = ly.image.tile(c))
-                        if (!exec(tile, {idValue(ly.id), c.x, c.y, packTile(*t)}))
-                            return false;
+                // The tiles are packed (the slow part: deflating them) on all the cores, a batch at a time,
+                // and written in order.
+                const std::vector<doc::TileCoord> coords = ly.image.tileCoords();
+                std::vector<doc::TilePtr> tiles;
+                tiles.reserve(coords.size());
+                for (const doc::TileCoord &c : coords)
+                    tiles.push_back(ly.image.tile(c));
+                std::vector<QByteArray> packed(tiles.size());
+                parallelFor(int(tiles.size()), [&](int k) {
+                    if (tiles[std::size_t(k)])
+                        packed[std::size_t(k)] = packTile(*tiles[std::size_t(k)]);
+                });
+                for (std::size_t n = 0; n < coords.size(); ++n)
+                    if (tiles[n] && !exec(tile, {idValue(ly.id), coords[n].x, coords[n].y, packed[n]}))
+                        return false;
             }
         }
         for (const doc::Exposure &e : l.timing().exposures())
@@ -417,6 +480,29 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
         failure = sqlError(q);
         return nullptr;
     }
+    // The tiles are unpacked (the slow part: inflating them) on all the cores, a batch of them at a time.
+    struct PendingTile
+    {
+        doc::Layer *layer = nullptr;
+        int x = 0, y = 0;
+        QByteArray blob;
+        std::shared_ptr<doc::Tile> tile;
+    };
+    const bool filtered = version >= 4;
+    std::vector<PendingTile> batch;
+    constexpr std::size_t kBatch = 2048;
+    auto flush = [&]() {
+        parallelFor(int(batch.size()), [&](int i) { batch[std::size_t(i)].tile = unpackTile(batch[std::size_t(i)].blob, filtered); });
+        for (PendingTile &t : batch) {
+            if (!t.tile) {
+                failure = QObject::tr("The project's pixels are damaged.");
+                return false;
+            }
+            t.layer->image.setTile({t.x, t.y}, std::move(t.tile));
+        }
+        batch.clear();
+        return true;
+    };
     while (q.next()) {
         doc::Layer *layer = nullptr;
         if (v1) {
@@ -428,13 +514,12 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
         }
         if (!layer)
             continue;
-        auto tile = unpackTile(q.value(3).toByteArray());
-        if (!tile) {
-            failure = QObject::tr("The project's pixels are damaged.");
+        batch.push_back({layer, q.value(1).toInt(), q.value(2).toInt(), q.value(3).toByteArray(), nullptr});
+        if (batch.size() >= kBatch && !flush())
             return nullptr;
-        }
-        layer->image.setTile({q.value(1).toInt(), q.value(2).toInt()}, std::move(tile));
     }
+    if (!flush())
+        return nullptr;
 
     if (!q.exec(v1 ? QStringLiteral("select layer, start, length, drawing from exposures order by layer, start")
                    : QStringLiteral("select cel, start, length, drawing from exposures order by cel, start"))) {
