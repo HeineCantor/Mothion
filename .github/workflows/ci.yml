@@ -37,6 +37,7 @@ jobs:
             build-essential \
             cmake \
             ninja-build \
+            ffmpeg \
             libeigen3-dev
 
       - name: Install Qt

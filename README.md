@@ -21,6 +21,8 @@ This is still an homemade project, made with love and moths in our hearts, so en
 
 Qt Multimedia, with its FFmpeg backend, decodes and plays the project's audio track. It is a separate package or module in most Qt distributions (`qt6-multimedia-dev` on Debian/Ubuntu, the *Qt Multimedia* module in the Qt Online Installer).
 
+Exporting a video (File > Export video…) runs the `ffmpeg` program, which is not part of the build: install it (`sudo apt install ffmpeg`, `winget install ffmpeg`) and put it on the `PATH`, or next to the Mothion executable. Without it the rest of the application works as usual. The build scripts install it (with `apt`, `pacman` or `dnf`/`zypper`, and `winget` on Windows); on Fedora and openSUSE the distribution's own ffmpeg cannot write H.264, so for the video export take the one from RPM Fusion or Packman.
+
 Qt's SQLite driver (`qsqlite`) is used to read `.sut` brush files. Qt must be dynamically linked, as required by the LGPL. CMake checks for static Qt builds and stops if one is found.
 
 Eigen is used by the puppet warp implementation. CMake looks for a system installation first and downloads it during configuration if none is available.

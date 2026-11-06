@@ -4,7 +4,8 @@
 # Checks for, and installs when missing (through the distribution's package
 # manager, with sudo): the C++ compiler, CMake, Ninja, Qt 6 (Core, Gui, Widgets,
 # Sql with the SQLite driver, Network, Multimedia with its FFmpeg backend for the
-# audio track, Test, Wayland) and Eigen. Supported: apt
+# audio track, Test, Wayland) and Eigen, and ffmpeg (for File > Export video;
+# a failure to install it only warns). Supported: apt
 # (Debian, Ubuntu), dnf (Fedora), pacman (Arch) and zypper (openSUSE).
 # Then configures and builds the project and runs the tests.
 #
@@ -65,22 +66,29 @@ if command -v apt-get >/dev/null; then
     packages=(build-essential cmake ninja-build qt6-base-dev libqt6sql6-sqlite qt6-multimedia-dev qt6-wayland libeigen3-dev)
     is_installed() { dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q 'ok installed'; }
     install() { sudo apt-get update && sudo apt-get install -y "$@"; }
+    optional=(ffmpeg)
 elif command -v dnf >/dev/null; then
     packages=(gcc-c++ cmake ninja-build qt6-qtbase-devel qt6-qtmultimedia-devel qt6-qtwayland eigen3-devel)
     is_installed() { rpm -q "$1" >/dev/null 2>&1; }
     install() { sudo dnf install -y "$@"; }
+    # Fedora's own ffmpeg-free cannot write H.264: for Export video use the ffmpeg of RPM Fusion instead.
+    optional=(ffmpeg-free)
 elif command -v pacman >/dev/null; then
     # qt6-multimedia is the library, qt6-multimedia-ffmpeg the backend that decodes the audio files.
     packages=(base-devel cmake ninja qt6-base qt6-multimedia qt6-multimedia-ffmpeg qt6-wayland eigen)
     # base-devel is a group on older Arch installs, a package on newer ones.
     is_installed() { pacman -Q "$1" >/dev/null 2>&1 || pacman -Qg "$1" >/dev/null 2>&1; }
     install() { sudo pacman -S --needed --noconfirm "$@"; }
+    optional=(ffmpeg)
 elif command -v zypper >/dev/null; then
     packages=(gcc-c++ cmake ninja qt6-base-devel qt6-sql-sqlite qt6-multimedia-devel qt6-wayland eigen3-devel)
     is_installed() { rpm -q "$1" >/dev/null 2>&1; }
     install() { sudo zypper --non-interactive install "$@"; }
+    # openSUSE's ffmpeg has no H.264 encoder either: Packman's has.
+    optional=(ffmpeg)
 else
     packages=()
+    optional=()
 fi
 
 if [[ ${#packages[@]} -eq 0 ]]; then
@@ -99,6 +107,16 @@ else
             step "Installing ${missing[*]}"
             install "${missing[@]}" || fail 'Installing the packages failed.'
         fi
+    fi
+fi
+
+# ffmpeg only serves Export video: not finding or installing it does not stop the build.
+if ! command -v ffmpeg >/dev/null && [[ ${#optional[@]} -gt 0 ]]; then
+    if [[ $no_install -eq 1 ]]; then
+        step "ffmpeg is missing (not installed because of --no-install): Export video needs it"
+    else
+        step "Installing ${optional[*]} (for Export video)"
+        install "${optional[@]}" || step 'ffmpeg could not be installed: Export video will not work until it is.'
     fi
 fi
 

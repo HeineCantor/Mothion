@@ -10,6 +10,8 @@
       - Qt for MSVC 2022 64-bit with its Multimedia module (the audio track),
         downloaded with aqtinstall (which needs Python, also installed with
         winget if missing)
+      - ffmpeg (winget; File > Export video needs it, and a failure here only
+        warns)
     Then configures and builds the project, runs the tests and copies Qt's
     DLLs next to mothion.exe, so the program starts on its own.
 
@@ -95,6 +97,15 @@ if (-not (Get-Command cmake -ErrorAction SilentlyContinue)) {
     Step 'Installing CMake'
     Install-WithWinget 'Kitware.CMake'
     if (-not (Get-Command cmake -ErrorAction SilentlyContinue)) { throw 'CMake is still not available; open a new terminal and try again.' }
+}
+
+# --- ffmpeg (Export video) ---
+if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
+    Step 'Installing ffmpeg (for Export video)'
+    try { Install-WithWinget 'Gyan.FFmpeg' } catch { Write-Warning $_.Exception.Message }
+    if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
+        Write-Warning 'ffmpeg is not available yet: Export video will work once it is on the PATH (a new terminal may be needed).'
+    }
 }
 
 # --- Visual Studio C++ tools ---
