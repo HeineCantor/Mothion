@@ -1,6 +1,7 @@
 // Entry point: input-related application attributes, command line,
 // application identity (used by QSettings), theme, splash, main window.
 
+#include "diagnostics/CrashHandler.h"
 #include "input/TabletBackend.h"
 #include "ui/MainWindow.h"
 #include "ui/SplashScreen.h"
@@ -29,6 +30,7 @@ int main(int argc, char *argv[])
     QApplication::setApplicationName(QStringLiteral("Mothion"));
     QApplication::setApplicationVersion(QStringLiteral(MOTHION_VERSION));
     QApplication::setWindowIcon(QIcon(QStringLiteral(":/icon/mothion.png")));
+    mothion::diagnostics::install(QApplication::applicationVersion()); // the log, and what a crash leaves behind
 
     QCommandLineParser parser;
     parser.addHelpOption();
@@ -59,6 +61,7 @@ int main(int argc, char *argv[])
     QTimer::singleShot(std::max<qint64>(0, kSplashMinimumMs - shown.elapsed()), &window, [&] {
         window.show();
         splash.finish(&window);
+        window.checkPreviousCrash();
         if (!parser.positionalArguments().isEmpty())
             window.openFile(parser.positionalArguments().constFirst());
     });

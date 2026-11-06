@@ -40,6 +40,8 @@ public:
 
     // Opens a project (no unsaved-changes question); false if it could not be read.
     bool openFile(const QString &path);
+    // Tells the user, once, that an earlier run crashed, and where the report and the copy of the project are.
+    void checkPreviousCrash();
 
 protected:
     void closeEvent(QCloseEvent *event) override;

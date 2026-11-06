@@ -236,6 +236,23 @@ When a stroke ends, it is redrawn using the final points produced by `StrokeShap
 - `DockLayout` handles panel arrangement and persistence.
 - Tablet-related Qt private API usage is confined to `input/TabletBackend_wintab.cpp`.
 
+## Crashes and logs
+
+Mothion keeps a log of each run (the last three) and, if it dies, leaves what is needed to understand why:
+
+- **Log**: `logs/mothion.log` (and `mothion.1.log`, `mothion.2.log` for the earlier runs) in the application data
+  directory (`~/.local/share/Mothion/Mothion` on Linux, `%APPDATA%\Mothion\Mothion` on Windows). It holds the Qt
+  messages with the time, the system and screens, and the projects opened and saved.
+- **Crash report**: `crashes/crash-<time>.txt` with the reason and, on Linux, the stack of calls (offsets that
+  `addr2line -e mothion -f -C -p <offset>` turns into places; build with RelWithDebInfo). On Windows a
+  `crash-<time>.dmp` minidump is written next to it, to open in Visual Studio or WinDbg with the build's `.pdb`.
+- **Backup**: after the report, the program tries to save a copy of the project as
+  `crashes/<name>-backup-<time>.moth` (the stroke being drawn is not in it, and a badly damaged program may not
+  manage it).
+
+The next start tells the user about the crash, with buttons to open the folder and the copy. A tester who hits a
+crash should send the report and the latest logs.
+
 ## Controls (provisional)
 
 | Action | Control |

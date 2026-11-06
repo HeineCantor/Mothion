@@ -1,6 +1,7 @@
 #include "ui/MainWindow.h"
 
 #include "canvas/CanvasView.h"
+#include "diagnostics/CrashHandler.h"
 #include "document/DocumentController.h"
 #include "input/ProximityFilter.h"
 #include "io/FrameExport.h"
@@ -56,6 +57,8 @@
 #include <QFileInfo>
 #include <QImageReader>
 #include <QKeyEvent>
+#include <QDesktopServices>
+#include <QUrl>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QLabel>
@@ -115,6 +118,11 @@ MainWindow::MainWindow(QWidget *parent)
     , m_canvas(new canvas::CanvasView(m_toolState, m_document, this))
 {
     m_audioPlayer = new audio::AudioPlayer(m_document, this);
+    // If the program dies, a copy of the project is tried (the stroke being drawn is not in it).
+    diagnostics::setEmergencySave([this](const QString &path) {
+        return io::saveProject(m_document->document(), path, nullptr);
+    });
+    connect(this, &QObject::destroyed, [] { diagnostics::setEmergencySave({}); });
     setWindowTitle(QStringLiteral("Mothion"));
     resize(1400, 900);
 
@@ -425,6 +433,15 @@ void MainWindow::createMenus()
         m_compositing->activateWindow();
     });
     window->addAction(tr("Reset default layout"), m_dockLayout, &DockLayout::resetToDefault);
+
+    // For a bug report: where the log and the crash reports are.
+    QMenu *help = menuBar()->addMenu(tr("&Help"));
+    help->addAction(tr("Open the logs folder"), this, [] {
+        QDesktopServices::openUrl(QUrl::fromLocalFile(diagnostics::logDirectory()));
+    });
+    help->addAction(tr("Open the crash reports folder"), this, [] {
+        QDesktopServices::openUrl(QUrl::fromLocalFile(diagnostics::crashDirectory()));
+    });
 }
 
 namespace {
@@ -817,11 +834,35 @@ bool MainWindow::openFile(const QString &path)
     }
     m_document->replaceDocument(std::move(loaded));
     m_filePath = QFileInfo(path).absoluteFilePath();
+    diagnostics::setProjectPath(m_filePath);
+    diagnostics::note(QStringLiteral("Opened %1").arg(m_filePath));
     rememberProjectDirectory(m_filePath);
     rememberRecentFile(m_filePath);
     updateTitle();
     statusBar()->showMessage(tr("Opened %1").arg(QFileInfo(path).fileName()), 4000);
     return true;
+}
+
+void MainWindow::checkPreviousCrash()
+{
+    const diagnostics::PreviousCrash crash = diagnostics::takePreviousCrash();
+    if (!crash.happened)
+        return;
+    QString text = tr("Mothion closed unexpectedly the last time it ran.\n\nThe report is in:\n%1\n\nThe log is in:\n%2")
+                       .arg(crash.report.isEmpty() ? diagnostics::crashDirectory() : crash.report, diagnostics::logDirectory());
+    if (!crash.backup.isEmpty())
+        text += tr("\n\nA copy of your project was saved:\n%1").arg(crash.backup);
+    else
+        text += tr("\n\nNo copy of the project could be saved.");
+    text += tr("\n\nIf you report the problem, please send the report and the log.");
+    QMessageBox box(QMessageBox::Warning, tr("Mothion crashed"), text, QMessageBox::Close, this);
+    QPushButton *folder = box.addButton(tr("Open the folder"), QMessageBox::ActionRole);
+    QPushButton *open = crash.backup.isEmpty() ? nullptr : box.addButton(tr("Open the copy"), QMessageBox::AcceptRole);
+    box.exec();
+    if (box.clickedButton() == folder)
+        QDesktopServices::openUrl(QUrl::fromLocalFile(diagnostics::crashDirectory()));
+    else if (open && box.clickedButton() == open)
+        openFile(crash.backup);
 }
 
 bool MainWindow::save()
@@ -854,6 +895,8 @@ bool MainWindow::saveTo(const QString &path)
         return false;
     }
     m_filePath = QFileInfo(path).absoluteFilePath();
+    diagnostics::setProjectPath(m_filePath);
+    diagnostics::note(QStringLiteral("Saved %1").arg(m_filePath));
     rememberProjectDirectory(m_filePath);
     rememberRecentFile(m_filePath);
     m_document->markSaved();
