@@ -316,7 +316,7 @@ bool ToolPalettePanel::eventFilter(QObject *watched, QEvent *event)
 void ToolPalettePanel::stepSize(int direction)
 {
     const ToolId tool = m_state->activeTool();
-    if (!tools::ToolState::isPaintTool(tool))
+    if (!tools::ToolState::hasSize(tool))
         return;
     const double size = m_state->settings(tool).size;
     const QList<double> &presets = BrushSizeGrid::presets();

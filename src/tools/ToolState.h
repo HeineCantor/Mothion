@@ -116,6 +116,12 @@ public:
     static constexpr double kMaxSize = 2000.0;
 
     static bool isPaintTool(ToolId tool) { return tool == ToolId::Brush || tool == ToolId::Eraser; }
+    // Tools with a size of their own in the settings: the paint tools, the effect brushes and the shape tool.
+    // The size controls (presets, [ ] and the slider) work on all of them.
+    static bool hasSize(ToolId tool)
+    {
+        return isPaintTool(tool) || tool == ToolId::Blend || tool == ToolId::Liquify || tool == ToolId::Shape;
+    }
     static QString displayName(ToolId tool);
 
     ToolId activeTool() const { return m_activeTool; }

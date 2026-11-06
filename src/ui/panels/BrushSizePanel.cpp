@@ -115,7 +115,7 @@ void BrushSizeGrid::paintEvent(QPaintEvent *)
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
     const QPalette &pal = palette();
-    const bool enabled = isEnabled() && ToolState::isPaintTool(m_state->activeTool());
+    const bool enabled = isEnabled() && ToolState::hasSize(m_state->activeTool());
     const double current = m_state->settings(m_state->activeTool()).size;
     const QColor ink = enabled ? pal.color(QPalette::Text) : pal.color(QPalette::Disabled, QPalette::Text);
 
@@ -165,7 +165,7 @@ void BrushSizeGrid::paintEvent(QPaintEvent *)
 void BrushSizeGrid::mousePressEvent(QMouseEvent *event)
 {
     const int index = presetAt(event->position().toPoint());
-    if (event->button() != Qt::LeftButton || index < 0 || !ToolState::isPaintTool(m_state->activeTool()))
+    if (event->button() != Qt::LeftButton || index < 0 || !ToolState::hasSize(m_state->activeTool()))
         return;
     m_state->setSize(m_state->activeTool(), presets()[index]);
 }

@@ -50,7 +50,9 @@
 #include "ui/panels/LayersPanel.h"
 #include "ui/AdvancedToolSettings.h"
 #include "ui/SplashScreen.h"
+#include "ui/panels/BrushSlidersPanel.h"
 #include "ui/panels/ToolPalettePanel.h"
+#include "ui/panels/VerticalValueSlider.h"
 #include "ui/panels/SubToolPanel.h"
 #include "ui/panels/ToolPropertiesPanel.h"
 #include "ui/panels/timeline/TimelinePanel.h"
@@ -412,6 +414,46 @@ private slots:
         state.setActiveTool(tools::ToolId::Move); // not a paint tool: no size to set
         QTest::mouseClick(grid, Qt::LeftButton, {}, grid->cellRect(0).center());
         QCOMPARE(state.settings(tools::ToolId::Brush).size, 60.0);
+    }
+
+    // The effect brushes and the shape tool have a size too: the palette, the [ ] keys and the size slider work
+    // on it, as on the brush (the opacity slider stays with the paint tools).
+    void sizeControlsServeTheEffectBrushesAndShapes()
+    {
+        tools::ToolState state;
+        ui::BrushSizePanel panel(&state);
+        panel.resize(250, 400);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        ui::BrushSizeGrid *grid = panel.grid();
+        const int index = int(ui::BrushSizeGrid::presets().indexOf(25));
+        for (const tools::ToolId tool : {tools::ToolId::Liquify, tools::ToolId::Blend, tools::ToolId::Shape}) {
+            state.setActiveTool(tool);
+            const double brushBefore = state.settings(tools::ToolId::Brush).size;
+            QTest::mouseClick(grid, Qt::LeftButton, {}, grid->cellRect(index).center());
+            QCOMPARE(state.settings(tool).size, 25.0);
+            QCOMPARE(state.settings(tools::ToolId::Brush).size, brushBefore); // the brush's own is not touched
+        }
+        ui::ToolPalettePanel palette(&state);
+        palette.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&palette));
+        state.setActiveTool(tools::ToolId::Liquify);
+        const double before = state.settings(tools::ToolId::Liquify).size;
+        QTest::keyClick(&palette, Qt::Key_BracketRight);
+        QVERIFY(state.settings(tools::ToolId::Liquify).size > before);
+        QTest::keyClick(&palette, Qt::Key_BracketLeft);
+        QCOMPARE(state.settings(tools::ToolId::Liquify).size, before);
+        state.setActiveTool(tools::ToolId::Move); // no size
+        const double move = state.settings(tools::ToolId::Move).size;
+        QTest::keyClick(&palette, Qt::Key_BracketRight);
+        QCOMPARE(state.settings(tools::ToolId::Move).size, move);
+
+        ui::BrushSlidersPanel sliders(&state);
+        state.setActiveTool(tools::ToolId::Shape);
+        const auto bars = sliders.findChildren<ui::VerticalValueSlider *>();
+        QCOMPARE(bars.size(), 2);
+        QVERIFY(bars[0]->isEnabled());  // size
+        QVERIFY(!bars[1]->isEnabled()); // opacity
     }
 
     // The palette is a dock of the workspace, the front tab of its group.

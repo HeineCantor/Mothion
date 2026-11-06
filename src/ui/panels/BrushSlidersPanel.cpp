@@ -42,9 +42,9 @@ BrushSlidersPanel::BrushSlidersPanel(ToolState *state, QWidget *parent)
 
 void BrushSlidersPanel::syncFromState()
 {
-    const bool paint = ToolState::isPaintTool(m_state->activeTool());
-    m_size->setEnabled(paint);
-    m_opacity->setEnabled(paint);
+    const tools::ToolId tool = m_state->activeTool();
+    m_size->setEnabled(ToolState::hasSize(tool));
+    m_opacity->setEnabled(ToolState::isPaintTool(tool)); // the effect brushes and shapes have no opacity of their own
     const tools::BrushSettings s = m_state->settings(m_state->activeTool());
     m_size->setValue(s.size);
     m_opacity->setValue(s.opacity * 100.0);
