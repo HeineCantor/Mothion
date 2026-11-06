@@ -1225,6 +1225,40 @@ private slots:
         QCOMPARE(controller.undoText(), QStringLiteral("Undo transform"));
     }
 
+    // An image bigger than the page is pasted whole: the part off the page is kept and selected, so moving it
+    // brings that part onto the page.
+    void pastedImageBiggerThanThePageIsKeptWhole()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        const int w = controller.document().width(), h = controller.document().height();
+        QImage image(w + 480, h + 120, QImage::Format_ARGB32_Premultiplied);
+        image.fill(Qt::red);
+        QPainter p(&image);
+        p.fillRect(0, 0, 240, image.height(), Qt::green); // the strip that falls off the left edge
+        p.end();
+        QVERIFY(controller.pasteImage(image, std::nullopt));
+        const QRectF whole(-240, -60, image.width(), image.height());
+        QCOMPARE(controller.selection().boundingRect(), whole);
+        auto pixel = [&controller](int x, int y) {
+            const doc::Cel &cel = *controller.document().cel(controller.currentCel());
+            return cel.drawingAt(controller.currentFrame())->layers.front().image.pixel(x, y);
+        };
+        QCOMPARE(pixel(-100, 10), doc::Pixel(0xff00ff00)); // off the page, and still there
+        QCOMPARE(pixel(100, 10), doc::Pixel(0xffff0000));
+
+        state.setActiveTool(tools::ToolId::Transform);
+        canvas::TransformTool tool(&controller, &state, [](const QString &) {}, [] {});
+        tool.activated();
+        QCOMPARE(tool.box(), whole.toRect()); // the box is the whole image, not the page's part
+        tool.press({500, 500}, Qt::NoModifier);
+        tool.move({800, 500}, Qt::NoModifier);
+        tool.release({800, 500}, Qt::NoModifier); // 300 to the right
+        QCOMPARE(pixel(100, 10), doc::Pixel(0xff00ff00)); // what was off the page is on it now
+        QVERIFY(tool.keyPress(Qt::Key_Return));
+        QCOMPARE(pixel(100, 10), doc::Pixel(0xff00ff00));
+    }
+
     // Just outside a corner of the box (not on its handle) a drag turns it, with a turning
     // arrow for the cursor; the handle itself scales, with arrows along its diagonal.
     void transformTurnsFromJustOutsideACorner()

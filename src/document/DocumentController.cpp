@@ -780,12 +780,12 @@ bool DocumentController::clearCurrentLayer(QString *reason)
     return true;
 }
 
-void DocumentController::setSelection(const QPainterPath &area)
+void DocumentController::setSelection(const QPainterPath &area, bool clipToPage)
 {
     // Kept inside the document: what lies outside is never drawn.
     QPainterPath page;
     page.addRect(0, 0, m_document->width(), m_document->height());
-    QPainterPath clipped = area.isEmpty() ? QPainterPath() : area.intersected(page);
+    QPainterPath clipped = area.isEmpty() ? QPainterPath() : clipToPage ? area.intersected(page) : area;
     if (clipped.boundingRect().isEmpty())
         clipped = QPainterPath();
     if (clipped == m_selection)
@@ -963,8 +963,10 @@ bool DocumentController::pasteImage(const QImage &image, std::optional<QPoint> o
     doc::Document &d = *m_document;
     const QImage pixels = image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
     const QPoint at = origin.value_or(QPoint((d.width() - pixels.width()) / 2, (d.height() - pixels.height()) / 2));
-    const QRect area = QRect(at, pixels.size()) & QRect(0, 0, d.width(), d.height());
-    if (area.isEmpty()) {
+    // The whole image, even what lies off the page: the layer keeps it and the selection takes all of it, so it
+    // can be moved (the page shows only its own part).
+    const QRect area(at, pixels.size());
+    if ((area & QRect(0, 0, d.width(), d.height())).isEmpty()) {
         if (reason)
             *reason = tr("The pasted image is outside the sheet");
         return false;
@@ -977,15 +979,13 @@ bool DocumentController::pasteImage(const QImage &image, std::optional<QPoint> o
         return false;
     const doc::TiledImage before = *target->image;
     doc::TiledImage pasted;
-    const QPoint from = area.topLeft() - at;
     pasted.write(area.x(), area.y(), area.width(), area.height(),
-                 reinterpret_cast<const doc::Pixel *>(pixels.constScanLine(from.y())) + from.x(),
-                 pixels.bytesPerLine() / 4);
+                 reinterpret_cast<const doc::Pixel *>(pixels.constBits()), pixels.bytesPerLine() / 4);
     canvas::compositeOver(*target->image, pasted);
-    notifyPainted(area);
+    notifyPainted(area & QRect(0, 0, d.width(), d.height()));
     QPainterPath selected;
     selected.addRect(area);
-    setSelection(selected);
+    setSelection(selected, false);
     endPaint(before, doc::CommandKind::Paste);
     return true;
 }

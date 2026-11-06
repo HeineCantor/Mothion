@@ -144,7 +144,9 @@ public:
     // step: see endPaint().
     const QPainterPath &selection() const { return m_selection; }
     bool hasSelection() const { return !m_selection.isEmpty(); }
-    void setSelection(const QPainterPath &area);
+    // By default the selection is kept inside the page (what lies outside is never drawn); a pasted image bigger than
+    // the page is selected whole (`clipToPage` false), so it can be moved to bring any part of it onto the page.
+    void setSelection(const QPainterPath &area, bool clipToPage = true);
     void selectAll();
     void clearSelection();
     // Selects what was not selected (all if nothing was).

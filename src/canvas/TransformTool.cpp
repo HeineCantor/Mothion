@@ -144,11 +144,10 @@ bool TransformTool::start()
     }
     // The frame is the selection's own bounding box, not that of the pixels in it.
     if (!s->selection.isEmpty()) {
-        const doc::Document &d = m_document->document();
-        const QRect selected = s->selection.boundingRect().toAlignedRect() & QRect(0, 0, d.width(), d.height());
-        if (!selected.isEmpty()) {
+        // Not cut to the page: an image pasted bigger than it is moved whole.
+        const QRect selected = s->selection.boundingRect().toAlignedRect();
+        if (!selected.isEmpty())
             box = selected;
-        }
     }
     // Layers of other frames than the one shown are drawn only when the transform is applied. If none is in
     // the frame shown, all are drawn at each step (there would be nothing to see otherwise).
