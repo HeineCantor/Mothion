@@ -559,6 +559,20 @@ private slots:
         QVERIFY(!panel.addButton()->isEnabled());
     }
 
+    // The timeline's header has a button for Import audio, which asks the window for the file as the menu does.
+    void timelineHasAnImportAudioButton()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        ui::TimelinePanel panel(&controller, &state);
+        panel.show();
+        auto *button = panel.findChild<QToolButton *>(QStringLiteral("importAudio"));
+        QVERIFY(button);
+        QSignalSpy asked(panel.view(), &ui::TimelineView::audioImportRequested);
+        button->click();
+        QCOMPARE(asked.count(), 1);
+    }
+
     // The effect brushes and the shape tool have a size too: the palette, the [ ] keys and the size slider work
     // on it, as on the brush (the opacity slider stays with the paint tools).
     void sizeControlsServeTheEffectBrushesAndShapes()

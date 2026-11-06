@@ -185,6 +185,13 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
     connect(toolState, &tools::ToolState::onionSkinChanged, onion,
             [onion, toolState] { onion->setChecked(toolState->onionSkin().enabled); });
 
+    // The audio track: the same as File > Import audio (the window asks for the file).
+    auto *importAudio = celButton(IconId::Speaker, QStringLiteral("importAudio"),
+                                  tr("Import audio… (replaces the track already in the project)"), this);
+    importAudio->setText(tr("Audio"));
+    importAudio->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    connect(importAudio, &QToolButton::clicked, m_view, &TimelineView::audioImportRequested);
+
     auto *zoom = new QSlider(Qt::Horizontal, this);
     zoom->setRange(6, 60);
     zoom->setValue(m_view->frameWidth());
@@ -202,6 +209,7 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
     bar->addWidget(frameLabel);
     bar->addWidget(newDrawing);
     bar->addWidget(onion);
+    bar->addWidget(importAudio);
     bar->addStretch(1);
     bar->addWidget(new QLabel(tr("Zoom"), this));
     bar->addWidget(zoom);
