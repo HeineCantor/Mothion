@@ -36,6 +36,7 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <utility>
 #include <cmath>
 #include <functional>
 #include <limits>
@@ -463,7 +464,9 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
         selectCurrentRow();
     });
     connect(m_document, &DocumentController::currentLayerChanged, this, &LayersPanel::selectCurrentRow);
-    connect(m_document, &DocumentController::pixelsChanged, this, [this] {
+    connect(m_document, &DocumentController::pixelsChanged, this, [this](doc::CelId, doc::DrawingId drawing) {
+        if (drawing != doc::kNoId)
+            m_dirtyDrawings.insert(drawing); // only that frame's thumbnails need making again
         if (!m_thumbnailTimer.isActive())
             m_thumbnailTimer.start();
     });
@@ -523,6 +526,7 @@ QTreeWidgetItem *LayersPanel::layerItem(doc::LayerId layer) const
 
 void LayersPanel::rebuildTree()
 {
+    m_dirtyDrawings.clear(); // the rows are made anew, with fresh thumbnails
     const QSignalBlocker block(m_tree);
     // The folders as they were left: closed ones stay closed, new ones open.
     for (int i = 0; i < m_tree->topLevelItemCount(); ++i) {
@@ -771,9 +775,15 @@ void LayersPanel::refreshThumbnails()
     for (int i = 0; i < d.celCount(); ++i) {
         const doc::Cel &cel = d.celAt(i);
         set(celItem(cel.id()), thumbnail(nullptr, cel.drawingAt(frame), docSize, nullptr));
-        for (const auto &[id, drawing] : cel.drawings()) {
-            set(frameItem(id), thumbnail(nullptr, &drawing, docSize, nullptr));
-            for (const doc::Layer &layer : drawing.layers)
+    // The cels show the frame of the moment; a frame and its layers only change when painted on (rebuildTree()
+    // makes all of them anew). A project of hundreds of big frames cannot afford more than that at every stroke.
+    const QSet<doc::DrawingId> dirty = std::exchange(m_dirtyDrawings, {});
+        for (const doc::DrawingId id : dirty) {
+            const doc::Drawing *drawing = cel.drawing(id);
+            if (!drawing)
+                continue;
+            set(frameItem(id), thumbnail(nullptr, drawing, docSize, nullptr));
+            for (const doc::Layer &layer : drawing->layers)
                 set(layerItem(layer.id), layerThumbnail(layer, docSize));
         }
     }

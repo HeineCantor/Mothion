@@ -110,7 +110,7 @@ private:
     void rebuildTree();       // structure changed: recreate the rows
     void syncHeader();        // current row changed: blend / opacity / buttons, publishSelection()
     void publishSelection();  // the chosen rows' layers, for the tools (a move)
-    void refreshThumbnails(); // throttled: pixels or the current frame changed
+    void refreshThumbnails(); // throttled: the cels' (the frame changed) and those of the frames painted on
     void markCurrentFrames(); // the frames shown now, in bold
     void selectCurrentRow();  // the current cel / layer chosen elsewhere
     void restoreSelection();  // after rebuildTree()
@@ -165,6 +165,7 @@ private:
     // made again only when it changes, not at each step of a drag.
     int m_cameraRowState = -2;
     static int cameraRowState(const document::DocumentController &document);
+    QSet<doc::DrawingId> m_dirtyDrawings; // frames whose pixels changed since their thumbnails were made
     Focus m_focus = Focus::Layer;
     struct OpacityPreview
     {
