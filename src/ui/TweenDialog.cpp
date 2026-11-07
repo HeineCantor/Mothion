@@ -9,6 +9,7 @@
 #include <QLabel>
 #include <QPainter>
 #include <QPushButton>
+#include <QThreadPool>
 #include <QSettings>
 #include <QSlider>
 #include <QSpinBox>
@@ -130,11 +131,13 @@ void TweenDialog::poseChanged()
         reason = tr("The cel is locked");
     } else {
         QApplication::setOverrideCursor(Qt::WaitCursor); // laying the two poses over each other takes a moment
-        m_tween = document::DrawingTween::make(*cel->drawing(cel->timing().drawingAt(from())),
-                                               *cel->drawing(cel->timing().drawingAt(to())), &reason);
+        auto made = document::DrawingTween::make(*cel->drawing(cel->timing().drawingAt(from())),
+                                                 *cel->drawing(cel->timing().drawingAt(to())), &reason);
         QApplication::restoreOverrideCursor();
-        if (m_tween)
+        if (made) {
+            m_tween = std::make_shared<const document::DrawingTween>(std::move(*made));
             m_frames = to() - from() - 1;
+        }
     }
     m_ok->setEnabled(m_frames > 0);
     m_note->setText(m_frames > 0 ? tr("%n frame(s) will be made, replacing what they show now.", "", m_frames) : reason);
@@ -148,14 +151,44 @@ void TweenDialog::showPreview()
         m_preview->setText(tr("Nothing to show"));
         return;
     }
+    // One picture at a time, made apart: if the slider moves meanwhile, only the last place it was left at is made next.
+    if (m_busy) {
+        m_again = true;
+        return;
+    }
+    startPreview();
+}
+
+void TweenDialog::startPreview()
+{
+    m_busy = true;
+    m_again = false;
     const double t = document::easedTime(ease(), m_at->value() / 100.0);
-    const QImage picture = m_tween->picture(t);
-    QImage flat(picture.size(), QImage::Format_RGB32);
-    flat.fill(QColor::fromRgba(m_document->document().paperColor()));
-    QPainter p(&flat);
-    p.drawImage(0, 0, picture);
-    p.end();
-    m_preview->setPixmap(QPixmap::fromImage(flat.scaled(m_preview->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation)));
+    const std::shared_ptr<const document::DrawingTween> tween = m_tween;
+    const QPointer<TweenDialog> self(this);
+    QThreadPool::globalInstance()->start([tween, t, self] {
+        const QImage picture = tween->preview(t);
+        if (self)
+            QMetaObject::invokeMethod(self.data(), [self, picture] {
+                if (self)
+                    self->previewReady(picture);
+            }, Qt::QueuedConnection);
+    });
+}
+
+void TweenDialog::previewReady(const QImage &picture)
+{
+    m_busy = false;
+    if (m_tween) {
+        QImage flat(picture.size(), QImage::Format_RGB32);
+        flat.fill(QColor::fromRgba(m_document->document().paperColor()));
+        QPainter p(&flat);
+        p.drawImage(0, 0, picture);
+        p.end();
+        m_preview->setPixmap(QPixmap::fromImage(flat.scaled(m_preview->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation)));
+    }
+    if (m_again)
+        showPreview();
 }
 
 void TweenDialog::accept()

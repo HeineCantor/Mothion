@@ -6,6 +6,7 @@
 #include <QDialog>
 #include <QPointer>
 
+#include <memory>
 #include <optional>
 
 class QComboBox;
@@ -46,11 +47,15 @@ public:
     QSpinBox *fromBox() const { return m_from; }
     QSpinBox *toBox() const { return m_to; }
     QSlider *previewSlider() const { return m_at; }
+    // True while the picture of the preview is being made (it is made apart, so that the slider is not held up).
+    bool previewBusy() const { return m_busy; }
     void accept() override;
 
 private:
     void poseChanged();   // from or to changed: the poses laid over each other again
-    void showPreview();
+    void showPreview();           // asks for the picture at the slider's place
+    void previewReady(const QImage &picture); // it was made: shown, and the one wanted since, if any, is started
+    void startPreview();
     void validate();
 
     document::DocumentController *m_document;
@@ -62,7 +67,9 @@ private:
     QLabel *m_preview = nullptr;
     QLabel *m_note = nullptr;
     QPushButton *m_ok = nullptr;
-    std::optional<document::DrawingTween> m_tween;
+    std::shared_ptr<const document::DrawingTween> m_tween; // shared: the thread making a preview holds it too
+    bool m_busy = false;
+    bool m_again = false; // the slider moved while a picture was being made
     int m_frames = 0;
 };
 

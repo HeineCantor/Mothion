@@ -158,10 +158,12 @@ private slots:
         QCOMPARE(dialog.to(), 6);
         QCOMPARE(dialog.frameCount(), 5);
         QVERIFY(dialog.okButton()->isEnabled());
-        QVERIFY(!dialog.preview()->pixmap().isNull());
+        QTRY_VERIFY(!dialog.preview()->pixmap().isNull()); // made apart: it comes a moment after
         // At the start of the way the picture is the first pose, at the end the second: the bar is on the left, then on the right.
         auto darkSide = [&](int percent) {
             dialog.previewSlider()->setValue(percent);
+            const bool settled = QTest::qWaitFor([&] { return !dialog.previewBusy(); }, 5000);
+            Q_UNUSED(settled)
             const QImage shot = dialog.preview()->pixmap().toImage();
             long left = 0, right = 0;
             for (int y = 0; y < shot.height(); ++y)
@@ -174,6 +176,13 @@ private slots:
         QVERIFY(atStart.first + atStart.second > 100 && atEnd.first + atEnd.second > 100);
         QVERIFY(atStart.first > atEnd.first); // the bar has moved to the right
         QVERIFY(atEnd.second > atStart.second);
+
+        // The slider can be dragged all the way and back without holding anything up: one picture is made at a time,
+        // and what was asked meanwhile is made once, at the last place.
+        for (int i = 0; i <= 100; i += 5)
+            dialog.previewSlider()->setValue(i);
+        QVERIFY(dialog.previewBusy() || !dialog.preview()->pixmap().isNull());
+        QTRY_VERIFY(!dialog.previewBusy());
 
         // A pair with no frame between, or the same pose twice: refused, with a note.
         dialog.toBox()->setValue(dialog.fromBox()->value() + 1);

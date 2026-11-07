@@ -43,6 +43,53 @@ puppet::RasterImage rasterOf(const doc::Layer *layer, const QRect &area)
     return image;
 }
 
+// The pixels of a layer, where they are (tile bounds), nothing for none.
+QRect boundsOf(const doc::Layer *layer)
+{
+    QRect bounds;
+    if (layer)
+        for (const doc::TileCoord &c : layer->image.tileCoords())
+            bounds |= QRect(c.x * doc::kTileSize, c.y * doc::kTileSize, doc::kTileSize, doc::kTileSize);
+    return bounds;
+}
+
+// A block of a field, as a field of its own.
+tween::Field cropped(const tween::Field &field, const QRect &block)
+{
+    tween::Field out(block.width(), block.height());
+    for (int y = 0; y < block.height(); ++y)
+        for (int x = 0; x < block.width(); ++x) {
+            const std::size_t from = std::size_t(block.y() + y) * std::size_t(field.width) + std::size_t(block.x() + x);
+            const std::size_t to = std::size_t(y) * std::size_t(block.width()) + std::size_t(x);
+            out.dx[to] = field.dx[from];
+            out.dy[to] = field.dy[from];
+        }
+    return out;
+}
+
+// The picture made `factor` times smaller (the mean of each block of pixels, premultiplied as they are).
+puppet::RasterImage shrunk(const puppet::RasterImage &image, int factor, int width, int height)
+{
+    puppet::RasterImage out(0, 0, width, height);
+    for (int y = 0; y < height; ++y)
+        for (int x = 0; x < width; ++x) {
+            unsigned a = 0, r = 0, g = 0, b = 0, n = 0;
+            for (int j = y * factor; j < std::min(image.height, (y + 1) * factor); ++j)
+                for (int i = x * factor; i < std::min(image.width, (x + 1) * factor); ++i) {
+                    const std::uint32_t p = image.pixels[std::size_t(j) * std::size_t(image.width) + std::size_t(i)];
+                    a += p >> 24;
+                    r += (p >> 16) & 0xff;
+                    g += (p >> 8) & 0xff;
+                    b += p & 0xff;
+                    ++n;
+                }
+            if (n)
+                out.pixels[std::size_t(y) * std::size_t(width) + std::size_t(x)] =
+                    ((a / n) << 24) | ((r / n) << 16) | ((g / n) << 8) | (b / n);
+        }
+    return out;
+}
+
 } // namespace
 
 std::optional<DrawingTween> DrawingTween::make(const doc::Drawing &from, const doc::Drawing &to, QString *reason)
@@ -108,7 +155,38 @@ std::optional<DrawingTween> DrawingTween::make(const doc::Drawing &from, const d
     };
     const tween::Field small = tween::registerImages(ink(t.m_from), ink(t.m_to));
     t.m_field = tween::resized(small, t.m_area.width(), t.m_area.height());
+    double reach = 0.0;
+    for (std::size_t i = 0; i < t.m_field.dx.size(); ++i)
+        reach = std::max(reach, std::hypot(double(t.m_field.dx[i]), double(t.m_field.dy[i])));
+    t.m_reach = int(std::ceil(reach));
+
+    // Small copies of the layers and of the field, for the preview.
+    constexpr int kPreviewSize = 400;
+    t.m_previewScale = std::max(1, (std::max(t.m_area.width(), t.m_area.height()) + kPreviewSize - 1) / kPreviewSize);
+    t.m_previewSize = QSize((t.m_area.width() + t.m_previewScale - 1) / t.m_previewScale,
+                            (t.m_area.height() + t.m_previewScale - 1) / t.m_previewScale);
+    t.m_previewField = tween::resized(small, t.m_previewSize.width(), t.m_previewSize.height());
+    for (const Pair &pair : t.m_pairs) {
+        const doc::Layer *first = pair.from >= 0 ? &t.m_from.layers[std::size_t(pair.from)] : nullptr;
+        const doc::Layer *second = pair.to >= 0 ? &t.m_to.layers[std::size_t(pair.to)] : nullptr;
+        t.m_small.push_back({shrunk(rasterOf(first, t.m_area), t.m_previewScale, t.m_previewSize.width(), t.m_previewSize.height()),
+                             shrunk(rasterOf(second, t.m_area), t.m_previewScale, t.m_previewSize.width(), t.m_previewSize.height()),
+                             (first ? first : second)->properties});
+    }
     return t;
+}
+
+QImage DrawingTween::preview(double t) const
+{
+    doc::Drawing between;
+    for (const SmallPair &pair : m_small) {
+        doc::Layer layer;
+        layer.properties = pair.look;
+        const puppet::RasterImage r = tween::morph(pair.from, pair.to, m_previewField, t);
+        layer.image.write(0, 0, r.width, r.height, r.pixels.data(), r.width);
+        between.layers.push_back(std::move(layer));
+    }
+    return canvas::composeDrawing(between, QRect(QPoint(0, 0), m_previewSize), false);
 }
 
 QImage DrawingTween::picture(double t) const
@@ -126,10 +204,16 @@ doc::Layer DrawingTween::layerAt(int index, double t) const
     const doc::Layer *to = pair.to >= 0 ? &m_to.layers[std::size_t(pair.to)] : nullptr;
     doc::Layer layer;
     layer.properties = (from ? from : to)->properties;
-    const puppet::RasterImage a = rasterOf(from, m_area);
-    const puppet::RasterImage b = rasterOf(to, m_area);
-    const puppet::RasterImage result = tween::morph(a, b, m_field, t);
-    layer.image.write(m_area.x(), m_area.y(), m_area.width(), m_area.height(), result.pixels.data(), m_area.width());
+    // Only where the layer has pixels, and as far around them as anything moves: an empty layer costs nothing and a
+    // sparse one little, whatever the size of the drawing.
+    const QRect content = boundsOf(from) | boundsOf(to);
+    if (content.isEmpty())
+        return layer;
+    const QRect block = content.adjusted(-m_reach - 4, -m_reach - 4, m_reach + 4, m_reach + 4) & m_area;
+    const puppet::RasterImage a = rasterOf(from, block);
+    const puppet::RasterImage b = rasterOf(to, block);
+    const puppet::RasterImage result = tween::morph(a, b, cropped(m_field, block.translated(-m_area.topLeft())), t);
+    layer.image.write(block.x(), block.y(), block.width(), block.height(), result.pixels.data(), block.width());
     return layer;
 }
 

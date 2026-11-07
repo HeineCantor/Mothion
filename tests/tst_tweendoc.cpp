@@ -214,6 +214,45 @@ private slots:
         QCOMPARE(f.controller.document().cel(f.cel)->drawingAt(4)->layers.size(), size_t(1)); // only the ink
     }
 
+    // The preview is small whatever the drawings' size, and follows the same way as the frames do.
+    void thePreviewIsSmallAndFollowsTheWay()
+    {
+        Fixture f;
+        doc::Document &d = f.controller.documentForCommands();
+        // A layer as big as the sheet in both poses, as a background grid is.
+        d.cel(f.cel)->drawing(f.a)->layers.push_back({d.allocateLayerId(), {"grid"}, {}});
+        d.cel(f.cel)->drawing(f.b)->layers.push_back({d.allocateLayerId(), {"grid"}, {}});
+        for (int x = 0; x < 1900; x += 100)
+            for (int y = 0; y < 1000; ++y) {
+                d.cel(f.cel)->drawing(f.a)->layers.back().image.setPixel(x, y, 0xff808080);
+                d.cel(f.cel)->drawing(f.b)->layers.back().image.setPixel(x, y, 0xff808080);
+            }
+        const auto tween = document::DrawingTween::make(*d.cel(f.cel)->drawing(f.a), *d.cel(f.cel)->drawing(f.b));
+        QVERIFY(tween);
+        const QImage small = tween->preview(0.5);
+        QVERIFY(std::max(small.width(), small.height()) <= 400);
+        QCOMPARE(small.size().width(), (tween->area().width() + tween->previewScale() - 1) / tween->previewScale());
+        QVERIFY(tween->previewScale() > 1);
+        // The ink of the stroke is in the preview at a place between the poses (A's stroke is left of B's).
+        auto inkX = [&](const QImage &image) {
+            double sum = 0;
+            long n = 0;
+            for (int y = 0; y < image.height(); ++y)
+                for (int x = 0; x < image.width(); ++x)
+                    if (qAlpha(image.pixel(x, y)) > 200 && qGray(image.pixel(x, y)) < 40) {
+                        sum += x;
+                        ++n;
+                    }
+            return n ? sum / double(n) : -1.0;
+        };
+        const double a = inkX(tween->preview(0.0)), mid = inkX(tween->preview(0.5)), b = inkX(tween->preview(1.0));
+        QVERIFY(a > 0 && b > a + 1.0);
+        QVERIFY2(mid > a && mid < b, qPrintable(QStringLiteral("%1 %2 %3").arg(a).arg(mid).arg(b))); // on the way
+        // The frames are made only where the layers have pixels: the grid's layer is there and as big as its content.
+        QCOMPARE(f.controller.tweenFrames(f.cel, 0, 8), 7);
+        QVERIFY(!f.layerAt(4, 1).image.isEmpty());
+    }
+
     void twoEmptyPosesHaveNothingToTween()
     {
         document::DocumentController controller;
