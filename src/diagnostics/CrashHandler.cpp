@@ -202,7 +202,7 @@ void writeAll(int fd, const char *text)
 }
 
 // Writes the report, and returns its path in `path`.
-void writeReportFile(const char *reason, char *path, size_t pathSize)
+void writeReportFile(const char *reason, void *, char *path, size_t pathSize)
 {
     char stampText[32];
     currentStamp(stampText, sizeof stampText);
@@ -226,7 +226,52 @@ void writeReportFile(const char *reason, char *path, size_t pathSize)
 
 #else
 
-void writeReportFile(const char *reason, char *path, size_t pathSize)
+// "module.exe+0xOFFSET": where an address is, in a way that does not change from run to run (the modules are loaded
+// at other addresses each time): the .pdb of the build says which function and line that offset is.
+void writeAddress(FILE *file, DWORD64 address)
+{
+    HMODULE module = nullptr;
+    char name[MAX_PATH] = "?";
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           reinterpret_cast<LPCSTR>(address), &module))
+        GetModuleFileNameA(module, name, MAX_PATH);
+    const char *base = std::strrchr(name, '\\');
+    std::fprintf(file, "  %s+0x%llX  (at 0x%llX)\n", base ? base + 1 : name,
+                 static_cast<unsigned long long>(address - reinterpret_cast<DWORD64>(module)),
+                 static_cast<unsigned long long>(address));
+}
+
+// The stack of the crashing thread, from the registers the exception caught (the ones of this very place, for an
+// abort), unwound with the tables every x64 module has: no symbols needed, the .pdb is for later.
+void writeStack(FILE *file, EXCEPTION_POINTERS *exception)
+{
+#if defined(_M_X64) || defined(__x86_64__)
+    CONTEXT context;
+    if (exception && exception->ContextRecord)
+        context = *exception->ContextRecord;
+    else
+        RtlCaptureContext(&context);
+    for (int i = 0; i < 64 && context.Rip; ++i) {
+        writeAddress(file, context.Rip);
+        DWORD64 imageBase = 0;
+        PRUNTIME_FUNCTION function = RtlLookupFunctionEntry(context.Rip, &imageBase, nullptr);
+        if (!function) { // a leaf: the return address is at the top of the stack
+            context.Rip = *reinterpret_cast<DWORD64 *>(context.Rsp);
+            context.Rsp += 8;
+        } else {
+            void *handlerData = nullptr;
+            DWORD64 establisher = 0;
+            RtlVirtualUnwind(UNW_FLAG_NHANDLER, imageBase, context.Rip, function, &context, &handlerData,
+                             &establisher, nullptr);
+        }
+    }
+#else
+    Q_UNUSED(file)
+    Q_UNUSED(exception)
+#endif
+}
+
+void writeReportFile(const char *reason, void *exceptionInfo, char *path, size_t pathSize)
 {
     char stampText[32];
     currentStamp(stampText, sizeof stampText);
@@ -236,6 +281,23 @@ void writeReportFile(const char *reason, char *path, size_t pathSize)
         return;
     std::fprintf(file, "Mothion crash report\nVersion: %s\nReason: %s\nProject: %s\nTime: %s\n", g_versionText, reason,
                  g_projectText[0] ? g_projectText : "(none)", stampText);
+    auto *exception = static_cast<EXCEPTION_POINTERS *>(exceptionInfo);
+    if (exception && exception->ExceptionRecord) {
+        const EXCEPTION_RECORD *record = exception->ExceptionRecord;
+        std::fprintf(file, "\nWhere it happened:\n");
+        writeAddress(file, reinterpret_cast<DWORD64>(record->ExceptionAddress));
+        if (record->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && record->NumberParameters >= 2) {
+            const ULONG_PTR kind = record->ExceptionInformation[0];
+            std::fprintf(file, "It %s the address 0x%llX.\n",
+                         kind == 0 ? "read" : kind == 1 ? "wrote" : "ran code at",
+                         static_cast<unsigned long long>(record->ExceptionInformation[1]));
+        }
+    }
+    std::fprintf(file, "\nStack of the crashing thread (offsets in each module; the .pdb of this build turns them into "
+                       "functions):\n");
+    writeStack(file, exception);
+    std::fprintf(file, "\nThe minidump next to this file (same name, .dmp) has all the threads and the memory; the log "
+                       "of the run is among the other runs' logs.\n");
     std::fclose(file);
 }
 
@@ -293,7 +355,7 @@ void crash(const char *reason, void *exceptionInfo)
         return; // crashing again while handling a crash: the report is written, nothing more to try
     char reportPath[kReportPath];
     reportPath[0] = '\0';
-    writeReportFile(reason, reportPath, sizeof reportPath);
+    writeReportFile(reason, exceptionInfo, reportPath, sizeof reportPath);
     if (reportPath[0])
         markerAppend("report", reportPath);
 #ifdef _WIN32
