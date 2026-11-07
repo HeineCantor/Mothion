@@ -57,6 +57,8 @@ const char *const kSchema[] = {
     " scrub integer not null default 1)",
     // Format 7: the compositing network, as JSON.
     "create table compositing (graph text not null)",
+    // Format 8: the camera, as JSON.
+    "create table camera (data text not null)",
 };
 
 // Stored by name, so reordering the enum cannot change old files.
@@ -289,6 +291,52 @@ QString graphToJson(const doc::GraphData &graph, const doc::GraphView &view)
     return QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact));
 }
 
+// The camera as JSON text: whether it is on, and its keys (frame, centre, zoom, rotation, and the easing to the
+// next key: "h" held, "l" straight, or the four numbers of a Bezier).
+QString cameraToJson(const doc::Camera &camera)
+{
+    QJsonArray keys;
+    for (const doc::CameraKey &k : camera.keys()) {
+        QJsonObject key{{"f", k.frame}, {"x", k.pose.centerX}, {"y", k.pose.centerY}, {"z", k.pose.zoom},
+                        {"r", k.pose.rotation}};
+        switch (k.easing.kind) {
+        case doc::Easing::Kind::Hold: key["e"] = QStringLiteral("h"); break;
+        case doc::Easing::Kind::Linear: key["e"] = QStringLiteral("l"); break;
+        case doc::Easing::Kind::Bezier: key["e"] = QJsonArray{k.easing.x1, k.easing.y1, k.easing.x2, k.easing.y2}; break;
+        }
+        keys.append(key);
+    }
+    return QString::fromUtf8(QJsonDocument(QJsonObject{{"visible", camera.visible}, {"keys", keys}})
+                                 .toJson(QJsonDocument::Compact));
+}
+
+doc::Camera cameraFromJson(const QString &text)
+{
+    doc::Camera camera;
+    const QJsonObject root = QJsonDocument::fromJson(text.toUtf8()).object();
+    camera.visible = root.value("visible").toBool(true);
+    for (const QJsonValue &value : root.value("keys").toArray()) {
+        const QJsonObject o = value.toObject();
+        doc::CameraPose pose;
+        pose.centerX = o.value("x").toDouble();
+        pose.centerY = o.value("y").toDouble();
+        pose.zoom = o.value("z").toDouble(1.0);
+        if (!(pose.zoom > 0))
+            pose.zoom = 1.0; // a zoom of nothing would be no picture
+        pose.rotation = o.value("r").toDouble();
+        doc::Easing easing = doc::Easing::linear();
+        const QJsonValue e = o.value("e");
+        if (e.isString() && e.toString() == QLatin1String("h")) {
+            easing = doc::Easing::hold();
+        } else if (e.isArray() && e.toArray().size() == 4) {
+            const QJsonArray a = e.toArray();
+            easing = doc::Easing::bezier(a[0].toDouble(), a[1].toDouble(), a[2].toDouble(), a[3].toDouble());
+        }
+        camera.setKey(o.value("f").toInt(), pose, easing);
+    }
+    return camera;
+}
+
 doc::GraphView viewFromJson(const QString &text)
 {
     doc::GraphView view;
@@ -442,6 +490,15 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
         audio.addBindValue(track->scrub);
         if (!audio.exec()) {
             failure = sqlError(audio);
+            return false;
+        }
+    }
+    if (d.camera()) {
+        QSqlQuery camera(db);
+        camera.prepare(QStringLiteral("insert into camera values (?)"));
+        camera.addBindValue(cameraToJson(*d.camera()));
+        if (!camera.exec()) {
+            failure = sqlError(camera);
             return false;
         }
     }
@@ -644,6 +701,9 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
         track.scrub = q.value(7).toBool();
         d->setAudio(std::move(track));
     }
+
+    if (version >= 8 && q.exec(QStringLiteral("select data from camera")) && q.next())
+        d->setCamera(cameraFromJson(q.value(0).toString()));
 
     if (version >= 7 && q.exec(QStringLiteral("select graph from compositing")) && q.next())
     {

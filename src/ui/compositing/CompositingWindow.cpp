@@ -249,6 +249,7 @@ CompositingWindow::CompositingWindow(document::DocumentController *document, QWi
         connect(m_document, &document::DocumentController::currentFrameChanged, this, frameChanged);
         connect(m_document, &document::DocumentController::structureChanged, this, frameChanged);
         connect(m_document, &document::DocumentController::pixelsChanged, this, frameChanged);
+        connect(m_document, &document::DocumentController::cameraChanged, this, frameChanged);
     }
     // The window gets its size a moment after it is shown (maximized): frame the layout then, and again
     // if the size changes, until the user takes the view into their hands.
@@ -501,7 +502,7 @@ void CompositingWindow::addMaskShape(const MaskShape &shape)
 void CompositingWindow::refresh()
 {
     if (m_frameDirty && m_document) {
-        m_frame = io::renderFrame(m_document->document(), m_document->currentFrame(), false);
+        m_frame = io::renderOutputFrame(m_document->document(), m_document->currentFrame(), false); // seen through the camera
         m_frameScale = 1.0;
         const int pageWidth = m_frame.width();
         // A preview needs no more than this; blurs get slow on big pages.

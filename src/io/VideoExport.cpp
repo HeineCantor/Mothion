@@ -28,7 +28,7 @@ QString findFfmpeg()
 QImage renderFinalFrame(const doc::Document &document, int frame, compositing::Evaluator &evaluator,
                         const compositing::Graph *graph, bool transparent)
 {
-    QImage plain = renderFrame(document, frame, transparent);
+    QImage plain = renderOutputFrame(document, frame, transparent); // through the camera, if there is one
     if (!graph)
         return plain;
     compositing::EvalContext context;

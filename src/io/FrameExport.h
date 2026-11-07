@@ -31,6 +31,15 @@ QString suffixOf(ImageFormat format); // "png", "jpg"
 // over the paper, or over transparency; perspective layers (guides) left out.
 QImage renderFrame(const doc::Document &document, int frame, bool transparent);
 
+// The sheet's picture seen through the camera at `pose`: as big as the sheet, with the part the camera looks at
+// carried over it (moved, turned, zoomed with a smooth resampling). Where the camera looks past the sheet's edge
+// `background` shows (the paper's color, or transparency).
+QImage applyCamera(const QImage &sheet, const doc::CameraPose &pose, QRgb background);
+
+// What a frame looks like to whoever watches the animation, which is what the playback and the exports show:
+// renderFrame() seen through the project's camera, if it has one and it is on (visible); the whole sheet if not.
+QImage renderOutputFrame(const doc::Document &document, int frame, bool transparent);
+
 // Writes one frame to `path`.
 bool exportFrame(const doc::Document &document, int frame, const QString &path, const ExportOptions &options,
                  QString *error);

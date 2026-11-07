@@ -108,6 +108,44 @@ private slots:
 
 
     // "Flip" shows the animation mirrored left to right, in the window only.
+    // The Autoplay shows the animation through the camera, when the project has one and it is on.
+    void autoplayShowsTheCamera()
+    {
+        document::DocumentController controller;
+        const int w = controller.document().width(), h = controller.document().height();
+        QImage square(400, 400, QImage::Format_ARGB32);
+        square.fill(Qt::blue);
+        QVERIFY(controller.pasteImage(square, QPoint(w / 2 - 200, h / 2 - 200)));
+        controller.clearSelection();
+
+        ui::AutoplayWindow window(&controller);
+        window.resize(720, 500);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        window.findChild<QPushButton *>(QStringLiteral("autoplayPlay"))->setChecked(false);
+        auto bluePixels = [&] {
+            const QImage shot = window.grab().toImage();
+            long n = 0;
+            for (int y = 0; y < shot.height(); ++y)
+                for (int x = 0; x < shot.width(); ++x) {
+                    const QColor c = shot.pixelColor(x, y);
+                    n += (c.blue() > 200 && c.red() < 60 && c.green() < 60) ? 1 : 0;
+                }
+            return n;
+        };
+        const long plain = bluePixels();
+        QVERIFY(plain > 1000);
+
+        controller.setCameraKey(0, {w / 2.0, h / 2.0, 2, 0}); // twice as close: the square is four times the area
+        QTRY_VERIFY(bluePixels() > 3 * plain);
+        controller.setCameraVisible(false); // off: the sheet as it is
+        QTRY_COMPARE(bluePixels(), plain);
+        controller.setCameraVisible(true);
+        QTRY_VERIFY(bluePixels() > 3 * plain);
+        controller.removeCamera();
+        QTRY_COMPARE(bluePixels(), plain);
+    }
+
     void autoplayFlipsHorizontally()
     {
         document::DocumentController controller;
@@ -511,6 +549,106 @@ private slots:
     // Blocks on the timeline are selected with clicks (Ctrl adds, Shift a
     // range of the row) and dragged along the time together, in one step,
     // only onto free frames; copied, they are pasted as they are or as copies.
+    // The camera has a row under the cels: a diamond at each key, which can be clicked and dragged; a double click on
+    // an empty cell makes a key; its eye and name in the header.
+    void timelineHasACameraRowWithKeys()
+    {
+        document::DocumentController controller;
+        controller.addCamera();
+        ui::TimelineView view(&controller);
+        view.resize(800, 200);
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        ui::TimelineMetrics m;
+        const int row = controller.document().celCount(); // the camera's row is the one under the cels
+        const int y = m.rowY(row) + m.rowHeight / 2;
+        auto cell = [&](int frame) { return QPoint(m.frameX(frame) + m.frameWidth / 2, y); };
+        auto *vp = view.viewport();
+        auto doubleClick = [&](QPoint at) {
+            QMouseEvent press(QEvent::MouseButtonDblClick, QPointF(at), vp->mapToGlobal(QPointF(at)), Qt::LeftButton,
+                              Qt::LeftButton, Qt::NoModifier);
+            QApplication::sendEvent(vp, &press);
+            QMouseEvent release(QEvent::MouseButtonRelease, QPointF(at), vp->mapToGlobal(QPointF(at)), Qt::LeftButton,
+                                Qt::NoButton, Qt::NoModifier);
+            QApplication::sendEvent(vp, &release);
+        };
+
+        // A double click on an empty cell: a key there, at the pose the camera has.
+        QCOMPARE(controller.camera()->keys().size(), size_t(1));
+        doubleClick(cell(10));
+        QCOMPARE(controller.camera()->keys().size(), size_t(2));
+        QVERIFY(controller.camera()->keyAt(10));
+        QCOMPARE(controller.camera()->keyAt(10)->pose, controller.camera()->poseAt(0)); // the same pose: nothing moves
+        doubleClick(cell(10)); // on a key already: nothing more
+        QCOMPARE(controller.camera()->keys().size(), size_t(2));
+
+        // A click on a key shows its frame; on an empty cell, that frame.
+        QTest::mouseClick(vp, Qt::LeftButton, {}, cell(10));
+        QCOMPARE(controller.currentFrame(), 10);
+        QTest::mouseClick(vp, Qt::LeftButton, {}, cell(4));
+        QCOMPARE(controller.currentFrame(), 4);
+        QCOMPARE(controller.camera()->keys().size(), size_t(2));
+
+        // Dragged, a key moves to another frame, one undo step.
+        QTest::mousePress(vp, Qt::LeftButton, {}, cell(10));
+        QTest::mouseMove(vp, cell(12));
+        QTest::mouseMove(vp, cell(15));
+        QTest::mouseRelease(vp, Qt::LeftButton, {}, cell(15));
+        QVERIFY(controller.camera()->keyAt(15));
+        QVERIFY(!controller.camera()->keyAt(10));
+        QCOMPARE(controller.currentFrame(), 15);
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo camera"));
+        // Onto a frame that has a key: refused.
+        QTest::mousePress(vp, Qt::LeftButton, {}, cell(15));
+        QTest::mouseMove(vp, cell(0));
+        QTest::mouseRelease(vp, Qt::LeftButton, {}, cell(0));
+        QVERIFY(controller.camera()->keyAt(15));
+        QCOMPARE(controller.camera()->keys().size(), size_t(2));
+
+        // The header: the eye turns the camera off and on; the name selects it.
+        const QPoint eye(20, y);
+        QTest::mouseClick(vp, Qt::LeftButton, {}, eye);
+        QVERIFY(!controller.camera()->visible);
+        QTest::mouseClick(vp, Qt::LeftButton, {}, eye);
+        QVERIFY(controller.camera()->visible);
+        QVERIFY(!controller.cameraSelected());
+        QTest::mouseClick(vp, Qt::LeftButton, {}, QPoint(80, y));
+        QVERIFY(controller.cameraSelected());
+
+        // Delete, with the camera selected, takes away the key at the current frame.
+        controller.setCurrentFrame(15);
+        QTest::keyClick(&view, Qt::Key_Delete);
+        QVERIFY(!controller.camera()->keyAt(15));
+        QCOMPARE(controller.camera()->keys().size(), size_t(1));
+        QTest::keyClick(&view, Qt::Key_Delete); // not on a key: nothing
+        QCOMPARE(controller.camera()->keys().size(), size_t(1));
+    }
+
+    // The "Key" button of the timeline makes a camera keyframe at the current frame (and the camera, if need be).
+    void timelineKeyButtonMakesACameraKey()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        ui::TimelinePanel panel(&controller, &state);
+        panel.show();
+        auto *button = panel.findChild<QToolButton *>(QStringLiteral("cameraKey"));
+        QVERIFY(button);
+        QVERIFY(!controller.camera());
+        controller.setCurrentFrame(6);
+        button->click(); // no camera yet: one is made, with a key here
+        QVERIFY(controller.camera());
+        QCOMPARE(controller.camera()->keys().size(), size_t(1));
+        QCOMPARE(controller.camera()->keys()[0].frame, 6);
+        controller.setCameraKey(0, {100, 100, 2, 0});
+        controller.setCurrentFrame(3);
+        button->click(); // between two keys: a key at the pose the camera has there
+        QVERIFY(controller.camera()->keyAt(3));
+        QCOMPARE(controller.camera()->keyAt(3)->pose, controller.camera()->poseAt(3));
+        QCOMPARE(controller.camera()->keys().size(), size_t(3));
+        button->click(); // already a key here: nothing changes
+        QCOMPARE(controller.camera()->keys().size(), size_t(3));
+    }
+
     void timelineDragsTheSelectedFrames()
     {
         document::DocumentController controller;

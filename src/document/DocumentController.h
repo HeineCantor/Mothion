@@ -126,6 +126,27 @@ public:
     // between, a locked cel).
     int tweenFrames(doc::CelId cel, int from, int to, TweenEase ease = TweenEase::Linear, QString *reason = nullptr);
 
+    // The camera (see doc::Camera): at most one for now. Each change is one undo step.
+    const std::optional<doc::Camera> &camera() const { return m_document->camera(); }
+    void addCamera();                                      // one that shows the whole sheet, from the first frame
+    void removeCamera();
+    void setCameraVisible(bool visible);                   // an invisible camera is not applied
+    void setCameraKey(int frame, const doc::CameraPose &pose); // a key at `frame` (a camera is made if there is none)
+    bool removeCameraKey(int frame);
+    bool moveCameraKey(int from, int to);
+    bool setCameraEasing(int frame, const doc::Easing &easing); // from the key at `frame` to the next
+    // The camera as it is at `frame` (the whole sheet if there is none or it is invisible).
+    doc::CameraPose cameraPoseAt(int frame) const;
+    // For a drag: shows `camera` without recording it, and commitCamera() then records the whole change as one
+    // step, from what it was before the drag.
+    void previewCamera(const std::optional<doc::Camera> &camera);
+    void commitCamera(const std::optional<doc::Camera> &before, const std::optional<doc::Camera> &after);
+
+    // Whether the camera is what the Layers panel has selected: drawing is refused then (see beginPaint()), and the
+    // canvas moves the camera with the pen (canvas::CameraGizmo). Not kept in the project.
+    bool cameraSelected() const { return m_cameraSelected; }
+    void selectCamera(bool selected);
+
     // The compositing network kept in the project: one undo step puts `graph` in place of it.
     const doc::GraphData &compositing() const { return m_document->compositing(); }
     void setCompositing(doc::GraphData graph);
@@ -286,6 +307,10 @@ public slots:
 signals:
     // The audio track changed without a structure change (a volume being dragged): the views and the player take it up.
     void audioChanged();
+    // The camera changed (a key, whether it is on, or it was added or taken away; also a preview).
+    void cameraChanged();
+    // The camera was selected, or another row was (see cameraSelected()).
+    void cameraSelectionChanged();
     // Pixels of (a layer of) `drawing` changed in `rect` (document coordinates).
     void pixelsChanged(doc::CelId cel, doc::DrawingId drawing, const QRect &rect);
     // Cels, drawings, layers, timing or document properties changed.
@@ -325,6 +350,7 @@ private:
     doc::CelId m_currentCel = doc::kNoId;
     int m_currentFrame = 0;
     bool m_layerChosen = true;
+    bool m_cameraSelected = false;
     doc::LayerId m_currentLayer = doc::kNoId;
     std::string m_currentLayerName; // looked for when the drawing changes
     QPainterPath m_selection;

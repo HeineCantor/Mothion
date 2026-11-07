@@ -37,6 +37,7 @@ add_library(mothion_core STATIC
     core/document/Document.h core/document/Document.cpp
     core/document/Command.h
     core/document/Audio.h
+    core/document/Camera.h core/document/Camera.cpp
     core/document/History.h core/document/History.cpp
     core/document/commands/GroupCommand.h core/document/commands/GroupCommand.cpp
     core/document/commands/PaintCommand.h core/document/commands/PaintCommand.cpp
@@ -46,6 +47,7 @@ add_library(mothion_core STATIC
     core/document/commands/LayerCommands.h core/document/commands/LayerCommands.cpp
     core/document/commands/AudioCommands.h core/document/commands/AudioCommands.cpp
     core/document/commands/CompositingCommands.h core/document/commands/CompositingCommands.cpp
+    core/document/commands/CameraCommands.h core/document/commands/CameraCommands.cpp
     core/document/Compositing.h
 )
 set_target_properties(mothion_core PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
@@ -87,6 +89,7 @@ qt_add_library(mothion_gui STATIC
     canvas/StrokeSession.h canvas/StrokeSession.cpp
     canvas/FrameRenderer.h canvas/FrameRenderer.cpp
     canvas/PerspectiveGizmo.h canvas/PerspectiveGizmo.cpp
+    canvas/CameraGizmo.h canvas/CameraGizmo.cpp
     canvas/ViewTransform.h canvas/ViewTransform.cpp
     canvas/NavigationGesture.h canvas/NavigationGesture.cpp
     canvas/CanvasTool.h

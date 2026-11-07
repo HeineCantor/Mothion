@@ -3,6 +3,7 @@
 #include "core/document/Document.h"
 #include "core/document/History.h"
 #include "core/document/commands/DrawingCommands.h"
+#include "core/document/commands/CameraCommands.h"
 #include "core/document/commands/CelCommands.h"
 #include "core/document/commands/LayerCommands.h"
 #include "core/document/commands/PaintCommand.h"
@@ -306,6 +307,37 @@ private slots:
 
         history.redo(doc);
         QCOMPARE(doc.celAt(0).id(), a); // same id on redo
+    }
+
+    void cameraCommandsApplyAndRevert()
+    {
+        Document doc(640, 360);
+        QVERIFY(!doc.camera());
+        History history;
+        auto step = [&](std::optional<Camera> camera) {
+            const ChangeSet changes = history.execute(doc, std::make_unique<SetCameraCommand>(std::move(camera)));
+            QVERIFY(changes.camera);
+            QVERIFY(!changes.isEmpty());
+            QVERIFY(!changes.structure); // the cels and the timeline did not change
+        };
+        Camera one = Camera::wholeSheet(640, 360);
+        step(one);
+        QCOMPARE(doc.camera(), std::optional<Camera>(one));
+        Camera two = one;
+        two.setKey(10, {100, 100, 2, 15});
+        step(two);
+        QCOMPARE(doc.camera()->keys().size(), size_t(2));
+        step(std::nullopt); // the camera taken away
+        QVERIFY(!doc.camera());
+        history.undo(doc);
+        QCOMPARE(doc.camera(), std::optional<Camera>(two));
+        history.undo(doc);
+        QCOMPARE(doc.camera(), std::optional<Camera>(one));
+        history.undo(doc);
+        QVERIFY(!doc.camera());
+        history.redo(doc);
+        QCOMPARE(doc.camera(), std::optional<Camera>(one));
+        QCOMPARE(history.undoCommand()->kind(), CommandKind::EditCamera);
     }
 
     void historyDiscardsRedoBranch()

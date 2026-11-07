@@ -80,6 +80,7 @@ private:
     document::DocumentController *m_document;
     QPointer<audio::AudioPlayer> m_audio; // may go before the window (both are the main window's children)
     canvas::FrameRenderer m_renderer;
+    QImage m_output; // the frame seen through the camera, when the project has one
     QWidget *m_picture;
     QSlider *m_slider;
     QLabel *m_position;
