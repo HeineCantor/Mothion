@@ -23,6 +23,7 @@ private slots:
         QFile log(diagnostics::logFile());
         QVERIFY(log.open(QIODevice::ReadOnly));
         const QString text = QString::fromUtf8(log.readAll());
+        log.close(); // Windows does not rename a file that is open: the next run could not make this one the previous
         QVERIFY(text.contains(QLatin1String("Mothion 9.9")));
         QVERIFY(text.contains(QLatin1String("[W] something odd 42")));
         QVERIFY(text.contains(QLatin1String("[N] Opened a project")));

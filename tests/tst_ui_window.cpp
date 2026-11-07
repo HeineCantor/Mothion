@@ -443,10 +443,19 @@ private slots:
         // The frame changes: sent again (the timer keeps the original start).
         controller.setCurrentFrame(4);
         controller.setCurrentFrame(5);
-        const Message second = next();
-        const QJsonObject again = second.json.value(QStringLiteral("args")).toObject().value(QStringLiteral("activity")).toObject();
+        // Frame 5 may go out at once when the minimum interval has already passed (a slow machine), and then frame 6
+        // after it; what matters is that frame 6 is the last, with the same start every time.
+        QJsonObject again;
+        for (int i = 0; i < 3; ++i) {
+            const Message second = next();
+            QVERIFY(second.opcode == 1);
+            again = second.json.value(QStringLiteral("args")).toObject().value(QStringLiteral("activity")).toObject();
+            QCOMPARE(again.value(QStringLiteral("timestamps")).toObject().value(QStringLiteral("start")).toInteger(), start);
+            if (again.value(QStringLiteral("state")).toString().startsWith(QStringLiteral("Frame 6 / ")))
+                break;
+            QVERIFY(again.value(QStringLiteral("state")).toString().startsWith(QStringLiteral("Frame 5 / ")));
+        }
         QVERIFY(again.value(QStringLiteral("state")).toString().startsWith(QStringLiteral("Frame 6 / ")));
-        QCOMPARE(again.value(QStringLiteral("timestamps")).toObject().value(QStringLiteral("start")).toInteger(), start);
 
         // Ping: the same payload comes back as pong.
         send(3, QByteArrayLiteral("hello"));
