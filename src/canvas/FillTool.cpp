@@ -30,6 +30,15 @@ doc::Pixel behind(doc::Pixel pixel, doc::Pixel fill, int coverage)
     return out;
 }
 
+// `pixel` with `amount` (0..255) of it taken away: what a fill does to a mask (it shows the layer where it fills).
+doc::Pixel clearedBy(doc::Pixel pixel, int amount)
+{
+    doc::Pixel out = 0;
+    for (int shift = 0; shift < 32; shift += 8)
+        out |= doc::Pixel((int((pixel >> shift) & 0xff) * (255 - amount) + 127) / 255) << shift;
+    return out;
+}
+
 // `fill` × `coverage` (0..255) over `pixel`, premultiplied.
 doc::Pixel over(doc::Pixel pixel, doc::Pixel fill, int coverage)
 {
@@ -127,7 +136,7 @@ void FillTool::fillLasso()
         for (int x = 0; x < box.width(); ++x)
             if (const int coverage = mask.at(box.x() + x, box.y() + y)) {
                 doc::Pixel &p = pixels[std::size_t(y) * std::size_t(box.width()) + std::size_t(x)];
-                p = over(p, color, coverage);
+                p = target->mask ? clearedBy(p, coverage * int(color >> 24) / 255) : over(p, color, coverage);
             }
     target->image->write(box.x(), box.y(), box.width(), box.height(), pixels.data(), box.width());
     m_document->notifyPainted(box);
@@ -187,7 +196,7 @@ void FillTool::fillAround(const QPointF &docPos)
                 coverage = coverage * selection.at(dx, dy) / 255;
             doc::Pixel &p = pixels[std::size_t(y) * std::size_t(box.width()) + std::size_t(x)];
             if (coverage)
-                p = behind(p, color, coverage);
+                p = target->mask ? clearedBy(p, coverage * int(color >> 24) / 255) : behind(p, color, coverage);
         }
     }
     target->image->write(box.x(), box.y(), box.width(), box.height(), pixels.data(), box.width());

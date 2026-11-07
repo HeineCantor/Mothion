@@ -55,6 +55,49 @@ private slots:
     }
 
 
+    // A mask holds what is hidden, in black, and is white (nothing there) where the layer shows: on it the eraser hides
+    // (paints black) and the brush puts the layer back (takes the black away), whatever the color selected.
+    void onAMaskTheEraserHidesAndTheBrushShows()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        QImage red(300, 300, QImage::Format_ARGB32);
+        red.fill(Qt::red);
+        controller.importImage(red, QStringLiteral("x")); // centered on the 1920x1080 page
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(500, 400);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        QVERIFY(controller.createLayerMask());
+        const doc::Layer &layer = controller.currentDrawing()->layers.front();
+        QVERIFY(layer.mask && layer.mask->isEmpty()); // starts white: everything shows
+
+        const QTransform toView = canvas.view().documentToView();
+        const QPoint start = toView.map(QPointF(900, 540)).toPoint();
+        auto stroke = [&](tools::ToolId tool) {
+            state.setActiveTool(tool);
+            QTest::mousePress(&canvas, Qt::LeftButton, {}, start);
+            for (int i = 1; i <= 20; ++i)
+                QTest::mouseMove(&canvas, start + QPoint(i * 2, 0));
+            QTest::mouseRelease(&canvas, Qt::LeftButton, {}, start + QPoint(40, 0));
+        };
+        const QPoint inside = toView.inverted().map(QPointF(start + QPoint(20, 0))).toPoint(); // on the stroke
+        state.setColor(Qt::white); // the color does not matter
+
+        stroke(tools::ToolId::Brush); // the brush on a mask with nothing hidden: nothing to take away
+        QVERIFY(!layer.mask || layer.mask->pixel(inside.x(), inside.y()) == 0);
+
+        stroke(tools::ToolId::Eraser); // the eraser hides
+        const doc::Pixel hidden = layer.mask->pixel(inside.x(), inside.y());
+        QVERIFY2((hidden >> 24) > 200 && (hidden & 0xffffff) == 0, "black");
+
+        state.setColor(Qt::black);
+        stroke(tools::ToolId::Brush); // the brush shows it again
+        QVERIFY((layer.mask->pixel(inside.x(), inside.y()) >> 24) < 40);
+        QCOMPARE(layer.image.pixel(inside.x(), inside.y()), doc::Pixel(0xffff0000)); // the layer itself is untouched
+    }
+
+
     // A stroke on an empty frame that leaves nothing (the selection is elsewhere) takes back the frame it made when it
     // ends: nothing may look at the image that went with it afterwards (the line start was read from it: a crash).
     void aStrokeThatPaintsNothingOnAnEmptyFrame()

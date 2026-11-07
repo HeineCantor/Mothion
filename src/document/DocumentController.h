@@ -231,13 +231,12 @@ public:
         doc::LayerId layer = doc::kNoId;
         doc::TiledImage *image = nullptr; // the layer's pixels, or its mask's when `mask`
         bool mask = false;
-        // What a painting tool puts on this target: on a mask, the color's gray (a mask is black and white).
+        // What a painting tool puts on this target: on a mask, black. A mask holds what is hidden, in black (where it
+        // has no pixel everything shows, white): a tool that paints puts the layer back (takes the black away) and the
+        // eraser hides (paints it): see CanvasView::beginStroke(), FillTool and ShapeTool.
         QColor tint(const QColor &color) const
         {
-            if (!mask)
-                return color;
-            const int gray = qGray(color.rgb());
-            return QColor(gray, gray, gray, color.alpha());
+            return mask ? QColor(0, 0, 0, color.alpha()) : color;
         }
     };
     // Resolves the current layer. On an empty frame a new drawing (with one

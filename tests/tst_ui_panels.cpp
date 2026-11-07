@@ -903,7 +903,7 @@ private slots:
         // The pen paints the mask, in gray (black and white): the layer's pixels stay as they are.
         const auto target = controller.beginPaint(true);
         QVERIFY(target && target->mask);
-        QCOMPARE(target->tint(QColor(200, 40, 30)), QColor(qGray(QColor(200, 40, 30).rgb()), qGray(QColor(200, 40, 30).rgb()), qGray(QColor(200, 40, 30).rgb())));
+        QCOMPARE(target->tint(QColor(200, 40, 30)), QColor(0, 0, 0)); // what hides is black
         const doc::TiledImage before = *target->image;
         target->image->setPixel(3, 3, 0xff000000);
         controller.endPaint(before);

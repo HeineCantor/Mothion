@@ -324,13 +324,7 @@ void ShapeTool::draw(const RenderedShape &shape)
             if (selected)
                 factor = (factor * selection.at(box.x() + x, box.y() + y) + 127) / 255;
             doc::Pixel &p = pixels[std::size_t(y) * std::size_t(box.width()) + std::size_t(x)];
-            doc::Pixel source = line[x];
-            if (target->mask) { // a mask is black and white: the shape's gray
-                const doc::Pixel gray = ((77 * ((source >> 16) & 0xff) + 150 * ((source >> 8) & 0xff) +
-                                          29 * (source & 0xff)) >> 8);
-                source = (source & 0xff000000) | gray << 16 | gray << 8 | gray;
-            }
-            p = composite(p, source, factor, erase);
+            p = composite(p, line[x], factor, erase != target->mask); // on a mask a shape shows the layer: it erases
         }
     }
     target->image->write(box.x(), box.y(), box.width(), box.height(), pixels.data(), box.width());

@@ -701,6 +701,8 @@ void CanvasView::beginStroke(const PenSample &sample)
         return;
     }
     const ToolId tool = m_eraseStroke && !transparentBrush ? ToolId::Eraser : ToolId::Brush;
+    if (target->mask) // a mask holds what is hidden: the brush puts the layer back, the eraser hides it
+        m_eraseStroke = !m_eraseStroke;
     const tools::BrushSettings settings = m_toolState->settings(tool);
     const tools::BrushDefinitionPtr definition = m_toolState->brush(tool);
     brush::BrushStyle style = definition->style;
