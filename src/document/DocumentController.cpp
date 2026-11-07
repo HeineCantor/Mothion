@@ -994,7 +994,10 @@ bool DocumentController::canClearCurrentLayer() const
     if (!cel || !cel->properties().visible || cel->properties().locked)
         return false;
     const doc::Layer *layer = m_document->layer(m_currentCel, currentDrawingId(), m_currentLayer);
-    return layer && layer->properties.visible && !layer->properties.locked && !layer->image.isEmpty();
+    if (!layer || !layer->properties.visible || layer->properties.locked)
+        return false;
+    // What there is to clear: the mask when it is what is drawn on, the layer's pixels otherwise.
+    return !(layer->mask && m_maskLayer == layer->id ? *layer->mask : layer->image).isEmpty();
 }
 
 bool DocumentController::clearCurrentLayer(QString *reason)
@@ -1004,7 +1007,10 @@ bool DocumentController::clearCurrentLayer(QString *reason)
     doc::Layer *layer = workLayer(true, nothing, reason);
     if (!layer)
         return false;
-    if (layer->image.isEmpty()) {
+    // With the mask being drawn on, it is the mask that is cleared (nothing hidden again), not the layer.
+    const bool onMask = layer->mask && m_maskLayer == layer->id;
+    doc::TiledImage &image = onMask ? *layer->mask : layer->image;
+    if (image.isEmpty()) {
         if (reason)
             *reason = nothing;
         return false;
@@ -1012,11 +1018,11 @@ bool DocumentController::clearCurrentLayer(QString *reason)
 
     // The layer stays (and its drawing, exposures too), only its pixels go.
     const doc::DrawingId drawingId = currentDrawingId();
-    const doc::TiledImage before = layer->image;
+    const doc::TiledImage before = image;
     const QRect area = boundsOf(before.tileCoords());
-    layer->image = doc::TiledImage();
+    image = doc::TiledImage();
     std::vector<std::unique_ptr<doc::Command>> steps;
-    steps.push_back(doc::PaintCommand::capture(m_currentCel, drawingId, m_currentLayer, before, layer->image));
+    steps.push_back(doc::PaintCommand::capture(m_currentCel, drawingId, m_currentLayer, before, image, onMask));
     m_history.pushApplied(std::make_unique<doc::GroupCommand>(doc::CommandKind::ClearLayer, std::move(steps)));
     emit pixelsChanged(m_currentCel, drawingId, area);
     emit historyChanged();

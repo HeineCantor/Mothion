@@ -910,6 +910,14 @@ private slots:
         QVERIFY(controller.currentDrawing()->layers.front().mask->pixel(3, 3) == 0xff000000);
         QCOMPARE(controller.currentDrawing()->layers.front().image.pixel(3, 3), controller.currentDrawing()->layers.front().image.pixel(3, 3));
 
+        // Clearing the layer clears the mask while it is the one drawn on, and the layer's pixels once it is not.
+        QVERIFY(controller.canClearCurrentLayer());
+        QVERIFY(controller.clearCurrentLayer());
+        QVERIFY(controller.currentDrawing()->layers.front().mask->isEmpty());
+        QVERIFY(!controller.currentDrawing()->layers.front().image.isEmpty()); // the layer is as it was
+        controller.undo(); // the black comes back
+        QVERIFY(controller.currentDrawing()->layers.front().mask->pixel(3, 3) == 0xff000000);
+
         // Clicking the layer's own thumbnail goes back to drawing on the layer.
         auto *layerThumb = tree->itemWidget(panel.layerItem(layer), 0)->findChild<QLabel *>(QStringLiteral("thumbnail"));
         QTest::mouseClick(layerThumb, Qt::LeftButton);
@@ -917,6 +925,10 @@ private slots:
         const auto onLayer = controller.beginPaint(true);
         QVERIFY(onLayer && !onLayer->mask);
         controller.cancelPaint();
+        QVERIFY(controller.clearCurrentLayer()); // now the layer's pixels go, the mask stays
+        QVERIFY(controller.currentDrawing()->layers.front().image.isEmpty());
+        QVERIFY(controller.currentDrawing()->layers.front().mask->pixel(3, 3) == 0xff000000);
+        controller.undo();
 
         QTest::mouseClick(remove, Qt::LeftButton);
         QCoreApplication::processEvents();
