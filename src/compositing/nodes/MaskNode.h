@@ -12,6 +12,7 @@ class MaskNode : public NodeType
 public:
     QString id() const override { return QStringLiteral("mask"); }
     QString title() const override { return nodeTr("Mask"); }
+    NodeCategory category() const override { return NodeCategory::Composite; }
     QColor tint() const override { return {125, 95, 165}; }
     QStringList inputs() const override { return {nodeTr("Image")}; }
     QStringList outputs() const override { return {nodeTr("Image"), nodeTr("Mask")}; }

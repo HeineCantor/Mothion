@@ -14,6 +14,7 @@ class SensorNoiseNode : public NodeType
 public:
     QString id() const override { return QStringLiteral("sensornoise"); }
     QString title() const override { return nodeTr("Sensor Noise"); }
+    NodeCategory category() const override { return NodeCategory::Effect; }
     QColor tint() const override { return {100, 105, 135}; }
     QStringList inputs() const override { return {nodeTr("Image")}; }
     QStringList outputs() const override { return {nodeTr("Image")}; }

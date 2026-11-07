@@ -1,5 +1,6 @@
 #include "canvas/FrameRenderer.h"
 
+#include "canvas/BlendDraw.h"
 #include "canvas/TileQt.h"
 #include "core/document/Blend.h"
 
@@ -15,27 +16,6 @@
 namespace mothion::canvas {
 
 namespace {
-
-QPainter::CompositionMode compositionFor(doc::BlendMode blend)
-{
-    switch (blend) {
-    case doc::BlendMode::Normal: return QPainter::CompositionMode_SourceOver;
-    case doc::BlendMode::Multiply: return QPainter::CompositionMode_Multiply;
-    case doc::BlendMode::Screen: return QPainter::CompositionMode_Screen;
-    case doc::BlendMode::Overlay: return QPainter::CompositionMode_Overlay;
-    case doc::BlendMode::Add: return QPainter::CompositionMode_Plus;
-    case doc::BlendMode::Darken: return QPainter::CompositionMode_Darken;
-    case doc::BlendMode::Lighten: return QPainter::CompositionMode_Lighten;
-    case doc::BlendMode::ColorDodge: return QPainter::CompositionMode_ColorDodge;
-    case doc::BlendMode::ColorBurn: return QPainter::CompositionMode_ColorBurn;
-    case doc::BlendMode::HardLight: return QPainter::CompositionMode_HardLight;
-    case doc::BlendMode::SoftLight: return QPainter::CompositionMode_SoftLight;
-    case doc::BlendMode::Difference: return QPainter::CompositionMode_Difference;
-    case doc::BlendMode::Exclusion: return QPainter::CompositionMode_Exclusion;
-    default: break; // blended by hand: see needsSoftwareBlend
-    }
-    return QPainter::CompositionMode_SourceOver;
-}
 
 bool shows(const doc::Layer &layer, bool guides)
 {
