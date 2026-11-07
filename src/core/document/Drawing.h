@@ -10,7 +10,8 @@
 
 namespace mothion::doc {
 
-enum class BlendMode { Normal, Multiply, Screen, Overlay, Add };
+enum class BlendMode { Normal, Multiply, Screen, Overlay, Add, Darken, Lighten, ColorDodge, ColorBurn, HardLight, SoftLight,
+                       Difference, Exclusion };
 
 struct LayerProperties
 {

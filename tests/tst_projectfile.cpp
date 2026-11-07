@@ -250,6 +250,22 @@ private slots:
         compareDocuments(*original, *loaded);
     }
 
+    void everyBlendModeSurvivesTheFile()
+    {
+        QTemporaryDir dir;
+        const QString path = dir.filePath(QStringLiteral("blend.moth"));
+        const auto original = sampleDocument();
+        doc::Drawing &drawing = *original->celAt(0).drawing(original->celAt(0).drawings().begin()->first);
+        for (int i = int(doc::BlendMode::Normal); i <= int(doc::BlendMode::Exclusion); ++i) {
+            drawing.layers.push_back({original->allocateLayerId(), {"Mode", true, false, 1.0f, doc::BlendMode(i)}, {}});
+        }
+        QString error;
+        QVERIFY2(io::saveProject(*original, path, &error), qPrintable(error));
+        const auto loaded = io::loadProject(path, &error);
+        QVERIFY2(loaded, qPrintable(error));
+        compareDocuments(*original, *loaded);
+    }
+
     // The preview for file managers, found the way the Windows thumbnail
     // provider does: in the first bytes of the file, without SQLite.
     void savedProjectsCarryAThumbnail()

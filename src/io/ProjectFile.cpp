@@ -62,12 +62,20 @@ const char *const kSchema[] = {
 };
 
 // Stored by name, so reordering the enum cannot change old files.
-constexpr std::array<std::pair<doc::BlendMode, const char *>, 5> kBlendNames{{
+constexpr std::array<std::pair<doc::BlendMode, const char *>, 13> kBlendNames{{
     {doc::BlendMode::Normal, "normal"},
     {doc::BlendMode::Multiply, "multiply"},
     {doc::BlendMode::Screen, "screen"},
     {doc::BlendMode::Overlay, "overlay"},
     {doc::BlendMode::Add, "add"},
+    {doc::BlendMode::Darken, "darken"},
+    {doc::BlendMode::Lighten, "lighten"},
+    {doc::BlendMode::ColorDodge, "colordodge"},
+    {doc::BlendMode::ColorBurn, "colorburn"},
+    {doc::BlendMode::HardLight, "hardlight"},
+    {doc::BlendMode::SoftLight, "softlight"},
+    {doc::BlendMode::Difference, "difference"},
+    {doc::BlendMode::Exclusion, "exclusion"},
 }};
 
 QString blendName(doc::BlendMode blend)
