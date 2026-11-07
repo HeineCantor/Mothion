@@ -402,8 +402,8 @@ private slots:
         const QString name = QStringLiteral("mothion-test-discord-%1").arg(QCoreApplication::applicationPid());
         QLocalServer::removeServer(name);
         document::DocumentController controller;
-        ui::DiscordPresence presence(&controller, QStringLiteral("123456789"));
-        presence.setCandidatePaths({QStringLiteral("mothion-test-nobody-here"), name});
+        ui::DiscordPresence presence(&controller, QStringLiteral("123456789"), nullptr,
+                                     QStringList{QStringLiteral("mothion-test-nobody-here"), name});
         presence.setMinimumUpdateInterval(60);
         presence.setRetryInterval(40);
         presence.start();
@@ -497,8 +497,7 @@ private slots:
     void discordPresenceNeedsAnApplicationId()
     {
         document::DocumentController controller;
-        ui::DiscordPresence presence(&controller, QString());
-        presence.setCandidatePaths({QStringLiteral("mothion-test-nobody-here")});
+        ui::DiscordPresence presence(&controller, QString(), nullptr, QStringList{QStringLiteral("mothion-test-nobody-here")});
         presence.start();
         controller.setCurrentFrame(3);
         QVERIFY(!presence.isConnected());
@@ -563,8 +562,7 @@ private slots:
     void discordPresenceCanBeDisabled()
     {
         document::DocumentController controller;
-        ui::DiscordPresence presence(&controller, QStringLiteral("123"));
-        presence.setCandidatePaths({});
+        ui::DiscordPresence presence(&controller, QStringLiteral("123"), nullptr, QStringList{});
         QVERIFY(presence.isEnabled());
         presence.setEnabled(false);
         QVERIFY(!presence.isEnabled() && !presence.isConnected());

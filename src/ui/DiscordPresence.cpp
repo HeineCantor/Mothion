@@ -57,12 +57,12 @@ QStringList DiscordPresence::candidatePaths()
 }
 
 DiscordPresence::DiscordPresence(document::DocumentController *document, const QString &applicationId,
-                                 QObject *parent)
+                                 QObject *parent, std::optional<QStringList> paths)
     : QObject(parent)
     , m_document(document)
     , m_applicationId(applicationId)
     , m_socket(new QLocalSocket(this))
-    , m_candidates(candidatePaths())
+    , m_candidates(paths ? *paths : candidatePaths())
     , m_startSeconds(QDateTime::currentSecsSinceEpoch())
 {
     m_retry.setInterval(15000);

@@ -2,6 +2,8 @@
 
 #include <QElapsedTimer>
 #include <QObject>
+
+#include <optional>
 #include <QStringList>
 #include <QTimer>
 
@@ -27,7 +29,10 @@ class DiscordPresence : public QObject
     Q_OBJECT
 
 public:
-    DiscordPresence(document::DocumentController *document, const QString &applicationId, QObject *parent = nullptr);
+    // `paths`: where to look for Discord's socket (default: where its desktop client puts it). The constructor
+    // already starts looking, so a test must give them here, or it talks to the Discord of the machine.
+    DiscordPresence(document::DocumentController *document, const QString &applicationId, QObject *parent = nullptr,
+                    std::optional<QStringList> paths = std::nullopt);
 
     // The id of Mothion's application in Discord's developer portal, from the build or, to try another,
     // the MOTHION_DISCORD_APP_ID environment variable. Empty: no presence.
