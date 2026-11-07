@@ -707,6 +707,24 @@ void DocumentController::removeCamera()
         execute(std::make_unique<doc::SetCameraCommand>(std::nullopt));
 }
 
+void DocumentController::setLayerChosen(bool chosen)
+{
+    if (chosen == m_layerChosen)
+        return;
+    m_layerChosen = chosen;
+    emit layerChosenChanged();
+}
+
+bool DocumentController::drawingBlocked() const
+{
+    if (m_cameraSelected)
+        return true;
+    if (m_layerChosen)
+        return false;
+    const doc::Cel *cel = m_document->cel(m_currentCel);
+    return cel && cel->timing().drawingAt(m_currentFrame) != doc::kNoId;
+}
+
 void DocumentController::setSceneLength(int frames)
 {
     frames = std::max(1, frames);

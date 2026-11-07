@@ -184,6 +184,11 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
 
     connect(m_toolState, &ToolState::activeToolChanged, this, &CanvasView::commitPendingEdits);
     connect(m_toolState, &ToolState::activeToolChanged, this, &CanvasView::updateCursor);
+    for (auto signal : {&DocumentController::layerChosenChanged, &DocumentController::cameraSelectionChanged,
+                        &DocumentController::structureChanged, &DocumentController::documentReplaced})
+        connect(m_document, signal, this, &CanvasView::updateCursor); // may now (not) be drawable
+    connect(m_document, &DocumentController::currentFrameChanged, this, &CanvasView::updateCursor);
+    connect(m_document, &DocumentController::currentCelChanged, this, &CanvasView::updateCursor);
     connect(m_toolState, &ToolState::activeToolChanged, this, [this] { updateStraightLine(); });
     connect(m_document, &DocumentController::documentReplaced, this, [this] {
         m_lastPoint.reset();
@@ -420,7 +425,7 @@ void CanvasView::paintEvent(QPaintEvent *)
 
     m_paintedOutline = QRect();
     if (m_pointerVisible && Preferences::instance().brushOutline() && ToolState::isPaintTool(m_toolState->activeTool())
-        && !m_gesture.isActive()
+        && !m_document->drawingBlocked() && !m_gesture.isActive()
         && !picksColor() && m_editTool != m_eyedropperTool.get()) {
         p.setRenderHint(QPainter::Antialiasing);
         p.setBrush(Qt::NoBrush);
@@ -1314,6 +1319,8 @@ void CanvasView::updateCursor()
         setCursor(zoomCursor());
     else if (picksColor())
         setCursor(Qt::CrossCursor);
+    else if (ToolState::editsPixels(m_toolState->activeTool()) && m_document->drawingBlocked())
+        setCursor(Qt::ForbiddenCursor); // nothing to draw on: a cel, a frame or the camera is selected
     else if (ToolState::isPaintTool(m_toolState->activeTool()) && Preferences::instance().brushOutline())
         setCursor(invisibleCursor()); // the brush's own outline, drawn in paintEvent(), is the cursor
     else if (const CanvasTool *tool = canvasTool())

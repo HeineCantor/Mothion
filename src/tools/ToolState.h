@@ -116,6 +116,12 @@ public:
     static constexpr double kMaxSize = 2000.0;
 
     static bool isPaintTool(ToolId tool) { return tool == ToolId::Brush || tool == ToolId::Eraser; }
+    // Tools that change the pixels of a layer (the selection tools, the eyedropper, the hand and the zoom do not).
+    static bool editsPixels(ToolId tool)
+    {
+        return tool != ToolId::Hand && tool != ToolId::Zoom && tool != ToolId::RectSelect &&
+               tool != ToolId::LassoSelect && tool != ToolId::Eyedropper;
+    }
     // Tools with a size of their own in the settings: the paint tools, the effect brushes and the shape tool.
     // The size controls (presets, [ ] and the slider) work on all of them.
     static bool hasSize(ToolId tool)

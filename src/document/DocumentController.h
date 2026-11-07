@@ -307,7 +307,10 @@ public slots:
     // Whether the Layers panel's selection is a layer (true) or a cel or a frame, which cannot be drawn on (see
     // beginPaint()).
     bool layerChosen() const { return m_layerChosen; }
-    void setLayerChosen(bool chosen) { m_layerChosen = chosen; }
+    void setLayerChosen(bool chosen);
+    // True when the pixel tools have nowhere to work right now, for the cursor: the camera is selected, or a cel or
+    // a frame is while the current frame has a drawing (on an empty frame drawing makes one).
+    bool drawingBlocked() const;
 
 signals:
     // The audio track changed without a structure change (a volume being dragged): the views and the player take it up.
@@ -325,6 +328,8 @@ signals:
     void currentLayerChanged(doc::LayerId layer);
     // Drawing on an empty frame of the selected cel made the frame and selected its layer.
     void layerChosenByDrawing();
+    // Whether the selection is a layer changed (see layerChosen()).
+    void layerChosenChanged();
     // Undo/redo availability or labels changed.
     void historyChanged();
     void selectionChanged();

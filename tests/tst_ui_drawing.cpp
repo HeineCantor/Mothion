@@ -55,6 +55,45 @@ private slots:
     }
 
 
+    // With a cel or a frame selected (or the camera), the pixel tools show the "not allowed" cursor, not the brush.
+    void cursorSaysNoWhenNothingCanBeDrawnOn()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        QImage image(20, 20, QImage::Format_ARGB32);
+        image.fill(Qt::red);
+        controller.importImage(image, QStringLiteral("red")); // the frame has a drawing
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(400, 300);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+
+        state.setActiveTool(tools::ToolId::Brush);
+        controller.setLayerChosen(true);
+        QVERIFY(!controller.drawingBlocked());
+        QVERIFY(canvas.cursor().shape() != Qt::ForbiddenCursor);
+
+        controller.setLayerChosen(false); // a cel or a frame is selected
+        QVERIFY(controller.drawingBlocked());
+        QCOMPARE(canvas.cursor().shape(), Qt::ForbiddenCursor);
+        state.setActiveTool(tools::ToolId::Fill);
+        QCOMPARE(canvas.cursor().shape(), Qt::ForbiddenCursor);
+        state.setActiveTool(tools::ToolId::Hand); // moving the view is always fine
+        QVERIFY(canvas.cursor().shape() != Qt::ForbiddenCursor);
+        state.setActiveTool(tools::ToolId::RectSelect);
+        QVERIFY(canvas.cursor().shape() != Qt::ForbiddenCursor);
+
+        state.setActiveTool(tools::ToolId::Brush);
+        controller.setLayerChosen(true);
+        QVERIFY(canvas.cursor().shape() != Qt::ForbiddenCursor); // back to the brush
+
+        // An empty frame is drawn on even so: drawing makes the drawing there.
+        controller.setLayerChosen(false);
+        controller.setCurrentFrame(controller.document().frameCount() + 10);
+        QVERIFY(!controller.drawingBlocked());
+    }
+
+
     // The arrow next to + adds a perspective layer: a grid that cannot be
     // drawn on, and that the panel has no controls for (it is set on the canvas).
     void perspectiveLayers()
