@@ -929,9 +929,11 @@ void CanvasView::endStroke()
         m_document->notifyPainted(changed);
     }
     m_document->notifyPainted(m_stroke->finish());
-    m_document->endPaint(m_stroke->before());
+    // Before the stroke is recorded: a stroke on an empty frame that left nothing takes back the frame it made, and
+    // the image it painted on goes with it.
     if (!m_points.empty())
         m_lastPoint = lineStartOf(m_points);
+    m_document->endPaint(m_stroke->before());
     m_stroke.reset();
     m_strokeImage = nullptr;
     m_dabs.reset();

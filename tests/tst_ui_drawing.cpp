@@ -55,6 +55,31 @@ private slots:
     }
 
 
+    // A stroke on an empty frame that leaves nothing (the selection is elsewhere) takes back the frame it made when it
+    // ends: nothing may look at the image that went with it afterwards (the line start was read from it: a crash).
+    void aStrokeThatPaintsNothingOnAnEmptyFrame()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(400, 300);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        state.setActiveTool(tools::ToolId::Brush);
+        QPainterPath elsewhere;
+        elsewhere.addRect(0, 0, 10, 10);
+        controller.setSelection(elsewhere, true); // the pen paints only inside it
+        QVERIFY(!controller.currentDrawing());
+        const QPoint p = canvas.view().documentToView().map(QPointF(960, 540)).toPoint();
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, p);
+        for (int i = 1; i <= 10; ++i)
+            QTest::mouseMove(&canvas, p + QPoint(i * 6, i * 2));
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, p + QPoint(60, 20));
+        QCoreApplication::processEvents();
+        QVERIFY(!controller.currentDrawing()); // the empty frame stays empty
+    }
+
+
     // With a cel or a frame selected (or the camera), the pixel tools show the "not allowed" cursor, not the brush.
     void cursorSaysNoWhenNothingCanBeDrawnOn()
     {
