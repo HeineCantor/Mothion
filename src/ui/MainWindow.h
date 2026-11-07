@@ -81,6 +81,8 @@ private:
     void exportVideo();
     // Makes the frames between two poses of the current cel (see DocumentController::tweenFrames()).
     void tweenFrames();
+    // Asks for the scene's length, in frames.
+    void sceneLength();
     void importImage();
     // An image sequence: one dialog to choose the images (several of them, or "Use this folder" for all of
     // the folder's), then asks where it starts and the frames per image, and imports it.

@@ -707,6 +707,24 @@ void DocumentController::removeCamera()
         execute(std::make_unique<doc::SetCameraCommand>(std::nullopt));
 }
 
+void DocumentController::setSceneLength(int frames)
+{
+    frames = std::max(1, frames);
+    if (frames == m_document->frameCount())
+        return;
+    execute(std::make_unique<doc::SetFrameCountCommand>(frames));
+}
+
+int DocumentController::sceneLength() const { return m_document->frameCount(); }
+
+int DocumentController::usedFrames() const
+{
+    int last = 0;
+    for (int i = 0; i < m_document->celCount(); ++i)
+        last = std::max(last, m_document->celAt(i).timing().lastFrame());
+    return last;
+}
+
 void DocumentController::setCameraVisible(bool visible)
 {
     if (!m_document->camera() || m_document->camera()->visible == visible)
@@ -1203,6 +1221,7 @@ QString DocumentController::commandName(doc::CommandKind kind)
     case doc::CommandKind::EditCompositing: return tr("compositing");
     case doc::CommandKind::Tween: return tr("tween");
     case doc::CommandKind::EditCamera: return tr("camera");
+    case doc::CommandKind::SceneLength: return tr("scene length");
     case doc::CommandKind::ClearLayer: return tr("clear");
     case doc::CommandKind::Move: return tr("move");
     case doc::CommandKind::Select: return tr("selection");

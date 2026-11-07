@@ -114,6 +114,23 @@ private slots:
         QVERIFY(cel->drawing(nd.id));
     }
 
+    void sceneLengthUndoRedo()
+    {
+        auto [doc, celId] = docWithCel();
+        const int before = doc->frameCount();
+        History history;
+        const ChangeSet changes = history.execute(*doc, std::make_unique<SetFrameCountCommand>(before + 40));
+        QVERIFY(changes.structure);
+        QCOMPARE(doc->frameCount(), before + 40);
+        history.undo(*doc);
+        QCOMPARE(doc->frameCount(), before);
+        history.redo(*doc);
+        QCOMPARE(doc->frameCount(), before + 40);
+        // Never below one frame.
+        doc->setFrameCount(-3);
+        QCOMPARE(doc->frameCount(), 1);
+    }
+
     // A new drawing has one layer; layers are added, moved, changed and
     // removed with their pixels, each undoable.
     void layerCommandsUndoRedo()

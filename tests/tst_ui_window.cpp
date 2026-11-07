@@ -213,6 +213,28 @@ private slots:
         QVERIFY(found);
     }
 
+    // The scene's length is the user's to change, and one undo step.
+    void sceneLengthIsChangedFromTheController()
+    {
+        document::DocumentController controller;
+        const int before = controller.sceneLength();
+        controller.setSceneLength(before + 30);
+        QCOMPARE(controller.sceneLength(), before + 30);
+        QVERIFY(controller.document().frameCount() == before + 30);
+        controller.undo();
+        QCOMPARE(controller.sceneLength(), before);
+        controller.setSceneLength(0); // at least one frame
+        QCOMPARE(controller.sceneLength(), 1);
+        controller.setSceneLength(1); // unchanged: no step
+        QVERIFY(controller.usedFrames() >= 0);
+
+        ui::MainWindow window;
+        bool found = false;
+        for (QAction *action : window.findChildren<QAction *>())
+            found = found || action->text() == QStringLiteral("Scene length…");
+        QVERIFY(found);
+    }
+
     // "Apply compositing" is offered when the project has a network, and is the user's choice.
     void exportDialogOffersTheCompositingOnlyWhenThereIsOne()
     {

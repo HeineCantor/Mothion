@@ -26,6 +26,21 @@ private:
     Timing m_after;
 };
 
+// The scene's length, in frames.
+class SetFrameCountCommand : public Command
+{
+public:
+    explicit SetFrameCountCommand(int after) : m_after(after) {}
+
+    CommandKind kind() const override { return CommandKind::SceneLength; }
+    ChangeSet apply(Document &doc) override;
+    ChangeSet revert(Document &doc) override;
+
+private:
+    int m_after;
+    int m_before = 0;
+};
+
 // Factories: compute the edited timing from the cel's current one.
 // They return nullptr when the edit would change nothing (or is invalid).
 std::unique_ptr<Command> makeSetExposure(const Document &doc, CelId cel, int start, int length,

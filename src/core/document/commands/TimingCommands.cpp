@@ -133,4 +133,21 @@ std::unique_ptr<Command> makeMoveExposures(const Document &doc, const std::vecto
     return std::make_unique<GroupCommand>(CommandKind::MoveFrames, std::move(steps));
 }
 
+ChangeSet SetFrameCountCommand::apply(Document &doc)
+{
+    m_before = doc.frameCount();
+    doc.setFrameCount(m_after);
+    ChangeSet changes;
+    changes.structure = true;
+    return changes;
+}
+
+ChangeSet SetFrameCountCommand::revert(Document &doc)
+{
+    doc.setFrameCount(m_before);
+    ChangeSet changes;
+    changes.structure = true;
+    return changes;
+}
+
 } // namespace mothion::doc

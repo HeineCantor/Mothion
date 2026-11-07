@@ -61,6 +61,7 @@
 #include <QKeyEvent>
 #include <QDesktopServices>
 #include <QUrl>
+#include <QInputDialog>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QLabel>
@@ -424,6 +425,7 @@ void MainWindow::createMenus()
     // The hold of the frame at the current point, one frame longer or shorter;
     // the frames after it move along.
     animation->addAction(tr("Tween frames…"), this, &MainWindow::tweenFrames);
+    animation->addAction(tr("Scene length…"), this, &MainWindow::sceneLength);
     animation->addSeparator();
     QAction *longer = animation->addAction(tr("Lengthen frame"), this, [this] { m_document->changeCurrentHold(+1); });
     keymap.bind(longer, QStringLiteral("anim.lengthen"));
@@ -1108,6 +1110,29 @@ void MainWindow::exportFrames()
                                        .arg(QFileInfo(file).absolutePath())
                                  : tr("Exported %1").arg(QFileInfo(file).fileName()),
                              4000);
+}
+
+void MainWindow::sceneLength()
+{
+    const doc::Document &d = m_document->document();
+    const double fps = d.frameRate().fps();
+    bool ok = false;
+    const int frames = QInputDialog::getInt(
+        this, tr("Scene length"), tr("Frames (at %1 fps, %2 s now):").arg(fps, 0, 'g', 5).arg(d.frameCount() / fps, 0, 'f', 1),
+        d.frameCount(), 1, 100000, 1, &ok);
+    if (!ok || frames == d.frameCount())
+        return;
+    const int used = m_document->usedFrames();
+    if (frames < used &&
+        QMessageBox::question(this, tr("Scene length"),
+                              tr("Some frames are drawn past frame %1. They stay in the project, but the scene, the "
+                                 "playback and the exports end at frame %1.").arg(frames),
+                              QMessageBox::Ok | QMessageBox::Cancel) != QMessageBox::Ok)
+        return;
+    m_document->setSceneLength(frames);
+    if (m_document->currentFrame() >= frames)
+        m_document->setCurrentFrame(frames - 1);
+    statusBar()->showMessage(tr("Scene length: %n frame(s)", "", frames), 6000);
 }
 
 void MainWindow::tweenFrames()

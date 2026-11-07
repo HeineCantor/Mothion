@@ -130,6 +130,11 @@ public:
     const std::optional<doc::Camera> &camera() const { return m_document->camera(); }
     void addCamera();                                      // one that shows the whole sheet, from the first frame
     void removeCamera();
+    // The scene's length, in frames (1 or more; exposures past it stay, they are just not part of the scene).
+    void setSceneLength(int frames);
+    int sceneLength() const;
+    // The frame after the last exposure of any cel: how short the scene can be without leaving some out.
+    int usedFrames() const;
     void setCameraVisible(bool visible);                   // an invisible camera is not applied
     void setCameraKey(int frame, const doc::CameraPose &pose); // a key at `frame` (a camera is made if there is none)
     bool removeCameraKey(int frame);
