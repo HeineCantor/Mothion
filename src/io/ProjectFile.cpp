@@ -62,7 +62,7 @@ const char *const kSchema[] = {
 };
 
 // Stored by name, so reordering the enum cannot change old files.
-constexpr std::array<std::pair<doc::BlendMode, const char *>, 13> kBlendNames{{
+constexpr std::array<std::pair<doc::BlendMode, const char *>, 28> kBlendNames{{
     {doc::BlendMode::Normal, "normal"},
     {doc::BlendMode::Multiply, "multiply"},
     {doc::BlendMode::Screen, "screen"},
@@ -76,6 +76,21 @@ constexpr std::array<std::pair<doc::BlendMode, const char *>, 13> kBlendNames{{
     {doc::BlendMode::SoftLight, "softlight"},
     {doc::BlendMode::Difference, "difference"},
     {doc::BlendMode::Exclusion, "exclusion"},
+    {doc::BlendMode::LinearBurn, "linearburn"},
+    {doc::BlendMode::Subtract, "subtract"},
+    {doc::BlendMode::Divide, "divide"},
+    {doc::BlendMode::LinearLight, "linearlight"},
+    {doc::BlendMode::VividLight, "vividlight"},
+    {doc::BlendMode::PinLight, "pinlight"},
+    {doc::BlendMode::HardMix, "hardmix"},
+    {doc::BlendMode::LighterColor, "lightercolor"},
+    {doc::BlendMode::DarkerColor, "darkercolor"},
+    {doc::BlendMode::Hue, "hue"},
+    {doc::BlendMode::Saturation, "saturation"},
+    {doc::BlendMode::Color, "color"},
+    {doc::BlendMode::Luminosity, "luminosity"},
+    {doc::BlendMode::GlowDodge, "glowdodge"},
+    {doc::BlendMode::AddGlow, "addglow"},
 }};
 
 QString blendName(doc::BlendMode blend)

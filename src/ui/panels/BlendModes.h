@@ -10,7 +10,7 @@
 namespace mothion::ui {
 
 // The blend modes in the order the menus list them, and their names.
-inline constexpr std::array<doc::BlendMode, 13> kBlendModes{doc::BlendMode::Normal, doc::BlendMode::Multiply,
+inline constexpr std::array<doc::BlendMode, 28> kBlendModes{doc::BlendMode::Normal, doc::BlendMode::Multiply,
                                                            doc::BlendMode::Screen, doc::BlendMode::Overlay,
                                                            doc::BlendMode::Add,
                                                            doc::BlendMode::Darken,
@@ -20,7 +20,22 @@ inline constexpr std::array<doc::BlendMode, 13> kBlendModes{doc::BlendMode::Norm
                                                            doc::BlendMode::HardLight,
                                                            doc::BlendMode::SoftLight,
                                                            doc::BlendMode::Difference,
-                                                           doc::BlendMode::Exclusion};
+                                                           doc::BlendMode::Exclusion,
+                                                           doc::BlendMode::LinearBurn,
+                                                           doc::BlendMode::Subtract,
+                                                           doc::BlendMode::Divide,
+                                                           doc::BlendMode::LinearLight,
+                                                           doc::BlendMode::VividLight,
+                                                           doc::BlendMode::PinLight,
+                                                           doc::BlendMode::HardMix,
+                                                           doc::BlendMode::LighterColor,
+                                                           doc::BlendMode::DarkerColor,
+                                                           doc::BlendMode::Hue,
+                                                           doc::BlendMode::Saturation,
+                                                           doc::BlendMode::Color,
+                                                           doc::BlendMode::Luminosity,
+                                                           doc::BlendMode::GlowDodge,
+                                                           doc::BlendMode::AddGlow};
 
 inline QString blendModeName(doc::BlendMode mode)
 {
@@ -38,6 +53,21 @@ inline QString blendModeName(doc::BlendMode mode)
     case doc::BlendMode::SoftLight: return QCoreApplication::translate("BlendModes", "Soft Light");
     case doc::BlendMode::Difference: return QCoreApplication::translate("BlendModes", "Difference");
     case doc::BlendMode::Exclusion: return QCoreApplication::translate("BlendModes", "Exclusion");
+    case doc::BlendMode::LinearBurn: return QCoreApplication::translate("BlendModes", "Linear Burn");
+    case doc::BlendMode::Subtract: return QCoreApplication::translate("BlendModes", "Subtract");
+    case doc::BlendMode::Divide: return QCoreApplication::translate("BlendModes", "Divide");
+    case doc::BlendMode::LinearLight: return QCoreApplication::translate("BlendModes", "Linear Light");
+    case doc::BlendMode::VividLight: return QCoreApplication::translate("BlendModes", "Vivid Light");
+    case doc::BlendMode::PinLight: return QCoreApplication::translate("BlendModes", "Pin Light");
+    case doc::BlendMode::HardMix: return QCoreApplication::translate("BlendModes", "Hard Mix");
+    case doc::BlendMode::LighterColor: return QCoreApplication::translate("BlendModes", "Lighter Color");
+    case doc::BlendMode::DarkerColor: return QCoreApplication::translate("BlendModes", "Darker Color");
+    case doc::BlendMode::Hue: return QCoreApplication::translate("BlendModes", "Hue");
+    case doc::BlendMode::Saturation: return QCoreApplication::translate("BlendModes", "Saturation");
+    case doc::BlendMode::Color: return QCoreApplication::translate("BlendModes", "Color");
+    case doc::BlendMode::Luminosity: return QCoreApplication::translate("BlendModes", "Luminosity");
+    case doc::BlendMode::GlowDodge: return QCoreApplication::translate("BlendModes", "Glow Dodge");
+    case doc::BlendMode::AddGlow: return QCoreApplication::translate("BlendModes", "Add (Glow)");
     }
     return {};
 }

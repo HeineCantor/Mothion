@@ -309,6 +309,31 @@ private slots:
         QCOMPARE(renderer.image().pixelColor(5, 5), QColor(Qt::red));
     }
 
+    void modesQPainterLacksAreBlendedByHand()
+    {
+        doc::Document document(64, 32);
+        doc::AddCelCommand bottom(document, 0, {"B"});
+        bottom.apply(document);
+        doc::NewDrawing red = doc::makeNewDrawing(document, bottom.celId(), 0);
+        red.command->apply(document);
+        document.cel(bottom.celId())->drawing(red.id)->layers.front().image.setPixel(5, 5, 0xffff0000);
+        doc::CelProperties burn{"T"};
+        burn.blend = doc::BlendMode::LinearBurn;
+        doc::AddCelCommand top(document, 1, burn);
+        top.apply(document);
+        doc::NewDrawing blue = doc::makeNewDrawing(document, top.celId(), 0);
+        blue.command->apply(document);
+        doc::Drawing &drawing = *document.cel(top.celId())->drawing(blue.id);
+        drawing.layers.front().image.setPixel(5, 5, 0xff0000ff);
+        drawing.layers.front().image.setPixel(6, 5, 0xff0000ff); // over the paper, not over the red
+
+        canvas::FrameRenderer renderer;
+        renderer.renderAll(document, 0);
+        QCOMPARE(renderer.image().pixelColor(5, 5), QColor(Qt::black)); // red + blue - 1
+        QCOMPARE(renderer.image().pixelColor(6, 5), QColor(Qt::blue)); // white + blue - 1
+        QCOMPARE(renderer.image().pixelColor(50, 20), QColor(Qt::white));
+    }
+
     // The layers of a drawing are composed apart, like a folder, then the
     // result goes over the cels below with the cel's opacity and blend.
     void drawingLayersComposeLikeAFolder()

@@ -16,6 +16,7 @@ add_library(mothion_core STATIC
     core/brush/StrokeShaper.h core/brush/StrokeShaper.cpp
     core/brush/VelocityMeter.h core/brush/VelocityMeter.cpp
 
+    core/document/Blend.h core/document/Blend.cpp
     core/fill/FloodFill.h core/fill/FloodFill.cpp
     core/tween/Flow.h core/tween/Flow.cpp
     core/tween/Morph.h core/tween/Morph.cpp

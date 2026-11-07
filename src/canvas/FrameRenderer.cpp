@@ -1,6 +1,7 @@
 #include "canvas/FrameRenderer.h"
 
 #include "canvas/TileQt.h"
+#include "core/document/Blend.h"
 
 #include <QPainter>
 #include <QPainterPath>
@@ -31,6 +32,7 @@ QPainter::CompositionMode compositionFor(doc::BlendMode blend)
     case doc::BlendMode::SoftLight: return QPainter::CompositionMode_SoftLight;
     case doc::BlendMode::Difference: return QPainter::CompositionMode_Difference;
     case doc::BlendMode::Exclusion: return QPainter::CompositionMode_Exclusion;
+    default: break; // blended by hand: see needsSoftwareBlend
     }
     return QPainter::CompositionMode_SourceOver;
 }
@@ -42,11 +44,51 @@ bool shows(const doc::Layer &layer, bool guides)
     return layer.kind == doc::LayerKind::Perspective ? guides : !layer.image.isEmpty();
 }
 
-// Draws the layer (its tiles among `tiles`, or its grid) with its opacity
-// and blend mode.
-void drawLayer(QPainter &p, const doc::Layer &layer, const std::vector<doc::TileCoord> &tiles, double opacity,
-               doc::BlendMode blend)
+// The modes QPainter lacks: the layer's tiles go over `target` pixel by pixel, inside `limit` (the target's pixel
+// (0, 0) is the document's `origin`). The painter on the target is not touched.
+void blendLayer(QImage &target, const QPoint &origin, const QRect &limit, const doc::Layer &layer,
+                const std::vector<doc::TileCoord> &tiles, double opacity, doc::BlendMode blend)
 {
+    for (const doc::TileCoord &c : tiles) {
+        const doc::TilePtr tile = layer.image.tile(c);
+        if (!tile)
+            continue;
+        const QPoint corner = tileRect(c).topLeft() - origin;
+        const QRect r = QRect(corner, tileRect(c).size()) & limit & target.rect();
+        if (r.isEmpty())
+            continue;
+        const QImage pixels = tileImage(*tile);
+        for (int y = r.top(); y <= r.bottom(); ++y) {
+            auto *dst = reinterpret_cast<doc::Pixel *>(target.scanLine(y)) + r.left();
+            const auto *src = reinterpret_cast<const doc::Pixel *>(pixels.constScanLine(y - corner.y())) +
+                              (r.left() - corner.x());
+            doc::blendSpan(dst, src, r.width(), blend, float(opacity));
+        }
+    }
+}
+
+// An image (premultiplied, at `at` in `target`) over the target with a software blend mode, inside `limit`.
+void blendImage(QImage &target, const QPoint &at, const QRect &limit, const QImage &image, double opacity,
+                doc::BlendMode blend)
+{
+    const QRect r = QRect(at, image.size()) & limit & target.rect();
+    for (int y = r.top(); y <= r.bottom(); ++y) {
+        auto *dst = reinterpret_cast<doc::Pixel *>(target.scanLine(y)) + r.left();
+        const auto *src = reinterpret_cast<const doc::Pixel *>(image.constScanLine(y - at.y())) + (r.left() - at.x());
+        doc::blendSpan(dst, src, r.width(), blend, float(opacity));
+    }
+}
+
+// Draws the layer (its tiles among `tiles`, or its grid) with its opacity
+// and blend mode. The painter paints on `target`, whose pixel (0, 0) is the
+// document's `origin`; only `limit` (in target pixels) may change.
+void drawLayer(QPainter &p, QImage &target, const QPoint &origin, const QRect &limit, const doc::Layer &layer,
+               const std::vector<doc::TileCoord> &tiles, double opacity, doc::BlendMode blend)
+{
+    if (layer.kind == doc::LayerKind::Raster && doc::needsSoftwareBlend(blend)) {
+        blendLayer(target, origin, limit, layer, tiles, opacity, blend);
+        return;
+    }
     p.setOpacity(opacity);
     p.setCompositionMode(compositionFor(blend));
     if (layer.kind == doc::LayerKind::Perspective) {
@@ -186,7 +228,8 @@ QImage composeDrawing(const doc::Drawing &drawing, const QRect &area, bool guide
     const std::vector<doc::TileCoord> tiles = tilesIn(area);
     for (const doc::Layer &layer : drawing.layers)
         if (shows(layer, guides))
-            drawLayer(p, layer, tiles, layer.properties.opacity, layer.properties.blend);
+            drawLayer(p, image, area.topLeft(), image.rect(), layer, tiles, layer.properties.opacity,
+                      layer.properties.blend);
     return image;
 }
 
@@ -227,7 +270,13 @@ void FrameRenderer::render(const doc::Document &doc, int frame, const QRect &rec
             continue;
         if (shown == 1 && only->properties.blend == doc::BlendMode::Normal) {
             // A lone normal layer over transparency is itself: no folder needed.
-            drawLayer(p, *only, tiles, props.opacity * only->properties.opacity, props.blend);
+            drawLayer(p, m_image, QPoint(0, 0), area, *only, tiles, props.opacity * only->properties.opacity,
+                      props.blend);
+            continue;
+        }
+        if (doc::needsSoftwareBlend(props.blend)) {
+            blendImage(m_image, area.topLeft(), area, composeDrawing(*drawing, area, m_guides), props.opacity,
+                       props.blend);
             continue;
         }
         p.setOpacity(props.opacity);

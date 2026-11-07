@@ -11,7 +11,10 @@
 namespace mothion::doc {
 
 enum class BlendMode { Normal, Multiply, Screen, Overlay, Add, Darken, Lighten, ColorDodge, ColorBurn, HardLight, SoftLight,
-                       Difference, Exclusion };
+                       Difference, Exclusion,
+                       // Not in QPainter: blended by hand (document/Blend.h).
+                       LinearBurn, Subtract, Divide, LinearLight, VividLight, PinLight, HardMix, LighterColor,
+                       DarkerColor, Hue, Saturation, Color, Luminosity, GlowDodge, AddGlow };
 
 struct LayerProperties
 {
