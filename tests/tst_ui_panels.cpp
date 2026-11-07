@@ -757,30 +757,41 @@ private slots:
     }
 
 
-    // A cel's row in the Layers panel has the color its blocks have in the timeline.
-    void celRowsHaveTheirTimelineColor()
+    // A cel's row in the Layers panel is in the color of its blocks in the timeline, in whichever theme with enough
+    // contrast under the text (deep under light text, bright under dark text).
+    void celRowsHaveTheirColorWithContrast()
     {
-        document::DocumentController controller;
-        ui::LayersPanel panel(&controller);
-        panel.resize(320, 800);
-        panel.show();
-        QVERIFY(QTest::qWaitForWindowExposed(&panel));
-        auto *tree = panel.findChild<QTreeWidget *>();
-        QImage red(20, 20, QImage::Format_ARGB32);
-        red.fill(Qt::red);
-        controller.importImage(red, QStringLiteral("x"));
-        const doc::LayerId layer = controller.currentDrawing()->layers.front().id;
-        controller.addCel();
-        QCoreApplication::processEvents();
-        tree->setCurrentItem(panel.layerItem(layer)); // not a cel row
-        const doc::Document &d = controller.document();
-        QVERIFY(d.celCount() >= 2);
-        for (int i = 0; i < d.celCount(); ++i) {
-            QTreeWidgetItem *item = panel.celItem(d.celAt(i).id());
-            QVERIFY(item);
-            QVERIFY(!item->isSelected());
-            QCOMPARE(item->background(0).color(), ui::TimelineView::colorForCel(i).darker(170));
+        for (const bool light : {false, true}) {
+            if (light)
+                ui::applyLightTheme(*qApp);
+            else
+                ui::applyDarkTheme(*qApp);
+            document::DocumentController controller;
+            ui::LayersPanel panel(&controller);
+            panel.resize(320, 800);
+            panel.show();
+            QVERIFY(QTest::qWaitForWindowExposed(&panel));
+            auto *tree = panel.findChild<QTreeWidget *>();
+            QImage red(20, 20, QImage::Format_ARGB32);
+            red.fill(Qt::red);
+            controller.importImage(red, QStringLiteral("x"));
+            const doc::LayerId layer = controller.currentDrawing()->layers.front().id;
+            controller.addCel();
+            QCoreApplication::processEvents();
+            tree->setCurrentItem(panel.layerItem(layer)); // not a cel row
+            const doc::Document &d = controller.document();
+            QVERIFY(d.celCount() >= 2);
+            const QColor text = QApplication::palette().color(QPalette::WindowText);
+            for (int i = 0; i < d.celCount(); ++i) {
+                QTreeWidgetItem *item = panel.celItem(d.celAt(i).id());
+                QVERIFY(item);
+                QVERIFY(!item->isSelected());
+                const QColor fill = item->background(0).color();
+                QCOMPARE(fill, ui::LayersPanel::celRowColor(i, QApplication::palette()));
+                QVERIFY2(qAbs(fill.lightness() - text.lightness()) > 120, light ? "light theme" : "dark theme");
+            }
         }
+        ui::applyDarkTheme(*qApp); // the default again
     }
 
 

@@ -64,6 +64,10 @@ class LayersPanel : public QWidget
 public:
     explicit LayersPanel(document::DocumentController *document, QWidget *parent = nullptr);
 
+    // The background of a cel's row: the color of its blocks in the timeline, deep on a dark theme (under light
+    // text) and the color itself, a little lightened, on a light one (under dark text).
+    static QColor celRowColor(int celIndex, const QPalette &palette);
+
     // The layer clipboard (Ctrl+C and Ctrl+V while the rows have the focus, and the
     // right click menu): copies the selected layers, of whichever frames; pastes them on
     // top of the current frame, as layers of their own or, `merged`, as one.
@@ -161,11 +165,11 @@ private:
     QToolButton *m_snapTo;  // the layer actions' second row
     tools::ToolState *m_toolState = nullptr;
     QTimer m_thumbnailTimer;
+    QSet<doc::DrawingId> m_dirtyDrawings; // frames whose pixels changed since their thumbnails were made
     // What the camera's row shows (-1: no camera; else twice the number of keys, plus one if it is on): the rows are
     // made again only when it changes, not at each step of a drag.
     int m_cameraRowState = -2;
     static int cameraRowState(const document::DocumentController &document);
-    QSet<doc::DrawingId> m_dirtyDrawings; // frames whose pixels changed since their thumbnails were made
     Focus m_focus = Focus::Layer;
     struct OpacityPreview
     {

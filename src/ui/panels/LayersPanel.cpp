@@ -622,13 +622,8 @@ void LayersPanel::rebuildTree()
                 [toggleCel](bool visible) { toggleCel([visible](doc::CelProperties &p) { p.visible = visible; }); });
         connect(lock, &QToolButton::clicked, this,
                 [toggleCel](bool locked) { toggleCel([locked](doc::CelProperties &p) { p.locked = locked; }); });
-        // The cel's own color, the one of its blocks in the timeline (selected rows keep the selection's color).
-        const QColor celFill = TimelineView::colorForCel(i).darker(170);
-        QPalette celInk = row->palette();
-        celInk.setColor(QPalette::WindowText, celFill.lightness() < 150 ? QColor(0xf2, 0xf2, 0xf5) : QColor(0x1e, 0x1e, 0x22));
-        row->setPalette(celInk);
         QTreeWidgetItem *celRow = addRow(nullptr, Row::Cel, celId, doc::kNoId, doc::kNoId, row);
-        celRow->setBackground(0, celFill);
+        celRow->setBackground(0, celRowColor(i, QApplication::palette())); // the cel's color, as in the timeline
 
         // Its frames, in the order the timeline first shows them (the ones
         // not shown anywhere last).
@@ -728,9 +723,17 @@ void LayersPanel::paintRowColors()
     // The rows are widgets over the tree: its selection colors do not reach them, so the text and the glyphs
     // of a selected row take the highlighted text color by hand (dark on the blue otherwise, in the light theme).
     const QPalette app = QApplication::palette();
+    // The selection: on a light theme a transparent blue-grey, so the cel's color shows through, under the usual dark text.
+    const bool light = app.color(QPalette::Base).lightness() >= 128;
+    QPalette treePalette; // only what is set here is the tree's own; the rest follows the theme
+    if (light)
+        treePalette.setColor(QPalette::Highlight, QColor(0x70, 0x78, 0x82, 115));
+    m_tree->setPalette(treePalette);
     std::function<void(QTreeWidgetItem *)> paint = [&](QTreeWidgetItem *item) {
+        if (kindOf(item) == Row::Cel) // the cel's color follows the theme, pale on a light one
+            item->setBackground(0, celRowColor(m_document->document().indexOf(celOf(item)), app));
         if (QWidget *row = m_tree->itemWidget(item, 0)) {
-            const bool selected = item->isSelected();
+            const bool selected = item->isSelected() && !light; // on a light theme the text stays dark
             QPalette pal = app;
             if (selected)
                 for (auto role : {QPalette::WindowText, QPalette::ButtonText, QPalette::Text})
@@ -772,12 +775,12 @@ void LayersPanel::refreshThumbnails()
             if (auto *thumb = row->findChild<QLabel *>(QStringLiteral("thumbnail")))
                 thumb->setPixmap(pixmap);
     };
-    for (int i = 0; i < d.celCount(); ++i) {
-        const doc::Cel &cel = d.celAt(i);
-        set(celItem(cel.id()), thumbnail(nullptr, cel.drawingAt(frame), docSize, nullptr));
     // The cels show the frame of the moment; a frame and its layers only change when painted on (rebuildTree()
     // makes all of them anew). A project of hundreds of big frames cannot afford more than that at every stroke.
     const QSet<doc::DrawingId> dirty = std::exchange(m_dirtyDrawings, {});
+    for (int i = 0; i < d.celCount(); ++i) {
+        const doc::Cel &cel = d.celAt(i);
+        set(celItem(cel.id()), thumbnail(nullptr, cel.drawingAt(frame), docSize, nullptr));
         for (const doc::DrawingId id : dirty) {
             const doc::Drawing *drawing = cel.drawing(id);
             if (!drawing)
@@ -954,6 +957,17 @@ QPixmap LayersPanel::dragPreview() const
         y += row.deviceIndependentSize().toSize().height();
     }
     return preview;
+}
+
+QColor LayersPanel::celRowColor(int celIndex, const QPalette &palette)
+{
+    const QColor color = TimelineView::colorForCel(celIndex);
+    if (palette.color(QPalette::Base).lightness() < 128)
+        return color.darker(170); // on a dark theme, deep, under the light text
+    // On a light one the color itself, a little lightened, under the dark text.
+    const QColor base = palette.color(QPalette::Base);
+    return QColor::fromRgbF(0.70 * color.redF() + 0.30 * base.redF(), 0.70 * color.greenF() + 0.30 * base.greenF(),
+                            0.70 * color.blueF() + 0.30 * base.blueF());
 }
 
 // --- edits -----------------------------------------------------------------------------
