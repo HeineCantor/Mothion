@@ -204,6 +204,35 @@ private slots:
         QVERIFY(doc::alphaOf(f.layerAt(7, 1).image.pixel(115, 115)) < 50);        // nearly gone
     }
 
+    void hiddenLayersAreLeftOutAndDoNotChangeThePairing()
+    {
+        Fixture f;
+        doc::Document &d = f.controller.documentForCommands();
+        // The first pose has a big hidden layer under its ink, and a see-through one (opacity 0); the second has none.
+        doc::Drawing *first = d.cel(f.cel)->drawing(f.a);
+        first->layers.insert(first->layers.begin(), {d.allocateLayerId(), {"old sketch", false, false, 1.0f}, {}});
+        first->layers.push_back({d.allocateLayerId(), {"faded", true, false, 0.0f}, {}});
+        for (int y = 0; y < 1000; ++y)
+            for (int x = 0; x < 1800; x += 50) {
+                first->layers.front().image.setPixel(x, y, 0xff00ff00);
+                first->layers.back().image.setPixel(x + 1, y, 0xff00ff00);
+            }
+        QCOMPARE(f.controller.tweenFrames(f.cel, 0, 8), 7);
+        const doc::Drawing &middle = *f.controller.document().cel(f.cel)->drawingAt(4);
+        QCOMPARE(middle.layers.size(), size_t(1)); // only the ink: the hidden ones are not in the frames
+        QCOMPARE(middle.layers[0].properties.name, std::string("ink"));
+        const QPointF start = centroid(f.layerAt(0, 1)), end = centroid(f.layerAt(8));
+        const QPointF c = centroid(middle.layers[0]);
+        QVERIFY(std::hypot(c.x() - (start.x() + end.x()) / 2, c.y() - (start.y() + end.y()) / 2) < 4.0);
+        // The first pose is as it was, hidden layers included.
+        QCOMPARE(f.controller.document().cel(f.cel)->drawingAt(0)->layers.size(), size_t(3));
+        // And the area is the ink's, not the hidden layer's width.
+        const auto tween = document::DrawingTween::make(*f.controller.document().cel(f.cel)->drawing(f.a),
+                                                        *f.controller.document().cel(f.cel)->drawing(f.b));
+        QVERIFY(tween);
+        QVERIFY(tween->area().width() < 400);
+    }
+
     void perspectiveLayersAreLeftOut()
     {
         Fixture f;

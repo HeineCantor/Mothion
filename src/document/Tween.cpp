@@ -30,9 +30,12 @@ namespace {
 constexpr int kWorkSize = 220;
 constexpr int kMargin = 24; // px around the drawings, room for what moves outward
 
-bool isRaster(const doc::Layer &layer)
+// A layer that is part of the picture: pixels that are shown (not hidden, not see-through to nothing). Hidden layers
+// are left out of the tween altogether: they are not paired, not moved, and the frames made do not have them.
+bool isTweened(const doc::Layer &layer)
 {
-    return layer.kind == doc::LayerKind::Raster;
+    return layer.kind == doc::LayerKind::Raster && layer.properties.visible && layer.properties.opacity > 0.0f
+           && !layer.image.isEmpty();
 }
 
 puppet::RasterImage rasterOf(const doc::Layer *layer, const QRect &area)
@@ -105,13 +108,13 @@ std::optional<DrawingTween> DrawingTween::make(const doc::Drawing &from, const d
     t.m_to = to;
     t.m_area = bounds.adjusted(-kMargin, -kMargin, kMargin, kMargin);
 
-    // The layers in pairs: by name first, then what is left in the order it is stacked.
+    // The layers in pairs (the visible ones with pixels): by name first, then what is left in the order it is stacked.
     std::vector<int> a, b; // the raster layers, as indices
     for (std::size_t i = 0; i < t.m_from.layers.size(); ++i)
-        if (isRaster(t.m_from.layers[i]))
+        if (isTweened(t.m_from.layers[i]))
             a.push_back(int(i));
     for (std::size_t i = 0; i < t.m_to.layers.size(); ++i)
-        if (isRaster(t.m_to.layers[i]))
+        if (isTweened(t.m_to.layers[i]))
             b.push_back(int(i));
     auto nameA = [&](std::size_t i) -> const std::string & { return t.m_from.layers[std::size_t(a[i])].properties.name; };
     auto nameB = [&](std::size_t j) -> const std::string & { return t.m_to.layers[std::size_t(b[j])].properties.name; };

@@ -21,7 +21,8 @@ double easedTime(TweenEase ease, double u);
 // The drawings between two others. The two drawings are laid over each other by registering them (tween::
 // registerImages on how much ink there is at each point), once, and any picture between them is then made from the
 // two, layer by layer: a layer of one is paired with the layer of the other of the same name (then the rest in the
-// order they are stacked), and a layer with no partner fades out or in. Perspective layers (guides) are not part of it.
+// order they are stacked), and a layer with no partner fades out or in. Layers that are hidden (or empty) and
+// perspective layers (guides) are not part of it: they are not paired, and the pictures made do not have them.
 class DrawingTween
 {
 public:
