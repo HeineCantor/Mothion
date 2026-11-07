@@ -20,6 +20,7 @@
 #include "ui/DockLayout.h"
 #include "io/VideoExport.h"
 #include "ui/ExportDialog.h"
+#include "ui/TweenDialog.h"
 #include "ui/VideoExportDialog.h"
 #include "ui/IconFactory.h"
 #include "ui/PanelDock.h"
@@ -422,6 +423,8 @@ void MainWindow::createMenus()
     animation->addSeparator();
     // The hold of the frame at the current point, one frame longer or shorter;
     // the frames after it move along.
+    animation->addAction(tr("Tween frames…"), this, &MainWindow::tweenFrames);
+    animation->addSeparator();
     QAction *longer = animation->addAction(tr("Lengthen frame"), this, [this] { m_document->changeCurrentHold(+1); });
     keymap.bind(longer, QStringLiteral("anim.lengthen"));
     QAction *shorter = animation->addAction(tr("Shorten frame"), this, [this] { m_document->changeCurrentHold(-1); });
@@ -1105,6 +1108,24 @@ void MainWindow::exportFrames()
                                        .arg(QFileInfo(file).absolutePath())
                                  : tr("Exported %1").arg(QFileInfo(file).fileName()),
                              4000);
+}
+
+void MainWindow::tweenFrames()
+{
+    m_document->finishEdits();
+    TweenDialog dialog(m_document, this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    QString reason;
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    const int made = m_document->tweenFrames(dialog.cel(), dialog.from(), dialog.to(), dialog.ease(), &reason);
+    QApplication::restoreOverrideCursor();
+    if (made == 0) {
+        QMessageBox::warning(this, tr("Tween frames"), reason.isEmpty() ? tr("No frames were made.") : reason);
+        return;
+    }
+    statusBar()->showMessage(tr("%n frame(s) made between frames %1 and %2", "", made).arg(dialog.from() + 1).arg(dialog.to() + 1),
+                             6000);
 }
 
 void MainWindow::exportVideo()

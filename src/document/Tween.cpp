@@ -111,6 +111,14 @@ std::optional<DrawingTween> DrawingTween::make(const doc::Drawing &from, const d
     return t;
 }
 
+QImage DrawingTween::picture(double t) const
+{
+    doc::Drawing between;
+    for (int i = 0; i < layerCount(); ++i)
+        between.layers.push_back(layerAt(i, t));
+    return canvas::composeDrawing(between, m_area, false);
+}
+
 doc::Layer DrawingTween::layerAt(int index, double t) const
 {
     const Pair &pair = m_pairs[std::size_t(index)];

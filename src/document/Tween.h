@@ -3,6 +3,7 @@
 #include "core/document/Drawing.h"
 #include "core/tween/Flow.h"
 
+#include <QImage>
 #include <QRect>
 #include <QString>
 
@@ -28,6 +29,10 @@ public:
 
     // The layers a picture between the two has, bottom first.
     int layerCount() const { return int(m_pairs.size()); }
+    // The block of the document the pictures are made of (the drawings' bounds, a little more).
+    QRect area() const { return m_area; }
+    // The picture at `t`: the layers composed together over transparency, as big as area().
+    QImage picture(double t) const;
     // Layer `index` of the picture at `t` (0 is `from`, 1 is `to`): the look of its partner in `from` (else in `to`),
     // and the pixels. Its id is left unset. Safe to call from several threads at once.
     doc::Layer layerAt(int index, double t) const;

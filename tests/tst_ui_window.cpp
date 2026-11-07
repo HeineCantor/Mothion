@@ -1,5 +1,6 @@
 // Tests for the UI layer: the main window, settings, shortcuts, import and export.
 
+#include "ui/TweenDialog.h"
 #include "test_common.h"
 
 class TestUiWindow : public QObject
@@ -122,6 +123,86 @@ private slots:
         QVERIFY(!dialog.options().transparent); // JPEG selected: never transparent
     }
 
+
+    // Tween frames: the dialog proposes the current frame and the next pose, shows the picture between them, and
+    // refuses a pair that cannot be tweened; the menu has the command.
+    void tweenDialogProposesThePosesAndShowsTheWay()
+    {
+        document::DocumentController controller;
+        const doc::CelId cel = controller.currentCel();
+        doc::Document &d = controller.documentForCommands();
+        doc::NewDrawing first = doc::makeNewDrawing(d, cel, 0, 2, "ink");
+        const doc::DrawingId a = first.id;
+        controller.execute(std::move(first.command));
+        doc::NewDrawing second = doc::makeNewDrawing(d, cel, 6, 1, "ink");
+        const doc::DrawingId b = second.id;
+        controller.execute(std::move(second.command));
+        auto bar = [&](doc::DrawingId id, int x, int y) {
+            for (int j = 0; j < 80; ++j)
+                for (int i = 0; i < 12; ++i)
+                    d.cel(cel)->drawing(id)->layers[0].image.setPixel(x + i, y + j, 0xff000000);
+        };
+        bar(a, 300, 300);
+        bar(b, 340, 300);
+        controller.setCurrentFrame(0);
+
+        QCOMPARE(ui::TweenDialog::nextPose(*controller.document().cel(cel), 0), std::optional<int>(6));
+        QCOMPARE(ui::TweenDialog::nextPose(*controller.document().cel(cel), 1), std::optional<int>(6)); // inside the hold
+        QVERIFY(!ui::TweenDialog::nextPose(*controller.document().cel(cel), 6)); // nothing after the last pose
+        QVERIFY(!ui::TweenDialog::nextPose(*controller.document().cel(cel), 3)); // an empty frame
+
+        ui::TweenDialog dialog(&controller);
+        dialog.show();
+        QCOMPARE(dialog.cel(), cel);
+        QCOMPARE(dialog.from(), 0);
+        QCOMPARE(dialog.to(), 6);
+        QCOMPARE(dialog.frameCount(), 5);
+        QVERIFY(dialog.okButton()->isEnabled());
+        QVERIFY(!dialog.preview()->pixmap().isNull());
+        // At the start of the way the picture is the first pose, at the end the second: the bar is on the left, then on the right.
+        auto darkSide = [&](int percent) {
+            dialog.previewSlider()->setValue(percent);
+            const QImage shot = dialog.preview()->pixmap().toImage();
+            long left = 0, right = 0;
+            for (int y = 0; y < shot.height(); ++y)
+                for (int x = 0; x < shot.width(); ++x)
+                    if (qGray(shot.pixel(x, y)) < 100)
+                        (x < shot.width() / 2 ? left : right) += 1;
+            return std::pair{left, right};
+        };
+        const auto atStart = darkSide(0), atEnd = darkSide(100);
+        QVERIFY(atStart.first + atStart.second > 100 && atEnd.first + atEnd.second > 100);
+        QVERIFY(atStart.first > atEnd.first); // the bar has moved to the right
+        QVERIFY(atEnd.second > atStart.second);
+
+        // A pair with no frame between, or the same pose twice: refused, with a note.
+        dialog.toBox()->setValue(dialog.fromBox()->value() + 1);
+        QVERIFY(!dialog.okButton()->isEnabled());
+        QCOMPARE(dialog.frameCount(), 0);
+        dialog.toBox()->setValue(2); // frame 2 shows the same drawing as frame 1 (a hold)
+        QVERIFY(!dialog.okButton()->isEnabled());
+        dialog.toBox()->setValue(4); // an empty frame
+        QVERIFY(!dialog.okButton()->isEnabled());
+        dialog.toBox()->setValue(7);
+        QVERIFY(dialog.okButton()->isEnabled());
+
+        // The easing is remembered.
+        auto *ease = dialog.findChild<QComboBox *>();
+        QVERIFY(ease);
+        ease->setCurrentIndex(3);
+        dialog.accept();
+        ui::TweenDialog again(&controller);
+        QCOMPARE(again.ease(), document::TweenEase::EaseInOut);
+    }
+
+    void animationMenuHasTweenFrames()
+    {
+        ui::MainWindow window;
+        bool found = false;
+        for (QAction *action : window.findChildren<QAction *>())
+            found = found || action->text() == QStringLiteral("Tween frames…");
+        QVERIFY(found);
+    }
 
     // "Apply compositing" is offered when the project has a network, and is the user's choice.
     void exportDialogOffersTheCompositingOnlyWhenThereIsOne()

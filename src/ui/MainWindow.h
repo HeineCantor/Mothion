@@ -79,6 +79,8 @@ private:
     void discardAutosave(); // the project is saved or its changes given up: its copy is of no use
     void exportFrames();
     void exportVideo();
+    // Makes the frames between two poses of the current cel (see DocumentController::tweenFrames()).
+    void tweenFrames();
     void importImage();
     // An image sequence: one dialog to choose the images (several of them, or "Use this folder" for all of
     // the folder's), then asks where it starts and the frames per image, and imports it.

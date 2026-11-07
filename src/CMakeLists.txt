@@ -106,6 +106,7 @@ qt_add_library(mothion_gui STATIC
     ui/DockLayout.h ui/DockLayout.cpp
     ui/ExportDialog.h ui/ExportDialog.cpp
     ui/VideoExportDialog.h ui/VideoExportDialog.cpp
+    ui/TweenDialog.h ui/TweenDialog.cpp
     ui/PanelDock.h ui/PanelDock.cpp
     ui/SplashScreen.h ui/SplashScreen.cpp
     ui/SelectionBar.h ui/SelectionBar.cpp
