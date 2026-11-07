@@ -112,6 +112,11 @@ signals:
 
 private:
     void rebuildTree();       // structure changed: recreate the rows
+    // The structure changed: the rows are made anew, or, when only how cels and layers look changed (shown, locked,
+    // opacity, blend, name), they are updated where they are.
+    void structureChangedNow();
+    void updateLooks();
+    QString shapeKey() const; // what the rows are made of, not how they look
     void syncHeader();        // current row changed: blend / opacity / buttons, publishSelection()
     void publishSelection();  // the chosen rows' layers, for the tools (a move)
     void fillThumbnails();    // the pending ones, for a few milliseconds, then again from the event loop
@@ -167,6 +172,8 @@ private:
     tools::ToolState *m_toolState = nullptr;
     QTimer m_thumbnailTimer;
     QTimer m_fillTimer;
+    QString m_shape;                                // shapeKey() of the rows now
+    std::map<doc::DrawingId, QString> m_looks;      // how each frame's layers looked when their rows were set
     bool m_rebuildPending = false; // the structure changed during a stroke: the rows are made when it ends
     std::vector<doc::DrawingId> m_pendingThumbnails; // frames whose thumbnails (and their layers') are still to make
     QSet<doc::DrawingId> m_dirtyDrawings; // frames whose pixels changed since their thumbnails were made

@@ -821,6 +821,52 @@ private slots:
     }
 
 
+    // Showing, locking or changing a cel or a layer updates its row where it is: the rows are not made anew (that is
+    // a noticeable moment in a project of hundreds of frames). A change of structure still makes them anew.
+    void lookChangesUpdateTheRowsInPlace()
+    {
+        document::DocumentController controller;
+        ui::LayersPanel panel(&controller);
+        panel.resize(320, 600);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        QImage red(20, 20, QImage::Format_ARGB32);
+        red.fill(Qt::red);
+        controller.importImage(red, QStringLiteral("x"));
+        QCoreApplication::processEvents();
+        const doc::CelId cel = controller.currentCel();
+        const doc::Drawing *drawing = controller.currentDrawing();
+        const doc::LayerId layer = drawing->layers.front().id;
+        QTreeWidgetItem *celRow = panel.celItem(cel);
+        QTreeWidgetItem *layerRow = panel.layerItem(layer);
+        QVERIFY(celRow && layerRow);
+        auto eye = [&](QTreeWidgetItem *item) {
+            return panel.findChild<QTreeWidget *>()->itemWidget(item, 0)->findChildren<QToolButton *>(QStringLiteral("LayerEye")).first();
+        };
+        QVERIFY(eye(layerRow)->isChecked());
+
+        doc::LayerProperties props = drawing->layers.front().properties;
+        props.visible = false;
+        props.opacity = 0.5f;
+        controller.execute(doc::makeSetLayerProperties(controller.document(), cel, drawing->id, layer, props));
+        QCoreApplication::processEvents();
+        QCOMPARE(panel.layerItem(layer), layerRow); // the same row
+        QCOMPARE(panel.celItem(cel), celRow);
+        QVERIFY(!eye(layerRow)->isChecked());
+        auto *text = panel.findChild<QTreeWidget *>()->itemWidget(layerRow, 0)->findChild<QLabel *>(QStringLiteral("rowText"));
+        QVERIFY(text->text().contains(QStringLiteral("50")));
+
+        controller.undo(); // and back
+        QCoreApplication::processEvents();
+        QCOMPARE(panel.layerItem(layer), layerRow);
+        QVERIFY(eye(layerRow)->isChecked());
+
+        controller.addCel(); // a new cel: the rows are made anew
+        QCoreApplication::processEvents();
+        QVERIFY(panel.layerItem(layer) != layerRow);
+    }
+
+
     // Ctrl+click adds a layer to the selection, Shift+click a range; the
     // header and the buttons then act on all of them, as one undo step.
     void layersSelectWithCtrlAndShift()
@@ -1206,8 +1252,7 @@ private slots:
     }
 
 
-    // The text of a selected row is in the highlighted text color (dark on the blue otherwise, in a light
-    // theme), the others' in the normal one.
+    // The selection is an outline, not a fill: the text of a selected row is in the same color as the others'.
     void selectedLayerRowsKeepReadableText()
     {
         tools::ToolState state;
@@ -1234,13 +1279,8 @@ private slots:
             if (!text)
                 continue;
             const QColor shown = text->palette().color(QPalette::WindowText);
-            if (item->isSelected()) {
-                ++selected;
-                QCOMPARE(shown, pal.color(QPalette::HighlightedText));
-            } else {
-                ++others;
-                QCOMPARE(shown, pal.color(QPalette::WindowText));
-            }
+            (item->isSelected() ? selected : others)++;
+            QCOMPARE(shown, pal.color(QPalette::WindowText));
         }
         QVERIFY(selected >= 1 && others >= 1);
     }

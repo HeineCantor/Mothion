@@ -164,6 +164,7 @@ private:
     double audioSeconds() const;
     void paintAudio(QPainter &p) const;
     void paintAudioHeader(QPainter &p) const;
+    void paintSelection(QPainter &p) const;
     // Decodes the track's sound when it is a new one (for the waveform and its length), or forgets it.
     void syncAudio();
     void showAudioMenu(const QPoint &globalPos);

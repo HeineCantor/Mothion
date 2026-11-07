@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QColor>
+#include <QPalette>
 
 class QApplication;
 
@@ -18,9 +19,12 @@ void applyDarkTheme(QApplication &app);
 // Same as applyDarkTheme, but with Fusion's light palette.
 void applyLightTheme(QApplication &app);
 
-// The selection on the light theme: a transparent grey (laid over what is under it) with the usual dark text, the
-// cels' own colors showing through. The dark theme keeps the blue of its palette's highlight.
-inline QColor lightSelectionColor() { return QColor(0x70, 0x78, 0x82, 115); }
+// The outline of the selected rows (the Layers panel and the timeline): the highlight of the palette on a dark theme, a dark
+// blue-grey on a light one.
+inline QColor selectionOutlineColor(const QPalette &palette)
+{
+    return palette.color(QPalette::Base).lightness() >= 128 ? QColor(0x3c, 0x46, 0x52) : palette.color(QPalette::Highlight);
+}
 
 // Applies the theme and remembers it in QSettings. With System the theme
 // follows the system color scheme, also when it changes while running

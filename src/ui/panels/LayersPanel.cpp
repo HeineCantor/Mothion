@@ -191,6 +191,23 @@ QLabel *iconLabel(IconId id, QWidget *parent)
     return label;
 }
 
+// How a frame's layers look, as one string: what their rows show and what their thumbnails are made of.
+QString looksOf(const doc::Drawing &drawing)
+{
+    QString key;
+    for (const doc::Layer &layer : drawing.layers) {
+        const doc::LayerProperties &p = layer.properties;
+        key += QStringLiteral("%1,%2,%3,%4,%5,%6;")
+                   .arg(layer.id)
+                   .arg(p.visible)
+                   .arg(p.locked)
+                   .arg(double(p.opacity))
+                   .arg(int(p.blend))
+                   .arg(QString::fromStdString(p.name));
+    }
+    return key;
+}
+
 QString propertiesText(float opacity, doc::BlendMode blend, const std::string &name)
 {
     return QStringLiteral("%1 % %2\n%3")
@@ -206,14 +223,53 @@ constexpr double kDraggedRowOpacity = 0.4;   // the rows left in the tree meanwh
 class LayerTree : public QTreeWidget
 {
 public:
-    LayerTree(std::function<QList<QTreeWidgetItem *>()> moving, std::function<QPixmap()> preview, QWidget *parent)
+    // `strip`: the color of the narrow column at the left of a row (that of its cel, whole when the cel is the chosen
+    // one), none for rows that belong to no cel.
+    LayerTree(std::function<QList<QTreeWidgetItem *>()> moving, std::function<QPixmap()> preview,
+              std::function<QColor(QTreeWidgetItem *)> strip, QWidget *parent)
         : QTreeWidget(parent)
         , m_moving(std::move(moving))
         , m_preview(std::move(preview))
+        , m_strip(std::move(strip))
     {
     }
 
 protected:
+    // The column at the left (under the expand arrows) is in the color of the row's cel; the selected rows are
+    // outlined (the tree's highlight is transparent: see LayersPanel::paintRowColors()).
+    void drawRow(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const override
+    {
+        QTreeWidget::drawRow(painter, option, index);
+        const QRect item = visualRect(index);
+        const int contentLeft = visualRect(model()->index(0, 0)).left(); // where the top rows start: the column is left of it
+        const bool selected = selectionModel()->isSelected(index);
+        QRect bar = item;
+        bar.setLeft(contentLeft);
+        bar.setRight(viewport()->width() - 1);
+        if (selected) {
+            // A selected row is drawn with the highlight (transparent) instead of its own background: put that back.
+            const QBrush own = index.data(Qt::BackgroundRole).value<QBrush>();
+            if (own.style() != Qt::NoBrush)
+                painter->fillRect(bar, own);
+        }
+        const QColor strip = m_strip(itemFromIndex(index));
+        if (strip.isValid()) {
+            const QRect column(0, item.top(), contentLeft, item.height());
+            painter->fillRect(column, strip);
+            drawBranches(painter, QRect(0, item.top(), item.left(), item.height()), index); // the arrows, over it
+        }
+        if (!selected)
+            return;
+        bar.setLeft(0);
+        const QRect rect = bar.adjusted(1, 1, -2, -2);
+        painter->save();
+        painter->setRenderHint(QPainter::Antialiasing);
+        painter->setBrush(Qt::NoBrush);
+        painter->setPen(QPen(selectionOutlineColor(QApplication::palette()), 2.0));
+        painter->drawRoundedRect(QRectF(rect).adjusted(0.5, 0.5, -0.5, -0.5), 3, 3);
+        painter->restore();
+    }
+
     void startDrag(Qt::DropActions actions) override
     {
         const QList<QTreeWidgetItem *> moving = m_moving();
@@ -255,6 +311,7 @@ protected:
 private:
     std::function<QList<QTreeWidgetItem *>()> m_moving;
     std::function<QPixmap()> m_preview;
+    std::function<QColor(QTreeWidgetItem *)> m_strip;
 };
 
 } // namespace
@@ -286,7 +343,17 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
         }
         return items;
     };
-    m_tree = new LayerTree(moving, [this] { return dragPreview(); }, this);
+    m_tree = new LayerTree(
+        moving, [this] { return dragPreview(); },
+        [this](QTreeWidgetItem *item) {
+            const doc::Document &d = m_document->document();
+            const int index = kindOf(item) == Row::Camera || kindOf(item) == Row::Paper ? -1 : d.indexOf(celOf(item));
+            if (index < 0)
+                return QColor();
+            const bool chosen = celOf(item) == m_document->currentCel() && !m_document->cameraSelected();
+            return chosen ? TimelineView::colorForCel(index) : celRowColor(index, QApplication::palette());
+        },
+        this);
 
     for (doc::BlendMode mode : kBlendModes)
         m_blend->addItem(blendModeName(mode));
@@ -437,12 +504,12 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
             if (m_document->isPainting()) // the first stroke on an empty frame made the frame: the rows wait for the
                 m_rebuildPending = true;  // pen to lift, a rebuild in the middle of a stroke would be felt
             else
-                rebuildTree();
+                structureChangedNow();
         },
         Qt::QueuedConnection);
     connect(m_document, &DocumentController::historyChanged, this, [this] {
         if (m_rebuildPending && !m_document->isPainting())
-            rebuildTree();
+            structureChangedNow();
     });
     connect(m_document, &DocumentController::documentReplaced, this, &LayersPanel::rebuildTree);
     // Another point of the timeline may show other frames.
@@ -454,6 +521,9 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
             m_thumbnailTimer.start();
     });
     connect(m_document, &DocumentController::currentCelChanged, this, &LayersPanel::selectCurrentRow);
+    // The chosen cel's column is whole, the others' fainter: they follow the current cel.
+    connect(m_document, &DocumentController::currentCelChanged, this, [this] { m_tree->viewport()->update(); });
+    connect(m_document, &DocumentController::cameraSelectionChanged, this, [this] { m_tree->viewport()->update(); });
     // The camera's row follows the camera (a key, the eye, the camera added, taken away, undone).
     connect(m_document, &DocumentController::cameraChanged, this, [this] {
         if (cameraRowState(*m_document) != m_cameraRowState)
@@ -627,7 +697,9 @@ void LayersPanel::rebuildTree()
         h->addWidget(lock);
         h->addWidget(iconLabel(IconId::Folder, row));
         h->addWidget(thumb);
-        h->addWidget(new QLabel(propertiesText(props.opacity, props.blend, props.name), row), 1);
+        auto *celText = new QLabel(propertiesText(props.opacity, props.blend, props.name), row);
+        celText->setObjectName(QStringLiteral("rowText"));
+        h->addWidget(celText, 1);
         auto toggleCel = [this, celId](auto change) {
             const doc::Cel *c = m_document->document().cel(celId);
             if (!c)
@@ -687,10 +759,11 @@ void LayersPanel::rebuildTree()
                 lh->addWidget(layerEye);
                 lh->addWidget(layerLock);
                 lh->addWidget(layerThumb);
-                lh->addWidget(new QLabel(propertiesText(layer.properties.opacity, layer.properties.blend,
-                                                        layer.properties.name),
-                                         layerRow),
-                              1);
+                auto *layerText = new QLabel(propertiesText(layer.properties.opacity, layer.properties.blend,
+                                                            layer.properties.name),
+                                             layerRow);
+                layerText->setObjectName(QStringLiteral("rowText"));
+                lh->addWidget(layerText, 1);
                 if (layer.kind == doc::LayerKind::Perspective) {
                     // The sight of the layer strokes snap to (shown by refreshSnapMarks()).
                     auto *snapMark = iconLabel(IconId::Crosshair, layerRow);
@@ -734,6 +807,11 @@ void LayersPanel::rebuildTree()
     if (!m_pendingThumbnails.empty())
         m_fillTimer.start(0); // the frames' and layers' thumbnails, a few at a time: a project of hundreds of big
                               // frames would otherwise hold the pen for seconds at every new frame
+    m_shape = shapeKey();
+    m_looks.clear();
+    for (int i = 0; i < d.celCount(); ++i)
+        for (const auto &[id, drawing] : d.celAt(i).drawings())
+            m_looks[id] = looksOf(drawing);
     restoreSelection();
     paintRowColors();
     m_tree->verticalScrollBar()->setValue(scroll);
@@ -742,33 +820,23 @@ void LayersPanel::rebuildTree()
 
 void LayersPanel::paintRowColors()
 {
-    // The rows are widgets over the tree: its selection colors do not reach them, so the text and the glyphs
-    // of a selected row take the highlighted text color by hand (dark on the blue otherwise, in the light theme).
     const QPalette app = QApplication::palette();
-    // The selection: on a light theme a transparent blue-grey, so the cel's color shows through, under the usual dark text.
-    const bool light = app.color(QPalette::Base).lightness() >= 128;
+    // The selection is an outline (LayerTree::drawRow()), not a fill: the text and the glyphs of the rows keep their
+    // colors, and the cel's own color shows whole.
     QPalette treePalette; // only what is set here is the tree's own; the rest follows the theme
-    if (light)
-        treePalette.setColor(QPalette::Highlight, lightSelectionColor());
+    treePalette.setColor(QPalette::Highlight, Qt::transparent);
     m_tree->setPalette(treePalette);
     std::function<void(QTreeWidgetItem *)> paint = [&](QTreeWidgetItem *item) {
         if (kindOf(item) == Row::Cel) // the cel's color follows the theme, pale on a light one
             item->setBackground(0, celRowColor(m_document->document().indexOf(celOf(item)), app));
         if (QWidget *row = m_tree->itemWidget(item, 0)) {
-            const bool selected = item->isSelected() && !light; // on a light theme the text stays dark
-            QPalette pal = app;
-            if (selected)
-                for (auto role : {QPalette::WindowText, QPalette::ButtonText, QPalette::Text})
-                    pal.setColor(role, app.color(QPalette::HighlightedText));
+            const QPalette pal = app;
             row->setPalette(pal);
             for (QLabel *label : row->findChildren<QLabel *>())
                 label->setPalette(pal); // the style sheet gives each its own: the row's does not reach them
             for (QWidget *w : row->findChildren<QWidget *>()) {
                 if (!w->property("glyph").isValid())
                     continue;
-                w->setProperty("rowSelected", selected);
-                w->style()->unpolish(w); // the outline of the slot follows the selection
-                w->style()->polish(w);
                 auto *button = qobject_cast<QToolButton *>(w);
                 showGlyph(w, !button || button->isChecked());
             }
@@ -785,6 +853,73 @@ void LayersPanel::changeEvent(QEvent *event)
     QWidget::changeEvent(event);
     if (event->type() == QEvent::PaletteChange && m_tree)
         paintRowColors(); // another theme: the colors set by hand are taken again
+}
+
+QString LayersPanel::shapeKey() const
+{
+    const doc::Document &d = m_document->document();
+    QString key = QStringLiteral("%1x%2,%3,%4;").arg(d.width()).arg(d.height()).arg(d.paperColor()).arg(cameraRowState(*m_document));
+    for (int i = 0; i < d.celCount(); ++i) {
+        const doc::Cel &cel = d.celAt(i);
+        key += QStringLiteral("c%1:").arg(cel.id());
+        for (const auto &[id, drawing] : cel.drawings()) {
+            key += QStringLiteral("d%1,%2,%3[").arg(id).arg(QString::fromStdString(drawing.name), exposureText(cel.timing(), id));
+            for (const doc::Layer &layer : drawing.layers)
+                key += QStringLiteral("%1k%2,").arg(layer.id).arg(int(layer.kind));
+            key += QLatin1Char(']');
+        }
+    }
+    return key;
+}
+
+void LayersPanel::structureChangedNow()
+{
+    // Showing, locking or changing a cel or a layer leaves the rows as they are; making them all anew costs a
+    // noticeable moment in a project of hundreds of frames.
+    if (m_shape.isEmpty() || shapeKey() != m_shape) {
+        rebuildTree();
+        return;
+    }
+    updateLooks();
+}
+
+void LayersPanel::updateLooks()
+{
+    const doc::Document &d = m_document->document();
+    auto setRow = [this](QTreeWidgetItem *item, bool visible, bool locked, const QString &text) {
+        QWidget *row = item ? m_tree->itemWidget(item, 0) : nullptr;
+        if (!row)
+            return;
+        const auto buttons = row->findChildren<QToolButton *>(QStringLiteral("LayerEye")); // the eye, then the lock
+        if (buttons.size() >= 2) {
+            buttons[0]->setChecked(visible);
+            buttons[1]->setChecked(locked);
+        }
+        if (auto *label = row->findChild<QLabel *>(QStringLiteral("rowText")))
+            label->setText(text);
+    };
+    bool thumbnails = false;
+    for (int i = 0; i < d.celCount(); ++i) {
+        const doc::Cel &cel = d.celAt(i);
+        const doc::CelProperties &props = cel.properties();
+        setRow(celItem(cel.id()), props.visible, props.locked, propertiesText(props.opacity, props.blend, props.name));
+        for (const auto &[id, drawing] : cel.drawings()) {
+            const QString looks = looksOf(drawing);
+            QString &before = m_looks[id];
+            if (looks == before)
+                continue;
+            before = looks;
+            for (const doc::Layer &layer : drawing.layers) {
+                const doc::LayerProperties &p = layer.properties;
+                setRow(layerItem(layer.id), p.visible, p.locked, propertiesText(p.opacity, p.blend, p.name));
+            }
+            m_dirtyDrawings.insert(id); // its thumbnail shows only the visible layers
+            thumbnails = true;
+        }
+    }
+    if (thumbnails && !m_thumbnailTimer.isActive())
+        m_thumbnailTimer.start();
+    syncHeader();
 }
 
 void LayersPanel::fillThumbnails()
