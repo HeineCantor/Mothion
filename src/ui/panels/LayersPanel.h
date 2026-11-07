@@ -114,6 +114,7 @@ private:
     void rebuildTree();       // structure changed: recreate the rows
     void syncHeader();        // current row changed: blend / opacity / buttons, publishSelection()
     void publishSelection();  // the chosen rows' layers, for the tools (a move)
+    void fillThumbnails();    // the pending ones, for a few milliseconds, then again from the event loop
     void refreshThumbnails(); // throttled: the cels' (the frame changed) and those of the frames painted on
     void markCurrentFrames(); // the frames shown now, in bold
     void selectCurrentRow();  // the current cel / layer chosen elsewhere
@@ -165,6 +166,9 @@ private:
     QToolButton *m_snapTo;  // the layer actions' second row
     tools::ToolState *m_toolState = nullptr;
     QTimer m_thumbnailTimer;
+    QTimer m_fillTimer;
+    bool m_rebuildPending = false; // the structure changed during a stroke: the rows are made when it ends
+    std::vector<doc::DrawingId> m_pendingThumbnails; // frames whose thumbnails (and their layers') are still to make
     QSet<doc::DrawingId> m_dirtyDrawings; // frames whose pixels changed since their thumbnails were made
     // What the camera's row shows (-1: no camera; else twice the number of keys, plus one if it is on): the rows are
     // made again only when it changes, not at each step of a drag.

@@ -18,6 +18,7 @@
 #include <QDrag>
 #include <QDropEvent>
 #include <QGraphicsOpacityEffect>
+#include <QElapsedTimer>
 #include <QHBoxLayout>
 #include <QInputDialog>
 #include <QApplication>
@@ -426,10 +427,23 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     m_thumbnailTimer.setSingleShot(true);
     m_thumbnailTimer.setInterval(250);
     connect(&m_thumbnailTimer, &QTimer::timeout, this, &LayersPanel::refreshThumbnails);
+    m_fillTimer.setSingleShot(true);
+    connect(&m_fillTimer, &QTimer::timeout, this, &LayersPanel::fillThumbnails);
     // Queued: a row's own button may trigger the change, and must not be
     // destroyed while its click is still being delivered.
-    connect(m_document, &DocumentController::structureChanged, this, &LayersPanel::rebuildTree,
-            Qt::QueuedConnection);
+    connect(
+        m_document, &DocumentController::structureChanged, this,
+        [this] {
+            if (m_document->isPainting()) // the first stroke on an empty frame made the frame: the rows wait for the
+                m_rebuildPending = true;  // pen to lift, a rebuild in the middle of a stroke would be felt
+            else
+                rebuildTree();
+        },
+        Qt::QueuedConnection);
+    connect(m_document, &DocumentController::historyChanged, this, [this] {
+        if (m_rebuildPending && !m_document->isPainting())
+            rebuildTree();
+    });
     connect(m_document, &DocumentController::documentReplaced, this, &LayersPanel::rebuildTree);
     // Another point of the timeline may show other frames.
     connect(m_document, &DocumentController::currentFrameChanged, this, [this] {
@@ -527,7 +541,9 @@ QTreeWidgetItem *LayersPanel::layerItem(doc::LayerId layer) const
 
 void LayersPanel::rebuildTree()
 {
-    m_dirtyDrawings.clear(); // the rows are made anew, with fresh thumbnails
+    m_rebuildPending = false;
+    m_dirtyDrawings.clear(); // the rows are made anew, and their thumbnails again
+    m_pendingThumbnails.clear();
     const QSignalBlocker block(m_tree);
     // The folders as they were left: closed ones stay closed, new ones open.
     for (int i = 0; i < m_tree->topLevelItemCount(); ++i) {
@@ -593,6 +609,7 @@ void LayersPanel::rebuildTree()
     }
     m_cameraRowState = cameraRowState(*m_document);
 
+    const QPixmap blank = thumbnail(nullptr, nullptr, docSize, nullptr);
     for (int i = d.celCount() - 1; i >= 0; --i) { // top cel first
         const doc::Cel &cel = d.celAt(i);
         const doc::CelId celId = cel.id();
@@ -643,7 +660,8 @@ void LayersPanel::rebuildTree()
             auto [frameRow, fh] = rowWidget();
             auto *frameThumb = new QLabel(frameRow);
             frameThumb->setObjectName(QStringLiteral("thumbnail"));
-            frameThumb->setPixmap(thumbnail(nullptr, drawing, docSize, nullptr));
+            frameThumb->setPixmap(blank); // made soon, apart (fillThumbnails())
+            m_pendingThumbnails.push_back(drawing->id);
             auto *frameText = new QLabel(QStringLiteral("%1\n%2").arg(
                                              tr("Frame %1").arg(QString::fromStdString(drawing->name)),
                                              exposureText(cel.timing(), drawing->id)),
@@ -665,7 +683,7 @@ void LayersPanel::rebuildTree()
                 auto *layerLock = toggleButton(IconId::Lock, tr("Lock / unlock"), layer.properties.locked, layerRow);
                 auto *layerThumb = new QLabel(layerRow);
                 layerThumb->setObjectName(QStringLiteral("thumbnail"));
-                layerThumb->setPixmap(layerThumbnail(layer, docSize));
+                layerThumb->setPixmap(blank);
                 lh->addWidget(layerEye);
                 lh->addWidget(layerLock);
                 lh->addWidget(layerThumb);
@@ -713,6 +731,9 @@ void LayersPanel::rebuildTree()
 
     markCurrentFrames();
     refreshSnapMarks();
+    if (!m_pendingThumbnails.empty())
+        m_fillTimer.start(0); // the frames' and layers' thumbnails, a few at a time: a project of hundreds of big
+                              // frames would otherwise hold the pen for seconds at every new frame
     restoreSelection();
     paintRowColors();
     m_tree->verticalScrollBar()->setValue(scroll);
@@ -764,6 +785,34 @@ void LayersPanel::changeEvent(QEvent *event)
     QWidget::changeEvent(event);
     if (event->type() == QEvent::PaletteChange && m_tree)
         paintRowColors(); // another theme: the colors set by hand are taken again
+}
+
+void LayersPanel::fillThumbnails()
+{
+    const doc::Document &d = m_document->document();
+    const QSize docSize(d.width(), d.height());
+    auto set = [this](QTreeWidgetItem *item, const QPixmap &pixmap) {
+        if (QWidget *row = item ? m_tree->itemWidget(item, 0) : nullptr)
+            if (auto *thumb = row->findChild<QLabel *>(QStringLiteral("thumbnail")))
+                thumb->setPixmap(pixmap);
+    };
+    QElapsedTimer slice;
+    slice.start();
+    while (!m_pendingThumbnails.empty() && slice.elapsed() < 8) { // never long enough to be felt
+        const doc::DrawingId id = m_pendingThumbnails.back(); // the last first: the frames nearest the top
+        m_pendingThumbnails.pop_back();
+        for (int i = 0; i < d.celCount(); ++i) {
+            const doc::Drawing *drawing = d.celAt(i).drawing(id);
+            if (!drawing)
+                continue;
+            set(frameItem(id), thumbnail(nullptr, drawing, docSize, nullptr));
+            for (const doc::Layer &layer : drawing->layers)
+                set(layerItem(layer.id), layerThumbnail(layer, docSize));
+            break;
+        }
+    }
+    if (!m_pendingThumbnails.empty())
+        m_fillTimer.start(0);
 }
 
 void LayersPanel::refreshThumbnails()

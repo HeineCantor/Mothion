@@ -795,6 +795,32 @@ private slots:
     }
 
 
+    // The first stroke on an empty frame makes the frame, and the rows for it wait for the pen to lift (rebuilding the
+    // panel in the middle of a stroke is a stall in a project of many frames).
+    void theRowsWaitForTheEndOfTheStroke()
+    {
+        document::DocumentController controller;
+        ui::LayersPanel panel(&controller);
+        QImage red(20, 20, QImage::Format_ARGB32);
+        red.fill(Qt::red);
+        controller.importImage(red, QStringLiteral("x"));
+        controller.addCel(); // a cel with no frame
+        QCoreApplication::processEvents();
+        const auto target = controller.beginPaint(true);
+        QVERIFY(target);
+        const doc::DrawingId made = controller.currentDrawingId();
+        QVERIFY(made != doc::kNoId);
+        const doc::TiledImage before = *target->image;
+        target->image->setPixel(3, 3, 0xff000000);
+        QCoreApplication::processEvents(); // the change is announced, the panel holds back
+        QVERIFY(controller.isPainting());
+        QVERIFY(!panel.frameItem(made));
+        controller.endPaint(before);
+        QCoreApplication::processEvents();
+        QVERIFY(panel.frameItem(made)); // now there
+    }
+
+
     // Ctrl+click adds a layer to the selection, Shift+click a range; the
     // header and the buttons then act on all of them, as one undo step.
     void layersSelectWithCtrlAndShift()
