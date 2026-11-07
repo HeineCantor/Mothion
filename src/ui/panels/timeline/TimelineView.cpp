@@ -289,12 +289,11 @@ void TimelineView::paintSelection(QPainter &p) const
     // The current cel's row (and the camera's, when it is selected) is outlined across the header and the cells.
     const TimelineMetrics &m = m_metrics;
     const doc::Document &d = m_document->document();
-    p.setRenderHint(QPainter::Antialiasing);
     p.setBrush(Qt::NoBrush);
     p.setPen(QPen(ui::selectionOutlineColor(QApplication::palette()), 2.0));
     auto outline = [&](int top) {
         const QRectF bar(0, top, viewport()->width() - 1, m.rowHeight - 1);
-        p.drawRoundedRect(bar.adjusted(1, 1, -1, -1), 3, 3);
+        p.drawRect(bar.adjusted(1, 1, -1, -1));
     };
     for (int row = 0; row < rowCount(); ++row)
         if (d.celAt(celIndexForRow(row)).id() == m_document->currentCel() && !m_document->cameraSelected())

@@ -261,12 +261,10 @@ protected:
         if (!selected)
             return;
         bar.setLeft(0);
-        const QRect rect = bar.adjusted(1, 1, -2, -2);
         painter->save();
-        painter->setRenderHint(QPainter::Antialiasing);
         painter->setBrush(Qt::NoBrush);
         painter->setPen(QPen(selectionOutlineColor(QApplication::palette()), 2.0));
-        painter->drawRoundedRect(QRectF(rect).adjusted(0.5, 0.5, -0.5, -0.5), 3, 3);
+        painter->drawRect(bar.adjusted(1, 1, -1, -1)); // square, two whole pixels
         painter->restore();
     }
 
