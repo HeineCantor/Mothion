@@ -60,6 +60,8 @@ mothion_set_warnings(mothion_core)
 # ---------------------------------------------------------------------------
 qt_add_library(mothion_gui STATIC
     document/DocumentController.h document/DocumentController.cpp
+    document/Tween.h document/Tween.cpp
+    document/Tween.h document/Tween.cpp
 
     io/ProjectFile.h io/ProjectFile.cpp
     io/ProjectThumbnail.h

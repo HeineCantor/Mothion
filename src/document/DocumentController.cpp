@@ -5,6 +5,7 @@
 #include "canvas/SelectionMask.h"
 #include "canvas/TileQt.h"
 #include "core/document/commands/DrawingCommands.h"
+#include "core/Parallel.h"
 #include "core/document/commands/GroupCommand.h"
 #include "core/document/commands/AudioCommands.h"
 #include "core/document/commands/CompositingCommands.h"
@@ -17,6 +18,7 @@
 #include <QFileInfo>
 
 #include <algorithm>
+#include <set>
 #include <functional>
 #include <vector>
 
@@ -616,6 +618,66 @@ void DocumentController::commitAudioVolume(float before)
     setAudioVolume(after);
 }
 
+int DocumentController::tweenFrames(doc::CelId celId, int from, int to, TweenEase ease, QString *reason)
+{
+    auto fail = [reason](const QString &why) {
+        if (reason)
+            *reason = why;
+        return 0;
+    };
+    interruptStroke();
+    doc::Cel *cel = m_document->cel(celId);
+    if (!cel)
+        return fail(tr("No cel selected"));
+    if (cel->properties().locked)
+        return fail(tr("Cel “%1” is locked").arg(QString::fromStdString(cel->properties().name)));
+    if (from < 0 || to - from < 2)
+        return fail(tr("There is no frame between the two poses"));
+    const doc::DrawingId a = cel->timing().drawingAt(from), b = cel->timing().drawingAt(to);
+    if (a == doc::kNoId || b == doc::kNoId)
+        return fail(tr("Both ends of a tween need a drawing"));
+    if (a == b)
+        return fail(tr("The two frames show the same drawing"));
+    const auto tween = DrawingTween::make(*cel->drawing(a), *cel->drawing(b), reason);
+    if (!tween)
+        return 0;
+
+    // The pictures between: each layer of each frame on its own core.
+    const int frames = to - from - 1, layers = tween->layerCount();
+    std::vector<doc::Layer> made(std::size_t(frames) * std::size_t(layers));
+    parallelFor(frames * layers, [&](int k) {
+        const int frame = k / layers, layer = k % layers;
+        const double u = double(frame + 1) / double(to - from);
+        made[std::size_t(k)] = tween->layerAt(layer, easedTime(ease, u));
+    });
+
+    // New drawings, named with the next free numbers, shown one frame each from the first frame after `from`.
+    std::set<std::string> used;
+    for (const auto &[id, drawing] : cel->drawings())
+        used.insert(drawing.name);
+    doc::Timing after = cel->timing();
+    std::vector<std::unique_ptr<doc::Command>> steps;
+    int number = 0;
+    for (int frame = 0; frame < frames; ++frame) {
+        std::string name;
+        do
+            name = std::to_string(++number);
+        while (used.contains(name));
+        used.insert(name);
+        doc::Drawing drawing{m_document->allocateDrawingId(), name, {}};
+        for (int layer = 0; layer < layers; ++layer) {
+            doc::Layer &l = made[std::size_t(frame) * std::size_t(layers) + std::size_t(layer)];
+            l.id = m_document->allocateLayerId();
+            drawing.layers.push_back(std::move(l));
+        }
+        after.setExposure(from + 1 + frame, 1, drawing.id);
+        steps.push_back(std::make_unique<doc::AddDrawingCommand>(celId, std::move(drawing)));
+    }
+    steps.push_back(std::make_unique<doc::SetTimingCommand>(celId, cel->timing(), std::move(after)));
+    execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::Tween, std::move(steps)));
+    return frames;
+}
+
 void DocumentController::setCompositing(doc::GraphData graph)
 {
     if (graph != m_document->compositing())
@@ -1034,6 +1096,7 @@ QString DocumentController::commandName(doc::CommandKind kind)
     case doc::CommandKind::SetAudio: return tr("audio");
     case doc::CommandKind::ChangeAudio: return tr("audio change");
     case doc::CommandKind::EditCompositing: return tr("compositing");
+    case doc::CommandKind::Tween: return tr("tween");
     case doc::CommandKind::ClearLayer: return tr("clear");
     case doc::CommandKind::Move: return tr("move");
     case doc::CommandKind::Select: return tr("selection");

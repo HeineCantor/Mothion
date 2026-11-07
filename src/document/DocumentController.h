@@ -2,6 +2,7 @@
 
 #include "core/document/Document.h"
 #include "core/document/History.h"
+#include "document/Tween.h"
 
 #include <QImage>
 #include <functional>
@@ -117,6 +118,13 @@ public:
     void commitAudioVolume(float before);
     // What decoding found out (not an undo step: it is a fact about the file).
     void setAudioDuration(double seconds);
+
+    // Tweening: the drawings of `cel` shown at frames `from` and `to` are two poses, and each frame between them gets
+    // a drawing of its own, the picture between the poses (see DrawingTween): the poses laid over each other
+    // automatically, the pictures made from both, layer by layer. They replace what those frames showed. One undo step.
+    // Returns how many frames were made; 0, with the reason, if there was no way (no poses, the same drawing, no frame
+    // between, a locked cel).
+    int tweenFrames(doc::CelId cel, int from, int to, TweenEase ease = TweenEase::Linear, QString *reason = nullptr);
 
     // The compositing network kept in the project: one undo step puts `graph` in place of it.
     const doc::GraphData &compositing() const { return m_document->compositing(); }
