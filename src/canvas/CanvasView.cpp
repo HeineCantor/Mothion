@@ -710,9 +710,9 @@ void CanvasView::beginStroke(const PenSample &sample)
         style.startTaper = 0.0;
     else
         style.startCorrection = 0;
-    auto stamper = std::make_shared<DabStamper>(m_toolState->color(), style.hardness, definition->tips,
+    auto stamper = std::make_shared<DabStamper>(target->tint(m_toolState->color()), style.hardness, definition->tips,
                                                 style.verticalThickness);
-    stamper->setSecondaryColor(m_toolState->inactiveColor());
+    stamper->setSecondaryColor(target->tint(m_toolState->inactiveColor()));
     const doc::Document &d = m_document->document();
     m_strokeImage = target->image;
     m_stroke.emplace(*target->image, std::move(stamper), settings.opacity, m_eraseStroke,

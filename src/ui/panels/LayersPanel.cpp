@@ -124,6 +124,55 @@ QPixmap thumbnail(const doc::TiledImage *image, const doc::Drawing *drawing, con
     return QPixmap::fromImage(img);
 }
 
+// A thumbnail that can be clicked (the click goes on to the row, which it also selects) and outlined (the one being
+// drawn on, of a layer and its mask).
+class ThumbLabel : public QLabel
+{
+public:
+    explicit ThumbLabel(QWidget *parent) : QLabel(parent) {}
+    void setActive(bool active)
+    {
+        if (active != m_active) {
+            m_active = active;
+            update();
+        }
+    }
+    std::function<void()> onPress;
+
+protected:
+    void mousePressEvent(QMouseEvent *event) override
+    {
+        if (onPress)
+            onPress();
+        QLabel::mousePressEvent(event); // not taken: the row gets it
+    }
+    void paintEvent(QPaintEvent *event) override
+    {
+        QLabel::paintEvent(event);
+        if (!m_active)
+            return;
+        // Around the thumbnail itself (the label may be taller than it, in a taller row), in a dark blue on a light
+        // theme, the palette's highlight on a dark one.
+        const QPalette app = QApplication::palette();
+        const QColor color = app.color(QPalette::Base).lightness() >= 128 ? QColor(0x1f, 0x4f, 0xa8)
+                                                                          : app.color(QPalette::Highlight);
+        const QRect picture = QStyle::alignedRect(layoutDirection(), alignment(), pixmap().size(), contentsRect());
+        QPainter p(this);
+        p.setPen(QPen(color, 2));
+        p.drawRect(picture.adjusted(1, 1, -1, -1));
+    }
+
+private:
+    bool m_active = false;
+};
+
+// A layer's mask in a thumbnail: white where the layer shows, black where it does not.
+QPixmap maskThumbnail(const doc::TiledImage &mask, const QSize &docSize)
+{
+    const QColor white(Qt::white);
+    return thumbnail(&mask, nullptr, docSize, &white);
+}
+
 // A layer's thumbnail: its pixels, or a perspective layer's grid drawn small
 // (scaled as a grid, so its lines stay visible).
 QPixmap layerThumbnail(const doc::Layer &layer, const QSize &docSize)
@@ -328,6 +377,9 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     , m_down(actionButton(IconId::ArrowDown, tr("Move down"), this))
     , m_snapTo(actionButton(IconId::Crosshair,
                             tr("Snap to: make the selected perspective layer the one strokes snap to"), this))
+    , m_maskAdd(actionButton(IconId::MaskAdd, tr("Create a mask layer: draw in black and white what the layer shows"),
+                             this))
+    , m_maskDelete(actionButton(IconId::MaskDelete, tr("Remove the mask layer: the layer shows whole again"), this))
 {
     auto moving = [this] {
         QList<QTreeWidgetItem *> items;
@@ -398,6 +450,12 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     auto *layerActions = new QHBoxLayout;
     layerActions->setSpacing(0);
     layerActions->addStretch(1); // these start from the right
+    m_maskAdd->setObjectName(QStringLiteral("maskAdd"));
+    m_maskDelete->setObjectName(QStringLiteral("maskDelete"));
+    m_maskAdd->setEnabled(false);
+    m_maskDelete->setEnabled(false);
+    layerActions->addWidget(m_maskAdd);
+    layerActions->addWidget(m_maskDelete);
     layerActions->addWidget(m_snapTo);
 
     auto *layout = new QVBoxLayout(this);
@@ -438,6 +496,9 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     connect(m_remove, &QToolButton::clicked, this, &LayersPanel::removeSelected);
     connect(m_merge, &QToolButton::clicked, this, &LayersPanel::mergeSelected);
     connect(m_snapTo, &QToolButton::clicked, this, &LayersPanel::snapToClicked);
+    connect(m_maskAdd, &QToolButton::clicked, this, [this] { m_document->createLayerMask(); });
+    connect(m_maskDelete, &QToolButton::clicked, this, [this] { m_document->deleteLayerMask(); });
+    connect(m_document, &DocumentController::maskEditingChanged, this, &LayersPanel::updateMaskFrames);
     // The camera: made if the project has none, and selected.
     connect(m_camera, &QToolButton::clicked, this, [this] {
         m_focus = Focus::Camera;
@@ -751,12 +812,20 @@ void LayersPanel::rebuildTree()
                 auto [layerRow, lh] = rowWidget();
                 auto *layerEye = toggleButton(IconId::Eye, tr("Show / hide"), layer.properties.visible, layerRow);
                 auto *layerLock = toggleButton(IconId::Lock, tr("Lock / unlock"), layer.properties.locked, layerRow);
-                auto *layerThumb = new QLabel(layerRow);
+                auto *layerThumb = new ThumbLabel(layerRow);
                 layerThumb->setObjectName(QStringLiteral("thumbnail"));
                 layerThumb->setPixmap(blank);
+                layerThumb->onPress = [this] { m_document->setMaskEditing(doc::kNoId); }; // draw on the layer
                 lh->addWidget(layerEye);
                 lh->addWidget(layerLock);
                 lh->addWidget(layerThumb);
+                if (layer.mask) { // its mask, at the right: the other thing to draw on
+                    auto *maskThumb = new ThumbLabel(layerRow);
+                    maskThumb->setObjectName(QStringLiteral("maskThumbnail"));
+                    maskThumb->setPixmap(blank);
+                    maskThumb->onPress = [this, id] { m_document->setMaskEditing(id); };
+                    lh->addWidget(maskThumb);
+                }
                 auto *layerText = new QLabel(propertiesText(layer.properties.opacity, layer.properties.blend,
                                                             layer.properties.name),
                                              layerRow);
@@ -812,6 +881,7 @@ void LayersPanel::rebuildTree()
             m_looks[id] = looksOf(drawing);
     restoreSelection();
     paintRowColors();
+    updateMaskFrames();
     m_tree->verticalScrollBar()->setValue(scroll);
     syncHeader();
 }
@@ -863,7 +933,7 @@ QString LayersPanel::shapeKey() const
         for (const auto &[id, drawing] : cel.drawings()) {
             key += QStringLiteral("d%1,%2,%3[").arg(id).arg(QString::fromStdString(drawing.name), exposureText(cel.timing(), id));
             for (const doc::Layer &layer : drawing.layers)
-                key += QStringLiteral("%1k%2,").arg(layer.id).arg(int(layer.kind));
+                key += QStringLiteral("%1k%2%3,").arg(layer.id).arg(int(layer.kind)).arg(layer.mask ? QLatin1Char('m') : QLatin1Char('-'));
             key += QLatin1Char(']');
         }
     }
@@ -920,6 +990,28 @@ void LayersPanel::updateLooks()
     syncHeader();
 }
 
+void LayersPanel::updateMaskFrames()
+{
+    const doc::LayerId editing = m_document->maskEditingLayer();
+    std::function<void(QTreeWidgetItem *)> visit = [&](QTreeWidgetItem *item) {
+        if (kindOf(item) == Row::Layer) {
+            if (QWidget *row = m_tree->itemWidget(item, 0)) {
+                // Only ThumbLabels have these names.
+                auto *maskThumb = static_cast<ThumbLabel *>(row->findChild<QLabel *>(QStringLiteral("maskThumbnail")));
+                if (auto *layerThumb = static_cast<ThumbLabel *>(row->findChild<QLabel *>(QStringLiteral("thumbnail")))) {
+                    layerThumb->setActive(maskThumb && layerOf(item) != editing); // outlined only where there is a choice
+                    if (maskThumb)
+                        maskThumb->setActive(layerOf(item) == editing);
+                }
+            }
+        }
+        for (int i = 0; i < item->childCount(); ++i)
+            visit(item->child(i));
+    };
+    for (int i = 0; i < m_tree->topLevelItemCount(); ++i)
+        visit(m_tree->topLevelItem(i));
+}
+
 void LayersPanel::fillThumbnails()
 {
     const doc::Document &d = m_document->document();
@@ -928,6 +1020,12 @@ void LayersPanel::fillThumbnails()
         if (QWidget *row = item ? m_tree->itemWidget(item, 0) : nullptr)
             if (auto *thumb = row->findChild<QLabel *>(QStringLiteral("thumbnail")))
                 thumb->setPixmap(pixmap);
+    };
+    auto setLayer = [this, &set, docSize](QTreeWidgetItem *item, const doc::Layer &layer) { // and its mask's
+        set(item, layerThumbnail(layer, docSize));
+        if (QWidget *row = layer.mask && item ? m_tree->itemWidget(item, 0) : nullptr)
+            if (auto *thumb = row->findChild<QLabel *>(QStringLiteral("maskThumbnail")))
+                thumb->setPixmap(maskThumbnail(*layer.mask, docSize));
     };
     QElapsedTimer slice;
     slice.start();
@@ -940,7 +1038,7 @@ void LayersPanel::fillThumbnails()
                 continue;
             set(frameItem(id), thumbnail(nullptr, drawing, docSize, nullptr));
             for (const doc::Layer &layer : drawing->layers)
-                set(layerItem(layer.id), layerThumbnail(layer, docSize));
+                setLayer(layerItem(layer.id), layer);
             break;
         }
     }
@@ -958,6 +1056,12 @@ void LayersPanel::refreshThumbnails()
             if (auto *thumb = row->findChild<QLabel *>(QStringLiteral("thumbnail")))
                 thumb->setPixmap(pixmap);
     };
+    auto setLayer = [this, &set, docSize](QTreeWidgetItem *item, const doc::Layer &layer) { // and its mask's
+        set(item, layerThumbnail(layer, docSize));
+        if (QWidget *row = layer.mask && item ? m_tree->itemWidget(item, 0) : nullptr)
+            if (auto *thumb = row->findChild<QLabel *>(QStringLiteral("maskThumbnail")))
+                thumb->setPixmap(maskThumbnail(*layer.mask, docSize));
+    };
     // The cels show the frame of the moment; a frame and its layers only change when painted on (rebuildTree()
     // makes all of them anew). A project of hundreds of big frames cannot afford more than that at every stroke.
     const QSet<doc::DrawingId> dirty = std::exchange(m_dirtyDrawings, {});
@@ -970,7 +1074,7 @@ void LayersPanel::refreshThumbnails()
                 continue;
             set(frameItem(id), thumbnail(nullptr, drawing, docSize, nullptr));
             for (const doc::Layer &layer : drawing->layers)
-                set(layerItem(layer.id), layerThumbnail(layer, docSize));
+                setLayer(layerItem(layer.id), layer);
         }
     }
 }
@@ -1717,6 +1821,11 @@ void LayersPanel::syncHeader()
         m_snapTo->setEnabled(snappable);
         m_snapTo->setChecked(snappable && isSnapReference(layer->id));
     }
+    // The mask: made for a raster layer that has none, taken away from one that has; one layer at a time.
+    const bool maskable = m_focus == Focus::Layer && layer && layer->kind == doc::LayerKind::Raster
+                          && selectedLayers().size() <= 1 && drawing;
+    m_maskAdd->setEnabled(maskable && !layer->mask);
+    m_maskDelete->setEnabled(maskable && layer->mask);
     if (!header && m_focus != Focus::Cel)
         return;
 

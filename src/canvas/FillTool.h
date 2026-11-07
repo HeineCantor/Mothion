@@ -45,7 +45,7 @@ private:
     void fillAround(const QPointF &docPos);
     void fillLasso();
     // The main color at the fill opacity, premultiplied.
-    doc::Pixel fillColor() const;
+    doc::Pixel fillColor(const QColor &color) const; // the main color (a mask's: its gray) with the opacity
 
     QPolygonF m_lasso; // the outline being drawn
     document::DocumentController *m_document;

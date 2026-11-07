@@ -148,6 +148,7 @@ private:
     void snapToClicked(bool on);
     // Shows the sight on the perspective layer(s) strokes snap to.
     void refreshSnapMarks();
+    void updateMaskFrames(); // which of a layer's thumbnails, itself or its mask, is outlined: the one drawn on
     bool isSnapReference(doc::LayerId layer) const;
     void moveSelected(int direction); // +1 up, -1 down, each by one place
     void moveCurrentCel(int index);
@@ -169,6 +170,8 @@ private:
     QToolButton *m_up;
     QToolButton *m_down;
     QToolButton *m_snapTo;  // the layer actions' second row
+    QToolButton *m_maskAdd;    // make / take away the current layer's mask (left of the snap button)
+    QToolButton *m_maskDelete;
     tools::ToolState *m_toolState = nullptr;
     QTimer m_thumbnailTimer;
     QTimer m_fillTimer;

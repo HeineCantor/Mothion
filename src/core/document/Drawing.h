@@ -5,6 +5,7 @@
 #include "core/perspective/PerspectiveGrid.h"
 
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -40,6 +41,9 @@ struct Layer
     LayerProperties properties;
     TiledImage image;
     LayerKind kind = LayerKind::Raster;
+    // The layer's mask, a bitmap painted in black and white (in any gray between): where it is white, or has no
+    // pixel, the layer shows; where it is black, it does not. Only raster layers have one.
+    std::optional<TiledImage> mask;
 };
 
 // One drawing of a cel, a "frame" in the interface. It exists independently

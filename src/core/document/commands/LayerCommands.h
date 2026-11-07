@@ -91,6 +91,32 @@ private:
 };
 
 // nullptr if the properties are already `properties`.
+// Gives a layer a mask (empty: everything shows), or takes it away; undo puts back what there was.
+class SetLayerMaskCommand : public Command
+{
+public:
+    SetLayerMaskCommand(CelId cel, DrawingId drawing, LayerId layer, std::optional<TiledImage> before,
+                        std::optional<TiledImage> after);
+
+    CommandKind kind() const override { return CommandKind::ChangeMask; }
+    ChangeSet apply(Document &doc) override;
+    ChangeSet revert(Document &doc) override;
+    std::size_t memoryBytes() const override;
+
+private:
+    ChangeSet put(Document &doc, const std::optional<TiledImage> &mask);
+
+    CelId m_cel;
+    DrawingId m_drawing;
+    LayerId m_id;
+    std::optional<TiledImage> m_before;
+    std::optional<TiledImage> m_after;
+};
+
+// Null when the layer is not there, is not a raster layer, or already has (no) mask.
+std::unique_ptr<Command> makeAddLayerMask(const Document &doc, CelId cel, DrawingId drawing, LayerId layer);
+std::unique_ptr<Command> makeRemoveLayerMask(const Document &doc, CelId cel, DrawingId drawing, LayerId layer);
+
 std::unique_ptr<Command> makeSetLayerProperties(const Document &doc, CelId cel, DrawingId drawing, LayerId layer,
                                                 LayerProperties properties);
 

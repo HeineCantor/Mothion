@@ -74,6 +74,7 @@ enum class CommandKind {
     Tween,
     EditCamera,
     SceneLength,
+    ChangeMask,
 };
 
 // An undoable change to a Document.

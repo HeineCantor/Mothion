@@ -25,10 +25,11 @@ public:
     };
 
     // nullptr if `before` and `after` share every tile (nothing was painted).
+    // `mask`: the pixels are those of the layer's mask, not of the layer.
     static std::unique_ptr<PaintCommand> capture(CelId cel, DrawingId drawing, LayerId layer,
-                                                 const TiledImage &before, const TiledImage &after);
+                                                 const TiledImage &before, const TiledImage &after, bool mask = false);
 
-    PaintCommand(CelId cel, DrawingId drawing, LayerId layer, std::vector<TileSwap> swaps);
+    PaintCommand(CelId cel, DrawingId drawing, LayerId layer, std::vector<TileSwap> swaps, bool mask = false);
 
     CommandKind kind() const override { return CommandKind::Paint; }
     ChangeSet apply(Document &doc) override;
@@ -44,6 +45,7 @@ private:
     DrawingId m_drawing;
     LayerId m_layer;
     std::vector<TileSwap> m_swaps;
+    bool m_mask;
 };
 
 } // namespace mothion::doc

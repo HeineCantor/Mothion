@@ -50,6 +50,8 @@ std::unique_ptr<doc::Document> sampleDocument()
     a.layers.push_back({d->allocateLayerId(), {"Line"}, {}});
     a.layers.push_back({d->allocateLayerId(), {"Color ✓", false, true, 0.25f, doc::BlendMode::Screen}, {}});
     a.layers[0].image.setPixel(100, 100, kHalfBlue);
+    a.layers[0].mask.emplace().setPixel(100, 100, 0xff000000); // a mask with a black pixel
+    a.layers[1].mask.emplace(); // and one with nothing in it
     a.layers[1].image.setPixel(-1, 300, kRed);
     doc::Drawing &b = ink.addDrawing({d->allocateDrawingId(), "B", {{d->allocateLayerId(), {"Line"}, {}}}});
     doc::LayerProperties grid{"Perspective ✓"};
@@ -140,6 +142,15 @@ void compareDocuments(const doc::Document &x, const doc::Document &y)
                 QCOMPARE(ky.id, kx.id);
                 QVERIFY(ky.kind == kx.kind);
                 QVERIFY(ky.properties == kx.properties);
+                QCOMPARE(ky.mask.has_value(), kx.mask.has_value());
+                if (kx.mask) {
+                    auto mx = kx.mask->tileCoords(), my = ky.mask->tileCoords();
+                    std::sort(mx.begin(), mx.end());
+                    std::sort(my.begin(), my.end());
+                    QVERIFY(mx == my);
+                    for (const doc::TileCoord &c : mx)
+                        QVERIFY(kx.mask->tile(c)->pixels == ky.mask->tile(c)->pixels);
+                }
                 auto cx = kx.image.tileCoords(), cy = ky.image.tileCoords();
                 std::sort(cx.begin(), cx.end());
                 std::sort(cy.begin(), cy.end());
@@ -203,6 +214,10 @@ private slots:
         original->setCompositing({});     // and the compositing one with format 7
         original->setCompositingView({});
         original->setCamera(std::nullopt); // and the camera with format 8
+        for (int i = 0; i < original->celCount(); ++i) // and the masks with format 9
+            for (const auto &[id, drawing] : original->celAt(i).drawings())
+                for (doc::Layer &layer : original->celAt(i).drawing(id)->layers)
+                    layer.mask.reset();
         const QString path = dir.filePath(QStringLiteral("old.moth"));
         QString error;
         QVERIFY2(io::saveProject(*original, path, &error), qPrintable(error));

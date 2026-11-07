@@ -172,4 +172,56 @@ std::unique_ptr<Command> makeSetLayerProperties(const Document &doc, CelId cel, 
                                                        std::move(properties));
 }
 
+// --- SetLayerMaskCommand ------------------------------------------------------------
+
+SetLayerMaskCommand::SetLayerMaskCommand(CelId cel, DrawingId drawing, LayerId layer, std::optional<TiledImage> before,
+                                         std::optional<TiledImage> after)
+    : m_cel(cel)
+    , m_drawing(drawing)
+    , m_id(layer)
+    , m_before(std::move(before))
+    , m_after(std::move(after))
+{
+}
+
+ChangeSet SetLayerMaskCommand::put(Document &doc, const std::optional<TiledImage> &mask)
+{
+    if (Layer *layer = doc.layer(m_cel, m_drawing, m_id))
+        layer->mask = mask;
+    ChangeSet changes = structural();
+    changes.pixels.push_back({m_cel, m_drawing, m_id, {}}); // what the layer shows changes
+    return changes;
+}
+
+ChangeSet SetLayerMaskCommand::apply(Document &doc)
+{
+    return put(doc, m_after);
+}
+
+ChangeSet SetLayerMaskCommand::revert(Document &doc)
+{
+    return put(doc, m_before);
+}
+
+std::size_t SetLayerMaskCommand::memoryBytes() const
+{
+    return sizeof(*this) + (m_before ? m_before->memoryBytes() : 0) + (m_after ? m_after->memoryBytes() : 0);
+}
+
+std::unique_ptr<Command> makeAddLayerMask(const Document &doc, CelId cel, DrawingId drawing, LayerId layerId)
+{
+    const Layer *layer = doc.layer(cel, drawing, layerId);
+    if (!layer || layer->kind != LayerKind::Raster || layer->mask)
+        return nullptr;
+    return std::make_unique<SetLayerMaskCommand>(cel, drawing, layerId, std::nullopt, TiledImage());
+}
+
+std::unique_ptr<Command> makeRemoveLayerMask(const Document &doc, CelId cel, DrawingId drawing, LayerId layerId)
+{
+    const Layer *layer = doc.layer(cel, drawing, layerId);
+    if (!layer || !layer->mask)
+        return nullptr;
+    return std::make_unique<SetLayerMaskCommand>(cel, drawing, layerId, layer->mask, std::nullopt);
+}
+
 } // namespace mothion::doc

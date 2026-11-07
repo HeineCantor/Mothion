@@ -114,6 +114,38 @@ private slots:
         QVERIFY(cel->drawing(nd.id));
     }
 
+    void layerMaskUndoRedoAndPainting()
+    {
+        auto [doc, celId] = docWithCel();
+        History history;
+        NewDrawing nd = makeNewDrawing(*doc, celId, 0, 3);
+        history.execute(*doc, std::move(nd.command));
+        Layer *layer = doc->layer(celId, nd.id, nd.layer);
+        QVERIFY(layer && !layer->mask);
+        QVERIFY(!makeRemoveLayerMask(*doc, celId, nd.id, nd.layer)); // none to take away
+
+        history.execute(*doc, makeAddLayerMask(*doc, celId, nd.id, nd.layer));
+        QVERIFY(layer->mask && layer->mask->isEmpty()); // everything shows
+        QVERIFY(!makeAddLayerMask(*doc, celId, nd.id, nd.layer)); // one is enough
+
+        // Painting on the mask goes in the mask, and is undone there.
+        const TiledImage before = *layer->mask;
+        layer->mask->setPixel(5, 5, 0xff000000);
+        history.pushApplied(PaintCommand::capture(celId, nd.id, nd.layer, before, *layer->mask, true));
+        QVERIFY(layer->image.isEmpty());
+        history.undo(*doc);
+        QVERIFY(layer->mask->isEmpty());
+        history.redo(*doc);
+        QCOMPARE(layer->mask->pixel(5, 5), Pixel(0xff000000));
+        QVERIFY(layer->image.isEmpty()); // the layer's own pixels were never touched
+
+        history.execute(*doc, makeRemoveLayerMask(*doc, celId, nd.id, nd.layer));
+        QVERIFY(!layer->mask);
+        history.undo(*doc); // the mask comes back with its black pixel
+        QVERIFY(layer->mask);
+        QCOMPARE(layer->mask->pixel(5, 5), Pixel(0xff000000));
+    }
+
     void sceneLengthUndoRedo()
     {
         auto [doc, celId] = docWithCel();

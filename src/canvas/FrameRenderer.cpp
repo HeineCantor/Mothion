@@ -44,6 +44,28 @@ bool shows(const doc::Layer &layer, bool guides)
     return layer.kind == doc::LayerKind::Perspective ? guides : !layer.image.isEmpty();
 }
 
+// A tile of a layer as it shows: through the layer's mask, where it has pixels. The mask is black and white: a pixel of
+// it that is white (or not there) lets the layer through, a black one does not, a gray one lets that much through.
+// Without a mask over the tile the tile's own memory is wrapped, not copied.
+QImage layerTile(const doc::Layer &layer, const doc::TileCoord &coord, const doc::Tile &tile)
+{
+    const doc::TilePtr mask = layer.mask ? layer.mask->tile(coord) : nullptr;
+    if (!mask)
+        return tileImage(tile);
+    QImage out(doc::kTileSize, doc::kTileSize, QImage::Format_ARGB32_Premultiplied);
+    auto *dst = reinterpret_cast<doc::Pixel *>(out.bits());
+    for (int i = 0; i < doc::kTilePixels; ++i) {
+        const doc::Pixel s = tile.pixels[std::size_t(i)];
+        const doc::Pixel m = mask->pixels[std::size_t(i)];
+        // The mask's pixel is premultiplied: its gray is (r, g, b) as they are, and what is not covered is white.
+        const unsigned gray = (77u * ((m >> 16) & 0xff) + 150u * ((m >> 8) & 0xff) + 29u * (m & 0xff)) >> 8;
+        const unsigned show = std::min(255u, 255u - (m >> 24) + gray);
+        dst[i] = (((((s >> 24) * show + 127) / 255) << 24) | ((((s >> 16) & 0xff) * show + 127) / 255) << 16 |
+                  ((((s >> 8) & 0xff) * show + 127) / 255) << 8 | ((s & 0xff) * show + 127) / 255);
+    }
+    return out;
+}
+
 // The modes QPainter lacks: the layer's tiles go over `target` pixel by pixel, inside `limit` (the target's pixel
 // (0, 0) is the document's `origin`). The painter on the target is not touched.
 void blendLayer(QImage &target, const QPoint &origin, const QRect &limit, const doc::Layer &layer,
@@ -57,7 +79,7 @@ void blendLayer(QImage &target, const QPoint &origin, const QRect &limit, const 
         const QRect r = QRect(corner, tileRect(c).size()) & limit & target.rect();
         if (r.isEmpty())
             continue;
-        const QImage pixels = tileImage(*tile);
+        const QImage pixels = layerTile(layer, c, *tile);
         for (int y = r.top(); y <= r.bottom(); ++y) {
             auto *dst = reinterpret_cast<doc::Pixel *>(target.scanLine(y)) + r.left();
             const auto *src = reinterpret_cast<const doc::Pixel *>(pixels.constScanLine(y - corner.y())) +
@@ -97,7 +119,7 @@ void drawLayer(QPainter &p, QImage &target, const QPoint &origin, const QRect &l
     }
     for (const doc::TileCoord &c : tiles)
         if (const doc::TilePtr tile = layer.image.tile(c))
-            p.drawImage(tileRect(c).topLeft(), tileImage(*tile));
+            p.drawImage(tileRect(c).topLeft(), layerTile(layer, c, *tile));
 }
 
 double lineWidth(const perspective::Grid &grid)

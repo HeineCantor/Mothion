@@ -309,6 +309,42 @@ private slots:
         QCOMPARE(renderer.image().pixelColor(5, 5), QColor(Qt::red));
     }
 
+    // A layer's mask: where it is white (or has no pixel) the layer shows, where it is black it does not, in the
+    // layer's blend mode too; a gray lets that much through.
+    void aLayerShowsThroughItsMask()
+    {
+        doc::Document document(64, 32);
+        doc::AddCelCommand cel(document, 0, {"C"});
+        cel.apply(document);
+        doc::NewDrawing d = doc::makeNewDrawing(document, cel.celId(), 0);
+        d.command->apply(document);
+        doc::Layer &layer = document.cel(cel.celId())->drawing(d.id)->layers.front();
+        for (int x = 0; x < 8; ++x)
+            layer.image.setPixel(x, 5, 0xff000000); // a black line over the white paper
+        layer.mask.emplace();
+        layer.mask->setPixel(2, 5, 0xff000000);  // black: hidden
+        layer.mask->setPixel(3, 5, 0xffffffff);  // white: shown
+        layer.mask->setPixel(4, 5, 0xff808080);  // gray: about half
+        canvas::FrameRenderer renderer;
+        renderer.renderAll(document, 0);
+        QCOMPARE(renderer.image().pixelColor(0, 5), QColor(Qt::black)); // no mask pixel here
+        QCOMPARE(renderer.image().pixelColor(1, 5), QColor(Qt::black));
+        QCOMPARE(renderer.image().pixelColor(2, 5), QColor(Qt::white)); // masked out: the paper
+        QCOMPARE(renderer.image().pixelColor(3, 5), QColor(Qt::black));
+        QVERIFY(qAbs(renderer.image().pixelColor(4, 5).red() - 127) <= 3);
+
+        // Through a software blend mode as well.
+        layer.properties.blend = doc::BlendMode::LinearBurn;
+        renderer.renderAll(document, 0);
+        QCOMPARE(renderer.image().pixelColor(2, 5), QColor(Qt::white));
+        QCOMPARE(renderer.image().pixelColor(3, 5), QColor(Qt::black));
+
+        // Taking the mask away shows the whole layer.
+        layer.mask.reset();
+        renderer.renderAll(document, 0);
+        QCOMPARE(renderer.image().pixelColor(2, 5), QColor(Qt::black));
+    }
+
     void modesQPainterLacksAreBlendedByHand()
     {
         doc::Document document(64, 32);

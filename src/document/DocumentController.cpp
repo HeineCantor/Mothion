@@ -725,6 +725,40 @@ bool DocumentController::drawingBlocked() const
     return cel && cel->timing().drawingAt(m_currentFrame) != doc::kNoId;
 }
 
+void DocumentController::setMaskEditing(doc::LayerId layer)
+{
+    if (layer == m_maskLayer)
+        return;
+    interruptStroke();
+    m_maskLayer = layer;
+    emit maskEditingChanged();
+}
+
+bool DocumentController::createLayerMask()
+{
+    const doc::DrawingId drawing = currentDrawingId();
+    auto step = doc::makeAddLayerMask(*m_document, m_currentCel, drawing, m_currentLayer);
+    if (!step)
+        return false;
+    execute(std::move(step));
+    setMaskEditing(m_currentLayer); // the mask is what is drawn on now
+    emit maskEditingChanged();
+    return true;
+}
+
+bool DocumentController::deleteLayerMask()
+{
+    const doc::DrawingId drawing = currentDrawingId();
+    auto step = doc::makeRemoveLayerMask(*m_document, m_currentCel, drawing, m_currentLayer);
+    if (!step)
+        return false;
+    execute(std::move(step));
+    if (m_maskLayer == m_currentLayer)
+        setMaskEditing(doc::kNoId);
+    emit maskEditingChanged();
+    return true;
+}
+
 void DocumentController::setSceneLength(int frames)
 {
     frames = std::max(1, frames);
@@ -1240,6 +1274,7 @@ QString DocumentController::commandName(doc::CommandKind kind)
     case doc::CommandKind::Tween: return tr("tween");
     case doc::CommandKind::EditCamera: return tr("camera");
     case doc::CommandKind::SceneLength: return tr("scene length");
+    case doc::CommandKind::ChangeMask: return tr("mask");
     case doc::CommandKind::ClearLayer: return tr("clear");
     case doc::CommandKind::Move: return tr("move");
     case doc::CommandKind::Select: return tr("selection");
@@ -1411,6 +1446,10 @@ std::optional<DocumentController::PaintTarget> DocumentController::beginPaint(bo
     if (layer->kind == doc::LayerKind::Perspective)
         return fail(tr("“%1” is a perspective layer: it can't be drawn on").arg(name));
     state.target = {m_currentCel, drawing, m_currentLayer, &layer->image};
+    if (layer->mask && m_maskLayer == layer->id) { // the mask is what is drawn on
+        state.target.image = &*layer->mask;
+        state.target.mask = true;
+    }
     state.selectionBefore = m_selection;
     m_paint = std::move(state);
     return m_paint->target;
@@ -1442,7 +1481,11 @@ std::vector<DocumentController::PaintTarget> DocumentController::beginPaintLayer
         if (!layer || !cel->properties().visible || cel->properties().locked || !layer->properties.visible
             || layer->properties.locked || layer->kind == doc::LayerKind::Perspective)
             continue;
-        const PaintTarget target{ref.cel, ref.drawing, ref.layer, &layer->image};
+        PaintTarget target{ref.cel, ref.drawing, ref.layer, &layer->image};
+        if (layer->mask && m_maskLayer == layer->id) {
+            target.image = &*layer->mask;
+            target.mask = true;
+        }
         if (ref.layer == m_currentLayer)
             targets.insert(targets.begin(), target);
         else
@@ -1492,7 +1535,7 @@ void DocumentController::endPaint(const std::vector<doc::TiledImage> &before, do
     targets.insert(targets.end(), state.others.begin(), state.others.end());
     for (std::size_t i = 0; i < targets.size() && i < before.size(); ++i)
         if (auto paint = doc::PaintCommand::capture(targets[i].cel, targets[i].drawing, targets[i].layer, before[i],
-                                                    *targets[i].image))
+                                                    *targets[i].image, targets[i].mask))
             steps.push_back(std::move(paint));
     if (!steps.empty()) {
         if (state.createdDrawing)

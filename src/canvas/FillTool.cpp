@@ -86,9 +86,8 @@ void FillTool::paintOverlay(QPainter &painter, const ViewTransform &view) const
     paintSelectionOutline(painter, view, open);
 }
 
-doc::Pixel FillTool::fillColor() const
+doc::Pixel FillTool::fillColor(const QColor &c) const
 {
-    const QColor c = m_state->color();
     const double opacity = m_state->settings(tools::ToolId::Fill).opacity;
     const int alpha = int(std::lround(255 * opacity));
     return doc::Pixel(alpha) << 24 | doc::Pixel(c.red() * alpha / 255) << 16 | doc::Pixel(c.green() * alpha / 255) << 8
@@ -121,7 +120,7 @@ void FillTool::fillLasso()
     }
     const doc::TiledImage before = *target->image;
     const QRect box = mask.bounds;
-    const doc::Pixel color = fillColor();
+    const doc::Pixel color = fillColor(target->tint(m_state->color()));
     std::vector<doc::Pixel> pixels(std::size_t(box.width()) * std::size_t(box.height()));
     target->image->read(box.x(), box.y(), box.width(), box.height(), pixels.data(), box.width());
     for (int y = 0; y < box.height(); ++y)
@@ -176,7 +175,7 @@ void FillTool::fillAround(const QPointF &docPos)
     }
 
     // The color behind what is there, inside the area (and the selection).
-    const doc::Pixel color = fillColor();
+    const doc::Pixel color = fillColor(target->tint(m_state->color()));
     const QRect box(QPoint(region.left, region.top), QPoint(region.right, region.bottom));
     std::vector<doc::Pixel> pixels(std::size_t(box.width()) * std::size_t(box.height()));
     target->image->read(box.x(), box.y(), box.width(), box.height(), pixels.data(), box.width());

@@ -867,6 +867,66 @@ private slots:
     }
 
 
+    // The mask buttons (next to the snap one): create a mask for the current layer, which then gets a thumbnail of its
+    // own and is what the pen draws on (in black and white); remove it.
+    void aLayerCanHaveAMask()
+    {
+        document::DocumentController controller;
+        ui::LayersPanel panel(&controller);
+        panel.resize(320, 600);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        QImage red(20, 20, QImage::Format_ARGB32);
+        red.fill(Qt::red);
+        controller.importImage(red, QStringLiteral("x"));
+        QCoreApplication::processEvents();
+        auto *tree = panel.findChild<QTreeWidget *>();
+        auto *add = panel.findChild<QToolButton *>(QStringLiteral("maskAdd"));
+        auto *remove = panel.findChild<QToolButton *>(QStringLiteral("maskDelete"));
+        QVERIFY(add && remove);
+        const doc::LayerId layer = controller.currentDrawing()->layers.front().id;
+        const doc::CelId cel = controller.currentCel();
+
+        // Only for a layer: with the cel's row chosen, neither is on.
+        tree->setCurrentItem(panel.celItem(cel));
+        QVERIFY(!add->isEnabled() && !remove->isEnabled());
+        tree->setCurrentItem(panel.layerItem(layer));
+        QVERIFY(add->isEnabled() && !remove->isEnabled());
+
+        QTest::mouseClick(add, Qt::LeftButton);
+        QCoreApplication::processEvents();
+        QVERIFY(controller.currentDrawing()->layers.front().mask.has_value());
+        QVERIFY(!add->isEnabled() && remove->isEnabled());
+        QCOMPARE(controller.maskEditingLayer(), layer); // drawn on now
+        QVERIFY(tree->itemWidget(panel.layerItem(layer), 0)->findChild<QLabel *>(QStringLiteral("maskThumbnail")));
+
+        // The pen paints the mask, in gray (black and white): the layer's pixels stay as they are.
+        const auto target = controller.beginPaint(true);
+        QVERIFY(target && target->mask);
+        QCOMPARE(target->tint(QColor(200, 40, 30)), QColor(qGray(QColor(200, 40, 30).rgb()), qGray(QColor(200, 40, 30).rgb()), qGray(QColor(200, 40, 30).rgb())));
+        const doc::TiledImage before = *target->image;
+        target->image->setPixel(3, 3, 0xff000000);
+        controller.endPaint(before);
+        QVERIFY(controller.currentDrawing()->layers.front().mask->pixel(3, 3) == 0xff000000);
+        QCOMPARE(controller.currentDrawing()->layers.front().image.pixel(3, 3), controller.currentDrawing()->layers.front().image.pixel(3, 3));
+
+        // Clicking the layer's own thumbnail goes back to drawing on the layer.
+        auto *layerThumb = tree->itemWidget(panel.layerItem(layer), 0)->findChild<QLabel *>(QStringLiteral("thumbnail"));
+        QTest::mouseClick(layerThumb, Qt::LeftButton);
+        QCOMPARE(controller.maskEditingLayer(), doc::kNoId);
+        const auto onLayer = controller.beginPaint(true);
+        QVERIFY(onLayer && !onLayer->mask);
+        controller.cancelPaint();
+
+        QTest::mouseClick(remove, Qt::LeftButton);
+        QCoreApplication::processEvents();
+        QVERIFY(!controller.currentDrawing()->layers.front().mask.has_value());
+        QVERIFY(add->isEnabled() && !remove->isEnabled());
+        controller.undo(); // the mask comes back
+        QVERIFY(controller.currentDrawing()->layers.front().mask.has_value());
+    }
+
+
     // Ctrl+click adds a layer to the selection, Shift+click a range; the
     // header and the buttons then act on all of them, as one undo step.
     void layersSelectWithCtrlAndShift()

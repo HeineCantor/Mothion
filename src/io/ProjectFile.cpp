@@ -59,6 +59,10 @@ const char *const kSchema[] = {
     "create table compositing (graph text not null)",
     // Format 8: the camera, as JSON.
     "create table camera (data text not null)",
+    // Format 9: the layers' masks: which layers have one, and its tiles (packed like the layers' own).
+    "create table masks (layer integer primary key references layers(id))",
+    "create table masktiles (layer integer not null references masks(layer), x integer not null,"
+    " y integer not null, pixels blob not null, primary key (layer, x, y))",
 };
 
 // Stored by name, so reordering the enum cannot change old files.
@@ -446,12 +450,14 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
         return false;
     }
 
-    QSqlQuery cel(db), drawing(db), layer(db), exposure(db), tile(db);
+    QSqlQuery cel(db), drawing(db), layer(db), exposure(db), tile(db), mask(db), maskTile(db);
     cel.prepare(QStringLiteral("insert into cels values (?, ?, ?, ?, ?, ?, ?)"));
     drawing.prepare(QStringLiteral("insert into drawings values (?, ?, ?)"));
     layer.prepare(QStringLiteral("insert into layers values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
     exposure.prepare(QStringLiteral("insert into exposures values (?, ?, ?, ?)"));
     tile.prepare(QStringLiteral("insert into tiles values (?, ?, ?, ?)"));
+    mask.prepare(QStringLiteral("insert into masks values (?)"));
+    maskTile.prepare(QStringLiteral("insert into masktiles values (?, ?, ?, ?)"));
     auto exec = [&](QSqlQuery &query, std::initializer_list<QVariant> values) {
         for (const QVariant &v : values)
             query.addBindValue(v);
@@ -494,6 +500,14 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
                 for (std::size_t n = 0; n < coords.size(); ++n)
                     if (tiles[n] && !exec(tile, {idValue(ly.id), coords[n].x, coords[n].y, packed[n]}))
                         return false;
+                if (ly.mask) { // its mask, the same way
+                    if (!exec(mask, {idValue(ly.id)}))
+                        return false;
+                    for (const doc::TileCoord &c : ly.mask->tileCoords())
+                        if (const doc::TilePtr t = ly.mask->tile(c);
+                            t && !exec(maskTile, {idValue(ly.id), c.x, c.y, packTile(*t)}))
+                            return false;
+                }
             }
         }
         for (const doc::Exposure &e : l.timing().exposures())
@@ -695,6 +709,33 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
     }
     if (!flush())
         return nullptr;
+
+    if (version >= 9) { // the masks
+        if (!q.exec(QStringLiteral("select layer from masks"))) {
+            failure = sqlError(q);
+            return nullptr;
+        }
+        while (q.next()) {
+            const auto it = layers.find(idFrom(q.value(0)));
+            if (it != layers.end() && it->second->kind == doc::LayerKind::Raster)
+                it->second->mask.emplace();
+        }
+        if (!q.exec(QStringLiteral("select layer, x, y, pixels from masktiles"))) {
+            failure = sqlError(q);
+            return nullptr;
+        }
+        while (q.next()) {
+            const auto it = layers.find(idFrom(q.value(0)));
+            if (it == layers.end() || !it->second->mask)
+                continue;
+            std::shared_ptr<doc::Tile> tile = unpackTile(q.value(3).toByteArray(), true);
+            if (!tile) {
+                failure = QObject::tr("The project's pixels are damaged.");
+                return nullptr;
+            }
+            it->second->mask->setTile({q.value(1).toInt(), q.value(2).toInt()}, std::move(tile));
+        }
+    }
 
     if (!q.exec(v1 ? QStringLiteral("select layer, start, length, drawing from exposures order by layer, start")
                    : QStringLiteral("select cel, start, length, drawing from exposures order by cel, start"))) {

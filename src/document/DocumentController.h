@@ -135,7 +135,15 @@ public:
     int sceneLength() const;
     // The frame after the last exposure of any cel: how short the scene can be without leaving some out.
     int usedFrames() const;
-    void setCameraVisible(bool visible);                   // an invisible camera is not applied
+    void setCameraVisible(bool visible);
+
+    // The layer's mask: painting tools work on it, not on the layer, while it is the one being edited (and the layer
+    // is the current one with a mask). kNoId: none, the layers' own pixels.
+    void setMaskEditing(doc::LayerId layer);
+    doc::LayerId maskEditingLayer() const { return m_maskLayer; }
+    // A mask for the current layer (everything shows), made the one edited; or take it away. Each one undo step.
+    bool createLayerMask();
+    bool deleteLayerMask();                   // an invisible camera is not applied
     void setCameraKey(int frame, const doc::CameraPose &pose); // a key at `frame` (a camera is made if there is none)
     bool removeCameraKey(int frame);
     bool moveCameraKey(int from, int to);
@@ -221,7 +229,16 @@ public:
         doc::CelId cel = doc::kNoId;
         doc::DrawingId drawing = doc::kNoId;
         doc::LayerId layer = doc::kNoId;
-        doc::TiledImage *image = nullptr;
+        doc::TiledImage *image = nullptr; // the layer's pixels, or its mask's when `mask`
+        bool mask = false;
+        // What a painting tool puts on this target: on a mask, the color's gray (a mask is black and white).
+        QColor tint(const QColor &color) const
+        {
+            if (!mask)
+                return color;
+            const int gray = qGray(color.rgb());
+            return QColor(gray, gray, gray, color.alpha());
+        }
     };
     // Resolves the current layer. On an empty frame a new drawing (with one
     // layer) is created if `createIfEmpty` (it becomes part of the stroke's
@@ -330,6 +347,8 @@ signals:
     void layerChosenByDrawing();
     // Whether the selection is a layer changed (see layerChosen()).
     void layerChosenChanged();
+    // Which layer's mask is being edited changed (see setMaskEditing()), or a mask was made or taken away.
+    void maskEditingChanged();
     // Undo/redo availability or labels changed.
     void historyChanged();
     void selectionChanged();
@@ -376,6 +395,7 @@ private:
         QPainterPath selectionBefore;
     };
     std::optional<PaintState> m_paint;
+    doc::LayerId m_maskLayer = doc::kNoId;
 };
 
 } // namespace mothion::document

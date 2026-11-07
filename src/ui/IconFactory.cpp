@@ -422,6 +422,23 @@ void drawGlyph(QPainter &p, IconId id)
         path.lineTo(20.5, 16.5);
         path.lineTo(15.5, 13.5);
         break;
+    case IconId::MaskAdd: // a square with a hole in it, and a plus
+    case IconId::MaskDelete: { // the same, and a cross
+        path.addRect(QRectF(3.5, 3.5, 13, 13));
+        path.addEllipse(QPointF(10, 10), 3.5, 3.5);
+        if (id == IconId::MaskAdd) {
+            path.moveTo(18.5, 14);
+            path.lineTo(18.5, 22);
+            path.moveTo(14.5, 18);
+            path.lineTo(22.5, 18);
+        } else {
+            path.moveTo(15, 14.5);
+            path.lineTo(22, 21.5);
+            path.moveTo(22, 14.5);
+            path.lineTo(15, 21.5);
+        }
+        break;
+    }
     case IconId::Frame: // a frame of film: the picture between sprocket holes
         path.addRect(QRectF(4.5, 3.5, 15, 17));
         path.addRect(QRectF(8, 7, 8, 10));
