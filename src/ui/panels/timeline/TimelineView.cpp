@@ -6,6 +6,7 @@
 #include "document/DocumentController.h"
 #include "ui/IconFactory.h"
 #include "ui/Shortcuts.h"
+#include "ui/Theme.h"
 
 #include <QActionGroup>
 #include <QApplication>
@@ -32,6 +33,22 @@ namespace {
 
 const QColor kCursorColor(0xe0, 0x4a, 0x4a);
 const QColor kSecondLine(0x60, 0x60, 0x68);
+
+bool lightPalette(const QPalette &p) { return p.color(QPalette::Base).lightness() >= 128; }
+
+// What a selected row is filled with over `under`: on a light theme the transparent grey, on a dark one the highlight
+// made deep (`darker`), with the highlighted text over it. `selectedText` is for the text and glyphs on it.
+QColor selectedFill(const QPalette &p, const QColor &under, int darker)
+{
+    if (!lightPalette(p))
+        return p.highlight().color().darker(darker);
+    const QColor grey = ui::lightSelectionColor();
+    const double a = grey.alphaF();
+    return QColor::fromRgbF(grey.redF() * a + under.redF() * (1 - a), grey.greenF() * a + under.greenF() * (1 - a),
+                            grey.blueF() * a + under.blueF() * (1 - a));
+}
+
+bool selectedIsDeep(const QPalette &p) { return !lightPalette(p); } // light text on it
 constexpr int kEdgeGrab = 4;          // pixels around a block's right edge that start a resize
 constexpr int kExtraFrames = 24;      // shown past the last exposure, room to keep animating
 
@@ -289,8 +306,8 @@ void TimelineView::paintCells(QPainter &p) const
     // Row backgrounds; the current cel's row is highlighted.
     for (int row = 0; row < rowCount(); ++row) {
         const bool current = d.celAt(celIndexForRow(row)).id() == m_document->currentCel();
-        const QColor bg = current ? palette().highlight().color().darker(260)
-                                  : (row % 2 ? palette().alternateBase().color() : palette().base().color());
+        const QColor plain = row % 2 ? palette().alternateBase().color() : palette().base().color();
+        const QColor bg = current ? selectedFill(palette(), plain, 260) : plain;
         p.fillRect(QRect(m.headerWidth, m.rowY(row), endX - m.headerWidth, m.rowHeight), bg);
     }
     if (hasAudio()) // the audio row, under the cels
@@ -397,7 +414,7 @@ void TimelineView::paintCamera(QPainter &p) const
     const int top = cameraTop();
     const bool selected = m_document->cameraSelected();
     const QRect row(m.headerWidth, top, viewport()->width() - m.headerWidth, m.rowHeight);
-    p.fillRect(row, selected ? palette().highlight().color().darker(260) : palette().base().color());
+    p.fillRect(row, selected ? selectedFill(palette(), palette().base().color(), 260) : palette().base().color());
     p.setPen(palette().mid().color());
     p.drawLine(row.left(), row.bottom(), row.right(), row.bottom());
 
@@ -438,11 +455,12 @@ void TimelineView::paintCameraHeader(QPainter &p) const
     const bool selected = m_document->cameraSelected();
     const QRect r(0, cameraTop(), m.headerWidth - 1, m.rowHeight);
     if (selected)
-        p.fillRect(r, palette().highlight().color().darker(200));
-    const QColor ink = selected ? palette().highlightedText().color() : palette().text().color();
-    const IconTone tone = selected ? IconTone::Selected : IconTone::Plain;
+        p.fillRect(r, selectedFill(palette(), palette().window().color(), 200));
+    const bool deep = selected && selectedIsDeep(palette()); // light text and glyphs on a deep fill
+    const QColor ink = deep ? palette().highlightedText().color() : palette().text().color();
+    const IconTone tone = deep ? IconTone::Selected : IconTone::Plain;
     p.fillRect(QRect(r.left() + 4, r.top() + 6, 4, r.height() - 12), QColor(235, 55, 55));
-    p.setPen(selected ? palette().highlightedText().color() : palette().placeholderText().color());
+    p.setPen(deep ? palette().highlightedText().color() : palette().placeholderText().color());
     p.drawRect(cameraEyeRect().adjusted(0, 0, -1, -1));
     if (camera->visible)
         icon(IconId::Eye, tone).paint(&p, cameraEyeRect().adjusted(1, 1, -1, -1));
@@ -739,13 +757,14 @@ void TimelineView::paintHeaders(QPainter &p) const
         const QRect r(0, m.rowY(row), m.headerWidth - 1, m.rowHeight);
         const bool current = cel.id() == m_document->currentCel();
         if (current)
-            p.fillRect(r, palette().highlight().color().darker(200));
+            p.fillRect(r, selectedFill(palette(), palette().window().color(), 200));
         // On the dark highlight of the current cel the text and glyphs are the highlighted text's color.
-        const QColor ink = current ? palette().highlightedText().color() : palette().text().color();
-        const IconTone tone = current ? IconTone::Selected : IconTone::Plain;
+        const bool deep = current && selectedIsDeep(palette());
+        const QColor ink = deep ? palette().highlightedText().color() : palette().text().color();
+        const IconTone tone = deep ? IconTone::Selected : IconTone::Plain;
         p.fillRect(QRect(r.left() + 4, r.top() + 6, 4, r.height() - 12), colorForCel(celIndex));
         // The toggles: the icon when on, an empty slot when off.
-        p.setPen(current ? palette().highlightedText().color() : palette().placeholderText().color());
+        p.setPen(deep ? palette().highlightedText().color() : palette().placeholderText().color());
         for (const QRect &slot : {eyeRect(row), lockRect(row)})
             p.drawRect(slot.adjusted(0, 0, -1, -1));
         if (cel.properties().visible)

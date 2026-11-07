@@ -10,6 +10,7 @@
 #include "tools/ToolState.h"
 #include "ui/IconFactory.h"
 #include "ui/Shortcuts.h"
+#include "ui/Theme.h"
 #include "ui/panels/BlendModes.h"
 #include "ui/panels/timeline/TimelineView.h"
 
@@ -727,7 +728,7 @@ void LayersPanel::paintRowColors()
     const bool light = app.color(QPalette::Base).lightness() >= 128;
     QPalette treePalette; // only what is set here is the tree's own; the rest follows the theme
     if (light)
-        treePalette.setColor(QPalette::Highlight, QColor(0x70, 0x78, 0x82, 115));
+        treePalette.setColor(QPalette::Highlight, lightSelectionColor());
     m_tree->setPalette(treePalette);
     std::function<void(QTreeWidgetItem *)> paint = [&](QTreeWidgetItem *item) {
         if (kindOf(item) == Row::Cel) // the cel's color follows the theme, pale on a light one
