@@ -757,6 +757,33 @@ private slots:
     }
 
 
+    // A cel's row in the Layers panel has the color its blocks have in the timeline.
+    void celRowsHaveTheirTimelineColor()
+    {
+        document::DocumentController controller;
+        ui::LayersPanel panel(&controller);
+        panel.resize(320, 800);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        auto *tree = panel.findChild<QTreeWidget *>();
+        QImage red(20, 20, QImage::Format_ARGB32);
+        red.fill(Qt::red);
+        controller.importImage(red, QStringLiteral("x"));
+        const doc::LayerId layer = controller.currentDrawing()->layers.front().id;
+        controller.addCel();
+        QCoreApplication::processEvents();
+        tree->setCurrentItem(panel.layerItem(layer)); // not a cel row
+        const doc::Document &d = controller.document();
+        QVERIFY(d.celCount() >= 2);
+        for (int i = 0; i < d.celCount(); ++i) {
+            QTreeWidgetItem *item = panel.celItem(d.celAt(i).id());
+            QVERIFY(item);
+            QVERIFY(!item->isSelected());
+            QCOMPARE(item->background(0).color(), ui::TimelineView::colorForCel(i).darker(170));
+        }
+    }
+
+
     // Ctrl+click adds a layer to the selection, Shift+click a range; the
     // header and the buttons then act on all of them, as one undo step.
     void layersSelectWithCtrlAndShift()

@@ -11,6 +11,7 @@
 #include "ui/IconFactory.h"
 #include "ui/Shortcuts.h"
 #include "ui/panels/BlendModes.h"
+#include "ui/panels/timeline/TimelineView.h"
 
 #include <QComboBox>
 #include <QDrag>
@@ -617,7 +618,13 @@ void LayersPanel::rebuildTree()
                 [toggleCel](bool visible) { toggleCel([visible](doc::CelProperties &p) { p.visible = visible; }); });
         connect(lock, &QToolButton::clicked, this,
                 [toggleCel](bool locked) { toggleCel([locked](doc::CelProperties &p) { p.locked = locked; }); });
+        // The cel's own color, the one of its blocks in the timeline (selected rows keep the selection's color).
+        const QColor celFill = TimelineView::colorForCel(i).darker(170);
+        QPalette celInk = row->palette();
+        celInk.setColor(QPalette::WindowText, celFill.lightness() < 150 ? QColor(0xf2, 0xf2, 0xf5) : QColor(0x1e, 0x1e, 0x22));
+        row->setPalette(celInk);
         QTreeWidgetItem *celRow = addRow(nullptr, Row::Cel, celId, doc::kNoId, doc::kNoId, row);
+        celRow->setBackground(0, celFill);
 
         // Its frames, in the order the timeline first shows them (the ones
         // not shown anywhere last).

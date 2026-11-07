@@ -50,6 +50,9 @@ class TimelineView : public QAbstractScrollArea
     Q_OBJECT
 
 public:
+    // The color of a cel's blocks in the timeline (the Layers panel colors the cel's row with it too).
+    static QColor colorForCel(int celIndex);
+
     explicit TimelineView(document::DocumentController *document, QWidget *parent = nullptr);
 
     int frameWidth() const { return m_metrics.frameWidth; }
@@ -164,8 +167,6 @@ private:
     // Decodes the track's sound when it is a new one (for the waveform and its length), or forgets it.
     void syncAudio();
     void showAudioMenu(const QPoint &globalPos);
-    static QColor colorForCel(int celIndex);
-
     document::DocumentController *m_document;
     TimelineMetrics m_metrics;
     bool m_scrubbing = false;
