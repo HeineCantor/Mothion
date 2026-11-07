@@ -82,6 +82,10 @@ struct EvalContext
     QRgb paper = 0xffffffff; // the color of the page (ARGB): what some nodes leave alone
 };
 
+// The families nodes are grouped in, in the order the "Add node" menu lists them.
+enum class NodeCategory { InputOutput, Color, Filter, Effect, Transform, Composite };
+inline constexpr int kNodeCategoryCount = 6;
+
 inline QString nodeTr(const char *text) { return QCoreApplication::translate("Compositing", text); }
 
 // One kind of node: what it is called, which sockets and settings it has, and what it does to the images
@@ -94,6 +98,7 @@ public:
 
     virtual QString id() const = 0; // stored in project files: never change it
     virtual QString title() const = 0;
+    virtual NodeCategory category() const = 0;
     virtual QColor tint() const = 0;
     virtual QStringList inputs() const { return {}; }  // names of the input sockets
     virtual QStringList outputs() const { return {}; } // names of the output sockets
@@ -121,6 +126,9 @@ public:
 
 // Where a type finds the node's `data` (Node::data) among the settings it is handed. Only there when it is not empty.
 inline const QString kDataKey = QStringLiteral("data");
+
+// What a category is called in the menu.
+QString categoryTitle(NodeCategory category);
 
 // Every kind of node there is. To add one: write a NodeType and list it in NodeType.cpp.
 class NodeRegistry

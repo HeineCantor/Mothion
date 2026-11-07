@@ -2,6 +2,7 @@
 #include "compositing/Graph.h"
 #include "compositing/MaskData.h"
 #include "compositing/NodeType.h"
+#include "core/document/Drawing.h"
 
 #include <QtTest>
 
@@ -337,6 +338,128 @@ private slots:
         QCOMPARE(evaluator.processedCount(), 0);
         QCOMPARE(evaluator.evaluate(g, context).pixelColor(20, 20).alpha(), 0); // and the result was not forgotten
         QCOMPARE(evaluator.processedCount(), 0);
+    }
+
+    // The nodes are grouped in families: each one is in one, every family has a node, and the menu has the names.
+    void everyNodeIsInACategory()
+    {
+        const auto &registry = NodeRegistry::instance();
+        QVERIFY(registry.find(QStringLiteral("frame"))->category() == NodeCategory::InputOutput);
+        QVERIFY(registry.find(QStringLiteral("colorcorrect"))->category() == NodeCategory::Color);
+        QVERIFY(registry.find(QStringLiteral("transform"))->category() == NodeCategory::Transform);
+        QVERIFY(registry.find(QStringLiteral("merge"))->category() == NodeCategory::Composite);
+        for (int c = 0; c < kNodeCategoryCount; ++c) {
+            bool any = false;
+            for (const auto &type : registry.all())
+                any = any || int(type->category()) == c;
+            QVERIFY2(any, "a category with no node");
+            QVERIFY(!categoryTitle(NodeCategory(c)).isEmpty());
+        }
+    }
+
+    // Merge blends the front over the back in the layers' blend modes (QPainter's and the ones done by hand), and
+    // the opacity of the front goes with it.
+    void mergeBlendsInTheLayersModes()
+    {
+        auto merge = [](int mode, int opacity, QColor backColor, QColor frontColor) {
+            Graph g;
+            const NodeId back = g.addNode(QStringLiteral("color"));
+            const NodeId front = g.addNode(QStringLiteral("color"));
+            const NodeId node = g.addNode(QStringLiteral("merge"));
+            const NodeId out = g.addNode(QStringLiteral("output"));
+            g.setParam(back, QStringLiteral("color"), backColor);
+            g.setParam(front, QStringLiteral("color"), frontColor);
+            g.setParam(node, QStringLiteral("mode"), mode);
+            g.setParam(node, QStringLiteral("opacity"), opacity);
+            g.connect(back, 0, node, 0);
+            g.connect(front, 0, node, 1);
+            g.connect(node, 0, out, 0);
+            Evaluator evaluator;
+            EvalContext context;
+            context.frame = QImage(8, 8, QImage::Format_ARGB32_Premultiplied);
+            context.frame.fill(Qt::white);
+            return evaluator.evaluate(g, context).pixelColor(4, 4);
+        };
+        const QColor gray(128, 128, 128), white(255, 255, 255);
+        QVERIFY(qAbs(merge(0, 100, gray, QColor(200, 0, 0)).red() - 200) <= 1); // Normal
+        QVERIFY(qAbs(merge(1, 100, gray, gray).red() - 64) <= 2);      // Multiply: 0.5 * 0.5
+        QVERIFY(qAbs(merge(1, 50, white, gray).red() - 191) <= 2);     // at half opacity: halfway to the product
+        QVERIFY(qAbs(merge(int(mothion::doc::BlendMode::Difference), 100, white, gray).red() - 127) <= 2);
+        // One done by hand: Linear Burn is back + front - 1.
+        QVERIFY(qAbs(merge(int(mothion::doc::BlendMode::LinearBurn), 100, QColor(204, 204, 204), QColor(153, 153, 153)).red() - 102) <= 2);
+        // The modes are in the node's menu by their number.
+        const auto params = NodeRegistry::instance().find(QStringLiteral("merge"))->params();
+        QCOMPARE(params.first().choices.size(), int(mothion::doc::BlendMode::AddGlow) + 1);
+    }
+
+    void colorCorrectChangesBrightnessContrastGammaHueAndSaturation()
+    {
+        const QString type = QStringLiteral("colorcorrect");
+        QImage gray(10, 10, QImage::Format_ARGB32_Premultiplied);
+        gray.fill(QColor(100, 100, 100));
+        QCOMPARE(runNode(type, gray, {}), gray); // all at zero: as it came
+        QVERIFY(runNode(type, gray, {{"brightness", 30}}).pixelColor(3, 3).red() > 150);
+        QVERIFY(runNode(type, gray, {{"brightness", -30}}).pixelColor(3, 3).red() < 50);
+        QVERIFY(runNode(type, gray, {{"gamma", 200}}).pixelColor(3, 3).red() > 100); // gamma over 1 lightens
+        // Contrast pushes away from the middle gray: darker grays darker, lighter ones lighter.
+        QImage lighter(10, 10, QImage::Format_ARGB32_Premultiplied);
+        lighter.fill(QColor(180, 180, 180));
+        QVERIFY(runNode(type, gray, {{"contrast", 50}}).pixelColor(3, 3).red() < 100);
+        QVERIFY(runNode(type, lighter, {{"contrast", 50}}).pixelColor(3, 3).red() > 180);
+        // Saturation -100 takes the colors out (all channels the same); hue 180 turns red towards cyan.
+        QImage red(10, 10, QImage::Format_ARGB32_Premultiplied);
+        red.fill(QColor(220, 40, 40));
+        const QColor flat = runNode(type, red, {{"saturation", -100}}).pixelColor(3, 3);
+        QVERIFY(qAbs(flat.red() - flat.green()) <= 2 && qAbs(flat.green() - flat.blue()) <= 2);
+        const QColor turned = runNode(type, red, {{"hue", 180}}).pixelColor(3, 3);
+        QVERIFY(turned.red() < turned.blue() && turned.red() < turned.green());
+        // The alpha is left alone, and a see-through pixel stays see-through.
+        QImage half(10, 10, QImage::Format_ARGB32_Premultiplied);
+        half.fill(QColor(200, 200, 200, 128));
+        QCOMPARE(runNode(type, half, {{"brightness", 20}}).pixelColor(3, 3).alpha(), 128);
+        QImage clear(10, 10, QImage::Format_ARGB32_Premultiplied);
+        clear.fill(Qt::transparent);
+        QCOMPARE(runNode(type, clear, {{"brightness", 50}}).pixelColor(3, 3).alpha(), 0);
+    }
+
+    void transformMovesScalesAndTurnsAroundTheCenter()
+    {
+        const QString type = QStringLiteral("transform");
+        QImage dot(41, 41, QImage::Format_ARGB32_Premultiplied);
+        dot.fill(Qt::transparent);
+        for (int y = 14; y < 17; ++y)   // a 3x3 dot, up and to the left of the center
+            for (int x = 9; x < 12; ++x)
+                dot.setPixelColor(x, y, Qt::black);
+        QCOMPARE(runNode(type, dot, {}), dot); // nothing set: as it came
+        const QImage moved = runNode(type, dot, {{"x", 10}, {"y", 5}});
+        QCOMPARE(moved.pixelColor(20, 20), QColor(Qt::black));
+        QCOMPARE(moved.pixelColor(10, 15).alpha(), 0); // where it was
+        // Turned half a turn around the center (20, 20): to the other side of it.
+        const QImage turned = runNode(type, dot, {{"rotation", 180}});
+        QVERIFY(turned.pixelColor(30, 25).alpha() > 200);
+        QCOMPARE(turned.pixelColor(10, 15).alpha(), 0);
+        // Twice as big: the dot's distance from the center doubles, and so does its size.
+        const QImage big = runNode(type, dot, {{"scale", 200}});
+        QVERIFY(big.pixelColor(0, 10).alpha() > 200); // the dot's center was 10 left and 5 up of the center
+        QVERIFY(big.pixelColor(10, 15).alpha() == 0);
+    }
+
+    void opacityScalesTheAlphaOrTurnsItOver()
+    {
+        const QString type = QStringLiteral("opacity");
+        QImage red(10, 10, QImage::Format_ARGB32_Premultiplied);
+        red.fill(QColor(255, 0, 0));
+        QCOMPARE(runNode(type, red, {}), red);
+        const QColor half = runNode(type, red, {{"opacity", 50}}).pixelColor(3, 3);
+        QVERIFY(qAbs(half.alpha() - 128) <= 2);
+        QCOMPARE(runNode(type, red, {{"opacity", 0}}).pixelColor(3, 3).alpha(), 0);
+        // Inverted, an opaque pixel goes away and a see-through one is there (black).
+        QImage mixed(10, 10, QImage::Format_ARGB32_Premultiplied);
+        mixed.fill(Qt::transparent);
+        mixed.setPixelColor(2, 2, Qt::red);
+        const QImage inverted = runNode(type, mixed, {{"invert", 1}});
+        QCOMPARE(inverted.pixelColor(2, 2).alpha(), 0);
+        QCOMPARE(inverted.pixelColor(5, 5), QColor(Qt::black));
     }
 
     void mergeWithAMaskShowsTheFrontOnlyThere()

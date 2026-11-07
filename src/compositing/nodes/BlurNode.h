@@ -10,6 +10,7 @@ class BlurNode : public NodeType
 public:
     QString id() const override { return QStringLiteral("blur"); }
     QString title() const override { return nodeTr("Blur"); }
+    NodeCategory category() const override { return NodeCategory::Filter; }
     QColor tint() const override { return {150, 90, 60}; }
     QStringList inputs() const override { return {nodeTr("Image")}; }
     QStringList outputs() const override { return {nodeTr("Image")}; }

@@ -10,6 +10,7 @@ class ColorNode : public NodeType
 public:
     QString id() const override { return QStringLiteral("color"); }
     QString title() const override { return nodeTr("Color"); }
+    NodeCategory category() const override { return NodeCategory::Color; }
     QColor tint() const override { return {140, 80, 140}; }
     QStringList outputs() const override { return {nodeTr("Image")}; }
     QList<ParamInfo> params() const override

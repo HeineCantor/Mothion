@@ -14,6 +14,7 @@ class GlowNode : public NodeType
 public:
     QString id() const override { return QStringLiteral("glow"); }
     QString title() const override { return nodeTr("Glow"); }
+    NodeCategory category() const override { return NodeCategory::Effect; }
     QColor tint() const override { return {190, 160, 70}; }
     QStringList inputs() const override { return {nodeTr("Image")}; }
     QStringList outputs() const override { return {nodeTr("Image")}; }

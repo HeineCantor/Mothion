@@ -10,6 +10,7 @@ class FrameNode : public NodeType
 public:
     QString id() const override { return QStringLiteral("frame"); }
     QString title() const override { return nodeTr("Frame"); }
+    NodeCategory category() const override { return NodeCategory::InputOutput; }
     QColor tint() const override { return {70, 110, 170}; }
     QStringList outputs() const override { return {nodeTr("Image")}; }
     bool dependsOnFrame() const override { return true; }

@@ -88,6 +88,7 @@ qt_add_library(mothion_gui STATIC
     canvas/DabStamper.h canvas/DabStamper.cpp
     canvas/TileQt.h canvas/TileQt.cpp
     canvas/StrokeSession.h canvas/StrokeSession.cpp
+    canvas/BlendDraw.h canvas/BlendDraw.cpp
     canvas/FrameRenderer.h canvas/FrameRenderer.cpp
     canvas/PerspectiveGizmo.h canvas/PerspectiveGizmo.cpp
     canvas/CameraGizmo.h canvas/CameraGizmo.cpp
@@ -131,6 +132,9 @@ qt_add_library(mothion_gui STATIC
     compositing/nodes/SensorNoiseNode.h compositing/nodes/SensorNoiseNode.cpp
     compositing/nodes/GlowNode.h compositing/nodes/GlowNode.cpp
     compositing/nodes/MaskNode.h compositing/nodes/MaskNode.cpp
+    compositing/nodes/ColorCorrectNode.h compositing/nodes/ColorCorrectNode.cpp
+    compositing/nodes/TransformNode.h compositing/nodes/TransformNode.cpp
+    compositing/nodes/OpacityNode.h compositing/nodes/OpacityNode.cpp
     compositing/MaskData.h compositing/MaskData.cpp
     ui/compositing/NodeGraphView.h ui/compositing/NodeGraphView.cpp
     ui/compositing/CompositingWindow.h ui/compositing/CompositingWindow.cpp

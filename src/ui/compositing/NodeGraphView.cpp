@@ -770,8 +770,18 @@ void NodeGraphView::contextMenuEvent(QContextMenuEvent *event)
         menu.addAction(tr("Delete wire"), this, [this, to, port] { m_graph.disconnect(to, port); });
     } else {
         menu.addSection(tr("Add node"));
-        for (const auto &type : compositing::NodeRegistry::instance().all())
-            menu.addAction(type->title())->setData(type->id());
+        // By family, each with its own submenu (the families that have no node are not listed).
+        for (int c = 0; c < compositing::kNodeCategoryCount; ++c) {
+            const auto category = compositing::NodeCategory(c);
+            QMenu *submenu = nullptr;
+            for (const auto &type : compositing::NodeRegistry::instance().all()) {
+                if (type->category() != category)
+                    continue;
+                if (!submenu)
+                    submenu = menu.addMenu(compositing::categoryTitle(category));
+                submenu->addAction(type->title())->setData(type->id());
+            }
+        }
     }
     if (QAction *chosen = menu.exec(event->globalPos()); chosen && chosen->data().isValid())
         if (NodeItem *node = item(addNode(chosen->data().toString(), scenePos)))
