@@ -342,10 +342,7 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     // Header edits: of the current cel, or of the selected layers.
     connect(m_blend, &QComboBox::activated, this, [this](int index) {
         const doc::BlendMode blend = kBlendModes[std::size_t(index)];
-        if (m_focus == Focus::Cel)
-            editCurrentCel([blend](doc::CelProperties &p) { p.blend = blend; });
-        else
-            editSelectedLayers([blend](doc::LayerProperties &p) { p.blend = blend; });
+        editSelectedLayers([blend](doc::LayerProperties &p) { p.blend = blend; });
     });
     // Opacity: while the slider is dragged the canvas follows it (a preview, nothing recorded);
     // on release the change is executed once, so a drag is a single undo step.
@@ -965,40 +962,16 @@ void LayersPanel::editSelectedLayers(Edit edit)
             std::make_unique<doc::GroupCommand>(doc::CommandKind::ChangeLayerProperties, std::move(steps)));
 }
 
-template<typename Edit>
-void LayersPanel::editCurrentCel(Edit edit)
-{
-    const doc::Cel *cel = m_document->document().cel(m_document->currentCel());
-    if (!cel)
-        return;
-    doc::CelProperties props = cel->properties();
-    edit(props);
-    m_document->execute(doc::makeSetCelProperties(m_document->document(), cel->id(), props));
-}
-
 void LayersPanel::previewOpacity(int percent)
 {
     const float opacity = float(percent) / 100.0f;
     if (!m_opacityPreview) { // the drag begins: what it will go back to
         OpacityPreview start;
-        if (m_focus == Focus::Cel) {
-            const doc::Cel *cel = m_document->document().cel(m_document->currentCel());
-            if (!cel)
-                return;
-            start.cel = true;
-            start.celId = cel->id();
-            start.celBefore = cel->properties();
-        } else if (const doc::Drawing *drawing = m_document->currentDrawing()) {
+        if (const doc::Drawing *drawing = m_document->currentDrawing()) {
             for (doc::LayerId id : selectedLayers())
                 start.layersBefore.emplace_back(id, drawing->layer(id)->properties);
         }
         m_opacityPreview = std::move(start);
-    }
-    if (m_opacityPreview->cel) {
-        doc::CelProperties shown = m_opacityPreview->celBefore;
-        shown.opacity = opacity;
-        m_document->previewCelProperties(m_opacityPreview->celId, shown);
-        return;
     }
     const doc::Drawing *drawing = m_document->currentDrawing();
     if (!drawing)
@@ -1015,9 +988,7 @@ void LayersPanel::endOpacityPreview()
     if (m_opacityPreview) { // back to the start, so the command records the whole change
         const OpacityPreview start = std::move(*m_opacityPreview);
         m_opacityPreview.reset();
-        if (start.cel) {
-            m_document->previewCelProperties(start.celId, start.celBefore);
-        } else if (const doc::Drawing *drawing = m_document->currentDrawing()) {
+        if (const doc::Drawing *drawing = m_document->currentDrawing()) {
             for (const auto &[id, before] : start.layersBefore)
                 m_document->previewLayerProperties({m_document->currentCel(), drawing->id, id}, before);
         }
@@ -1028,10 +999,7 @@ void LayersPanel::endOpacityPreview()
 void LayersPanel::commitOpacity()
 {
     const float opacity = float(m_opacity->value()) / 100.0f;
-    if (m_focus == Focus::Cel)
-        editCurrentCel([opacity](doc::CelProperties &p) { p.opacity = opacity; });
-    else
-        editSelectedLayers([opacity](doc::LayerProperties &p) { p.opacity = opacity; });
+    editSelectedLayers([opacity](doc::LayerProperties &p) { p.opacity = opacity; });
 }
 
 void LayersPanel::addClicked(doc::LayerKind kind)
@@ -1461,7 +1429,7 @@ void LayersPanel::syncHeader()
     switch (m_focus) {
     case Focus::Cel: {
         const int index = cel ? d.indexOf(cel->id()) : -1;
-        header = canAdd = cel != nullptr;
+        canAdd = cel != nullptr; // its blend mode and opacity are the timeline's to change
         canRemove = cel && d.celCount() > 1; // keep at least one cel
         canUp = cel && index + 1 < d.celCount();
         canDown = cel && index > 0;
@@ -1535,7 +1503,7 @@ void LayersPanel::syncHeader()
         m_snapTo->setEnabled(snappable);
         m_snapTo->setChecked(snappable && isSnapReference(layer->id));
     }
-    if (!header)
+    if (!header && m_focus != Focus::Cel)
         return;
 
     const QSignalBlocker b1(m_blend), b2(m_opacity), b3(m_opacityValue);

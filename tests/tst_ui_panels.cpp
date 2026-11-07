@@ -725,12 +725,14 @@ private slots:
         QCOMPARE(controller.currentLayer(), controller.currentDrawing()->layers.back().id);
         QCOMPARE(panel.focus(), ui::LayersPanel::Focus::Layer);
 
-        // The cel's row: the header and the buttons act on the cel.
+        // The cel's row: the buttons act on the cel; its blend mode and opacity are the timeline's, here they are
+        // shown but cannot be changed.
         tree->setCurrentItem(panel.celItem(cel));
         QCOMPARE(panel.focus(), ui::LayersPanel::Focus::Cel);
-        panel.findChild<QSpinBox *>()->setValue(30);
-        QCOMPARE(d.cel(cel)->properties().opacity, 0.3f);
-        QCOMPARE(controller.currentDrawing()->layers[0].properties.opacity, 1.0f);
+        QVERIFY(!panel.findChild<QSpinBox *>()->isEnabled());
+        QVERIFY(!panel.findChild<QComboBox *>()->isEnabled());
+        QVERIFY(!panel.findChild<QSlider *>()->isEnabled());
+        QCOMPARE(d.cel(cel)->properties().opacity, 1.0f);
         button(QStringLiteral("New cel"))->click();
         QCoreApplication::processEvents();
         QCOMPARE(d.celCount(), 2);

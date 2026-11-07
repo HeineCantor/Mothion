@@ -145,8 +145,6 @@ private:
 
     template<typename Edit>
     void editSelectedLayers(Edit edit); // runs `edit` on copies of the properties, then executes
-    template<typename Edit>
-    void editCurrentCel(Edit edit);
 
     document::DocumentController *m_document;
     QComboBox *m_blend;
@@ -170,9 +168,6 @@ private:
     Focus m_focus = Focus::Layer;
     struct OpacityPreview
     {
-        bool cel = false;
-        doc::CelId celId = doc::kNoId;
-        doc::CelProperties celBefore;
         std::vector<std::pair<doc::LayerId, doc::LayerProperties>> layersBefore;
     };
     std::optional<OpacityPreview> m_opacityPreview; // while the slider is dragged
