@@ -4,6 +4,9 @@
 #include "compositing/nodes/ChromaticAberrationNode.h"
 #include "compositing/nodes/ColorCorrectNode.h"
 #include "compositing/nodes/ColorNode.h"
+#include "compositing/nodes/DirectionalBlurNode.h"
+#include "compositing/nodes/DropShadowNode.h"
+#include "compositing/nodes/LevelsNode.h"
 #include "compositing/nodes/FrameNode.h"
 #include "compositing/nodes/GlowNode.h"
 #include "compositing/nodes/MaskNode.h"
@@ -11,7 +14,9 @@
 #include "compositing/nodes/OpacityNode.h"
 #include "compositing/nodes/OutputNode.h"
 #include "compositing/nodes/SensorNoiseNode.h"
+#include "compositing/nodes/SharpenNode.h"
 #include "compositing/nodes/TransformNode.h"
+#include "compositing/nodes/VignetteNode.h"
 
 namespace mothion::compositing {
 
@@ -21,11 +26,16 @@ NodeRegistry::NodeRegistry()
     m_types.push_back(std::make_unique<FrameNode>());
     m_types.push_back(std::make_unique<OutputNode>());
     m_types.push_back(std::make_unique<ColorCorrectNode>());
+    m_types.push_back(std::make_unique<LevelsNode>());
     m_types.push_back(std::make_unique<ColorNode>());
     m_types.push_back(std::make_unique<BlurNode>());
+    m_types.push_back(std::make_unique<DirectionalBlurNode>());
+    m_types.push_back(std::make_unique<SharpenNode>());
     m_types.push_back(std::make_unique<GlowNode>());
     m_types.push_back(std::make_unique<ChromaticAberrationNode>());
     m_types.push_back(std::make_unique<SensorNoiseNode>());
+    m_types.push_back(std::make_unique<VignetteNode>());
+    m_types.push_back(std::make_unique<DropShadowNode>());
     m_types.push_back(std::make_unique<TransformNode>());
     m_types.push_back(std::make_unique<MergeNode>());
     m_types.push_back(std::make_unique<OpacityNode>());

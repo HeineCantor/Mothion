@@ -135,7 +135,13 @@ qt_add_library(mothion_gui STATIC
     compositing/nodes/ColorCorrectNode.h compositing/nodes/ColorCorrectNode.cpp
     compositing/nodes/TransformNode.h compositing/nodes/TransformNode.cpp
     compositing/nodes/OpacityNode.h compositing/nodes/OpacityNode.cpp
+    compositing/nodes/SharpenNode.h compositing/nodes/SharpenNode.cpp
+    compositing/nodes/DirectionalBlurNode.h compositing/nodes/DirectionalBlurNode.cpp
+    compositing/nodes/LevelsNode.h compositing/nodes/LevelsNode.cpp
+    compositing/nodes/VignetteNode.h compositing/nodes/VignetteNode.cpp
+    compositing/nodes/DropShadowNode.h compositing/nodes/DropShadowNode.cpp
     compositing/MaskData.h compositing/MaskData.cpp
+    compositing/ImageOps.h compositing/ImageOps.cpp
     ui/compositing/NodeGraphView.h ui/compositing/NodeGraphView.cpp
     ui/compositing/CompositingWindow.h ui/compositing/CompositingWindow.cpp
     ui/compositing/ImagePreview.h ui/compositing/ImagePreview.cpp

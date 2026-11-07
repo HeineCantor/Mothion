@@ -462,6 +462,94 @@ private slots:
         QCOMPARE(inverted.pixelColor(5, 5), QColor(Qt::black));
     }
 
+    void sharpenAddsBackWhatTheBlurTakes()
+    {
+        const QString type = QStringLiteral("sharpen");
+        QImage step(40, 10, QImage::Format_ARGB32_Premultiplied); // dark gray on the left, light on the right
+        for (int y = 0; y < 10; ++y)
+            for (int x = 0; x < 40; ++x)
+                step.setPixelColor(x, y, x < 20 ? QColor(100, 100, 100) : QColor(150, 150, 150));
+        QCOMPARE(runNode(type, step, {{"amount", 0}}), step);
+        const QImage sharp = runNode(type, step, {{"amount", 200}, {"radius", 2}});
+        QVERIFY(sharp.pixelColor(19, 5).red() < 100); // darker beside the edge on the dark side
+        QVERIFY(sharp.pixelColor(20, 5).red() > 150); // lighter on the light one
+        QCOMPARE(sharp.pixelColor(2, 5).red(), 100);  // flat areas stay as they are
+        QCOMPARE(sharp.pixelColor(37, 5).red(), 150);
+    }
+
+    void directionalBlurSmearsAlongItsDirection()
+    {
+        const QString type = QStringLiteral("directionalblur");
+        QImage dot(41, 41, QImage::Format_ARGB32_Premultiplied);
+        dot.fill(Qt::black);
+        dot.setPixelColor(20, 20, Qt::white);
+        QCOMPARE(runNode(type, dot, {{"length", 0}}), dot);
+        const QImage across = runNode(type, dot, {{"length", 10}, {"angle", 0}});
+        QVERIFY(across.pixelColor(24, 20).red() > 0);  // along the row
+        QCOMPARE(across.pixelColor(20, 24).red(), 0);  // not up or down
+        QVERIFY(across.pixelColor(20, 20).red() < 255); // the dot's light is spread
+        const QImage down = runNode(type, dot, {{"length", 10}, {"angle", 90}});
+        QVERIFY(down.pixelColor(20, 24).red() > 0);
+        QCOMPARE(down.pixelColor(24, 20).red(), 0);
+    }
+
+    void levelsMapTheRange()
+    {
+        const QString type = QStringLiteral("levels");
+        auto gray = [](int v) {
+            QImage image(6, 6, QImage::Format_ARGB32_Premultiplied);
+            image.fill(QColor(v, v, v));
+            return image;
+        };
+        QCOMPARE(runNode(type, gray(100), {}), gray(100)); // untouched settings: as it came
+        QCOMPARE(runNode(type, gray(40), {{"inBlack", 50}}).pixelColor(2, 2).red(), 0);
+        QCOMPARE(runNode(type, gray(220), {{"inWhite", 200}}).pixelColor(2, 2).red(), 255);
+        QVERIFY(runNode(type, gray(100), {{"gamma", 200}}).pixelColor(2, 2).red() > 100); // gamma over 1 lightens
+        QCOMPARE(runNode(type, gray(255), {{"outWhite", 128}}).pixelColor(2, 2).red(), 128);
+        QCOMPARE(runNode(type, gray(0), {{"outBlack", 60}}).pixelColor(2, 2).red(), 60);
+        QImage half(6, 6, QImage::Format_ARGB32_Premultiplied); // the alpha is left alone
+        half.fill(QColor(200, 200, 200, 128));
+        QCOMPARE(runNode(type, half, {{"inBlack", 10}}).pixelColor(2, 2).alpha(), 128);
+    }
+
+    void vignetteDarkensTheCornersOnly()
+    {
+        const QString type = QStringLiteral("vignette");
+        QImage white(41, 41, QImage::Format_ARGB32_Premultiplied);
+        white.fill(Qt::white);
+        QCOMPARE(runNode(type, white, {{"amount", 0}}), white);
+        const QImage dark = runNode(type, white, {{"amount", 100}, {"size", 40}, {"softness", 30}});
+        QCOMPARE(dark.pixelColor(20, 20), QColor(Qt::white)); // the center is not touched
+        QVERIFY(dark.pixelColor(0, 0).red() < 40);             // the corner is nearly black
+        QVERIFY(dark.pixelColor(10, 10).red() > dark.pixelColor(0, 0).red()); // gentler on the way in
+        QVERIFY(dark.pixelColor(10, 10).red() < 255);
+        // The color can be another one, and a see-through pixel stays so.
+        const QImage tinted = runNode(type, white, {{"amount", 100}, {"size", 40}, {"tint", QColor(255, 0, 0)}});
+        QVERIFY(tinted.pixelColor(0, 0).red() > 200 && tinted.pixelColor(0, 0).green() < 60);
+        QImage clear(41, 41, QImage::Format_ARGB32_Premultiplied);
+        clear.fill(Qt::transparent);
+        QCOMPARE(runNode(type, clear, {{"amount", 100}, {"size", 0}}).pixelColor(0, 0).alpha(), 0);
+    }
+
+    void dropShadowPutsTheShapeBehind()
+    {
+        const QString type = QStringLiteral("dropshadow");
+        QImage dot(41, 41, QImage::Format_ARGB32_Premultiplied);
+        dot.fill(Qt::transparent);
+        for (int y = 15; y < 20; ++y)
+            for (int x = 15; x < 20; ++x)
+                dot.setPixelColor(x, y, Qt::red);
+        QCOMPARE(runNode(type, dot, {{"opacity", 0}}), dot); // no shadow: as it came
+        const QImage shadowed = runNode(type, dot, {{"x", 10}, {"y", 10}, {"blur", 0}, {"opacity", 100}});
+        QCOMPARE(shadowed.pixelColor(17, 17), QColor(Qt::red));     // the picture stays on top
+        QCOMPARE(shadowed.pixelColor(27, 27), QColor(Qt::black));   // its shadow, moved by the offset
+        QCOMPARE(shadowed.pixelColor(35, 35).alpha(), 0);           // and nothing elsewhere
+        const QImage soft = runNode(type, dot, {{"x", 10}, {"y", 10}, {"blur", 4}, {"opacity", 100},
+                                                {"color", QColor(0, 0, 255)}});
+        QVERIFY(soft.pixelColor(27, 27).blue() > 0 && soft.pixelColor(27, 27).red() == 0); // in its own color
+        QVERIFY(soft.pixelColor(31, 27).alpha() > 0);              // the blur has spread it
+    }
+
     void mergeWithAMaskShowsTheFrontOnlyThere()
     {
         Graph g;
