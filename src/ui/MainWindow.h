@@ -6,6 +6,9 @@
 
 class QMenu;
 
+namespace mothion::ai {
+class ServerProcess;
+}
 namespace mothion::canvas {
 class CanvasView;
 }
@@ -27,6 +30,7 @@ class AudioPlayer;
 namespace mothion::ui {
 
 class AutoplayWindow;
+class RefineDialog;
 class CompositingWindow;
 class DockLayout;
 
@@ -117,6 +121,8 @@ private:
     QMenu *m_viewMenu = nullptr;
     audio::AudioPlayer *m_audioPlayer = nullptr; // the audio track, heard with the frames and as they are stepped
     QPointer<AutoplayWindow> m_autoplay; // one at a time, made when first asked for
+    QPointer<RefineDialog> m_refine;     // the same
+    ai::ServerProcess *m_aiServer = nullptr; // ComfyUI as started from there
     QPointer<CompositingWindow> m_compositing; // the node editor, made when first asked for
     QList<QAction *> m_fileActions;
     QList<QAction *> m_editActions;

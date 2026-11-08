@@ -153,6 +153,12 @@ qt_add_library(mothion_gui STATIC
     audio/AudioPlayer.h audio/AudioPlayer.cpp
     ui/Shortcuts.h ui/Shortcuts.cpp
     ui/SettingsDialog.h ui/SettingsDialog.cpp
+    ai/AiSettings.h ai/AiSettings.cpp
+    ai/Workflow.h ai/Workflow.cpp
+    ai/ComfyClient.h ai/ComfyClient.cpp
+    ai/ServerProcess.h ai/ServerProcess.cpp
+    ai/Reference.h ai/Reference.cpp
+    ui/RefineDialog.h ui/RefineDialog.cpp
     ui/ImportSequenceDialog.h ui/ImportSequenceDialog.cpp
     ui/NewProjectDialog.h ui/NewProjectDialog.cpp
     ui/Theme.h ui/Theme.cpp

@@ -287,6 +287,12 @@ public:
     // --- layer clipboard ------------------------------------------------------------
     // Layers copied from the Layers panel (of any frames, in the order they
     // are drawn): their pixels and looks, kept apart from the picture clipboard.
+    // Puts `image` (its top-left corner at `origin` on the page) as a new layer on top of everything the frame
+    // `frame` shows: in the drawing the topmost cel that is not locked has there. With a non-empty `area` only what
+    // is inside that path is kept. One undo step; the choice of layer and cel stays. False, with `reason`, if
+    // no cel has a drawing at that frame, or all are locked.
+    bool addImageLayerOnTop(const QImage &image, const QPoint &origin, const QPainterPath &area, int frame,
+                            const QString &name, QString *reason = nullptr);
     bool copyLayers(const std::vector<LayerRef> &layers, QString *reason = nullptr);
     bool hasCopiedLayers() const { return !m_copiedLayers.empty(); }
     // Puts the copied layers on top of the current frame (one is made when the cel shows
@@ -344,6 +350,8 @@ signals:
     void currentFrameChanged(int frame);
     void currentCelChanged(doc::CelId cel);
     void currentLayerChanged(doc::LayerId layer);
+    // The layers chosen in the Layers panel (layerSelection()) changed.
+    void layerSelectionChanged();
     // Drawing on an empty frame of the selected cel made the frame and selected its layer.
     void layerChosenByDrawing();
     // Whether the selection is a layer changed (see layerChosen()).

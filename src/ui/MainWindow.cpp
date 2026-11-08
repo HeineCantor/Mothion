@@ -28,6 +28,8 @@
 #include "ui/SelectionBar.h"
 #include "ui/PuppetBar.h"
 #include "ui/ShapeBar.h"
+#include "ai/ServerProcess.h"
+#include "ui/RefineDialog.h"
 #include "ui/SettingsDialog.h"
 #include "ui/Shortcuts.h"
 #include "ui/TransformBar.h"
@@ -384,6 +386,18 @@ void MainWindow::createMenus()
     keymap.bind(edit->addAction(icon(IconId::Transform), tr("Transform"), this,
                                 [this] { m_toolState->setActiveTool(tools::ToolId::Transform); }),
                 QStringLiteral("edit.transform"));
+    edit->addSeparator();
+    edit->addAction(tr("Refine with AI…"), this, [this] {
+        if (!m_refine) {
+            if (!m_aiServer)
+                m_aiServer = new ai::ServerProcess(this); // goes with the window, so does the server it started
+            m_refine = new RefineDialog(m_document, m_aiServer, this); // stays open while one draws: not modal
+        }
+        m_refine->refreshReference();
+        m_refine->show();
+        m_refine->raise();
+        m_refine->activateWindow();
+    });
 
     m_viewMenu = menuBar()->addMenu(tr("&View"));
     m_viewMenu->addActions(m_zoomActions);

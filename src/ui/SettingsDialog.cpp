@@ -1,5 +1,6 @@
 #include "ui/SettingsDialog.h"
 
+#include "ai/AiSettings.h"
 #include "tools/Preferences.h"
 #include "ui/Shortcuts.h"
 #include "ui/Theme.h"
@@ -11,6 +12,7 @@
 #include <QDesktopServices>
 #include <QDir>
 #include <QDialogButtonBox>
+#include <QFileDialog>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -20,6 +22,7 @@
 #include <QListWidget>
 #include <QMessageBox>
 #include <QPixmap>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSpinBox>
 #include <QStandardPaths>
@@ -61,6 +64,7 @@ SettingsDialog::SettingsDialog(QWidget *parent)
         {tr("Canvas"), canvasPage()},
         {tr("Input"), inputPage()},
         {tr("Shortcuts"), shortcutsPage()},
+        {tr("AI"), aiPage()},
         {tr("Advanced"), advancedPage()},
     };
     for (const auto &[name, page] : pages) {
@@ -79,6 +83,7 @@ SettingsDialog::SettingsDialog(QWidget *parent)
             != QMessageBox::Yes)
             return;
         tools::Preferences::instance().resetAll();
+        ai::resetSettings();
         Shortcuts::instance().resetAll();
         setThemeChoice(*qApp, ThemeChoice::System);
         // The pages show what they hold now.
@@ -94,6 +99,7 @@ SettingsDialog::SettingsDialog(QWidget *parent)
         m_pages->addWidget(canvasPage());
         m_pages->addWidget(inputPage());
         m_pages->addWidget(shortcutsPage());
+        m_pages->addWidget(aiPage());
         m_pages->addWidget(advancedPage());
         m_pages->setCurrentIndex(row);
     });
@@ -269,6 +275,76 @@ QWidget *SettingsDialog::inputPage()
     connect(pressure, &QSpinBox::valueChanged, this,
             [](int v) { tools::Preferences::instance().setMousePressurePercent(v); });
     form->addRow(tr("Pressure of a mouse"), pressure);
+    return page;
+}
+
+QWidget *SettingsDialog::aiPage()
+{
+    auto *page = new QWidget;
+    auto *form = new QFormLayout(page);
+    auto *note = new QLabel(tr("Edit > Refine with AI redraws what is chosen through a ComfyUI server "
+                               "(scripts/comfyui installs one)."),
+                            page);
+    note->setWordWrap(true);
+    form->addRow(note);
+
+    auto *folder = new QLineEdit(ai::comfyFolder(), page);
+    folder->setObjectName(QStringLiteral("aiFolder"));
+    folder->setPlaceholderText(ai::defaultComfyFolder());
+    folder->setToolTip(tr("Where the install script put ComfyUI: the Start button of the window runs it from here."));
+    connect(folder, &QLineEdit::textChanged, this, [](const QString &text) { ai::setComfyFolder(text); });
+    auto *browseFolder = new QPushButton(tr("Browse…"), page);
+    connect(browseFolder, &QPushButton::clicked, this, [this, folder] {
+        const QString dir = QFileDialog::getExistingDirectory(this, tr("ComfyUI folder"), folder->text());
+        if (!dir.isEmpty())
+            folder->setText(dir);
+    });
+    auto *folderRow = new QHBoxLayout;
+    folderRow->addWidget(folder, 1);
+    folderRow->addWidget(browseFolder);
+    form->addRow(tr("ComfyUI folder"), folderRow);
+
+    auto *options = new QLineEdit(ai::serverArguments(), page);
+    options->setObjectName(QStringLiteral("aiArguments"));
+    options->setPlaceholderText(tr("none (--lowvram if the card runs out of memory)"));
+    connect(options, &QLineEdit::textChanged, this, [](const QString &text) { ai::setServerArguments(text); });
+    form->addRow(tr("Start options"), options);
+
+    auto *server = new QLineEdit(ai::serverUrl(), page);
+    server->setObjectName(QStringLiteral("aiServer"));
+    server->setPlaceholderText(ai::defaultServer());
+    connect(server, &QLineEdit::textChanged, this, [](const QString &text) { ai::setServerUrl(text); });
+    form->addRow(tr("Server"), server);
+
+    auto *workflow = new QLineEdit(ai::workflowPath(), page);
+    workflow->setObjectName(QStringLiteral("aiWorkflow"));
+    workflow->setPlaceholderText(ai::defaultWorkflowPath());
+    connect(workflow, &QLineEdit::textChanged, this, [](const QString &text) { ai::setWorkflowPath(text); });
+    auto *browse = new QPushButton(tr("Browse…"), page);
+    connect(browse, &QPushButton::clicked, this, [this, workflow] {
+        const QString file = QFileDialog::getOpenFileName(this, tr("Workflow"), workflow->text(),
+                                                          tr("ComfyUI workflow, API format (*.json)"));
+        if (!file.isEmpty())
+            workflow->setText(file);
+    });
+    auto *workflowRow = new QHBoxLayout;
+    workflowRow->addWidget(workflow, 1);
+    workflowRow->addWidget(browse);
+    form->addRow(tr("Workflow"), workflowRow);
+
+    auto *prompt = new QPlainTextEdit(ai::systemPrompt(), page);
+    prompt->setObjectName(QStringLiteral("aiPrompt"));
+    prompt->setFixedHeight(64);
+    prompt->setToolTip(tr("Added before what is typed in the window, whatever the workflow says."));
+    connect(prompt, &QPlainTextEdit::textChanged, this, [prompt] { ai::setSystemPrompt(prompt->toPlainText()); });
+    form->addRow(tr("Standing prompt"), prompt);
+
+    auto *negative = new QPlainTextEdit(ai::systemNegative(), page);
+    negative->setObjectName(QStringLiteral("aiNegative"));
+    negative->setFixedHeight(64);
+    negative->setToolTip(tr("Added before the negative typed in the window, whatever the workflow says."));
+    connect(negative, &QPlainTextEdit::textChanged, this, [negative] { ai::setSystemNegative(negative->toPlainText()); });
+    form->addRow(tr("Standing negative"), negative);
     return page;
 }
 

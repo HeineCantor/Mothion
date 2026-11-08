@@ -15,6 +15,7 @@
 #include "core/document/commands/PaintCommand.h"
 #include "core/document/commands/TimingCommands.h"
 
+#include <QPainter>
 #include <QFile>
 #include <QFileInfo>
 
@@ -325,6 +326,52 @@ bool DocumentController::copyLayers(const std::vector<LayerRef> &layers, QString
         return false;
     }
     m_copiedLayers = std::move(copied); // the pixels shared with the originals until one is painted
+    return true;
+}
+
+bool DocumentController::addImageLayerOnTop(const QImage &image, const QPoint &origin, const QPainterPath &area,
+                                            int frame, const QString &name, QString *reason)
+{
+    auto fail = [reason](const QString &why) {
+        if (reason)
+            *reason = why;
+        return false;
+    };
+    if (image.isNull() || frame < 0 || frame >= m_document->frameCount())
+        return fail(tr("There is nothing to put on the frame"));
+    const doc::Drawing *target = nullptr;
+    doc::CelId targetCel = doc::kNoId;
+    bool lockedOnes = false;
+    for (int i = m_document->celCount() - 1; i >= 0 && !target; --i) {
+        const doc::Cel &cel = m_document->celAt(i);
+        const doc::Drawing *drawing = cel.drawingAt(frame);
+        if (!drawing)
+            continue;
+        if (cel.properties().locked) {
+            lockedOnes = true;
+            continue;
+        }
+        target = drawing;
+        targetCel = cel.id();
+    }
+    if (!target)
+        return fail(lockedOnes ? tr("The cels of that frame are locked") : tr("No cel has a drawing on that frame"));
+    interruptStroke();
+
+    QImage pixels(image.size(), QImage::Format_ARGB32_Premultiplied);
+    pixels.fill(Qt::transparent);
+    {
+        QPainter p(&pixels);
+        p.setRenderHint(QPainter::Antialiasing);
+        if (!area.isEmpty())
+            p.setClipPath(area.translated(-origin));
+        p.drawImage(0, 0, image);
+    }
+    doc::TiledImage layerImage;
+    layerImage.write(origin.x(), origin.y(), pixels.width(), pixels.height(),
+                     reinterpret_cast<const doc::Pixel *>(pixels.constBits()), pixels.bytesPerLine() / 4);
+    execute(std::make_unique<doc::AddLayerCommand>(*m_document, targetCel, target->id, int(target->layers.size()),
+                                                   doc::LayerProperties{name.toStdString()}, std::move(layerImage)));
     return true;
 }
 
@@ -1476,7 +1523,10 @@ void DocumentController::setLayerSelection(std::vector<LayerRef> layers)
 {
     if (layers.size() == 1 && layers.front().layer == m_currentLayer)
         layers.clear(); // just the current one
+    if (layers == m_layerSelection)
+        return;
     m_layerSelection = std::move(layers);
+    emit layerSelectionChanged();
 }
 
 std::vector<DocumentController::PaintTarget> DocumentController::beginPaintLayers(QString *reason)

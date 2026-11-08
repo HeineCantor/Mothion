@@ -8,6 +8,7 @@ class QTreeWidget;
 class QTreeWidgetItem;
 class QKeySequenceEdit;
 class QLineEdit;
+class QPlainTextEdit;
 
 namespace mothion::ui {
 
@@ -18,6 +19,7 @@ namespace mothion::ui {
 //  - Project: the size, frame rate, length and paper of a new project;
 //  - Canvas: the zoom and rotation steps, the brush outline (and the pointer it replaces);
 //  - Input: the pressure of a mouse;
+//  - AI: where ComfyUI is, the workflow, the standing prompt and negative of Refine with AI;
 //  - Advanced: the undo history, the data folder;
 //  - Shortcuts: every command and its key, changed here (see Shortcuts), with the keys that are not changeable.
 class SettingsDialog : public QDialog
@@ -35,6 +37,7 @@ private:
     QWidget *projectPage();
     QWidget *canvasPage();
     QWidget *inputPage();
+    QWidget *aiPage();
     QWidget *advancedPage();
     QWidget *shortcutsPage();
     void fillShortcuts();
