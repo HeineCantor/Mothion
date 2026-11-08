@@ -13,6 +13,7 @@ QString defaultServer(); // http://127.0.0.1:8188
 QString defaultWorkflowPath();
 // Where scripts/comfyui/install.* puts ComfyUI (%LOCALAPPDATA%\Mothion\ComfyUI, ~/.local/share/Mothion/ComfyUI).
 QString defaultComfyFolder();
+QString defaultTaggerWorkflowPath(); // the one that tells a picture's tags
 QString defaultSystemPrompt();
 QString defaultSystemNegative();
 
@@ -25,6 +26,8 @@ QString serverUrl();
 void setServerUrl(const QString &url);
 QString workflowPath();
 void setWorkflowPath(const QString &path);
+QString taggerWorkflowPath();
+void setTaggerWorkflowPath(const QString &path);
 QString systemPrompt();
 void setSystemPrompt(const QString &text);
 QString systemNegative();

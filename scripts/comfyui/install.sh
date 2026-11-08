@@ -7,8 +7,10 @@
 #   --dir      where to install (default: ~/.local/share/Mothion/ComfyUI)
 #   --cuda     the PyTorch build: cu128 is for every NVIDIA card, the RTX 50 series included (default when an NVIDIA
 #              card is found); cpu works, slowly, with no card
-#   --models   also download the checkpoint and the ControlNet of the first workflow (about 8 GB)
+#   --models   also download the models of the workflows: the checkpoint, the ControlNet and the tagger (about 8.5 GB)
 #   --python   the Python version for ComfyUI's own environment (default 3.12; uv fetches it if the system has none)
+#   --stamp N  what to write in <folder>/.mothion-install when everything is done (Mothion asks for it, and takes the
+#              install as complete only with its number there)
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -16,6 +18,7 @@ DIR="${XDG_DATA_HOME:-$HOME/.local/share}/Mothion/ComfyUI"
 CUDA=""
 MODELS=0
 PYTHON_VERSION="3.12"
+STAMP="1"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -23,7 +26,8 @@ while [[ $# -gt 0 ]]; do
         --cuda) CUDA="$2"; shift 2 ;;
         --models) MODELS=1; shift ;;
         --python) PYTHON_VERSION="$2"; shift 2 ;;
-        -h|--help) sed -n '2,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --stamp) STAMP="$2"; shift 2 ;;
+        -h|--help) sed -n '2,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "Unknown option: $1" >&2; exit 2 ;;
     esac
 done
@@ -63,7 +67,16 @@ if [[ -d "$SRC/.git" ]]; then
     git -C "$SRC" pull --ff-only
 elif command -v git >/dev/null 2>&1; then
     say "Downloading ComfyUI"
-    git clone --depth 1 https://github.com/comfyanonymous/ComfyUI.git "$SRC"
+    if [[ -d "$SRC" && -n "$(ls -A "$SRC")" ]]; then
+        # Something is in the folder already (models put there beforehand, an install that was interrupted): ComfyUI goes
+        # in around it, and what is there is kept.
+        git -C "$SRC" init -q
+        git -C "$SRC" remote add origin https://github.com/comfyanonymous/ComfyUI.git
+        git -C "$SRC" fetch -q --depth 1 origin HEAD
+        git -C "$SRC" checkout -q -f -B master FETCH_HEAD
+    else
+        git clone --depth 1 https://github.com/comfyanonymous/ComfyUI.git "$SRC"
+    fi
 else
     say "Downloading ComfyUI (no git: as an archive)"
     mkdir -p "$SRC"
@@ -84,6 +97,21 @@ fi
 
 say "ComfyUI's packages"
 "$UV" pip install --python "$PY" -r "$SRC/requirements.txt"
+
+# --- the tagger: Mothion's "Suggest" asks it for the tags of a picture --------------------------------------------------------
+say "Tagger (custom node)"
+NODE="$SRC/custom_nodes/ComfyUI-WD14-Tagger"
+if [[ -d "$NODE/.git" ]]; then
+    git -C "$NODE" pull --ff-only || true
+elif [[ ! -f "$NODE/__init__.py" ]]; then
+    if command -v git >/dev/null 2>&1; then
+        git clone --depth 1 https://github.com/pythongosssss/ComfyUI-WD14-Tagger.git "$NODE"
+    else
+        mkdir -p "$NODE"
+        curl -fsSL https://github.com/pythongosssss/ComfyUI-WD14-Tagger/archive/refs/heads/main.tar.gz | tar -xz --strip-components=1 -C "$NODE"
+    fi
+fi
+"$UV" pip install --python "$PY" onnxruntime
 
 # --- Mothion's workflows, and a launcher --------------------------------------------------------------------------------
 say "Workflows and launcher"
@@ -108,7 +136,20 @@ if [[ "$MODELS" == 1 ]]; then
     say "Models (read their licenses on the pages they come from)"
     fetch "https://huggingface.co/Laxhar/noobai-XL-1.1/resolve/main/NoobAI-XL-v1.1.safetensors" checkpoints NoobAI-XL-v1.1.safetensors
     fetch "https://huggingface.co/TheMistoAI/MistoLine/resolve/main/mistoLine_rank256.safetensors" controlnet mistoLine_rank256.safetensors
+    # The tagger's model, where the node looks for it (it would download it itself on first use, slowly and unseen).
+    TAGGER="$NODE/models"
+    mkdir -p "$TAGGER"
+    TAG_URL="https://huggingface.co/SmilingWolf/wd-swinv2-tagger-v3/resolve/main"
+    for pair in "model.onnx:wd-swinv2-tagger-v3.onnx" "selected_tags.csv:wd-swinv2-tagger-v3.csv"; do
+        if [[ ! -f "$TAGGER/${pair#*:}" ]]; then
+            echo "Downloading ${pair#*:}"
+            curl -fL -C - --progress-bar -o "$TAGGER/${pair#*:}.part" "$TAG_URL/${pair%%:*}" && mv "$TAGGER/${pair#*:}.part" "$TAGGER/${pair#*:}"
+        fi
+    done
 fi
+
+# --- done: the number Mothion asked for says so ----------------------------------------------------------------------------
+echo "$STAMP" > "$DIR/.mothion-install"
 
 cat <<DONE
 
@@ -120,5 +161,5 @@ Done.
   The models go in:
     $SRC/models/checkpoints/   an anime checkpoint (NoobAI-XL-v1.1.safetensors, or Illustrious-XL-v1.0.safetensors)
     $SRC/models/controlnet/    mistoLine_rank256.safetensors
-  (scripts/comfyui/README.md says where to get them; install.sh --models downloads those two.)
+  (scripts/comfyui/README.md says where to get them; install.sh --models downloads them, and the tagger's.)
 DONE

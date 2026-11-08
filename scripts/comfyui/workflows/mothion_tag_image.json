@@ -1,0 +1,20 @@
+{
+  "1": {
+    "class_type": "LoadImage",
+    "_meta": {"title": "MOTHION_INPUT"},
+    "inputs": {"image": "example.png"}
+  },
+  "2": {
+    "class_type": "WD14Tagger|pysssss",
+    "_meta": {"title": "MOTHION_TAGS"},
+    "inputs": {
+      "image": ["1", 0],
+      "model": "wd-swinv2-tagger-v3",
+      "threshold": 0.35,
+      "character_threshold": 0.85,
+      "replace_underscore": true,
+      "trailing_comma": false,
+      "exclude_tags": ""
+    }
+  }
+}

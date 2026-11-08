@@ -5,11 +5,21 @@ image model on your own graphics card. These scripts install it in a folder of i
 (through [uv](https://docs.astral.sh/uv/), which they fetch if it is not there): nothing is installed on the system,
 and deleting the folder removes everything.
 
+## From Mothion
+
+Nothing here has to be run by hand: in Mothion, **Edit > Refine with AI** has a row with **Start** and **Stop** for the
+server. If ComfyUI is not installed (or the install is older than the program: the scripts add things over time), Start
+asks, then runs the install script that is inside the program (these very files), with the models, and starts the server
+when it is done. The row shows the steps and the downloads; Stop during the install stops it, and Start goes on from
+where it was (downloads are resumed). Where it installs is in **Settings > AI**.
+
+The rest of this page is for installing by hand, or for what the script does.
+
 ## Install
 
 Linux / macOS:
 
-    scripts/comfyui/install.sh              # add --models to also download the two models below (about 8 GB)
+    scripts/comfyui/install.sh              # add --models to also download the models below (about 8.5 GB)
 
 Windows (PowerShell):
 
@@ -32,9 +42,17 @@ For anime and manga sketches, with 8 GB of video memory. They go in the `models`
 | Checkpoint (anime, SDXL) | `NoobAI-XL-v1.1.safetensors` (7.1 GB) | `models/checkpoints/` | <https://huggingface.co/Laxhar/noobai-XL-1.1> |
 | Or another checkpoint | `Illustrious-XL-v1.0.safetensors` (6.9 GB) | `models/checkpoints/` | <https://huggingface.co/OnomaAIResearch/Illustrious-XL-v1.0> |
 | ControlNet (keeps the drawing) | `mistoLine_rank256.safetensors` (0.8 GB) | `models/controlnet/` | <https://huggingface.co/TheMistoAI/MistoLine> |
+| Tagger (for "Suggest") | `wd-swinv2-tagger-v3.onnx` and `.csv` (0.5 GB) | `custom_nodes/ComfyUI-WD14-Tagger/models/` | <https://huggingface.co/SmilingWolf/wd-swinv2-tagger-v3> (`model.onnx` and `selected_tags.csv`) |
 
 Read the licenses on those pages (the checkpoints have their own terms for commercial use; MistoLine asks for
 attribution). If you use Illustrious, pick it in the checkpoint node of the workflow.
+
+## The tagger ("Suggest")
+
+The **Suggest** button of the window asks `workflows/mothion_tag_image.json` what the picture shows: the
+[WD14 tagger](https://github.com/pythongosssss/ComfyUI-WD14-Tagger), a custom node the install script adds (with
+`onnxruntime`), tells it as booru tags, the vocabulary of the anime checkpoints, and they go into the prompt to be
+corrected. The negative cannot be read from a picture: it is the standing one of Settings > AI.
 
 ## The workflow
 

@@ -22,8 +22,10 @@ namespace mothion::ui {
 
 // Edit > Refine with AI: the picture that will go to the workflow (the layers chosen in the Layers panel, and the
 // area under the selection, as they are now: it follows them while the window is open), the prompt and the negative
-// to add to the standing ones of Settings > AI, and Generate. While ComfyUI works a bar shows; the result becomes a
-// layer on top of the frame the picture was taken from.
+// to add to the standing ones of Settings > AI (Suggest fills the prompt with the tags a tagger finds in the
+// picture), and Generate. While ComfyUI works a bar shows; the result becomes a layer on top of the frame the picture
+// was taken from. A row at the top starts and stops the server: from a ComfyUI that is not installed (or not
+// completely), Start begins with the installation, models and workflows included, after asking.
 class RefineDialog : public QDialog
 {
     Q_OBJECT
@@ -45,6 +47,9 @@ protected:
 
 private:
     void generate();
+    void suggest();
+    void startServer();
+    void showSuggestion(const QString &tags);
     void stop();
     void finish(const QImage &result);
     void failWith(const QString &message);
@@ -56,10 +61,12 @@ private:
     ai::ComfyClient *m_client;
     ai::ServerProcess *m_server;
     QLabel *m_serverState;
+    QProgressBar *m_serverBar;
     QPushButton *m_start;
     QPushButton *m_stopServer;
     QLabel *m_preview;
     QLabel *m_info;
+    QPushButton *m_suggest;
     QPlainTextEdit *m_prompt;
     QPlainTextEdit *m_negative;
     QLabel *m_status;
@@ -69,7 +76,8 @@ private:
     QTimer m_later;
     ai::Reference m_reference; // what the picture is now
     ai::Reference m_job;       // what was sent (the result goes with it)
-    bool m_generating = false;
+    bool m_generating = false; // the client is busy: with a picture, or with the tags of one
+    bool m_suggesting = false; // (and it is the tags)
 };
 
 } // namespace mothion::ui

@@ -54,6 +54,7 @@ public:
     int pollsBeforeDone = 2;
     bool refuse = false;      // /prompt answers with a validation error
     bool fail = false;        // the run ends in an error
+    bool tagsMode = false;    // the run is a tagger's: its answer is text, not a picture
     QImage m_made;
 
 private:
@@ -97,6 +98,8 @@ private:
         } else if (path.startsWith(QLatin1String("/history/abc"))) {
             if (--pollsBeforeDone > 0) {
                 answer = "{}";
+            } else if (tagsMode) {
+                answer = R"({"abc":{"outputs":{"2":{"tags":["1girl, pleated skirt, from below"]}},"status":{"status_str":"success","completed":true}}})";
             } else if (fail) {
                 answer = R"({"abc":{"outputs":{},"status":{"status_str":"error","messages":[["execution_error",{"exception_message":"out of memory"}]]}}})";
             } else {
@@ -146,6 +149,55 @@ QString smallWorkflow(const QTemporaryDir &dir, bool withInput = true)
     file.open(QIODevice::WriteOnly);
     file.write(QJsonDocument(w).toJson());
     return path;
+}
+
+// A tagging workflow reduced to its nodes.
+QString smallTagger(const QTemporaryDir &dir)
+{
+    QJsonObject w;
+    w[QStringLiteral("1")] = QJsonObject{{QStringLiteral("class_type"), QStringLiteral("LoadImage")},
+                                        {QStringLiteral("_meta"), QJsonObject{{QStringLiteral("title"), QStringLiteral("MOTHION_INPUT")}}},
+                                        {QStringLiteral("inputs"), QJsonObject{{QStringLiteral("image"), QStringLiteral("example.png")}}}};
+    w[QStringLiteral("2")] = QJsonObject{{QStringLiteral("class_type"), QStringLiteral("WD14Tagger|pysssss")},
+                                        {QStringLiteral("_meta"), QJsonObject{{QStringLiteral("title"), QStringLiteral("MOTHION_TAGS")}}},
+                                        {QStringLiteral("inputs"), QJsonObject{}}};
+    QFile file(dir.filePath(QStringLiteral("tagger.json")));
+    file.open(QIODevice::WriteOnly);
+    file.write(QJsonDocument(w).toJson());
+    return file.fileName();
+}
+
+// A stand-in for the folder the install script makes: an interpreter (python3 itself), a main.py that answers
+// /system_stats on the port it is given, and the marker of a finished install. Empty if there is no python3.
+bool makeFakeInstall(const QString &folder, bool withMarker = true)
+{
+    const QString python = QStandardPaths::findExecutable(QStringLiteral("python3"));
+    if (python.isEmpty())
+        return false;
+    QDir().mkpath(folder + QStringLiteral("/.venv/bin"));
+    QDir().mkpath(folder + QStringLiteral("/ComfyUI"));
+    QFile::remove(folder + QStringLiteral("/.venv/bin/python"));
+    if (!QFile::link(python, folder + QStringLiteral("/.venv/bin/python")))
+        return false;
+    QFile main(folder + QStringLiteral("/ComfyUI/main.py"));
+    if (!main.open(QIODevice::WriteOnly))
+        return false;
+    main.write("import argparse, http.server\n"
+               "a = argparse.ArgumentParser(); a.add_argument('--listen'); a.add_argument('--port', type=int)\n"
+               "a.add_argument('--lowvram', action='store_true'); n = a.parse_args()\n"
+               "class H(http.server.BaseHTTPRequestHandler):\n"
+               "    def do_GET(self):\n"
+               "        self.send_response(200); self.send_header('Content-Length', '2'); self.end_headers(); self.wfile.write(b'{}')\n"
+               "    def log_message(self, *x): pass\n"
+               "http.server.HTTPServer((n.listen, n.port), H).serve_forever()\n");
+    main.close();
+    if (withMarker) {
+        QFile marker(folder + QStringLiteral("/.mothion-install"));
+        if (!marker.open(QIODevice::WriteOnly))
+            return false;
+        marker.write(QByteArray::number(ai::ServerProcess::kInstallStamp));
+    }
+    return true;
 }
 
 // A project with a sketch: a black square on a white page, one layer.
@@ -230,24 +282,9 @@ private slots:
 #ifdef Q_OS_WIN
         QSKIP("the stand-in server is a POSIX layout");
 #else
-        const QString python = QStandardPaths::findExecutable(QStringLiteral("python3"));
-        if (python.isEmpty())
-            QSKIP("no python3");
         QTemporaryDir folder;
-        QVERIFY(QDir(folder.path()).mkpath(QStringLiteral(".venv/bin")));
-        QVERIFY(QDir(folder.path()).mkpath(QStringLiteral("ComfyUI")));
-        QVERIFY(QFile::link(python, folder.filePath(QStringLiteral(".venv/bin/python"))));
-        QFile main(folder.filePath(QStringLiteral("ComfyUI/main.py")));
-        QVERIFY(main.open(QIODevice::WriteOnly));
-        main.write("import argparse, http.server\n"
-                   "a = argparse.ArgumentParser(); a.add_argument('--listen'); a.add_argument('--port', type=int)\n"
-                   "a.add_argument('--lowvram', action='store_true'); n = a.parse_args()\n"
-                   "class H(http.server.BaseHTTPRequestHandler):\n"
-                   "    def do_GET(self):\n"
-                   "        self.send_response(200); self.send_header('Content-Length', '2'); self.end_headers(); self.wfile.write(b'{}')\n"
-                   "    def log_message(self, *x): pass\n"
-                   "http.server.HTTPServer((n.listen, n.port), H).serve_forever()\n");
-        main.close();
+        if (!makeFakeInstall(folder.path()))
+            QSKIP("no python3");
         QTcpServer probe; // a free port
         QVERIFY(probe.listen(QHostAddress::LocalHost, 0));
         const quint16 port = probe.serverPort();
@@ -258,9 +295,9 @@ private slots:
         ai::setServerArguments(QStringLiteral("--lowvram"));
 
         ai::ServerProcess server;
-        QSignalSpy changed(&server, &ai::ServerProcess::changed);
         QString why;
         QVERIFY2(server.canStart(&why), qPrintable(why));
+        QVERIFY(server.installed());
         server.check();
         QTRY_COMPARE_WITH_TIMEOUT(int(server.state()), int(ai::ServerProcess::State::Stopped), 3000);
         server.start();
@@ -274,21 +311,148 @@ private slots:
 #endif
     }
 
+    // Start on a ComfyUI that is not there: the install runs (here a stand-in script that makes the folder), its
+    // steps and downloads show, and the server starts when it is done.
+    void startInstallsWhatIsNotInstalledAndThenStarts()
+    {
+#ifdef Q_OS_WIN
+        QSKIP("the stand-in installer is a POSIX layout");
+#else
+        const QString python = QStandardPaths::findExecutable(QStringLiteral("python3"));
+        if (python.isEmpty())
+            QSKIP("no python3");
+        QTemporaryDir work;
+        const QString folder = work.filePath(QStringLiteral("comfy"));
+        // The stand-in installer: prints steps and a download, then builds the folder as install.sh would.
+        QFile script(work.filePath(QStringLiteral("fake_install.py")));
+        QVERIFY(script.open(QIODevice::WriteOnly));
+        script.write("import os, sys, time\n"
+                     "folder = sys.argv[1]\n"
+                     "print('==> Getting uv', flush=True)\n"
+                     "print('==> Models', flush=True)\n"
+                     "print('Downloading model.safetensors', flush=True)\n"
+                     "sys.stdout.write('######## 42.5%\\r'); sys.stdout.flush(); time.sleep(0.4)\n"
+                     "os.makedirs(folder + '/.venv/bin'); os.makedirs(folder + '/ComfyUI')\n"
+                     "os.symlink(sys.argv[2], folder + '/.venv/bin/python')\n"
+                     "open(folder + '/ComfyUI/main.py', 'w').write(open(sys.argv[3]).read())\n"
+                     "open(folder + '/.mothion-install', 'w').write(sys.argv[4])\n");
+        script.close();
+        QTemporaryDir stand;
+        QVERIFY(makeFakeInstall(stand.path()));
+        QTcpServer probe;
+        QVERIFY(probe.listen(QHostAddress::LocalHost, 0));
+        const quint16 port = probe.serverPort();
+        probe.close();
+        ai::resetSettings();
+        ai::setComfyFolder(folder);
+        ai::setServerUrl(QStringLiteral("http://127.0.0.1:%1").arg(port));
+
+        ai::ServerProcess server;
+        server.setInstallCommand(python, {script.fileName(), folder, python, stand.filePath(QStringLiteral("ComfyUI/main.py")),
+                                          QString::number(ai::ServerProcess::kInstallStamp)});
+        QVERIFY(!server.installed());
+        QSignalSpy changed(&server, &ai::ServerProcess::changed);
+        server.start();
+        QCOMPARE(int(server.state()), int(ai::ServerProcess::State::Installing));
+        QTRY_VERIFY_WITH_TIMEOUT(server.installPercent() == 42, 5000);
+        QVERIFY2(server.installStatus().contains(QLatin1String("model.safetensors")), qPrintable(server.installStatus()));
+        QTRY_VERIFY_WITH_TIMEOUT(server.installed(), 10000);
+        QTRY_COMPARE_WITH_TIMEOUT(int(server.state()), int(ai::ServerProcess::State::Running), 15000); // it started after
+        QVERIFY(server.problem().isEmpty());
+        server.stop();
+        QTRY_COMPARE_WITH_TIMEOUT(int(server.state()), int(ai::ServerProcess::State::Stopped), 15000);
+        ai::resetSettings();
+#endif
+    }
+
+    void anInstallThatFailsOrIsStoppedSaysSo()
+    {
+#ifdef Q_OS_WIN
+        QSKIP("the stand-in installer is a POSIX layout");
+#else
+        const QString python = QStandardPaths::findExecutable(QStringLiteral("python3"));
+        if (python.isEmpty())
+            QSKIP("no python3");
+        QTemporaryDir work;
+        ai::resetSettings();
+        ai::setComfyFolder(work.filePath(QStringLiteral("comfy")));
+        {
+            ai::ServerProcess server;
+            server.setInstallCommand(python, {QStringLiteral("-c"), QStringLiteral("import sys; print('no space left'); sys.exit(3)")});
+            server.start();
+            QTRY_COMPARE_WITH_TIMEOUT(int(server.state()), int(ai::ServerProcess::State::Stopped), 10000);
+            QVERIFY2(server.problem().contains(QLatin1String("failed")), qPrintable(server.problem()));
+            QVERIFY2(server.problem().contains(QLatin1String("no space left")), qPrintable(server.problem()));
+        }
+        {
+            ai::ServerProcess server;
+            server.setInstallCommand(python, {QStringLiteral("-c"), QStringLiteral("import time; time.sleep(60)")});
+            server.start();
+            QCOMPARE(int(server.state()), int(ai::ServerProcess::State::Installing));
+            server.stop();
+            QTRY_COMPARE_WITH_TIMEOUT(int(server.state()), int(ai::ServerProcess::State::Stopped), 10000);
+            QVERIFY2(server.problem().contains(QLatin1String("stopped")), qPrintable(server.problem()));
+        }
+        ai::resetSettings();
+#endif
+    }
+
     void theServerSaysWhyItCannotStart()
     {
         QTemporaryDir empty;
         ai::resetSettings();
         ai::setComfyFolder(empty.path());
         ai::ServerProcess server;
+        QVERIFY(!server.installed()); // (nothing in the folder: Start would install)
         QString why;
-        QVERIFY(!server.canStart(&why));
-        QVERIFY2(why.contains(QLatin1String("not installed")), qPrintable(why));
-        server.start();
-        QVERIFY(server.problem().contains(QLatin1String("not installed")));
-        QVERIFY(!server.startedHere());
+        QVERIFY(server.canStart(&why));
         ai::setServerUrl(QStringLiteral("http://192.168.1.9:8188")); // somebody else's computer
         QVERIFY(!server.canStart(&why));
+        QVERIFY2(why.contains(QLatin1String("not on this computer")), qPrintable(why));
+        server.start();
+        QVERIFY(server.problem().contains(QLatin1String("not on this computer")));
+        QCOMPARE(int(server.state()), int(ai::ServerProcess::State::Stopped));
         ai::resetSettings();
+    }
+
+    // What Start runs when it installs is in the program: the very scripts and workflows of scripts/comfyui.
+    void theScriptsAreInTheProgram()
+    {
+        QTemporaryDir out;
+        QVERIFY(ai::ServerProcess::extractScripts(out.path()));
+        const QDir source(QFileInfo(shippedWorkflow()).dir().filePath(QStringLiteral("..")));
+        for (const QString &name : {QStringLiteral("install.sh"), QStringLiteral("install.ps1"),
+                                    QStringLiteral("workflows/mothion_sketch_refine.json"),
+                                    QStringLiteral("workflows/mothion_tag_image.json")}) {
+            QFile a(source.filePath(name)), b(QDir(out.path()).filePath(name));
+            QVERIFY2(a.open(QIODevice::ReadOnly) && b.open(QIODevice::ReadOnly), qPrintable(name));
+            QCOMPARE(b.readAll(), a.readAll());
+        }
+    }
+
+    void anOlderInstallIsNotComplete()
+    {
+#ifdef Q_OS_WIN
+        QSKIP("the stand-in install is a POSIX layout");
+#else
+        QTemporaryDir folder;
+        if (!makeFakeInstall(folder.path(), false))
+            QSKIP("no python3");
+        ai::resetSettings();
+        ai::setComfyFolder(folder.path());
+        ai::ServerProcess server;
+        QVERIFY(!server.installed()); // no marker: the script never finished
+        QFile marker(folder.filePath(QStringLiteral(".mothion-install")));
+        QVERIFY(marker.open(QIODevice::WriteOnly));
+        marker.write(QByteArray::number(ai::ServerProcess::kInstallStamp - 1));
+        marker.close();
+        QVERIFY(!server.installed()); // made by an older script
+        QVERIFY(marker.open(QIODevice::WriteOnly));
+        marker.write(QByteArray::number(ai::ServerProcess::kInstallStamp));
+        marker.close();
+        QVERIFY(server.installed());
+        ai::resetSettings();
+#endif
     }
 
     void theShippedWorkflowHasTheNodesMothionFills()
@@ -309,6 +473,17 @@ private slots:
         QCOMPARE(input("MOTHION_NEGATIVE", "text").toString(), QStringLiteral("blurry"));
         QCOMPARE(input("MOTHION_SAMPLER", "seed").toInt(), 77);
         QCOMPARE(input("MOTHION_SAMPLER", "denoise").toDouble(), 0.75); // the rest stays as it was
+
+        // The tagging workflow: a picture in, tags out; no prompt node is needed.
+        QJsonObject tagger;
+        const QString taggerFile = QFileInfo(shippedWorkflow()).dir().filePath(QStringLiteral("mothion_tag_image.json"));
+        QVERIFY2(ai::loadWorkflow(taggerFile, &tagger, &error), qPrintable(error));
+        QVERIFY(!ai::findNode(tagger, QStringLiteral("MOTHION_INPUT")).isEmpty());
+        QVERIFY(!ai::findNode(tagger, QStringLiteral("MOTHION_TAGS")).isEmpty());
+        QVERIFY(!ai::fillWorkflow(tagger, inputs, &filled, &error)); // as a drawing workflow it lacks the prompt
+        QVERIFY(ai::fillWorkflow(tagger, inputs, &filled, &error, false));
+        QCOMPARE(filled.value(ai::findNode(filled, QStringLiteral("MOTHION_INPUT"))).toObject().value(QStringLiteral("inputs")).toObject().value(QStringLiteral("image")).toString(),
+                 QStringLiteral("up.png"));
     }
 
     void aWorkflowWithoutTheInputNodeIsRefused()
@@ -439,6 +614,27 @@ private slots:
         QVERIFY(server.requests.contains(QStringLiteral("GET /view")));
     }
 
+    void theClientAsksForTheTagsOfAPicture()
+    {
+        QTemporaryDir dir;
+        FakeComfy server;
+        server.tagsMode = true;
+        ai::ComfyClient client;
+        client.setServer(QUrl(server.url()));
+        client.setTaggerWorkflowPath(smallTagger(dir));
+        client.setPollInterval(20);
+        QSignalSpy suggested(&client, &ai::ComfyClient::suggested);
+        QSignalSpy failed(&client, &ai::ComfyClient::failed);
+        QImage reference(30, 20, QImage::Format_RGB32);
+        reference.fill(Qt::white);
+        client.suggest(reference);
+        QTRY_COMPARE_WITH_TIMEOUT(suggested.size(), 1, 5000);
+        QVERIFY(failed.isEmpty());
+        QCOMPARE(suggested.first().first().toString(), QStringLiteral("1girl, pleated skirt, from below"));
+        QVERIFY(!server.requests.contains(QStringLiteral("GET /view"))); // text, no picture to get
+        QVERIFY(!client.busy());
+    }
+
     void theClientSaysWhyItFailed()
     {
         QTemporaryDir dir;
@@ -526,6 +722,20 @@ private slots:
         client.generate(reference, QStringLiteral("1girl"), QStringLiteral("blurry"));
         QTRY_VERIFY_WITH_TIMEOUT(!finished.isEmpty() || !failed.isEmpty(), 600000);
         qInfo() << "finished:" << finished.size() << "failed:" << (failed.isEmpty() ? QString() : failed.first().first().toString());
+
+        // And the tags of a picture (MOTHION_COMFY_IMAGE: one to look at; else a white page).
+        QImage look(256, 192, QImage::Format_RGB32);
+        look.fill(Qt::white);
+        const QString file = qEnvironmentVariable("MOTHION_COMFY_IMAGE");
+        if (!file.isEmpty())
+            look = QImage(file).convertToFormat(QImage::Format_RGB32);
+        client.setTaggerWorkflowPath(QFileInfo(shippedWorkflow()).dir().filePath(QStringLiteral("mothion_tag_image.json")));
+        QSignalSpy suggested(&client, &ai::ComfyClient::suggested);
+        failed.clear();
+        client.suggest(look);
+        QTRY_VERIFY_WITH_TIMEOUT(!suggested.isEmpty() || !failed.isEmpty(), 600000);
+        qInfo() << "tags:" << (suggested.isEmpty() ? QString() : suggested.first().first().toString())
+                << "failed:" << (failed.isEmpty() ? QString() : failed.first().first().toString());
     }
 
     void theWindowSendsWhatIsChosenAndPutsTheResultOnTop()
@@ -535,6 +745,7 @@ private slots:
         ai::resetSettings();
         ai::setServerUrl(server.url());
         ai::setWorkflowPath(smallWorkflow(dir));
+        ai::setTaggerWorkflowPath(smallTagger(dir));
         ai::setSystemPrompt(QStringLiteral("standing"));
         ai::setSystemNegative(QStringLiteral("never"));
         document::DocumentController controller;
@@ -551,6 +762,16 @@ private slots:
         QVERIFY(dialog.reference().valid());
 
         dialog.client()->setPollInterval(20);
+        // Suggest: the tags the tagger finds go into the prompt.
+        auto *suggest = dialog.findChild<QPushButton *>(QStringLiteral("suggest"));
+        QVERIFY(suggest && suggest->isEnabled());
+        server.tagsMode = true;
+        suggest->click();
+        QVERIFY(dialog.generating());
+        QTRY_VERIFY_WITH_TIMEOUT(!dialog.generating(), 5000);
+        QCOMPARE(prompt->toPlainText(), QStringLiteral("1girl, pleated skirt, from below"));
+        server.tagsMode = false;
+        server.pollsBeforeDone = 2;
         prompt->setPlainText(QStringLiteral("cat"));
         negative->setPlainText(QStringLiteral("dog"));
         const std::size_t layers = controller.document().cel(sketchCelId)->drawingAt(0)->layers.size();

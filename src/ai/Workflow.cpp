@@ -31,7 +31,8 @@ bool setInput(QJsonObject &workflow, const QString &node, const QString &input, 
 
 } // namespace
 
-bool fillWorkflow(const QJsonObject &workflow, const WorkflowInputs &inputs, QJsonObject *filled, QString *error)
+bool fillWorkflow(const QJsonObject &workflow, const WorkflowInputs &inputs, QJsonObject *filled, QString *error,
+                  bool needsPrompt)
 {
     auto fail = [error](const QString &message) {
         if (error)
@@ -39,9 +40,12 @@ bool fillWorkflow(const QJsonObject &workflow, const WorkflowInputs &inputs, QJs
         return false;
     };
     QJsonObject result = workflow;
-    for (const QString &needed : {QStringLiteral("MOTHION_INPUT"), QStringLiteral("MOTHION_PROMPT")})
+    QStringList mustHave{QStringLiteral("MOTHION_INPUT")};
+    if (needsPrompt)
+        mustHave << QStringLiteral("MOTHION_PROMPT");
+    for (const QString &needed : mustHave)
         if (findNode(workflow, needed).isEmpty())
-            return fail(QObject::tr("The workflow has no node titled %1: Mothion cannot tell where to put the picture and the prompt. "
+            return fail(QObject::tr("The workflow has no node titled %1: Mothion cannot tell where to put what it sends. "
                                     "Give the nodes these titles (see scripts/comfyui/README.md).")
                             .arg(needed));
     setInput(result, findNode(workflow, QStringLiteral("MOTHION_INPUT")), QStringLiteral("image"), inputs.image);

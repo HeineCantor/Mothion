@@ -12,6 +12,7 @@ const QString kServerKey = QStringLiteral("ai/server");
 const QString kWorkflowKey = QStringLiteral("ai/workflow");
 const QString kFolderKey = QStringLiteral("ai/folder");
 const QString kArgumentsKey = QStringLiteral("ai/serverArguments");
+const QString kTaggerKey = QStringLiteral("ai/taggerWorkflow");
 const QString kPromptKey = QStringLiteral("ai/systemPrompt");
 const QString kNegativeKey = QStringLiteral("ai/systemNegative");
 
@@ -31,6 +32,11 @@ QString defaultWorkflowPath()
     return QDir(comfyFolder()).filePath(QStringLiteral("Mothion/mothion_sketch_refine.json"));
 }
 
+QString defaultTaggerWorkflowPath()
+{
+    return QDir(comfyFolder()).filePath(QStringLiteral("Mothion/mothion_tag_image.json"));
+}
+
 QString defaultSystemPrompt() { return QStringLiteral("masterpiece, best quality, highres"); }
 
 QString defaultSystemNegative()
@@ -46,6 +52,8 @@ QString serverUrl() { return QSettings().value(kServerKey, defaultServer()).toSt
 void setServerUrl(const QString &url) { QSettings().setValue(kServerKey, url.trimmed()); }
 QString workflowPath() { return QSettings().value(kWorkflowKey, defaultWorkflowPath()).toString(); }
 void setWorkflowPath(const QString &path) { QSettings().setValue(kWorkflowKey, path.trimmed()); }
+QString taggerWorkflowPath() { return QSettings().value(kTaggerKey, defaultTaggerWorkflowPath()).toString(); }
+void setTaggerWorkflowPath(const QString &path) { QSettings().setValue(kTaggerKey, path.trimmed()); }
 QString systemPrompt() { return QSettings().value(kPromptKey, defaultSystemPrompt()).toString(); }
 void setSystemPrompt(const QString &text) { QSettings().setValue(kPromptKey, text); }
 QString systemNegative() { return QSettings().value(kNegativeKey, defaultSystemNegative()).toString(); }

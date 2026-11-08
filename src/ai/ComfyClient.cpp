@@ -91,13 +91,28 @@ void ComfyClient::generate(const QImage &reference, const QString &prompt, const
 {
     if (m_busy)
         return;
+    m_prompt = prompt;
+    m_negative = negative;
+    start(reference, m_workflowPath, false);
+}
+
+void ComfyClient::suggest(const QImage &reference)
+{
+    if (m_busy)
+        return;
+    m_prompt.clear();
+    m_negative.clear();
+    start(reference, m_taggerPath, true);
+}
+
+void ComfyClient::start(const QImage &reference, const QString &workflowPath, bool tagging)
+{
     QString error;
-    if (!loadWorkflow(m_workflowPath, &m_workflow, &error)) {
+    if (!loadWorkflow(workflowPath, &m_workflow, &error)) {
         emit failed(error);
         return;
     }
-    m_prompt = prompt;
-    m_negative = negative;
+    m_tagging = tagging;
     m_promptId.clear();
     m_failedPolls = 0;
     m_asking = false;
@@ -154,7 +169,7 @@ void ComfyClient::queue(const QString &uploadedName)
     inputs.seed = qint64(QRandomGenerator::global()->generate64() % (quint64(1) << 50));
     QJsonObject filled;
     QString error;
-    if (!fillWorkflow(m_workflow, inputs, &filled, &error)) {
+    if (!fillWorkflow(m_workflow, inputs, &filled, &error, !m_tagging)) {
         fail(error);
         return;
     }
@@ -178,7 +193,7 @@ void ComfyClient::queue(const QString &uploadedName)
             fail(tr("ComfyUI refused the workflow:\n%1").arg(validationProblem(answer)));
             return;
         }
-        emit status(tr("Generating…"));
+        emit status(m_tagging ? tr("Looking at the picture…") : tr("Generating…"));
         m_poll.start();
     });
 }
@@ -224,6 +239,30 @@ void ComfyClient::askHistory()
 void ComfyClient::fetch(const QJsonObject &entry)
 {
     const QJsonObject outputs = entry.value(QStringLiteral("outputs")).toObject();
+    if (m_tagging) {
+        // The tags the tagging node says: its "tags" (or "text") output, one string for the picture.
+        QString tags;
+        const QString wantedNode = findNode(m_workflow, QStringLiteral("MOTHION_TAGS"));
+        auto textOf = [](const QJsonObject &node) {
+            for (const char *key : {"tags", "text"}) {
+                const QJsonArray values = node.value(QLatin1String(key)).toArray();
+                if (!values.isEmpty())
+                    return values.at(0).toString();
+            }
+            return QString();
+        };
+        if (!wantedNode.isEmpty())
+            tags = textOf(outputs.value(wantedNode).toObject());
+        for (auto it = outputs.begin(); tags.isEmpty() && it != outputs.end(); ++it)
+            tags = textOf(it.value().toObject());
+        m_busy = false;
+        ++m_job;
+        if (tags.isEmpty())
+            emit failed(tr("The run gave no tags."));
+        else
+            emit suggested(tags);
+        return;
+    }
     // The picture of the node titled MOTHION_OUTPUT, else the first one any node made.
     QJsonObject picture;
     const QString wanted = findNode(m_workflow, QStringLiteral("MOTHION_OUTPUT"));

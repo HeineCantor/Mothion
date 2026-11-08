@@ -6,9 +6,11 @@
 #include "document/DocumentController.h"
 
 #include <QDialogButtonBox>
+#include <QDir>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QProgressBar>
 #include <QPushButton>
@@ -47,7 +49,11 @@ RefineDialog::RefineDialog(document::DocumentController *controller, ai::ServerP
     serverRow->addWidget(m_serverState, 1);
     serverRow->addWidget(m_start);
     serverRow->addWidget(m_stopServer);
-    connect(m_start, &QPushButton::clicked, m_server, &ai::ServerProcess::start);
+    m_serverBar = new QProgressBar(this);
+    m_serverBar->setObjectName(QStringLiteral("serverBar"));
+    m_serverBar->setRange(0, 100);
+    m_serverBar->hide();
+    connect(m_start, &QPushButton::clicked, this, &RefineDialog::startServer);
     connect(m_stopServer, &QPushButton::clicked, m_server, &ai::ServerProcess::stop);
     connect(m_server, &ai::ServerProcess::changed, this, &RefineDialog::showServer);
 
@@ -97,10 +103,17 @@ RefineDialog::RefineDialog(document::DocumentController *controller, ai::ServerP
 
     auto *layout = new QVBoxLayout(this);
     layout->addLayout(serverRow);
+    layout->addWidget(m_serverBar);
     layout->addWidget(m_preview, 0, Qt::AlignHCenter);
     layout->addWidget(m_info);
     auto *form = new QFormLayout;
-    form->addRow(tr("Prompt"), m_prompt);
+    m_suggest = new QPushButton(tr("Suggest"), this);
+    m_suggest->setObjectName(QStringLiteral("suggest"));
+    m_suggest->setToolTip(tr("Fills the prompt with the tags a tagger finds in the picture (ComfyUI must be running)."));
+    auto *promptRow = new QHBoxLayout;
+    promptRow->addWidget(m_prompt, 1);
+    promptRow->addWidget(m_suggest, 0, Qt::AlignTop);
+    form->addRow(tr("Prompt"), promptRow);
     form->addRow(tr("Negative"), m_negative);
     layout->addLayout(form);
     layout->addWidget(hint);
@@ -109,6 +122,8 @@ RefineDialog::RefineDialog(document::DocumentController *controller, ai::ServerP
     layout->addWidget(buttons);
 
     connect(m_generate, &QPushButton::clicked, this, &RefineDialog::generate);
+    connect(m_suggest, &QPushButton::clicked, this, &RefineDialog::suggest);
+    connect(m_client, &ai::ComfyClient::suggested, this, &RefineDialog::showSuggestion);
     connect(m_stop, &QPushButton::clicked, this, &RefineDialog::stop);
     connect(m_client, &ai::ComfyClient::status, m_status, &QLabel::setText);
     connect(m_client, &ai::ComfyClient::finished, this, &RefineDialog::finish);
@@ -152,20 +167,53 @@ void RefineDialog::showServer()
     using State = ai::ServerProcess::State;
     QString text;
     switch (m_server->state()) {
-    case State::Stopped: text = tr("stopped"); break;
+    case State::Stopped:
+        text = m_server->installed() ? tr("stopped") : tr("not installed (Start installs it)");
+        break;
     case State::Starting: text = tr("starting… (loading takes a moment)"); break;
     case State::Running: text = m_server->startedHere() ? tr("running") : tr("running (started elsewhere)"); break;
+    case State::Installing:
+        text = tr("installing: %1").arg(m_server->installStatus());
+        if (m_server->installPercent() >= 0)
+            text += QStringLiteral(" %1%").arg(m_server->installPercent());
+        break;
     }
     if (!m_server->problem().isEmpty())
         text += QStringLiteral("\n") + m_server->problem();
     m_serverState->setText(text);
+    const bool installing = m_server->state() == State::Installing;
+    m_serverBar->setVisible(installing);
+    if (installing) {
+        const int percent = m_server->installPercent();
+        m_serverBar->setRange(0, percent >= 0 ? 100 : 0); // 0, 0: busy
+        if (percent >= 0)
+            m_serverBar->setValue(percent);
+    }
     QString why;
     const bool canStart = m_server->canStart(&why);
     m_start->setEnabled(m_server->state() == State::Stopped && canStart);
-    m_start->setToolTip(canStart ? QString() : why);
-    m_stopServer->setEnabled(m_server->startedHere());
-    m_stopServer->setToolTip(m_server->state() == State::Running && !m_server->startedHere()
+    m_start->setToolTip(!canStart ? why
+                        : !m_server->installed() ? tr("ComfyUI is not installed: Start installs it first (several GB, with the models).")
+                                                 : QString());
+    m_stopServer->setEnabled(m_server->startedHere() || installing);
+    m_stopServer->setToolTip(installing ? tr("Stops the installation (what was downloaded is kept).")
+                             : m_server->state() == State::Running && !m_server->startedHere()
                                  ? tr("It was started outside Mothion: stop it there.") : QString());
+}
+
+void RefineDialog::startServer()
+{
+    if (!m_server->installed()) {
+        const QString folder = QDir::toNativeSeparators(ai::comfyFolder());
+        if (QMessageBox::question(this, tr("Install ComfyUI"),
+                                  tr("ComfyUI is not installed on this computer (or not completely).\n\n"
+                                     "Install it now, with the models and the workflows? It downloads several GB (about 15 GB "
+                                     "with an NVIDIA card) into\n%1\nand takes a while; then it starts by itself. "
+                                     "You can stop the installation and go on later.").arg(folder))
+            != QMessageBox::Yes)
+            return;
+    }
+    m_server->start();
 }
 
 void RefineDialog::refreshReference()
@@ -193,11 +241,15 @@ void RefineDialog::showReference()
         m_info->setText(shown.problem);
     }
     m_generate->setEnabled(!m_generating && m_reference.valid());
+    m_suggest->setEnabled(!m_generating && m_reference.valid());
 }
 
 void RefineDialog::setBusy(bool busy)
 {
     m_generating = busy;
+    if (!busy)
+        m_suggesting = false;
+    m_suggest->setEnabled(!busy && m_reference.valid());
     m_bar->setVisible(busy);
     m_stop->setVisible(busy);
     m_generate->setVisible(!busy);
@@ -220,6 +272,30 @@ void RefineDialog::generate()
     m_client->generate(m_job.image, ai::combinedPrompt(ai::systemPrompt(), m_prompt->toPlainText()),
                        ai::combinedPrompt(ai::systemNegative(), m_negative->toPlainText()));
     // (If it ended at once, the workflow could not be read: failed() has come already.)
+}
+
+void RefineDialog::suggest()
+{
+    if (m_generating || !m_reference.valid())
+        return;
+    m_client->setServer(QUrl(ai::serverUrl()));
+    m_client->setTaggerWorkflowPath(ai::taggerWorkflowPath());
+    m_job = m_reference;
+    m_suggesting = true;
+    setBusy(true);
+    m_suggesting = true; // (setBusy(true) leaves it)
+    m_status->clear();
+    m_client->suggest(m_job.image);
+}
+
+void RefineDialog::showSuggestion(const QString &tags)
+{
+    // In the field as an edit, so it can be undone (the person may have written something there).
+    m_prompt->selectAll();
+    m_prompt->insertPlainText(tags);
+    setBusy(false);
+    m_status->setText(tr("Tags suggested: correct them, then Generate."));
+    refreshReference();
 }
 
 void RefineDialog::stop()

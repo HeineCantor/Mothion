@@ -7,14 +7,17 @@ nothing is installed on the system, and removing the folder removes everything.
   -Dir     where to install (default: %LOCALAPPDATA%\Mothion\ComfyUI)
   -Cuda    the PyTorch build: cu128 is for every NVIDIA card, the RTX 50 series included (default when an NVIDIA card
            is found); cpu works, slowly, with no card
-  -Models  also download the checkpoint and the ControlNet of the first workflow (about 8 GB)
+  -Models  also download the checkpoint and the ControlNet of the first workflow (about 8.5 GB: the checkpoint, the ControlNet and the tagger)
   -Python  the Python version for ComfyUI's own environment (default 3.12; uv fetches it)
+  -Stamp   what to write in <folder>\.mothion-install when everything is done (Mothion asks for it, and takes the
+           install as complete only with its number there)
 #>
 param(
     [string]$Dir = (Join-Path $env:LOCALAPPDATA 'Mothion\ComfyUI'),
     [string]$Cuda = '',
     [switch]$Models,
-    [string]$Python = '3.12'
+    [string]$Python = '3.12',
+    [string]$Stamp = '1'
 )
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue' # Invoke-WebRequest is far faster without its progress bar
@@ -59,7 +62,16 @@ if (Test-Path (Join-Path $Src '.git')) {
     Run git @('-C', $Src, 'pull', '--ff-only')
 } elseif (Get-Command git -ErrorAction SilentlyContinue) {
     Say 'Downloading ComfyUI'
-    Run git @('clone', '--depth', '1', 'https://github.com/comfyanonymous/ComfyUI.git', $Src)
+    if ((Test-Path $Src) -and (Get-ChildItem $Src -Force | Select-Object -First 1)) {
+        # Something is in the folder already (models put there beforehand, an install that was interrupted): ComfyUI goes
+        # in around it, and what is there is kept.
+        Run git @('-C', $Src, 'init', '-q')
+        Run git @('-C', $Src, 'remote', 'add', 'origin', 'https://github.com/comfyanonymous/ComfyUI.git')
+        Run git @('-C', $Src, 'fetch', '-q', '--depth', '1', 'origin', 'HEAD')
+        Run git @('-C', $Src, 'checkout', '-q', '-f', '-B', 'master', 'FETCH_HEAD')
+    } else {
+        Run git @('clone', '--depth', '1', 'https://github.com/comfyanonymous/ComfyUI.git', $Src)
+    }
 } else {
     Say 'Downloading ComfyUI (no git: as an archive)'
     $zip = Join-Path $Dir 'comfyui.zip'
@@ -79,6 +91,24 @@ Run $Uv @('pip', 'install', '--python', $Py, 'torch', 'torchvision', 'torchaudio
 
 Say "ComfyUI's packages"
 Run $Uv @('pip', 'install', '--python', $Py, '-r', (Join-Path $Src 'requirements.txt'))
+
+# --- the tagger: Mothion's "Suggest" asks it for the tags of a picture -----------------------------------------------------------
+Say 'Tagger (custom node)'
+$Node = Join-Path $Src 'custom_nodes\ComfyUI-WD14-Tagger'
+if (Test-Path (Join-Path $Node '.git')) {
+    & git -C $Node pull --ff-only
+} elseif (-not (Test-Path (Join-Path $Node '__init__.py'))) {
+    if (Get-Command git -ErrorAction SilentlyContinue) {
+        Run git @('clone', '--depth', '1', 'https://github.com/pythongosssss/ComfyUI-WD14-Tagger.git', $Node)
+    } else {
+        $zip = Join-Path $Dir 'tagger.zip'
+        Invoke-WebRequest 'https://github.com/pythongosssss/ComfyUI-WD14-Tagger/archive/refs/heads/main.zip' -OutFile $zip
+        Expand-Archive -Force $zip (Join-Path $Src 'custom_nodes')
+        Move-Item (Join-Path $Src 'custom_nodes\ComfyUI-WD14-Tagger-main') $Node
+        Remove-Item $zip
+    }
+}
+Run $Uv @('pip', 'install', '--python', $Py, 'onnxruntime')
 
 # --- Mothion's workflows, and a launcher ----------------------------------------------------------------------------------------
 Say 'Workflows and launcher'
@@ -107,7 +137,21 @@ if ($Models) {
     Say 'Models (read their licenses on the pages they come from)'
     Fetch 'https://huggingface.co/Laxhar/noobai-XL-1.1/resolve/main/NoobAI-XL-v1.1.safetensors' 'checkpoints' 'NoobAI-XL-v1.1.safetensors'
     Fetch 'https://huggingface.co/TheMistoAI/MistoLine/resolve/main/mistoLine_rank256.safetensors' 'controlnet' 'mistoLine_rank256.safetensors'
+    # The tagger's model, where the node looks for it (it would download it itself on first use, slowly and unseen).
+    $taggerModels = Join-Path $Node 'models'
+    New-Item -ItemType Directory -Force -Path $taggerModels | Out-Null
+    foreach ($pair in @(@('model.onnx', 'wd-swinv2-tagger-v3.onnx'), @('selected_tags.csv', 'wd-swinv2-tagger-v3.csv'))) {
+        $target = Join-Path $taggerModels $pair[1]
+        if (-not (Test-Path $target)) {
+            Write-Host "Downloading $($pair[1])"
+            Run curl.exe @('-fL', '-C', '-', '--progress-bar', '-o', "$target.part", "https://huggingface.co/SmilingWolf/wd-swinv2-tagger-v3/resolve/main/$($pair[0])")
+            Move-Item "$target.part" $target
+        }
+    }
 }
+
+# --- done: the number Mothion asked for says so -----------------------------------------------------------------------------------
+Set-Content -Path (Join-Path $Dir '.mothion-install') -Value $Stamp -Encoding ASCII
 
 Write-Host @"
 

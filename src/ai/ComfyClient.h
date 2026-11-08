@@ -22,22 +22,27 @@ public:
 
     void setServer(const QUrl &server) { m_server = server; }
     void setWorkflowPath(const QString &path) { m_workflowPath = path; }
+    void setTaggerWorkflowPath(const QString &path) { m_taggerPath = path; }
     void setPollInterval(int milliseconds) { m_poll.setInterval(milliseconds); }
     bool busy() const { return m_busy; }
 
     // Starts a request: `reference` is what the workflow redraws. Ignored while busy.
     void generate(const QImage &reference, const QString &prompt, const QString &negative);
+    // Asks the tagging workflow what the picture shows: the tags come back with suggested(). Ignored while busy.
+    void suggest(const QImage &reference);
     // Stops waiting (and tells the server to stop the run, if it is running).
     void cancel();
 
 signals:
     void status(const QString &text); // what it is doing now, for the person
     void finished(const QImage &image);
+    void suggested(const QString &tags);
     void failed(const QString &message);
 
 private:
     QNetworkRequest request(const QString &path) const;
     void fail(const QString &message);
+    void start(const QImage &reference, const QString &workflowPath, bool tagging);
     void queue(const QString &uploadedName);
     void askHistory();
     void fetch(const QJsonObject &entry);
@@ -47,6 +52,7 @@ private:
     QTimer m_poll;
     QUrl m_server;
     QString m_workflowPath;
+    QString m_taggerPath;
     QString m_clientId;
     QJsonObject m_workflow;
     QString m_prompt;
@@ -56,6 +62,7 @@ private:
     int m_failedPolls = 0;
     bool m_busy = false;
     bool m_asking = false;
+    bool m_tagging = false; // the request is for the tags of the picture, not for a new picture
 };
 
 } // namespace mothion::ai

@@ -189,6 +189,17 @@ qt_add_resources(mothion_gui "mothion_resources"
         "${PROJECT_SOURCE_DIR}/resources/icon/mothion.png"
         "${PROJECT_SOURCE_DIR}/resources/fonts/Montserrat-Bold.ttf"
 )
+# The install scripts of scripts/comfyui travel in the program: Start in "Refine with AI" runs them when ComfyUI is
+# not installed (ai/ServerProcess writes them out for the run).
+qt_add_resources(mothion_gui "mothion_comfyui"
+    PREFIX "/"
+    BASE "${PROJECT_SOURCE_DIR}/scripts"
+    FILES
+        "${PROJECT_SOURCE_DIR}/scripts/comfyui/install.sh"
+        "${PROJECT_SOURCE_DIR}/scripts/comfyui/install.ps1"
+        "${PROJECT_SOURCE_DIR}/scripts/comfyui/workflows/mothion_sketch_refine.json"
+        "${PROJECT_SOURCE_DIR}/scripts/comfyui/workflows/mothion_tag_image.json"
+)
 # Tablet backend selection: Wintab needs Qt's private GUI API, Windows only.
 if(WIN32 AND MOTHION_ENABLE_WINTAB)
     find_package(Qt6 REQUIRED COMPONENTS GuiPrivate)
