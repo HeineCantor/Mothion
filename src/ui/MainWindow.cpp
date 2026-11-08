@@ -17,6 +17,7 @@
 #include "core/Parallel.h"
 #include "ui/DiscordPresence.h"
 #include "ui/ImportSequenceDialog.h"
+#include "ui/BackupDialog.h"
 #include "ui/NewProjectDialog.h"
 #include "ui/DockLayout.h"
 #include "io/VideoExport.h"
@@ -351,6 +352,8 @@ void MainWindow::createMenus()
     file->insertMenu(m_fileActions[2], m_recentMenu); // between Open and Save
     connect(m_recentMenu, &QMenu::aboutToShow, this, &MainWindow::fillRecentMenu);
     file->addAction(m_saveAsAction);
+    file->addSeparator();
+    file->addAction(tr("Open backup…"), this, &MainWindow::openBackup);
     file->addSeparator();
     file->addAction(tr("Import image…"), this, &MainWindow::importImage);
     file->addAction(tr("Import image sequence…"), this, &MainWindow::chooseSequence);
@@ -942,29 +945,34 @@ bool MainWindow::autosaveNow()
 void MainWindow::discardAutosave()
 {
     if (!m_filePath.isEmpty() || m_document->isModified())
-        io::autosave::remove(m_filePath);
+        io::autosave::retire(m_filePath);
     m_autosaveDirty = false;
 }
 
 void MainWindow::checkRecovery()
 {
+    io::autosave::prune(); // the copies over the limits (too many, too old) go
     QList<io::autosave::Entry> entries = io::autosave::all();
     std::reverse(entries.begin(), entries.end()); // the latest first
     for (const io::autosave::Entry &entry : std::as_const(entries)) {
         if (io::autosave::isStale(entry)) {
-            io::autosave::remove(entry.projectPath);
+            io::autosave::retire(entry.projectPath);
             continue;
         }
-        const QString text = tr("Mothion found unsaved work on “%1”, kept at %2.\n\nRecover it? You can then save it "
-                                "over the project, or elsewhere.")
-                                 .arg(entry.name, QLocale().toString(entry.when, QLocale::ShortFormat));
+        QString text = tr("Mothion found unsaved work on “%1”, kept at %2.")
+                           .arg(entry.name, QLocale().toString(entry.when, QLocale::ShortFormat));
+        if (const QFileInfo project(entry.projectPath); !entry.projectPath.isEmpty() && project.exists())
+            text += tr("\nThe project file was last saved at %1.")
+                        .arg(QLocale().toString(project.lastModified(), QLocale::ShortFormat));
+        text += tr("\n\nRecover it? You can then save it over the project, or elsewhere. The last copies stay in "
+                   "File > Open backup for a week, whatever you choose.");
         QMessageBox box(QMessageBox::Question, tr("Recover unsaved work"), text, QMessageBox::NoButton, this);
         QPushButton *recover = box.addButton(tr("Recover"), QMessageBox::AcceptRole);
         QPushButton *discard = box.addButton(tr("Discard"), QMessageBox::DestructiveRole);
         box.addButton(tr("Later"), QMessageBox::RejectRole);
         box.exec();
         if (box.clickedButton() == discard) {
-            io::autosave::remove(entry.projectPath);
+            io::autosave::retire(entry.projectPath);
         } else if (box.clickedButton() == recover) {
             QString error;
             std::unique_ptr<doc::Document> loaded = io::loadProject(entry.file, &error);
@@ -982,6 +990,36 @@ void MainWindow::checkRecovery()
             return; // one project fits the window; the others wait for the next start
         }
     }
+}
+
+bool MainWindow::openBackupCopy(const io::autosave::Entry &entry)
+{
+    QString error;
+    std::unique_ptr<doc::Document> loaded = io::loadProject(entry.file, &error);
+    if (!loaded) {
+        QMessageBox::warning(this, tr("Open backup"), error);
+        return false;
+    }
+    discardAutosave(); // the copies of what was in the window are kept as backups
+    m_document->replaceDocument(std::move(loaded));
+    m_filePath.clear(); // never over the project the copy came from: Save asks for a name
+    diagnostics::setProjectPath(QString());
+    diagnostics::note(QStringLiteral("Opened a backup of %1 made at %2")
+                          .arg(entry.name, entry.when.toString(Qt::ISODate)));
+    m_document->markUnsaved();
+    m_autosaveDirty = true; // and it is kept like any work not saved
+    updateTitle();
+    return true;
+}
+
+void MainWindow::openBackup()
+{
+    BackupDialog dialog(io::autosave::backups(), this);
+    if (dialog.exec() != QDialog::Accepted || dialog.selected().file.isEmpty())
+        return;
+    if (!maybeSave())
+        return;
+    openBackupCopy(dialog.selected());
 }
 
 void MainWindow::checkPreviousCrash()
@@ -1037,9 +1075,9 @@ bool MainWindow::saveTo(const QString &path)
         QMessageBox::critical(this, tr("Save project"), error);
         return false;
     }
-    io::autosave::remove(m_filePath); // the copy of what it was before (a project saved for the first time: untitled)
+    io::autosave::retire(m_filePath); // the copy of what it was before (a project saved for the first time: untitled)
     m_filePath = QFileInfo(path).absoluteFilePath();
-    io::autosave::remove(m_filePath);
+    io::autosave::retire(m_filePath);
     m_autosaveDirty = false;
     diagnostics::setProjectPath(m_filePath);
     diagnostics::note(QStringLiteral("Saved %1").arg(m_filePath));

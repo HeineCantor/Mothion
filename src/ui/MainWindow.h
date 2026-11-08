@@ -1,5 +1,7 @@
 #pragma once
 
+#include "io/Autosave.h"
+
 #include <QElapsedTimer>
 #include <QMainWindow>
 #include <QPointer>
@@ -49,6 +51,9 @@ public:
     // Offers back, one project at a time, the work that autosave copies of an earlier run hold: a copy is of no use
     // (and is taken away) if the project was saved after it was made.
     void checkRecovery();
+    // Opens a copy kept by the autosave as a new, unsaved project (it never goes over the original). False if it cannot
+    // be read.
+    bool openBackupCopy(const io::autosave::Entry &entry);
     // Keeps a copy of the project now if it has unsaved work the last copy lacks (what the timer does, when the
     // user is not drawing). Returns whether one was written.
     bool autosaveNow();
@@ -106,6 +111,7 @@ private:
     // The audio track: asks for a sound file and puts it in the project (a song under the animation).
     void importAudio();
     void openSettings(); // the Settings window
+    void openBackup();
 
     tools::ToolState *m_toolState = nullptr;
     tools::BrushLibrary *m_brushes = nullptr;
