@@ -16,6 +16,7 @@
 #include "compositing/nodes/SensorNoiseNode.h"
 #include "compositing/nodes/SharpenNode.h"
 #include "compositing/nodes/TransformNode.h"
+#include "compositing/nodes/LensDistortionNode.h"
 #include "compositing/nodes/VignetteNode.h"
 
 namespace mothion::compositing {
@@ -37,6 +38,7 @@ NodeRegistry::NodeRegistry()
     m_types.push_back(std::make_unique<VignetteNode>());
     m_types.push_back(std::make_unique<DropShadowNode>());
     m_types.push_back(std::make_unique<TransformNode>());
+    m_types.push_back(std::make_unique<LensDistortionNode>());
     m_types.push_back(std::make_unique<MergeNode>());
     m_types.push_back(std::make_unique<OpacityNode>());
     m_types.push_back(std::make_unique<MaskNode>());

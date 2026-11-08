@@ -84,6 +84,11 @@ NodeItem::NodeItem(compositing::Graph &graph, NodeId id)
         } else if (param.kind == compositing::ParamInfo::Kind::Choice) {
             auto *combo = new QComboBox(row);
             combo->addItems(param.choices);
+            // A long name does not widen the select past the node: it is cut short in the box (the list shows it whole).
+            combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+            combo->setMinimumContentsLength(2);
+            combo->setMinimumWidth(0);
+            label->setMinimumWidth(0); // (a short label leaves the select more room)
             combo->setCurrentIndex(initial.toInt());
             layout->addWidget(combo, 1);
             connect(combo, &QComboBox::currentIndexChanged, this, [this, key](int i) { m_graph.setParam(m_id, key, i); });

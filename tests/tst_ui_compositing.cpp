@@ -513,6 +513,26 @@ private slots:
     }
 
 
+    // Whatever a node holds (a long name in a select, say) fits in its width: the row of each setting is no wider than the
+    // node leaves it.
+    void everyNodesSettingsFitInsideIt()
+    {
+        for (const auto &owned : compositing::NodeRegistry::instance().all()) {
+            const compositing::NodeType *type = owned.get();
+            compositing::Graph network;
+            const compositing::NodeId id = network.addNode(type->id());
+            ui::NodeGraphView view(network);
+            view.show();
+            for (QGraphicsItem *child : view.item(id)->childItems())
+                if (auto *proxy = dynamic_cast<QGraphicsProxyWidget *>(child))
+                    // (A node is 150 px wide, and its settings keep 8 px from each side.)
+                    QVERIFY2(proxy->geometry().right() <= 142.5,
+                             qPrintable(QStringLiteral("%1: a setting reaches past the node (%2 > 142)")
+                                            .arg(type->id()).arg(proxy->geometry().right())));
+        }
+    }
+
+
     void nodeToggleIsKeptAndShownAgain()
     {
         compositing::Graph network;

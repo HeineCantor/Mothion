@@ -140,6 +140,7 @@ qt_add_library(mothion_gui STATIC
     compositing/nodes/DirectionalBlurNode.h compositing/nodes/DirectionalBlurNode.cpp
     compositing/nodes/LevelsNode.h compositing/nodes/LevelsNode.cpp
     compositing/nodes/VignetteNode.h compositing/nodes/VignetteNode.cpp
+    compositing/nodes/LensDistortionNode.h compositing/nodes/LensDistortionNode.cpp
     compositing/nodes/DropShadowNode.h compositing/nodes/DropShadowNode.cpp
     compositing/MaskData.h compositing/MaskData.cpp
     compositing/ImageOps.h compositing/ImageOps.cpp

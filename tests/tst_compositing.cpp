@@ -531,6 +531,80 @@ private slots:
         QCOMPARE(runNode(type, clear, {{"amount", 100}, {"size", 0}}).pixelColor(0, 0).alpha(), 0);
     }
 
+    void lensDistortionBendsThePictureAroundACenter()
+    {
+        const QString type = QStringLiteral("lensdistortion");
+        // A gradient, left to right: where a point of the result comes from shows in its value.
+        QImage ramp(41, 41, QImage::Format_ARGB32_Premultiplied);
+        for (int y = 0; y < 41; ++y)
+            for (int x = 0; x < 41; ++x)
+                ramp.setPixel(x, y, qRgba(x * 6, x * 6, x * 6, 255));
+        QCOMPARE(runNode(type, ramp, {{"amount", 0}, {"zoom", 100}}), ramp); // no bending, no zoom: as it came
+        // Barrel (fisheye): the edges come from further out, the center stays, the corners go empty.
+        const QImage barrel = runNode(type, ramp, {{"amount", 60}, {"zoom", 100}});
+        QCOMPARE(barrel.pixelColor(20, 20), ramp.pixelColor(20, 20));
+        QVERIFY(barrel.pixelColor(30, 20).red() > ramp.pixelColor(30, 20).red());
+        QVERIFY(barrel.pixelColor(10, 20).red() < ramp.pixelColor(10, 20).red());
+        QCOMPARE(runNode(type, ramp, {{"amount", 100}}).pixelColor(0, 0).alpha(), 0);
+        // Pincushion: the other way.
+        const QImage pinch = runNode(type, ramp, {{"amount", -60}});
+        QVERIFY(pinch.pixelColor(30, 20).red() < ramp.pixelColor(30, 20).red());
+        // Zoom in takes less of the picture; out, more (and the border is empty).
+        QVERIFY(runNode(type, ramp, {{"amount", 0}, {"zoom", 200}}).pixelColor(30, 20).red() < 180);
+        QCOMPARE(runNode(type, ramp, {{"amount", 0}, {"zoom", 50}}).pixelColor(0, 20).alpha(), 0);
+        // Another center: the point that stays put moves with it.
+        const QImage side = runNode(type, ramp, {{"amount", 60}, {"centerx", 0}, {"centery", 50}});
+        QCOMPARE(side.pixelColor(0, 20), ramp.pixelColor(0, 20));
+        QVERIFY(side.pixelColor(20, 20).red() > ramp.pixelColor(20, 20).red());
+        // Autosize: the zoom that leaves nothing empty at the edges, whatever the amount, the zoom set, or the center.
+        QImage solid(61, 41, QImage::Format_ARGB32_Premultiplied);
+        solid.fill(Qt::white);
+        for (const int amount : {100, 60, 30, -50, -100}) {
+            for (const QPoint center : {QPoint(50, 50), QPoint(0, 50), QPoint(80, 20)}) {
+                const QImage fitted = runNode(type, solid, {{"amount", amount}, {"autosize", true}, {"zoom", 50},
+                                                              {"centerx", center.x()}, {"centery", center.y()}});
+                for (int y = 0; y < 41; ++y)
+                    for (int x = 0; x < 61; ++x)
+                        if (fitted.pixelColor(x, y).alpha() != 255)
+                            QFAIL(qPrintable(QStringLiteral("empty at %1,%2 (amount %3, center %4,%5)")
+                                                 .arg(x).arg(y).arg(amount).arg(center.x()).arg(center.y())));
+            }
+        }
+        // ...and no more zoom than that: the same picture without it shows empty corners at the same amount.
+        QVERIFY(runNode(type, solid, {{"amount", 60}, {"zoom", 100}}).pixelColor(0, 0).alpha() < 255);
+        const QImage withRamp = runNode(type, ramp, {{"amount", 60}, {"autosize", true}});
+        QVERIFY(withRamp.pixelColor(0, 0).alpha() == 255 && withRamp.pixelColor(40, 40).alpha() == 255);
+        QCOMPARE(runNode(type, ramp, {{"amount", 0}, {"autosize", true}}), ramp); // nothing bent: nothing to fit
+        // Quality: bilinear blurs a thin line, bicubic and Lanczos keep more of it (the darkest point of the line).
+        QImage line(81, 41, QImage::Format_ARGB32_Premultiplied);
+        line.fill(Qt::white);
+        for (int y = 0; y < 41; ++y)
+            line.setPixelColor(50, y, Qt::black);
+        auto darkest = [&](int quality) {
+            const QImage out = runNode(type, line, {{"amount", 30}, {"zoom", 130}, {"quality", quality}});
+            int least = 255;
+            for (int x = 0; x < 81; ++x)
+                least = std::min(least, out.pixelColor(x, 20).red());
+            return least;
+        };
+        QVERIFY2(darkest(1) < darkest(0) - 20, "bicubic keeps the line darker than bilinear");
+        QVERIFY2(darkest(2) < darkest(0) - 20, "and so does Lanczos");
+        // None of them puts color past the alpha, or makes the paper of a white picture anything but white.
+        for (int quality = 0; quality < 3; ++quality) {
+            const QImage out = runNode(type, solid, {{"amount", 80}, {"autosize", true}, {"quality", quality}});
+            QCOMPARE(out.pixelColor(30, 20), QColor(Qt::white));
+            for (int y = 0; y < 41; ++y)
+                for (int x = 0; x < 61; ++x) {
+                    const QRgb px = out.pixel(x, y);
+                    QVERIFY(qRed(px) <= qAlpha(px) && qGreen(px) <= qAlpha(px) && qBlue(px) <= qAlpha(px));
+                }
+        }
+        // A see-through picture stays so (and a null one gives none).
+        QImage clear(41, 41, QImage::Format_ARGB32_Premultiplied);
+        clear.fill(Qt::transparent);
+        QCOMPARE(runNode(type, clear, {{"amount", 80}}).pixelColor(20, 20).alpha(), 0);
+    }
+
     void dropShadowPutsTheShapeBehind()
     {
         const QString type = QStringLiteral("dropshadow");
