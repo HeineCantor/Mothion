@@ -14,7 +14,8 @@ class QSpinBox;
 namespace mothion::ui {
 
 // Asks where and how to export the animation as an mp4 video (through ffmpeg): the file, the frames (the whole
-// scene or a range), the quality, and whether the compositing network is applied. The choices are remembered.
+// scene or a range), the format (H.264 mp4, or VP9 webm and ProRes 4444 mov, which keep transparency, for animations
+// without the paper), the quality, and whether the compositing network is applied. The choices are remembered.
 class VideoExportDialog : public QDialog
 {
     Q_OBJECT
@@ -32,13 +33,16 @@ public:
 
 private:
     void browse();
+    void formatChanged(); // the suffix of the file, and what the format can do
 
     int m_frameCount;
     QLineEdit *m_path = nullptr;
     QRadioButton *m_whole = nullptr;
     QSpinBox *m_from = nullptr;
     QSpinBox *m_to = nullptr;
+    QComboBox *m_format = nullptr;
     QComboBox *m_quality = nullptr;
+    QCheckBox *m_withoutPaper = nullptr;
     QCheckBox *m_compositing = nullptr;
 };
 

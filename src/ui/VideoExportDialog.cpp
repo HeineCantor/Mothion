@@ -27,6 +27,8 @@ constexpr int kMaxFrame = 99999; // exposures may run past the scene's end
 
 const QString kDirKey = QStringLiteral("videoExport/directory");
 const QString kQualityKey = QStringLiteral("videoExport/quality");
+const QString kFormatKey = QStringLiteral("videoExport/format");
+const QString kWithoutPaperKey = QStringLiteral("videoExport/withoutPaper");
 const QString kCompositingKey = QStringLiteral("videoExport/compositing");
 
 } // namespace
@@ -67,6 +69,16 @@ VideoExportDialog::VideoExportDialog(int frameCount, bool hasCompositing, const 
     connect(custom, &QRadioButton::toggled, m_to, &QWidget::setEnabled);
     connect(m_from, &QSpinBox::valueChanged, this, [this](int v) { m_to->setMinimum(v); });
 
+    m_format = new QComboBox(this);
+    m_format->setObjectName(QStringLiteral("format"));
+    m_format->addItem(tr("MP4 (H.264)"), int(io::VideoCodec::H264));
+    m_format->addItem(tr("WebM (VP9, with transparency)"), int(io::VideoCodec::Vp9));
+    m_format->addItem(tr("MOV (ProRes 4444, with transparency)"), int(io::VideoCodec::ProRes4444));
+    m_format->setCurrentIndex(std::clamp(settings.value(kFormatKey, 0).toInt(), 0, 2));
+    m_withoutPaper = new QCheckBox(tr("Without paper (transparent background)"), this);
+    m_withoutPaper->setObjectName(QStringLiteral("withoutPaper"));
+    m_withoutPaper->setChecked(settings.value(kWithoutPaperKey, false).toBool());
+
     m_quality = new QComboBox(this);
     m_quality->addItem(tr("High"), 16);
     m_quality->addItem(tr("Standard"), 20);
@@ -84,9 +96,12 @@ VideoExportDialog::VideoExportDialog(int frameCount, bool hasCompositing, const 
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     connect(browseButton, &QPushButton::clicked, this, &VideoExportDialog::browse);
+    connect(m_format, &QComboBox::currentIndexChanged, this, &VideoExportDialog::formatChanged);
 
     auto *form = new QFormLayout(this);
     form->addRow(tr("File"), pathRow);
+    form->addRow(tr("Format"), m_format);
+    form->addRow(m_withoutPaper);
     form->addRow(m_whole);
     form->addRow(rangeRow);
     form->addRow(tr("Quality"), m_quality);
@@ -98,13 +113,30 @@ VideoExportDialog::VideoExportDialog(int frameCount, bool hasCompositing, const 
         buttons->button(QDialogButtonBox::Ok)->setEnabled(false);
     }
     form->addRow(buttons);
+    formatChanged();
+}
+
+void VideoExportDialog::formatChanged()
+{
+    const io::VideoCodec codec = io::VideoCodec(m_format->currentData().toInt());
+    // The file's suffix follows the format (when it is one of ours: a name typed with another is left to path()).
+    QString file = m_path->text();
+    const QString current = QFileInfo(file).suffix().toLower();
+    for (const io::VideoCodec other : {io::VideoCodec::H264, io::VideoCodec::Vp9, io::VideoCodec::ProRes4444})
+        if (current == io::videoSuffix(other) && other != codec)
+            m_path->setText(file.left(file.size() - current.size()) + io::videoSuffix(codec));
+    const bool alpha = io::videoHasAlpha(codec);
+    m_withoutPaper->setEnabled(alpha);
+    m_withoutPaper->setToolTip(alpha ? QString() : tr("H.264 video has no transparency: choose WebM or MOV."));
+    m_quality->setEnabled(codec != io::VideoCodec::ProRes4444); // ProRes has no quality to choose
 }
 
 QString VideoExportDialog::path() const
 {
     QString file = m_path->text().trimmed();
-    if (QFileInfo(file).suffix().compare(QStringLiteral("mp4"), Qt::CaseInsensitive) != 0)
-        file += QStringLiteral(".mp4");
+    const QString suffix = io::videoSuffix(io::VideoCodec(m_format->currentData().toInt()));
+    if (QFileInfo(file).suffix().compare(suffix, Qt::CaseInsensitive) != 0)
+        file += QLatin1Char('.') + suffix;
     return file;
 }
 
@@ -113,6 +145,8 @@ io::VideoOptions VideoExportDialog::options() const
     io::VideoOptions options;
     options.crf = m_quality->currentData().toInt();
     options.compositing = m_compositing->isChecked();
+    options.codec = io::VideoCodec(m_format->currentData().toInt());
+    options.withoutPaper = io::videoHasAlpha(options.codec) && m_withoutPaper->isChecked();
     return options;
 }
 
@@ -128,7 +162,10 @@ int VideoExportDialog::lastFrame() const
 
 void VideoExportDialog::browse()
 {
-    const QString file = QFileDialog::getSaveFileName(this, tr("Export video"), m_path->text(), tr("MP4 video (*.mp4)"));
+    const io::VideoCodec codec = io::VideoCodec(m_format->currentData().toInt());
+    const QString filter = codec == io::VideoCodec::Vp9 ? tr("WebM video (*.webm)")
+                           : codec == io::VideoCodec::ProRes4444 ? tr("MOV video (*.mov)") : tr("MP4 video (*.mp4)");
+    const QString file = QFileDialog::getSaveFileName(this, tr("Export video"), m_path->text(), filter);
     if (!file.isEmpty())
         m_path->setText(file);
 }
@@ -151,6 +188,8 @@ void VideoExportDialog::accept()
     QSettings settings;
     settings.setValue(kDirKey, info.absolutePath());
     settings.setValue(kQualityKey, m_quality->currentIndex());
+    settings.setValue(kFormatKey, m_format->currentIndex());
+    settings.setValue(kWithoutPaperKey, m_withoutPaper->isChecked());
     if (m_compositing->isEnabled())
         settings.setValue(kCompositingKey, m_compositing->isChecked());
     QDialog::accept();

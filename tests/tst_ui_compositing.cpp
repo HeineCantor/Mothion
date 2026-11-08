@@ -2,6 +2,8 @@
 
 #include "test_common.h"
 
+#include <QProcess>
+
 class TestUiCompositing : public QObject
 {
     Q_OBJECT
@@ -399,6 +401,77 @@ private slots:
         // A folder that is not there is an error, with ffmpeg's words.
         QVERIFY(!io::exportVideo(d, 0, 1, dir.filePath(QStringLiteral("no/such/dir/x.mp4")), {}, {}, &error));
         QVERIFY(!error.isEmpty());
+    }
+
+
+    // An animation without the paper: WebM (VP9) and MOV (ProRes 4444) keep the alpha, and the first frame decoded
+    // again is see-through where nothing is drawn; with the paper it is white there; H.264 has no alpha to give.
+    void videoWithoutPaperKeepsTheTransparency()
+    {
+        if (io::findFfmpeg().isEmpty())
+            QSKIP("ffmpeg is not installed");
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        doc::Document d(64, 48);
+        d.setFrameCount(3);
+        doc::AddCelCommand cel(d, 0, {"C"});
+        cel.apply(d);
+        doc::NewDrawing nd = doc::makeNewDrawing(d, cel.celId(), 0, 3);
+        nd.command->apply(d);
+        doc::Layer &layer = d.cel(cel.celId())->drawing(nd.id)->layers.front();
+        for (int y = 16; y < 32; ++y)
+            for (int x = 16; x < 32; ++x)
+                layer.image.setPixel(x, y, 0xffff0000); // a red square
+
+        // The first frame of a video, as RGBA.
+        auto firstFrame = [&](const QString &video, bool vp9) {
+            const QString png = video + QStringLiteral(".png");
+            QStringList args{QStringLiteral("-y"), QStringLiteral("-loglevel"), QStringLiteral("error")};
+            if (vp9) // the native decoder skips the alpha plane: libvpx reads it
+                args << QStringLiteral("-c:v") << QStringLiteral("libvpx-vp9");
+            args << QStringLiteral("-i") << video << QStringLiteral("-frames:v") << QStringLiteral("1")
+                 << QStringLiteral("-pix_fmt") << QStringLiteral("rgba") << png;
+            QProcess ffmpeg;
+            ffmpeg.start(io::findFfmpeg(), args);
+            if (!ffmpeg.waitForFinished(20000) || ffmpeg.exitCode() != 0)
+                return QImage();
+            return QImage(png).convertToFormat(QImage::Format_ARGB32);
+        };
+        struct Case
+        {
+            io::VideoCodec codec;
+            const char *name;
+        };
+        for (const Case c : {Case{io::VideoCodec::Vp9, "out.webm"}, Case{io::VideoCodec::ProRes4444, "out.mov"}}) {
+            const QString file = dir.filePath(QString::fromLatin1(c.name));
+            io::VideoOptions options;
+            options.codec = c.codec;
+            options.withoutPaper = true;
+            QString error;
+            if (!io::exportVideo(d, 0, 2, file, options, {}, &error)) {
+                if (error.contains(QStringLiteral("ncoder"), Qt::CaseInsensitive))
+                    QSKIP("this ffmpeg has no such encoder");
+                QFAIL(qPrintable(error));
+            }
+            const QImage frame = firstFrame(file, c.codec == io::VideoCodec::Vp9);
+            if (frame.isNull())
+                QSKIP("this ffmpeg cannot decode the video back");
+            QVERIFY2(qAlpha(frame.pixel(4, 4)) < 30, c.name);          // no paper: see-through
+            QVERIFY2(qAlpha(frame.pixel(24, 24)) > 225, c.name);       // the drawing
+            QVERIFY2(qRed(frame.pixel(24, 24)) > 180 && qGreen(frame.pixel(24, 24)) < 90, c.name);
+
+            // With the paper (not asked to leave it out) the picture is opaque and the background white.
+            options.withoutPaper = false;
+            QVERIFY2(io::exportVideo(d, 0, 2, file, options, {}, &error), qPrintable(error));
+            const QImage papered = firstFrame(file, c.codec == io::VideoCodec::Vp9);
+            QVERIFY2(qAlpha(papered.pixel(4, 4)) > 225 && qRed(papered.pixel(4, 4)) > 225, c.name);
+        }
+        // H.264 does not keep an alpha, and does not pretend to: the option is ignored there.
+        QVERIFY(!io::videoHasAlpha(io::VideoCodec::H264));
+        io::VideoOptions plain;
+        plain.withoutPaper = true;
+        QString error;
+        QVERIFY2(io::exportVideo(d, 0, 1, dir.filePath(QStringLiteral("plain.mp4")), plain, {}, &error), qPrintable(error));
     }
 
 

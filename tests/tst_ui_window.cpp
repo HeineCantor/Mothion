@@ -766,6 +766,38 @@ private slots:
     }
 
 
+    // The video dialog offers H.264, VP9 and ProRes 4444; the last two keep transparency and can leave the paper out;
+    // the file's suffix follows the format.
+    void videoDialogOffersFormatsWithTransparency()
+    {
+        QSettings().remove(QStringLiteral("videoExport"));
+        ui::VideoExportDialog dialog(24, false, QStringLiteral("scene"));
+        auto *format = dialog.findChild<QComboBox *>(QStringLiteral("format"));
+        auto *without = dialog.findChild<QCheckBox *>(QStringLiteral("withoutPaper"));
+        QVERIFY(format && without);
+        QCOMPARE(format->count(), 3);
+        QVERIFY(dialog.options().codec == io::VideoCodec::H264);
+        QVERIFY(!without->isEnabled()); // no alpha in H.264
+        QVERIFY(dialog.path().endsWith(QStringLiteral(".mp4")));
+
+        format->setCurrentIndex(1); // WebM
+        QVERIFY(without->isEnabled());
+        QVERIFY(dialog.path().endsWith(QStringLiteral(".webm")));
+        without->setChecked(true);
+        QVERIFY(dialog.options().codec == io::VideoCodec::Vp9);
+        QVERIFY(dialog.options().withoutPaper);
+
+        format->setCurrentIndex(2); // MOV
+        QVERIFY(dialog.path().endsWith(QStringLiteral(".mov")));
+        QVERIFY(dialog.options().codec == io::VideoCodec::ProRes4444);
+
+        format->setCurrentIndex(0); // back: the option is not used with H.264, though the box stays ticked
+        QVERIFY(!dialog.options().withoutPaper);
+        QVERIFY(dialog.path().endsWith(QStringLiteral(".mp4")));
+        QSettings().remove(QStringLiteral("videoExport"));
+    }
+
+
     // An image sequence from files comes in as one new cel with a drawing for each image, in name order (2
     // before 10), `hold` frames each from the start frame; the scene grows to fit; one undo step; a file that
     // is no image is skipped.
