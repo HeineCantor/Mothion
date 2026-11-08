@@ -36,6 +36,8 @@ public:
     // --- whole document ---------------------------------------------------------
     // Starts over with a new default document.
     void newDocument();
+    // A new document of the given size (px), frame rate, length (frames) and paper color, with one cel.
+    void newDocument(int width, int height, int frameRate, int frames, const QColor &paper);
     // Puts a loaded document in place of the current one: history cleared,
     // the top cel and frame 1 current, nothing selected.
     void replaceDocument(std::unique_ptr<doc::Document> document);
@@ -372,6 +374,8 @@ private:
     // Puts the current layer back in the current drawing (see currentLayer()).
     void resolveCurrentLayer();
     static std::unique_ptr<doc::Document> makeDefaultDocument();
+    static std::unique_ptr<doc::Document> makeDocument(int width, int height, int frameRate, int frames,
+                                                        const QColor &paper);
 
     std::unique_ptr<doc::Document> m_document;
     doc::History m_history;

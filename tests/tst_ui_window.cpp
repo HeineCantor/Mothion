@@ -680,6 +680,92 @@ private slots:
     }
 
 
+    // File > New asks for the page: a preset or a custom size, the frame rate, the length and the paper; it comes up with
+    // what it was last accepted with.
+    void newProjectDialogAsksForThePage()
+    {
+        tools::Preferences &prefs = tools::Preferences::instance();
+        prefs.resetAll();
+        QSettings().remove(QStringLiteral("newProject")); // the first time: the new-project settings
+        {
+            ui::NewProjectDialog dialog;
+            QCOMPARE(dialog.pageWidth(), 1920);
+            QCOMPARE(dialog.pageHeight(), 1080);
+            QCOMPARE(dialog.frameRate(), 24);
+            QCOMPARE(dialog.frames(), 120);
+            auto *preset = dialog.findChild<QComboBox *>(QStringLiteral("preset"));
+            auto *width = dialog.findChild<QSpinBox *>(QStringLiteral("width"));
+            auto *height = dialog.findChild<QSpinBox *>(QStringLiteral("height"));
+            QVERIFY(preset && width && height);
+            QCOMPARE(preset->currentIndex(), 0); // Full HD
+
+            // A preset sets the size; editing the size by hand makes it Custom, and back to a preset's when it matches.
+            const auto presets = ui::NewProjectDialog::presets();
+            int vertical = -1;
+            for (int i = 0; i < presets.size(); ++i)
+                if (presets[i].width == 1080 && presets[i].height == 1920)
+                    vertical = i;
+            QVERIFY(vertical >= 0);
+            preset->setCurrentIndex(vertical);
+            emit preset->activated(vertical);
+            QCOMPARE(dialog.pageWidth(), 1080);
+            QCOMPARE(dialog.pageHeight(), 1920);
+            width->setValue(1000);
+            QCOMPARE(preset->currentIndex(), int(presets.size()) - 1); // Custom
+            width->setValue(1080);
+            QCOMPARE(preset->currentIndex(), vertical);
+
+            // A custom size, the other settings, and the page turned the other way.
+            width->setValue(777);
+            height->setValue(555);
+            dialog.findChild<QSpinBox *>(QStringLiteral("fps"))->setValue(12);
+            dialog.findChild<QSpinBox *>(QStringLiteral("frames"))->setValue(36);
+            QTest::mouseClick(dialog.findChild<QToolButton *>(QStringLiteral("swap")), Qt::LeftButton);
+            QCOMPARE(dialog.pageWidth(), 555);
+            QCOMPARE(dialog.pageHeight(), 777);
+            dialog.accept();
+        }
+        {
+            ui::NewProjectDialog again; // it remembers
+            QCOMPARE(again.pageWidth(), 555);
+            QCOMPARE(again.pageHeight(), 777);
+            QCOMPARE(again.frameRate(), 12);
+            QCOMPARE(again.frames(), 36);
+        }
+        {
+            // A paper with no color: the box gives a paper with alpha 0, and is remembered.
+            ui::NewProjectDialog dialog;
+            auto *none = dialog.findChild<QCheckBox *>(QStringLiteral("transparent"));
+            QVERIFY(none && !none->isChecked());
+            QCOMPARE(dialog.paper().alpha(), 255);
+            none->setChecked(true);
+            QCOMPARE(dialog.paper().alpha(), 0);
+            QVERIFY(!dialog.findChild<QPushButton *>(QStringLiteral("paper"))->isEnabled()); // nothing to choose
+            dialog.accept();
+            ui::NewProjectDialog again;
+            QVERIFY(again.findChild<QCheckBox *>(QStringLiteral("transparent"))->isChecked());
+            QCOMPARE(again.paper().alpha(), 0);
+        }
+        // The controller makes the document from them; the settings for the one at start-up are not touched.
+        document::DocumentController controller;
+        controller.newDocument(555, 777, 12, 36, QColor(10, 20, 30));
+        QCOMPARE(controller.document().width(), 555);
+        QCOMPARE(controller.document().height(), 777);
+        QCOMPARE(controller.document().frameCount(), 36);
+        QCOMPARE(controller.document().frameRate().fps(), 12.0);
+        QCOMPARE(QColor::fromRgba(controller.document().paperColor()), QColor(10, 20, 30));
+        QCOMPARE(controller.document().celCount(), 1);
+        QCOMPARE(prefs.newWidth(), 1920);
+        // A see-through paper: the frame the canvas shows has no alpha there.
+        controller.newDocument(40, 30, 24, 12, QColor(255, 255, 255, 0));
+        QCOMPARE(qAlpha(controller.document().paperColor()), 0);
+        canvas::FrameRenderer renderer;
+        renderer.renderAll(controller.document(), 0);
+        QCOMPARE(qAlpha(renderer.image().pixel(5, 5)), 0);
+        QSettings().remove(QStringLiteral("newProject"));
+    }
+
+
     // An image sequence from files comes in as one new cel with a drawing for each image, in name order (2
     // before 10), `hold` frames each from the start frame; the scene grows to fit; one undo step; a file that
     // is no image is skipped.

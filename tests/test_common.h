@@ -42,6 +42,7 @@
 #include "input/TabletInputAdapter.h"
 #include "tools/Preferences.h"
 #include "ui/ImportSequenceDialog.h"
+#include "ui/NewProjectDialog.h"
 #include "ui/SettingsDialog.h"
 #include "ui/Theme.h"
 #include "ui/ShapeBar.h"

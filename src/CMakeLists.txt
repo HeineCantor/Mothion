@@ -154,6 +154,7 @@ qt_add_library(mothion_gui STATIC
     ui/Shortcuts.h ui/Shortcuts.cpp
     ui/SettingsDialog.h ui/SettingsDialog.cpp
     ui/ImportSequenceDialog.h ui/ImportSequenceDialog.cpp
+    ui/NewProjectDialog.h ui/NewProjectDialog.cpp
     ui/Theme.h ui/Theme.cpp
     ui/panels/ToolPalettePanel.h ui/panels/ToolPalettePanel.cpp
     ui/panels/ToolPropertiesPanel.h ui/panels/ToolPropertiesPanel.cpp

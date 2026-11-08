@@ -1,5 +1,7 @@
 #include "canvas/CanvasView.h"
 
+#include "ui/Checkerboard.h"
+
 #include "canvas/DebugOverlay.h"
 #include "canvas/EyedropperTool.h"
 #include "canvas/EffectBrushTools.h"
@@ -406,6 +408,11 @@ void CanvasView::paintEvent(QPaintEvent *)
 
     // Smooth scaling only when zoomed out; nearest-neighbour shows real pixels up close.
     p.setRenderHint(QPainter::SmoothPixmapTransform, m_view.zoom() < 2.0);
+    if (qAlpha(m_document->document().paperColor()) < 255) { // a see-through paper: squares behind the sheet
+        const QRectF sheet = m_view.documentToView().mapRect(QRectF(0, 0, m_document->document().width(),
+                                                                    m_document->document().height()));
+        ui::paintCheckerboard(p, sheet.intersected(QRectF(rect())));
+    }
     p.save();
     p.setTransform(m_view.documentToView());
     p.drawImage(QPointF(0, 0), m_frame.image()); // paper included

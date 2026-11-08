@@ -1,5 +1,7 @@
 #include "ui/panels/NavigatorPanel.h"
 
+#include "ui/Checkerboard.h"
+
 #include "canvas/CanvasView.h"
 #include "ui/IconFactory.h"
 
@@ -103,7 +105,7 @@ void NavigatorPreview::paintEvent(QPaintEvent *)
     QPainter p(this);
     p.fillRect(rect(), palette().dark());
     const QRectF docRect = documentRect();
-    p.fillRect(docRect, Qt::white);
+    paintCheckerboard(p, docRect); // white, and the squares where the paper is see-through
     p.drawImage(docRect.topLeft(), m_thumbnail);
 
     // Visible area: the viewport corners mapped into the document, then into

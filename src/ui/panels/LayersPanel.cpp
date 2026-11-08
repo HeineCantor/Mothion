@@ -100,13 +100,13 @@ QPixmap thumbnail(const doc::TiledImage *image, const doc::Drawing *drawing, con
 {
     QImage img(kThumbSize, QImage::Format_ARGB32_Premultiplied);
     QPainter p(&img);
-    if (paper) {
-        img.fill(*paper);
-    } else {
+    if (!paper || paper->alpha() < 255) { // squares: behind everything, and behind a see-through paper
         for (int y = 0; y < img.height(); y += 6)
             for (int x = 0; x < img.width(); x += 6)
                 p.fillRect(x, y, 6, 6, ((x + y) / 6) % 2 ? QColor(0xcc, 0xcc, 0xcc) : Qt::white);
     }
+    if (paper)
+        p.fillRect(img.rect(), *paper);
     p.save();
     p.setRenderHint(QPainter::SmoothPixmapTransform);
     p.scale(double(kThumbSize.width()) / docSize.width(), double(kThumbSize.height()) / docSize.height());

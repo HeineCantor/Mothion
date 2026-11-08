@@ -1,5 +1,7 @@
 #include "ui/compositing/ImagePreview.h"
 
+#include "ui/Checkerboard.h"
+
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
@@ -118,6 +120,8 @@ void ImagePreview::paintEvent(QPaintEvent *)
     const QSizeF size(m_image.width() * s, m_image.height() * s);
     const QRectF target(QPointF((width() - size.width()) / 2, (height() - size.height()) / 2) + m_offset, size);
     p.setRenderHint(QPainter::SmoothPixmapTransform, s < 2.0);
+    if (m_image.hasAlphaChannel())
+        paintCheckerboard(p, target); // under what is see-through
     p.drawImage(target, m_image);
     if (!m_overlay.isNull())
         p.drawImage(target, m_overlay);

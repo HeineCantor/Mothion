@@ -28,8 +28,8 @@ bool writeImage(const QImage &frame, const QString &path, const ExportOptions &o
     QImageWriter writer(path, writerFormat(options.format));
     QImage image = frame;
     if (options.format == ImageFormat::Jpeg) {
-        // JPEG has no alpha; the frame is already over the paper.
-        image = frame.convertToFormat(QImage::Format_RGB32);
+        // JPEG has no alpha: over the paper, and over white where the paper is see-through.
+        image = flattenedOnWhite(frame);
         writer.setQuality(std::clamp(options.quality, 0, 100));
     } else {
         image = frame.convertToFormat(QImage::Format_ARGB32); // straight alpha, as PNG stores it
@@ -58,6 +58,15 @@ QString suffixOf(ImageFormat format)
     return format == ImageFormat::Jpeg ? QStringLiteral("jpg") : QStringLiteral("png");
 }
 
+QImage flattenedOnWhite(const QImage &image)
+{
+    QImage flat(image.size(), QImage::Format_RGB32);
+    flat.fill(Qt::white);
+    QPainter p(&flat);
+    p.drawImage(0, 0, image);
+    return flat;
+}
+
 QImage renderFrame(const doc::Document &document, int frame, bool transparent)
 {
     canvas::FrameRenderer renderer;
@@ -70,7 +79,7 @@ QImage renderFrame(const doc::Document &document, int frame, bool transparent)
 QImage applyCamera(const QImage &sheet, const doc::CameraPose &pose, QRgb background)
 {
     QImage out(sheet.size(), QImage::Format_ARGB32_Premultiplied);
-    out.fill(background);
+    out.fill(QColor::fromRgba(background)); // as a color: the alpha of the paper is its own, not premultiplied
     const doc::Matrix2x3 m = pose.sheetToPicture(sheet.width(), sheet.height());
     QTransform toPicture(m.a, m.b, m.c, m.d, m.e, m.f);
     // Far out the sheet is brought down to about the picture's size first (an average of the pixels), or the

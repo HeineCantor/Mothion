@@ -553,6 +553,30 @@ private slots:
         QVERIFY(qAbs(qRed(j.pixel(0, 0)) - qRed(d->paperColor())) < 6);
     }
 
+    // A paper with no color (alpha 0): a PNG keeps the see-through, whether or not the transparent option is on; JPEG
+    // and video have no alpha, and get white behind what is see-through.
+    void aSeeThroughPaperExportsAsTransparencyOrWhite()
+    {
+        QTemporaryDir dir;
+        const auto d = sampleDocument();
+        d->setPaperColor(0x00ffffff);
+        QString error;
+        const QString png = dir.filePath(QStringLiteral("frame.png"));
+        QVERIFY2(io::exportFrame(*d, 0, png, {io::ImageFormat::Png, false, 90}, &error), qPrintable(error));
+        const QImage p(png);
+        QCOMPARE(qAlpha(p.pixel(0, 0)), 0); // the paper is see-through, though it was not asked for
+        QCOMPARE(p.pixel(10, 20), QRgb(kRed));
+
+        const QString jpg = dir.filePath(QStringLiteral("frame.jpg"));
+        QVERIFY2(io::exportFrame(*d, 0, jpg, {io::ImageFormat::Jpeg, false, 95}, &error), qPrintable(error));
+        const QImage j(jpg);
+        QVERIFY(qRed(j.pixel(0, 0)) > 250 && qGreen(j.pixel(0, 0)) > 250 && qBlue(j.pixel(0, 0)) > 250); // white, not black
+        QVERIFY(qRed(j.pixel(10, 20)) > 200 && qGreen(j.pixel(10, 20)) < 60); // the drawing as it is
+        // The same through a camera that moves the sheet.
+        const QImage flat = io::flattenedOnWhite(io::renderOutputFrame(*d, 0, false));
+        QCOMPARE(flat.pixel(0, 0), QRgb(0xffffffff));
+    }
+
     // The document's compositing network can be applied to the exported images, when it is asked for.
     void exportCanApplyTheCompositing()
     {

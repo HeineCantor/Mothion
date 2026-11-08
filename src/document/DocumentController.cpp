@@ -114,9 +114,15 @@ DocumentController::~DocumentController() = default;
 std::unique_ptr<doc::Document> DocumentController::makeDefaultDocument()
 {
     const tools::Preferences &prefs = tools::Preferences::instance();
-    auto d = std::make_unique<doc::Document>(prefs.newWidth(), prefs.newHeight(), doc::FrameRate{prefs.newFrameRate(), 1});
-    d->setFrameCount(prefs.newFrames());
-    d->setPaperColor(prefs.paperColor().rgba());
+    return makeDocument(prefs.newWidth(), prefs.newHeight(), prefs.newFrameRate(), prefs.newFrames(), prefs.paperColor());
+}
+
+std::unique_ptr<doc::Document> DocumentController::makeDocument(int width, int height, int frameRate, int frames,
+                                                                const QColor &paper)
+{
+    auto d = std::make_unique<doc::Document>(width, height, doc::FrameRate{frameRate, 1});
+    d->setFrameCount(frames);
+    d->setPaperColor(paper.rgba());
     // The first layer is part of the new document, not an undoable step.
     doc::AddCelCommand first(*d, 0, {tr("Cel 1").toStdString()});
     first.apply(*d);
@@ -128,6 +134,11 @@ std::unique_ptr<doc::Document> DocumentController::makeDefaultDocument()
 void DocumentController::newDocument()
 {
     replaceDocument(makeDefaultDocument());
+}
+
+void DocumentController::newDocument(int width, int height, int frameRate, int frames, const QColor &paper)
+{
+    replaceDocument(makeDocument(width, height, frameRate, frames, paper));
 }
 
 void DocumentController::replaceDocument(std::unique_ptr<doc::Document> document)

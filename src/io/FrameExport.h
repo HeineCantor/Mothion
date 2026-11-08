@@ -36,6 +36,10 @@ QImage renderFrame(const doc::Document &document, int frame, bool transparent);
 // `background` shows (the paper's color, or transparency).
 QImage applyCamera(const QImage &sheet, const doc::CameraPose &pose, QRgb background);
 
+// The picture over white, opaque: for what has no alpha (JPEG, video), when the paper is see-through or the picture
+// has parts that are.
+QImage flattenedOnWhite(const QImage &image);
+
 // What a frame looks like to whoever watches the animation, which is what the playback and the exports show:
 // renderFrame() seen through the project's camera, if it has one and it is on (visible); the whole sheet if not.
 QImage renderOutputFrame(const doc::Document &document, int frame, bool transparent);

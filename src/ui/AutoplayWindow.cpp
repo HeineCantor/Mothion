@@ -1,5 +1,7 @@
 #include "ui/AutoplayWindow.h"
 
+#include "ui/Checkerboard.h"
+
 #include "audio/AudioPlayer.h"
 #include "document/DocumentController.h"
 #include "io/FrameExport.h"
@@ -65,6 +67,8 @@ protected:
             p.translate(width(), 0);
             p.scale(-1, 1);
         }
+        if (m_image->hasAlphaChannel())
+            paintCheckerboard(p, target); // under what is see-through
         p.drawImage(target, *m_image);
     }
 

@@ -181,8 +181,9 @@ void TweenDialog::previewReady(const QImage &picture)
     m_busy = false;
     if (m_tween) {
         QImage flat(picture.size(), QImage::Format_RGB32);
-        flat.fill(QColor::fromRgba(m_document->document().paperColor()));
+        flat.fill(Qt::white); // behind a paper that is see-through
         QPainter p(&flat);
+        p.fillRect(flat.rect(), QColor::fromRgba(m_document->document().paperColor()));
         p.drawImage(0, 0, picture);
         p.end();
         m_preview->setPixmap(QPixmap::fromImage(flat.scaled(m_preview->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation)));

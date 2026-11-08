@@ -17,6 +17,7 @@
 #include "core/Parallel.h"
 #include "ui/DiscordPresence.h"
 #include "ui/ImportSequenceDialog.h"
+#include "ui/NewProjectDialog.h"
 #include "ui/DockLayout.h"
 #include "io/VideoExport.h"
 #include "ui/ExportDialog.h"
@@ -219,7 +220,7 @@ void MainWindow::createCommandBar()
         connect(a, &QAction::triggered, this, slot);
         return a;
     };
-    m_fileActions << make(IconId::New, tr("New"), QStringLiteral("file.new"), &MainWindow::newDocument)
+    m_fileActions << make(IconId::New, tr("New…"), QStringLiteral("file.new"), &MainWindow::newDocument)
                   << make(IconId::Open, tr("Open…"), QStringLiteral("file.open"), &MainWindow::open)
                   << make(IconId::Save, tr("Save"), QStringLiteral("file.save"), &MainWindow::save);
     m_saveAsAction = new QAction(tr("Save as…"), this);
@@ -821,10 +822,14 @@ void MainWindow::openSettings()
 
 void MainWindow::newDocument()
 {
+    NewProjectDialog dialog(this); // the size and the rest, asked before the work in progress is put away
+    if (dialog.exec() != QDialog::Accepted)
+        return;
     if (!maybeSave())
         return;
     discardAutosave();
-    m_document->newDocument();
+    m_document->newDocument(dialog.pageWidth(), dialog.pageHeight(), dialog.frameRate(), dialog.frames(),
+                            dialog.paper());
     m_filePath.clear();
     updateTitle();
 }
