@@ -46,12 +46,52 @@ private slots:
         state.setActiveTool(tools::ToolId::Brush);
         state.setColor(Qt::blue);
         QTest::keyPress(&canvas, Qt::Key_Alt);
-        QTest::mousePress(&canvas, Qt::LeftButton, Qt::AltModifier, onPaper);
-        QTest::mouseMove(&canvas, onRed);
-        QTest::mouseRelease(&canvas, Qt::LeftButton, Qt::AltModifier, onRed);
+        QTest::mousePress(&canvas, Qt::LeftButton, Qt::AltModifier, onRed);
+        QTest::mouseRelease(&canvas, Qt::LeftButton, Qt::AltModifier, onRed); // a click: the color under it
         QTest::keyRelease(&canvas, Qt::Key_Alt);
-        QCOMPARE(state.color(), QColor(200, 40, 30)); // live, to where it was let go
+        QCOMPARE(state.color(), QColor(200, 40, 30));
         QCOMPARE(controller.undoText(), QStringLiteral("Undo import image")); // no stroke
+    }
+
+    // Alt and the pen dragged sideways turn the frames over (a frame for each 20 pixels), without painting or picking
+    // a color; a click that does not move still picks.
+    void altAndADragFlipTheFrames()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        controller.setSceneLength(30);
+        QImage image(200, 200, QImage::Format_ARGB32);
+        image.fill(QColor(200, 40, 30));
+        controller.importImage(image, QStringLiteral("red"));
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(500, 300);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        state.setActiveTool(tools::ToolId::Brush);
+        state.setColor(Qt::blue);
+        const QString undoBefore = controller.undoText();
+        controller.setCurrentFrame(10);
+        const QPoint start(200, 150);
+
+        QTest::keyPress(&canvas, Qt::Key_Alt);
+        QTest::mousePress(&canvas, Qt::LeftButton, Qt::AltModifier, start);
+        QTest::mouseMove(&canvas, start + QPoint(4, 0)); // not far enough to be a drag
+        QCOMPARE(controller.currentFrame(), 10);
+        QTest::mouseMove(&canvas, start + QPoint(25, 0));
+        QCOMPARE(controller.currentFrame(), 11);
+        QTest::mouseMove(&canvas, start + QPoint(65, 3));
+        QCOMPARE(controller.currentFrame(), 13);
+        QTest::mouseMove(&canvas, start + QPoint(-45, 0)); // and back, past where it began
+        QCOMPARE(controller.currentFrame(), 8);
+        QTest::mouseMove(&canvas, start + QPoint(-400, 0)); // the first frame is the end of the way
+        QCOMPARE(controller.currentFrame(), 0);
+        QTest::mouseMove(&canvas, start + QPoint(2000, 0)); // and the last
+        QCOMPARE(controller.currentFrame(), 29);
+        QTest::mouseRelease(&canvas, Qt::LeftButton, Qt::AltModifier, start + QPoint(2000, 0));
+        QTest::keyRelease(&canvas, Qt::Key_Alt);
+        QCOMPARE(controller.currentFrame(), 29); // it stays where the drag ended
+        QCOMPARE(state.color(), QColor(Qt::blue));    // no color was picked
+        QCOMPARE(controller.undoText(), undoBefore);  // and nothing was painted
     }
 
 

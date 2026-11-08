@@ -202,6 +202,16 @@ private:
     document::DocumentController *m_document;
     ViewTransform m_view;
     NavigationGesture m_gesture;
+    // Alt held and the pen down: a drag sideways turns the frames over, as with the pages of a pad; a click that does not
+    // move picks the color under it.
+    struct Flip
+    {
+        double startX = 0;     // where the pen went down (view coordinates)
+        int startFrame = 0;    // the frame it went down on
+        QPointF docPos;        // the point on the page, for the color pick
+        bool moved = false;    // it has gone far enough to be a drag
+    };
+    std::optional<Flip> m_flip;
     FrameRenderer m_frame;
     std::optional<StrokeSession> m_stroke; // set while a stroke is in progress
     std::unique_ptr<CanvasTool> m_moveTool;

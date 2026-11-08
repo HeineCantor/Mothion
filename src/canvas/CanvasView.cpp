@@ -576,7 +576,7 @@ void CanvasView::handleSample(const PenSample &sample)
     updateBrushOutline(QPointF(sample.x, sample.y));
 
     const bool busy = m_gesture.isActive() || m_stroke.has_value() || m_editTool || m_gizmo.isDragging()
-                      || m_cameraGizmo.isDragging();
+                      || m_cameraGizmo.isDragging() || m_flip.has_value();
     const QPointF docPos = m_view.mapToDocument(QPointF(sample.x, sample.y));
     const Qt::KeyboardModifiers modifiers = QGuiApplication::keyboardModifiers();
     switch (sample.phase) {
@@ -590,8 +590,8 @@ void CanvasView::handleSample(const PenSample &sample)
         } else if (sample.tipDown() && m_gizmo.press(docPos, m_view)) {
             update(); // a handle of the perspective layer, whatever the tool
         } else if (picksColor() && sample.tipDown() && sample.tool != InputTool::Eraser) {
-            m_eyedropperTool->press(docPos, modifiers);
-            m_editTool = m_eyedropperTool.get();
+            // Alt and the pen down: a drag turns the frames over, a click picks the color (known on release).
+            m_flip = Flip{sample.x, m_document->currentFrame(), docPos, false};
         } else if (sample.tipDown()
                    && (sample.tool == InputTool::Eraser || ToolState::isPaintTool(m_toolState->activeTool()))) {
             if (m_lineArmed)
@@ -606,7 +606,21 @@ void CanvasView::handleSample(const PenSample &sample)
         }
         break;
     case SamplePhase::Move:
-        if (m_gesture.isActive()) {
+        if (m_flip) {
+            constexpr double kStartPixels = 8;     // less than this is still a click
+            constexpr double kPixelsPerFrame = 20; // a frame for each so many pixels sideways
+            const double dx = sample.x - m_flip->startX;
+            if (!m_flip->moved && std::abs(dx) >= kStartPixels) {
+                m_flip->moved = true;
+                setCursor(Qt::SizeHorCursor);
+            }
+            if (m_flip->moved) {
+                const int target = std::clamp(m_flip->startFrame + int(std::lround(dx / kPixelsPerFrame)), 0,
+                                              m_document->document().frameCount() - 1);
+                if (target != m_document->currentFrame())
+                    m_document->setCurrentFrame(target);
+            }
+        } else if (m_gesture.isActive()) {
             m_gesture.update(QPointF(sample.x, sample.y), m_view);
             viewWasChanged();
         } else if (m_cameraGizmo.isDragging()) {
@@ -625,6 +639,17 @@ void CanvasView::handleSample(const PenSample &sample)
         }
         break;
     case SamplePhase::Release:
+        if (m_flip) {
+            const Flip flip = *m_flip;
+            m_flip.reset();
+            updateCursor();
+            if (!flip.moved) { // a click: the color under it
+                m_eyedropperTool->press(flip.docPos, modifiers);
+                m_eyedropperTool->release(flip.docPos, modifiers);
+                emit editStepsChanged();
+            }
+            break;
+        }
         m_gesture.end();
         if (m_cameraGizmo.isDragging()) {
             m_cameraGizmo.release(docPos);
