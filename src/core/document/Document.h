@@ -69,9 +69,13 @@ public:
     void moveCel(CelId id, int newIndex);
 
     // Fresh ids; never reused within this document.
-    CelId allocateCelId() { return m_nextCelId++; }
-    DrawingId allocateDrawingId() { return m_nextDrawingId++; }
-    LayerId allocateLayerId() { return m_nextLayerId++; }
+    CelId allocateCelId() { return take(m_nextCelId); }
+    DrawingId allocateDrawingId() { return take(m_nextDrawingId); }
+    LayerId allocateLayerId() { return take(m_nextLayerId); }
+    // For a shared session: this one's ids are the numbers that leave `offset` when divided by `stride` (0 <= offset <
+    // stride), so that those made by others at the same time never collide. The counters move up to the next such
+    // number. (1, 0 are the ordinary ones.)
+    void shareIds(unsigned stride, unsigned offset);
     // The next ids to allocate, as a saved file records them.
     CelId nextCelId() const { return m_nextCelId; }
     DrawingId nextDrawingId() const { return m_nextDrawingId; }
@@ -84,6 +88,15 @@ public:
     const Layer *layer(CelId cel, DrawingId drawing, LayerId layer) const;
 
 private:
+    template <class T>
+    T take(T &counter)
+    {
+        const T id = counter;
+        counter += T(m_idStride);
+        return id;
+    }
+
+    unsigned m_idStride = 1;
     int m_width;
     int m_height;
     FrameRate m_frameRate;

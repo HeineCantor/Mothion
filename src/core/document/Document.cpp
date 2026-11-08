@@ -68,6 +68,19 @@ const Layer *Document::layer(CelId celId, DrawingId drawingId, LayerId layerId) 
     return d ? d->layer(layerId) : nullptr;
 }
 
+void Document::shareIds(unsigned stride, unsigned offset)
+{
+    m_idStride = stride < 1 ? 1 : stride;
+    const unsigned residue = stride < 2 ? 0 : offset % stride;
+    auto up = [&](auto &counter) {
+        while (stride > 1 && unsigned(counter % stride) != residue)
+            ++counter;
+    };
+    up(m_nextCelId);
+    up(m_nextDrawingId);
+    up(m_nextLayerId);
+}
+
 void Document::restoreIdCounters(CelId nextCel, DrawingId nextDrawing, LayerId nextLayer)
 {
     CelId celFloor = 1;

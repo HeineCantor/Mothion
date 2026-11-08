@@ -1,5 +1,7 @@
 #include "io/ProjectFile.h"
 
+#include "io/ProjectCodec.h"
+
 #include "core/Parallel.h"
 #include "io/FrameExport.h"
 #include "io/ProjectThumbnail.h"
@@ -787,6 +789,22 @@ std::filesystem::path fsPath(const QString &path)
 }
 
 } // namespace
+
+namespace codec {
+
+QByteArray packTile(const doc::Tile &tile) { return io::packTile(tile); }
+std::shared_ptr<doc::Tile> unpackTile(const QByteArray &blob) { return io::unpackTile(blob, true); }
+QString blendName(doc::BlendMode blend) { return io::blendName(blend); }
+doc::BlendMode blendFromName(const QString &text) { return io::blendFromName(text); }
+QString gridToJson(const perspective::Grid &grid) { return io::gridToJson(grid); }
+perspective::Grid gridFromJson(const QString &text) { return io::gridFromJson(text); }
+QString graphToJson(const doc::GraphData &graph, const doc::GraphView &view) { return io::graphToJson(graph, view); }
+doc::GraphData graphFromJson(const QString &text) { return io::graphFromJson(text); }
+doc::GraphView viewFromJson(const QString &text) { return io::viewFromJson(text); }
+QString cameraToJson(const doc::Camera &camera) { return io::cameraToJson(camera); }
+doc::Camera cameraFromJson(const QString &text) { return io::cameraFromJson(text); }
+
+} // namespace codec
 
 bool saveProject(const doc::Document &document, const QString &path, QString *error)
 {

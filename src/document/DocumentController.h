@@ -32,6 +32,23 @@ public:
     ~DocumentController() override;
 
     const doc::Document &document() const { return *m_document; }
+    // For a shared session (sync/): the document to change with what comes from the others, which is announced with
+    // publishRemote() and is not an undo step. Nothing else changes the document this way.
+    doc::Document &remoteDocument() { return *m_document; }
+    void publishRemote(const doc::ChangeSet &changes);
+    // Says why a frame cannot be edited here and now (somebody else is working on it): empty when it can. Drawing
+    // and the tools on it are refused for such a frame.
+    using EditGuard = std::function<QString(doc::CelId, doc::DrawingId)>;
+    void setEditGuard(EditGuard guard)
+    {
+        m_editGuard = std::move(guard);
+        emit editGuardChanged();
+    }
+    void notifyEditGuardChanged() { emit editGuardChanged(); } // who is working on what changed
+    QString editRefusal(doc::CelId cel, doc::DrawingId drawing) const
+    {
+        return m_editGuard && drawing != doc::kNoId ? m_editGuard(cel, drawing) : QString();
+    }
 
     // --- whole document ---------------------------------------------------------
     // Starts over with a new default document.
@@ -348,6 +365,8 @@ signals:
     void layerChosenByDrawing();
     // Whether the selection is a layer changed (see layerChosen()).
     void layerChosenChanged();
+    // What the edit guard says changed (see setEditGuard()): views that show what can be drawn on look again.
+    void editGuardChanged();
     // Which layer's mask is being edited changed (see setMaskEditing()), or a mask was made or taken away.
     void maskEditingChanged();
     // Undo/redo availability or labels changed.
@@ -399,6 +418,7 @@ private:
     };
     std::optional<PaintState> m_paint;
     doc::LayerId m_maskLayer = doc::kNoId;
+    EditGuard m_editGuard;
 };
 
 } // namespace mothion::document

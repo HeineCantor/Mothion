@@ -726,10 +726,19 @@ void DocumentController::setLayerChosen(bool chosen)
     emit layerChosenChanged();
 }
 
+void DocumentController::publishRemote(const doc::ChangeSet &changes)
+{
+    publish(changes);
+    markUnsaved();
+}
+
 bool DocumentController::drawingBlocked() const
 {
     if (m_cameraSelected)
         return true;
+    if (const doc::Cel *shown = m_document->cel(m_currentCel);
+        shown && !editRefusal(m_currentCel, shown->timing().drawingAt(m_currentFrame)).isEmpty())
+        return true; // somebody else is on this frame
     if (m_layerChosen)
         return false;
     const doc::Cel *cel = m_document->cel(m_currentCel);
@@ -1437,6 +1446,8 @@ std::optional<DocumentController::PaintTarget> DocumentController::beginPaint(bo
     doc::DrawingId drawing = cel->timing().drawingAt(m_currentFrame);
     if (forDrawing && !m_layerChosen && drawing != doc::kNoId)
         return fail(tr("Choose a layer to draw on: a cel or a frame is selected"));
+    if (const QString why = editRefusal(m_currentCel, drawing); !why.isEmpty())
+        return fail(why);
     if (drawing == doc::kNoId) {
         if (!createIfEmpty)
             return fail(QString());
@@ -1496,7 +1507,8 @@ std::vector<DocumentController::PaintTarget> DocumentController::beginPaintLayer
         const doc::Cel *cel = m_document->cel(ref.cel);
         doc::Layer *layer = m_document->layer(ref.cel, ref.drawing, ref.layer);
         if (!layer || !cel->properties().visible || cel->properties().locked || !layer->properties.visible
-            || layer->properties.locked || layer->kind == doc::LayerKind::Perspective)
+            || layer->properties.locked || layer->kind == doc::LayerKind::Perspective
+            || !editRefusal(ref.cel, ref.drawing).isEmpty())
             continue;
         PaintTarget target{ref.cel, ref.drawing, ref.layer, &layer->image};
         if (layer->mask && m_maskLayer == layer->id) {

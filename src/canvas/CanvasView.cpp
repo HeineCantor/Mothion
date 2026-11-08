@@ -190,6 +190,7 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
                         &DocumentController::structureChanged, &DocumentController::documentReplaced})
         connect(m_document, signal, this, &CanvasView::updateCursor); // may now (not) be drawable
     connect(m_document, &DocumentController::currentFrameChanged, this, &CanvasView::updateCursor);
+    connect(m_document, &DocumentController::editGuardChanged, this, &CanvasView::updateCursor);
     connect(m_document, &DocumentController::currentCelChanged, this, &CanvasView::updateCursor);
     connect(m_toolState, &ToolState::activeToolChanged, this, [this] { updateStraightLine(); });
     connect(m_document, &DocumentController::documentReplaced, this, [this] {
