@@ -1088,6 +1088,87 @@ private slots:
     }
 
 
+    // "Merge with the layer below": the chosen layer goes into the one under it (the lowest of several chosen, if
+    // there are), which keeps its place and name; nothing below, or one that cannot be taken, and it is off.
+    void layersMergeDown()
+    {
+        document::DocumentController controller;
+        ui::LayersPanel panel(&controller);
+        panel.resize(320, 800);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 1, "Line").command);
+        QVERIFY(controller.addLayer(true));
+        QVERIFY(controller.addLayer(true));
+        QVERIFY(controller.addLayer(true));
+        const doc::CelId cel = controller.currentCel();
+        const doc::Drawing &drawing = *controller.currentDrawing();
+        QCOMPARE(drawing.layers.size(), std::size_t(4));
+        const doc::LayerId l0 = drawing.layers[0].id, l1 = drawing.layers[1].id, l2 = drawing.layers[2].id,
+                           l3 = drawing.layers[3].id;
+        auto layer = [&](doc::LayerId id) { return d.layer(cel, drawing.id, id); };
+        layer(l0)->image.setPixel(10, 10, 0xffff0000u);
+        layer(l1)->image.setPixel(20, 20, 0xff00ff00u);
+        layer(l2)->image.setPixel(30, 30, 0xff0000ffu);
+        layer(l3)->image.setPixel(40, 40, 0xffffff00u);
+        QCoreApplication::processEvents();
+
+        auto *tree = panel.findChild<QTreeWidget *>();
+        QToolButton *down = nullptr;
+        for (QToolButton *b : panel.findChildren<QToolButton *>())
+            if (b->toolTip() == QStringLiteral("Merge with the layer below"))
+                down = b;
+        QVERIFY(tree && down);
+        auto rowOf = [&](doc::LayerId id) { return panel.layerItem(id); };
+
+        tree->setCurrentItem(rowOf(l0));
+        QCoreApplication::processEvents();
+        QVERIFY(!down->isEnabled()); // the bottom layer: nothing below
+
+        // One layer chosen: into the one under it.
+        tree->setCurrentItem(rowOf(l2));
+        QCoreApplication::processEvents();
+        QVERIFY(down->isEnabled());
+        QTest::mouseClick(down, Qt::LeftButton);
+        QCOMPARE(drawing.layers.size(), std::size_t(3));
+        QCOMPARE(drawing.layers[1].id, l1); // the lower keeps its place
+        QCOMPARE(drawing.layers[2].id, l3);
+        QCOMPARE(layer(l1)->image.pixel(20, 20), doc::Pixel(0xff00ff00u));
+        QCOMPARE(layer(l1)->image.pixel(30, 30), doc::Pixel(0xff0000ffu));
+        QCOMPARE(controller.currentLayer(), l1);
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo merge layers"));
+        controller.undo();
+        QCOMPARE(drawing.layers.size(), std::size_t(4));
+        QCOMPARE(qAlpha(layer(l1)->image.pixel(30, 30)), 0);
+
+        // Two chosen: both go into the one under the lowest of them.
+        tree->setCurrentItem(rowOf(l3));
+        rowOf(l2)->setSelected(true);
+        QCoreApplication::processEvents();
+        QVERIFY(down->isEnabled());
+        QVERIFY(controller.canMergeDown({l2, l3}));
+        QTest::mouseClick(down, Qt::LeftButton);
+        QCOMPARE(drawing.layers.size(), std::size_t(2));
+        QCOMPARE(layer(l1)->image.pixel(40, 40), doc::Pixel(0xffffff00u));
+        QCOMPARE(layer(l1)->image.pixel(30, 30), doc::Pixel(0xff0000ffu));
+        controller.undo();
+
+        // A hidden or locked layer below is not taken silently: it is off, with the reason said.
+        layer(l1)->properties.visible = false;
+        QVERIFY(!controller.canMergeDown({l2}));
+        QString reason;
+        QVERIFY(!controller.mergeDown({l2}, &reason));
+        QVERIFY(!reason.isEmpty());
+        layer(l1)->properties.visible = true;
+        layer(l1)->properties.locked = true;
+        QVERIFY(!controller.canMergeDown({l2}));
+        layer(l1)->properties.locked = false;
+        QVERIFY(controller.canMergeDown({l2}));
+        QVERIFY(!controller.mergeDown({l0}, &reason)); // nothing under the bottom one
+        QCOMPARE(reason, QStringLiteral("There is no layer below to merge with"));
+    }
+
     // What a merge takes, and what it makes of the look of the layers.
     void mergeLayersKeepsTheLookAndSkipsWhatItCannotTake()
     {

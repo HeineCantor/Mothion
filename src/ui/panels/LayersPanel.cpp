@@ -371,6 +371,7 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     , m_opacityValue(new QSpinBox(this))
     , m_add(actionButton(IconId::Add, tr("New layer"), this))
     , m_merge(actionButton(IconId::MergeLayers, tr("Merge the selected layers"), this))
+    , m_mergeDown(actionButton(IconId::MergeDown, tr("Merge with the layer below"), this))
     , m_remove(actionButton(IconId::Delete, tr("Delete layer"), this))
     , m_camera(actionButton(IconId::Camera, tr("Camera: add it to the project, or select it"), this))
     , m_up(actionButton(IconId::ArrowUp, tr("Move up"), this))
@@ -435,6 +436,7 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     buttons->setSpacing(0);
     buttons->addWidget(m_add);
     buttons->addWidget(m_merge);
+    buttons->addWidget(m_mergeDown);
     buttons->addWidget(m_remove);
     m_camera->setObjectName(QStringLiteral("cameraButton"));
     buttons->addWidget(m_camera);
@@ -495,6 +497,7 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     m_addMenu->addAction(tr("Perspective Layer"), this, [this] { addClicked(doc::LayerKind::Perspective); });
     connect(m_remove, &QToolButton::clicked, this, &LayersPanel::removeSelected);
     connect(m_merge, &QToolButton::clicked, this, &LayersPanel::mergeSelected);
+    connect(m_mergeDown, &QToolButton::clicked, this, &LayersPanel::mergeSelectedDown);
     connect(m_snapTo, &QToolButton::clicked, this, &LayersPanel::snapToClicked);
     connect(m_maskAdd, &QToolButton::clicked, this, [this] { m_document->createLayerMask(); });
     connect(m_maskDelete, &QToolButton::clicked, this, [this] { m_document->deleteLayerMask(); });
@@ -1406,6 +1409,17 @@ void LayersPanel::mergeSelected()
         emit statusMessage(reason);
 }
 
+void LayersPanel::mergeSelectedDown()
+{
+    if (m_focus != Focus::Layer)
+        return;
+    const QList<doc::LayerId> layers = selectedLayers();
+    QString reason;
+    m_selected.clear(); // the result is chosen when it becomes the current layer
+    if (!m_document->mergeDown(std::vector<doc::LayerId>(layers.begin(), layers.end()), &reason))
+        emit statusMessage(reason);
+}
+
 void LayersPanel::copyLayers()
 {
     if (copySelected())
@@ -1462,6 +1476,8 @@ void LayersPanel::showContextMenu(const QPoint &at)
     if (kindOf(item) == Row::Layer) {
         QAction *merge = menu.addAction(icon(IconId::MergeLayers), tr("Merge layers"), this, &LayersPanel::mergeSelected);
         merge->setEnabled(m_merge->isEnabled());
+        QAction *down = menu.addAction(icon(IconId::MergeDown), tr("Merge with layer below"), this, &LayersPanel::mergeSelectedDown);
+        down->setEnabled(m_mergeDown->isEnabled());
     }
     if (kindOf(item) == Row::Layer) {
         menu.addAction(tr("Cut layers"), this, &LayersPanel::cutLayers);
@@ -1741,7 +1757,8 @@ void LayersPanel::syncHeader()
     const doc::Drawing *drawing = m_focus == Focus::Cel || shownNow ? m_document->currentDrawing() : nullptr;
     const doc::Layer *layer = drawing ? drawing->layer(m_document->currentLayer()) : nullptr;
 
-    bool header = false, canAdd = false, canRemove = false, canUp = false, canDown = false, canMerge = false;
+    bool header = false, canAdd = false, canRemove = false, canUp = false, canDown = false, canMerge = false,
+         canMergeDown = false;
     float opacity = 1.0f;
     doc::BlendMode blend = doc::BlendMode::Normal;
     switch (m_focus) {
@@ -1791,6 +1808,8 @@ void LayersPanel::syncHeader()
         canRemove = !removableLayers().empty();
         canMerge = drawing
                    && m_document->canMergeLayers(std::vector<doc::LayerId>(selected.begin(), selected.end()));
+        canMergeDown = drawing
+                       && m_document->canMergeDown(std::vector<doc::LayerId>(selected.begin(), selected.end()));
         canUp = layer && canUp;
         canDown = layer && canDown;
         if (layer) {
@@ -1812,6 +1831,7 @@ void LayersPanel::syncHeader()
     m_add->setPopupMode(m_focus == Focus::Cel ? QToolButton::DelayedPopup : QToolButton::MenuButtonPopup);
     m_remove->setEnabled(canRemove);
     m_merge->setEnabled(canMerge);
+    m_mergeDown->setEnabled(canMergeDown);
     m_up->setEnabled(canUp);
     m_down->setEnabled(canDown);
     // Snap to: on a perspective layer; pressed while strokes snap to it.

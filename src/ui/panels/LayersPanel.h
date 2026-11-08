@@ -143,6 +143,7 @@ private:
     // The layers Delete would take, by (cel, frame): all the selected layer rows.
     std::map<std::pair<doc::CelId, doc::DrawingId>, std::vector<LayerRow>> removableLayers() const;
     void mergeSelected();
+    void mergeSelectedDown();
     bool copySelected(); // to the layer clipboard; false (and a message) if none
     void showContextMenu(const QPoint &at);
     void snapToClicked(bool on);
@@ -165,6 +166,7 @@ private:
     QToolButton *m_add;
     QMenu *m_addMenu = nullptr; // the kinds of layer, from the arrow next to +
     QToolButton *m_merge;
+    QToolButton *m_mergeDown;
     QToolButton *m_remove;
     QToolButton *m_camera; // adds the camera, or selects it
     QToolButton *m_up;

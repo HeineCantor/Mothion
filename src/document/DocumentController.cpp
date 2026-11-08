@@ -301,6 +301,53 @@ bool DocumentController::mergeLayers(const std::vector<doc::LayerId> &ids, QStri
     return true;
 }
 
+doc::LayerId DocumentController::layerBelow(const std::vector<doc::LayerId> &ids) const
+{
+    const doc::Drawing *drawing = currentDrawing();
+    if (!drawing)
+        return doc::kNoId;
+    int lowest = -1;
+    for (doc::LayerId id : ids) {
+        const int i = drawing->indexOf(id);
+        if (i >= 0 && (lowest < 0 || i < lowest))
+            lowest = i;
+    }
+    return lowest > 0 ? drawing->layers[std::size_t(lowest - 1)].id : doc::kNoId;
+}
+
+bool DocumentController::canMergeDown(const std::vector<doc::LayerId> &ids) const
+{
+    const doc::LayerId below = layerBelow(ids);
+    if (below == doc::kNoId)
+        return false;
+    std::vector<doc::LayerId> together = ids;
+    together.push_back(below);
+    // Everything chosen, and the layer below, must be takeable: none is left out silently.
+    const auto taken = mergeableLayers(together);
+    std::size_t wanted = 0;
+    const doc::Drawing *drawing = currentDrawing();
+    for (doc::LayerId id : together)
+        wanted += drawing->indexOf(id) >= 0 ? 1 : 0;
+    return taken.size() >= 2 && taken.size() == wanted;
+}
+
+bool DocumentController::mergeDown(const std::vector<doc::LayerId> &ids, QString *reason)
+{
+    if (layerBelow(ids) == doc::kNoId) {
+        if (reason)
+            *reason = tr("There is no layer below to merge with");
+        return false;
+    }
+    if (!canMergeDown(ids)) {
+        if (reason)
+            *reason = tr("The layers to merge, and the one below, must be shown, unlocked drawing layers");
+        return false;
+    }
+    std::vector<doc::LayerId> together = ids;
+    together.push_back(layerBelow(ids));
+    return mergeLayers(together, reason);
+}
+
 bool DocumentController::copyLayers(const std::vector<LayerRef> &layers, QString *reason)
 {
     std::vector<doc::Layer> copied;
