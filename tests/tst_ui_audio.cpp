@@ -160,8 +160,8 @@ private slots:
         view.resize(600, 300);
         view.show();
         QVERIFY(QTest::qWaitForWindowExposed(&view));
-        // The cel's row is 22 px under the ruler (24 px), the audio row follows it; frames are 16 px, from x = 130.
-        const int audioY = 24 + 22;
+        // The cel's row is 22 px under the ruler, the audio row follows it; frames are 16 px, from x = 130.
+        const int audioY = ui::TimelineMetrics{}.rulerHeight + 22;
         QWidget *viewport = view.viewport();
         QTest::mouseClick(viewport, Qt::LeftButton, {}, QPoint(20, audioY + 20)); // no track: nothing here
         QVERIFY(!controller.audioTrack());

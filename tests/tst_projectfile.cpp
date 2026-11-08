@@ -84,6 +84,7 @@ std::unique_ptr<doc::Document> sampleDocument()
     camera.setKey(12, {200.5, 90.25, 2.5, -45}, doc::Easing::bezier(0.42, 0, 0.58, 1));
     camera.setKey(30, {160, 120, 1, 720}, doc::Easing::linear());
     d->setCamera(camera);
+    d->setMarkers({{0, "start"}, {12, ""}, {30, "o fim ✓"}});
     doc::GraphData graph;
     graph.nodes.push_back({1, "frame", -330.5, 12, {}});
     graph.nodes.push_back({4, "blur", 20, -7.25, {{"radius", 17}}});
@@ -107,6 +108,7 @@ void compareDocuments(const doc::Document &x, const doc::Document &y)
     QVERIFY(x.frameRate() == y.frameRate());
     QCOMPARE(x.frameCount(), y.frameCount());
     QCOMPARE(x.paperColor(), y.paperColor());
+    QVERIFY(x.markers() == y.markers());
     QCOMPARE(x.nextCelId(), y.nextCelId());
     QCOMPARE(x.nextDrawingId(), y.nextDrawingId());
     QCOMPARE(x.nextLayerId(), y.nextLayerId());
@@ -214,6 +216,7 @@ private slots:
         original->setCompositing({});     // and the compositing one with format 7
         original->setCompositingView({});
         original->setCamera(std::nullopt); // and the camera with format 8
+        original->setMarkers({}); // and the markers with format 10
         for (int i = 0; i < original->celCount(); ++i) // and the masks with format 9
             for (const auto &[id, drawing] : original->celAt(i).drawings())
                 for (doc::Layer &layer : original->celAt(i).drawing(id)->layers)

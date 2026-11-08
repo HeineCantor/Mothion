@@ -145,6 +145,13 @@ private:
     QRect cameraEyeRect() const;
     bool inCameraRow(int y) const;
     void paintCamera(QPainter &p) const;
+    void paintMarkerLines(QPainter &p) const;
+    void paintMarkerFlags(QPainter &p) const;
+    // The frame of the marker whose flag is under `pos` (in the strip at the top of the ruler).
+    std::optional<int> markerAt(const QPoint &pos) const;
+    int flagWidth() const; // the pennant's, from the pole
+    void renameMarker(int frame);
+    void showMarkerMenu(const QPoint &global, int frame);
     void paintCameraHeader(QPainter &p) const;
     void showCameraMenu(const QPoint &globalPos, int frame);
 
@@ -188,6 +195,13 @@ private:
         int to = 0;   // where it would go
     };
     std::optional<CameraDrag> m_cameraDrag;
+    struct MarkerDrag
+    {
+        int from = 0; // the marker's frame
+        int to = 0;   // where it would go
+        int grabbed = 0; // the frame under the pointer when the flag was taken
+    };
+    std::optional<MarkerDrag> m_markerDrag;
     std::optional<float> m_volumeBefore; // the volume slider is being dragged: what it was when it began
     std::optional<Resize> m_resize;
     doc::Timing m_previewTiming; // the resized cel's timing during a drag

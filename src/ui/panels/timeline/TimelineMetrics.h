@@ -8,7 +8,7 @@ namespace mothion::ui {
 // Geometry of the timeline view: sizes of the regions and frame <-> x mapping.
 //
 //   +-----------+---------------------------+
-//   |  corner   |  ruler (frame numbers)    |  rulerHeight
+//   |  corner   |  ruler (markers, numbers) |  rulerHeight
 //   +-----------+---------------------------+
 //   |  cel      |  cells (exposures)        |  rowHeight per track
 //   |  names    |                           |
@@ -17,7 +17,8 @@ namespace mothion::ui {
 struct TimelineMetrics
 {
     int headerWidth = 130;
-    int rulerHeight = 24;
+    int rulerHeight = 34;
+    int markerStrip = 12; // the top of the ruler, where the markers are (the frame numbers are below)
     int rowHeight = 22;
     int frameWidth = 16;
     int scrollX = 0; // horizontal scroll of ruler + cells, in pixels

@@ -63,6 +63,8 @@ const char *const kSchema[] = {
     "create table masks (layer integer primary key references layers(id))",
     "create table masktiles (layer integer not null references masks(layer), x integer not null,"
     " y integer not null, pixels blob not null, primary key (layer, x, y))",
+    // Format 10: the timeline's markers.
+    "create table markers (frame integer primary key, name text not null)",
 };
 
 // Stored by name, so reordering the enum cannot change old files.
@@ -530,6 +532,16 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
             return false;
         }
     }
+    for (const auto &[frame, name] : d.markers()) {
+        QSqlQuery marker(db);
+        marker.prepare(QStringLiteral("insert into markers values (?, ?)"));
+        marker.addBindValue(frame);
+        marker.addBindValue(QString::fromStdString(name));
+        if (!marker.exec()) {
+            failure = sqlError(marker);
+            return false;
+        }
+    }
     if (d.camera()) {
         QSqlQuery camera(db);
         camera.prepare(QStringLiteral("insert into camera values (?)"));
@@ -764,6 +776,14 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
         track.data = std::make_shared<const std::vector<unsigned char>>(bytes.cbegin(), bytes.cend());
         track.scrub = q.value(7).toBool();
         d->setAudio(std::move(track));
+    }
+
+    if (version >= 10 && q.exec(QStringLiteral("select frame, name from markers"))) {
+        std::map<int, std::string> markers;
+        while (q.next())
+            if (q.value(0).toInt() >= 0)
+                markers[q.value(0).toInt()] = q.value(1).toString().toStdString();
+        d->setMarkers(std::move(markers));
     }
 
     if (version >= 8 && q.exec(QStringLiteral("select data from camera")) && q.next())

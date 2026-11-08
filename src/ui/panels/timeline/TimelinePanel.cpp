@@ -206,11 +206,32 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
                                                                        : doc::CameraPose::wholeSheet(d.width(), d.height()));
     });
 
-    auto *zoom = new QSlider(Qt::Horizontal, this);
-    zoom->setRange(6, 60);
-    zoom->setValue(m_view->frameWidth());
-    zoom->setMaximumWidth(140);
-    zoom->setToolTip(tr("Frame width (Ctrl+wheel on the timeline)"));
+    // A marker on the current frame: pressed while there is one; the button adds or takes it away (Ctrl+M).
+    auto *marker = celButton(IconId::Flag, QStringLiteral("markerButton"),
+                             tr("Marker on this frame: add or remove it (Ctrl+M). A marker is a name on the timeline: "
+                                "double click its flag to name it, drag it to move it, Alt+, and Alt+. go from one to "
+                                "the next."),
+                             this);
+    marker->setText(tr("Marker"));
+    marker->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    marker->setCheckable(true);
+    connect(marker, &QToolButton::clicked, m_document, &DocumentController::toggleMarker);
+    // To the markers on either side of the current frame, as the arrows go to the frames (off when there is none).
+    auto *prevMarker = celButton(IconId::PreviousMarker, QStringLiteral("previousMarker"), tr("Previous marker (Alt+,)"), this);
+    auto *nextMarker = celButton(IconId::NextMarker, QStringLiteral("nextMarker"), tr("Next marker (Alt+.)"), this);
+    connect(prevMarker, &QToolButton::clicked, m_document, [this] { m_document->goToMarker(-1); });
+    connect(nextMarker, &QToolButton::clicked, m_document, [this] { m_document->goToMarker(+1); });
+    auto syncMarker = [this, marker, prevMarker, nextMarker] {
+        const auto &markers = m_document->markers();
+        const int frame = m_document->currentFrame();
+        marker->setChecked(markers.count(frame) > 0);
+        prevMarker->setEnabled(!markers.empty() && markers.begin()->first < frame);
+        nextMarker->setEnabled(!markers.empty() && markers.rbegin()->first > frame);
+    };
+    connect(m_document, &DocumentController::markersChanged, marker, syncMarker);
+    connect(m_document, &DocumentController::currentFrameChanged, marker, syncMarker);
+    connect(m_document, &DocumentController::documentReplaced, marker, syncMarker);
+    syncMarker();
 
     auto *bar = new QHBoxLayout;
     bar->setContentsMargins(4, 2, 4, 2);
@@ -225,9 +246,10 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
     bar->addWidget(onion);
     bar->addWidget(importAudio);
     bar->addWidget(cameraKey);
+    bar->addWidget(prevMarker);
+    bar->addWidget(marker);
+    bar->addWidget(nextMarker);
     bar->addStretch(1);
-    bar->addWidget(new QLabel(tr("Zoom"), this));
-    bar->addWidget(zoom);
 
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -255,8 +277,6 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
     connect(newDrawing, &QPushButton::clicked, m_document, [this] {
         m_document->insertFrame(m_document->currentCel(), m_document->currentFrame(), false);
     });
-    connect(zoom, &QSlider::valueChanged, m_view, &TimelineView::setFrameWidth);
-    connect(m_view, &TimelineView::frameWidthChanged, zoom, &QSlider::setValue);
 }
 
 QLayout *TimelinePanel::celBar()
@@ -292,6 +312,17 @@ QLayout *TimelinePanel::celBar()
     row->addWidget(opacity, 1);
     row->addWidget(opacityValue);
     row->addStretch(1);
+    // The timeline's zoom, at the end of the row.
+    auto *zoom = new QSlider(Qt::Horizontal, this);
+    zoom->setObjectName(QStringLiteral("timelineZoom"));
+    zoom->setRange(6, 60);
+    zoom->setValue(m_view->frameWidth());
+    zoom->setMaximumWidth(140);
+    zoom->setToolTip(tr("Frame width (Ctrl+wheel on the timeline)"));
+    row->addWidget(new QLabel(tr("Zoom"), this));
+    row->addWidget(zoom);
+    connect(zoom, &QSlider::valueChanged, m_view, &TimelineView::setFrameWidth);
+    connect(m_view, &TimelineView::frameWidthChanged, zoom, &QSlider::setValue);
 
     // Every edit is one undo step on the current cel.
     auto edit = [this](auto change) {

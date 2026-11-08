@@ -62,6 +62,7 @@ TimelineView::TimelineView(DocumentController *document, QWidget *parent)
         viewport()->update();
     });
     connect(m_document, &DocumentController::cameraSelectionChanged, viewport(), qOverload<>(&QWidget::update));
+    connect(m_document, &DocumentController::markersChanged, viewport(), qOverload<>(&QWidget::update));
     connect(&m_analyzer, &audio::AudioAnalyzer::finished, this,
             [this](const void *key, const audio::Waveform &wave) {
                 const auto &track = m_document->audioTrack();
@@ -255,11 +256,13 @@ void TimelineView::paintEvent(QPaintEvent *)
     p.save();
     p.setClipRect(cells);
     paintCells(p);
+    paintMarkerLines(p);
     p.restore();
 
     p.save();
     p.setClipRect(ruler);
     paintRuler(p);
+    paintMarkerFlags(p);
     p.restore();
 
     p.save();
@@ -741,10 +744,121 @@ void TimelineView::paintRuler(QPainter &p) const
         p.drawLine(x, labelled ? m.rulerHeight - 10 : m.rulerHeight - 5, x, m.rulerHeight);
         if (labelled) {
             p.setPen(palette().text().color());
-            p.drawText(QRect(x - 20, 0, m.frameWidth + 40, m.rulerHeight - 8), Qt::AlignCenter,
+            p.drawText(QRect(x - 20, m.markerStrip, m.frameWidth + 40, m.rulerHeight - m.markerStrip - 8), Qt::AlignCenter,
                        QString::number(number));
         }
     }
+}
+
+namespace {
+
+QColor markerColor() { return QColor(0xe0, 0x9a, 0x2b); }
+
+} // namespace
+
+void TimelineView::paintMarkerLines(QPainter &p) const
+{
+    // A thin line down the cells at each marker: where it is, as the eye runs along the rows.
+    const TimelineMetrics &m = m_metrics;
+    QColor line = markerColor();
+    line.setAlpha(150);
+    p.setPen(QPen(line, 1, Qt::DashLine));
+    for (const auto &[frame, name] : m_document->markers()) {
+        int at = frame;
+        if (m_markerDrag && m_markerDrag->from == frame)
+            at = m_markerDrag->to;
+        const int x = m.frameX(at) + m.frameWidth / 2; // the middle of the slot, where the cursor's line is
+        if (x < m.headerWidth - m.frameWidth || x > viewport()->width())
+            continue;
+        p.drawLine(x, m.rulerHeight, x, viewport()->height());
+    }
+}
+
+void TimelineView::paintMarkerFlags(QPainter &p) const
+{
+    const TimelineMetrics &m = m_metrics;
+    const auto &markers = m_document->markers();
+    // Where each flag is now (a dragged one is where it would drop), with its name.
+    std::vector<std::pair<int, QString>> shown;
+    for (const auto &[frame, name] : markers) {
+        const int at = m_markerDrag && m_markerDrag->from == frame ? m_markerDrag->to : frame;
+        shown.emplace_back(at, QString::fromStdString(name));
+    }
+    std::sort(shown.begin(), shown.end(), [](const auto &a, const auto &b) { return a.first < b.first; });
+    QFont small = font();
+    small.setPointSizeF(std::max(6.0, small.pointSizeF() - 1.5));
+    p.setFont(small);
+    for (std::size_t i = 0; i < shown.size(); ++i) {
+        const int x = m.frameX(shown[i].first) + m.frameWidth / 2; // the pole is at the middle of the slot, as the cursor
+        if (x + flagWidth() < m.headerWidth || x > viewport()->width())
+            continue;
+        // A pennant, flying to the right of its pole.
+        const QRectF flag(x, 1.5, flagWidth(), m.markerStrip - 3);
+        QPainterPath shape;
+        shape.moveTo(flag.topLeft());
+        shape.lineTo(flag.topRight());
+        shape.lineTo(flag.right() - 3, flag.center().y());
+        shape.lineTo(flag.bottomRight());
+        shape.lineTo(flag.bottomLeft());
+        shape.closeSubpath();
+        p.setPen(shown[i].first == m_document->currentFrame() ? palette().text().color() : markerColor().darker(140));
+        p.setBrush(markerColor());
+        p.drawPath(shape);
+        // The name, to the next flag (or the edge).
+        if (!shown[i].second.isEmpty()) {
+            const int left = x + int(flag.width()) + 3;
+            const int right = i + 1 < shown.size() ? m.frameX(shown[i + 1].first) + m.frameWidth / 2 - 2 : viewport()->width();
+            if (right - left > 12) {
+                p.setPen(palette().text().color());
+                p.drawText(QRect(left, 0, right - left, m.markerStrip), Qt::AlignVCenter | Qt::AlignLeft,
+                           QFontMetrics(small).elidedText(shown[i].second, Qt::ElideRight, right - left));
+            }
+        }
+    }
+    p.setBrush(Qt::NoBrush);
+}
+
+int TimelineView::flagWidth() const { return std::max(8, m_metrics.frameWidth - 3); }
+
+std::optional<int> TimelineView::markerAt(const QPoint &pos) const
+{
+    if (pos.y() >= m_metrics.markerStrip || pos.x() < m_metrics.headerWidth)
+        return std::nullopt;
+    // The flag and its pole: from just left of the pole (the middle of the slot) to the end of the pennant.
+    std::optional<int> found;
+    for (const auto &[frame, name] : m_document->markers()) {
+        const int pole = m_metrics.frameX(frame) + m_metrics.frameWidth / 2;
+        if (pos.x() >= pole - 3 && pos.x() <= pole + flagWidth() && (!found || std::abs(pos.x() - pole) < std::abs(pos.x() - (m_metrics.frameX(*found) + m_metrics.frameWidth / 2))))
+            found = frame;
+    }
+    return found;
+}
+
+void TimelineView::renameMarker(int frame)
+{
+    const auto it = m_document->markers().find(frame);
+    if (it == m_document->markers().end())
+        return;
+    bool ok = false;
+    const QString name = QInputDialog::getText(this, tr("Marker"), tr("Name of the marker on frame %1:").arg(frame + 1),
+                                               QLineEdit::Normal, QString::fromStdString(it->second), &ok);
+    if (ok)
+        m_document->setMarker(frame, name.trimmed());
+}
+
+void TimelineView::showMarkerMenu(const QPoint &global, int frame)
+{
+    QMenu menu(this);
+    if (m_document->markers().count(frame)) {
+        menu.addAction(tr("Rename marker…"), this, [this, frame] { renameMarker(frame); });
+        menu.addAction(tr("Delete marker"), this, [this, frame] { m_document->removeMarker(frame); });
+    } else {
+        menu.addAction(tr("Add marker here"), this, [this, frame] {
+            m_document->setMarker(frame, QString());
+            renameMarker(frame); // asked for a name, which may stay empty
+        });
+    }
+    menu.exec(global);
 }
 
 void TimelineView::paintHeaders(QPainter &p) const
@@ -783,8 +897,8 @@ void TimelineView::paintCursor(QPainter &p) const
     const TimelineMetrics &m = m_metrics;
     const int frame = m_document->currentFrame();
     const int x = m.frameX(frame);
-    // Frame number badge in the ruler, line through the cells.
-    const QRect badge(x, 1, std::max(m.frameWidth, 26), m.rulerHeight - 3);
+    // Frame number badge in the ruler (under the strip of the markers), line through the cells.
+    const QRect badge(x, m.markerStrip + 1, std::max(m.frameWidth, 26), m.rulerHeight - m.markerStrip - 3);
     p.fillRect(badge, kCursorColor);
     p.setPen(Qt::white);
     p.drawText(badge, Qt::AlignCenter, QString::number(frame + 1));
@@ -848,6 +962,12 @@ void TimelineView::mousePressEvent(QMouseEvent *event)
         return;
     }
     const QPoint pos = event->position().toPoint();
+    if (pos.y() < m_metrics.markerStrip) {
+        // The strip of the markers: a drag on a flag moves the marker; the strip is not for moving the cursor.
+        if (const auto marker = markerAt(pos))
+            m_markerDrag = MarkerDrag{*marker, *marker, frameAt(pos.x())};
+        return;
+    }
     if (inCameraRow(pos.y())) {
         // On a keyframe: its frame is shown, and a drag moves the key; elsewhere in the row: the frame under the pointer.
         const int frame = frameAt(pos.x());
@@ -993,6 +1113,15 @@ void TimelineView::mouseMoveEvent(QMouseEvent *event)
         m_document->previewAudioVolume(audioVolumeAt(pos.x()));
         return;
     }
+    if (m_markerDrag) {
+        // By as many frames as the pointer has moved (it may have taken the flag by its pennant, past the pole).
+        const int to = std::max(0, m_markerDrag->from + frameAt(pos.x()) - m_markerDrag->grabbed);
+        if (to != m_markerDrag->to) {
+            m_markerDrag->to = to;
+            viewport()->update();
+        }
+        return;
+    }
     if (m_cameraDrag) {
         const int to = std::max(0, frameAt(pos.x()));
         if (to != m_cameraDrag->to) {
@@ -1030,7 +1159,7 @@ void TimelineView::mouseMoveEvent(QMouseEvent *event)
         scrubTo(pos, false);
         return;
     }
-    viewport()->setCursor(edgeAt(pos) ? Qt::SizeHorCursor : Qt::ArrowCursor);
+    viewport()->setCursor(edgeAt(pos) || markerAt(pos) ? Qt::SizeHorCursor : Qt::ArrowCursor); // a flag moves sideways
 }
 
 void TimelineView::mouseReleaseEvent(QMouseEvent *)
@@ -1040,6 +1169,15 @@ void TimelineView::mouseReleaseEvent(QMouseEvent *)
         const float before = *m_volumeBefore;
         m_volumeBefore.reset();
         m_document->commitAudioVolume(before);
+        viewport()->update();
+        return;
+    }
+    if (m_markerDrag) {
+        const MarkerDrag drag = *m_markerDrag;
+        m_markerDrag.reset();
+        // A marker goes where there is none: one on the way is a place taken.
+        if (drag.to != drag.from)
+            m_document->moveMarker(drag.from, drag.to);
         viewport()->update();
         return;
     }
@@ -1080,6 +1218,15 @@ void TimelineView::mouseDoubleClickEvent(QMouseEvent *event)
 {
     const int row = rowAt(int(event->position().y()));
     const QPoint pos = event->position().toPoint();
+    if (event->button() == Qt::LeftButton && pos.y() < m_metrics.markerStrip && pos.x() >= m_metrics.headerWidth) {
+        const int frame = frameAt(pos.x()); // on a flag: its name; on the strip elsewhere: a marker here
+        if (frame >= 0) {
+            if (!m_document->markers().count(frame))
+                m_document->setMarker(frame, QString());
+            renameMarker(frame);
+        }
+        return;
+    }
     if (event->button() == Qt::LeftButton && inCameraRow(pos.y()) && pos.x() >= m_metrics.headerWidth) {
         const int frame = frameAt(pos.x()); // a key here, at the pose the camera has
         if (frame >= 0 && !m_document->camera()->keyAt(frame))
@@ -1172,6 +1319,12 @@ bool TimelineView::event(QEvent *event)
 
 void TimelineView::contextMenuEvent(QContextMenuEvent *event)
 {
+    if (event->pos().y() < m_metrics.rulerHeight && event->pos().x() >= m_metrics.headerWidth) {
+        const int frame = frameAt(event->pos().x());
+        if (frame >= 0)
+            showMarkerMenu(event->globalPos(), frame);
+        return;
+    }
     if (inCameraRow(event->pos().y())) {
         const int frame = event->pos().x() < m_metrics.headerWidth ? m_document->currentFrame() : frameAt(event->pos().x());
         if (frame >= 0)

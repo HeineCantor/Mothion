@@ -11,7 +11,7 @@ enum class IconId {
     ZoomOut, ZoomFit, ZoomActual, RotateLeft, RotateRight, RotateReset,
     FlipHorizontal, FlipVertical, Eye, Lock, Add, Delete, ArrowUp, ArrowDown, Clear,
     Deselect, InvertSelection, EraseSelection, CutToLayer, CopyToLayer, MergeLayers, MergeDown,
-    Folder, Frame, PreviousFrame, NextFrame, Wrench, Play, Stop, Pause, Speaker, SpeakerOff, Camera, MaskAdd, MaskDelete,
+    Folder, Frame, PreviousFrame, NextFrame, Wrench, Play, Stop, Pause, Speaker, SpeakerOff, Camera, MaskAdd, MaskDelete, Flag, PreviousMarker, NextMarker,
 };
 
 // Provisional icons, drawn in code as simple line art on a 24x24 grid.

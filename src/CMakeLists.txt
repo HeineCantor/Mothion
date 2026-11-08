@@ -49,6 +49,7 @@ add_library(mothion_core STATIC
     core/document/commands/AudioCommands.h core/document/commands/AudioCommands.cpp
     core/document/commands/CompositingCommands.h core/document/commands/CompositingCommands.cpp
     core/document/commands/CameraCommands.h core/document/commands/CameraCommands.cpp
+    core/document/commands/MarkerCommands.h core/document/commands/MarkerCommands.cpp
     core/document/Compositing.h
 )
 set_target_properties(mothion_core PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)

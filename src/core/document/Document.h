@@ -5,8 +5,10 @@
 #include "core/document/Cel.h"
 #include "core/document/Compositing.h"
 
+#include <map>
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace mothion::doc {
@@ -48,6 +50,11 @@ public:
     // The camera, if the project has one (see Camera): what the picture of each frame is cut from the sheet.
     const std::optional<Camera> &camera() const { return m_camera; }
     void setCamera(std::optional<Camera> camera) { m_camera = std::move(camera); }
+
+    // Markers: a name on a frame of the timeline (frame -> name; the name may be empty), to find one's way in a long
+    // scene. They are not tied to a cel: they stay where they are as frames are added or taken away.
+    const std::map<int, std::string> &markers() const { return m_markers; }
+    void setMarkers(std::map<int, std::string> markers) { m_markers = std::move(markers); }
 
     // The compositing network (see GraphData); empty until the editor makes one.
     const GraphData &compositing() const { return m_compositing; }
@@ -91,6 +98,7 @@ private:
     Pixel m_paperColor = 0xffffffff;
     std::optional<AudioTrack> m_audio;
     std::optional<Camera> m_camera;
+    std::map<int, std::string> m_markers;
     GraphData m_compositing;
     GraphView m_compositingView;
     std::vector<std::unique_ptr<Cel>> m_cels;

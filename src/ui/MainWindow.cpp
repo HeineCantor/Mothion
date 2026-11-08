@@ -426,6 +426,14 @@ void MainWindow::createMenus()
     keymap.bind(animation->addAction(tr("Next frame"), this, [this] { m_document->stepToFrame(+1); }),
                 QStringLiteral("anim.nextFrame"));
     animation->addSeparator();
+    // Markers: names on the timeline to find one's way in a long scene.
+    keymap.bind(animation->addAction(tr("Add or remove marker"), m_document, &document::DocumentController::toggleMarker),
+                QStringLiteral("anim.toggleMarker"));
+    keymap.bind(animation->addAction(tr("Previous marker"), this, [this] { m_document->goToMarker(-1); }),
+                QStringLiteral("anim.previousMarker"));
+    keymap.bind(animation->addAction(tr("Next marker"), this, [this] { m_document->goToMarker(+1); }),
+                QStringLiteral("anim.nextMarker"));
+    animation->addSeparator();
     // The hold of the frame at the current point, one frame longer or shorter;
     // the frames after it move along.
     animation->addAction(tr("Tween frames…"), this, &MainWindow::tweenFrames);

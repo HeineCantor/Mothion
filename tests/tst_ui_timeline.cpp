@@ -989,6 +989,151 @@ private slots:
         QVERIFY(!panel->player()->isPlaying()); // not from outside the timeline
     }
 
+
+    // Markers: a name on a frame. A key adds or takes one away on the current frame; moving between them, and each
+    // change is one undo step.
+    void markersAreAddedRenamedMovedAndWalked()
+    {
+        document::DocumentController controller;
+        controller.setSceneLength(60);
+        QVERIFY(controller.markers().empty());
+        controller.setCurrentFrame(10);
+        controller.toggleMarker();
+        QCOMPARE(controller.markers().size(), size_t(1));
+        QVERIFY(controller.markers().count(10));
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo markers"));
+        QVERIFY(controller.setMarker(10, QStringLiteral("impact"))); // a name for it
+        QVERIFY(!controller.setMarker(10, QStringLiteral("impact"))); // nothing changes
+        controller.setCurrentFrame(40);
+        controller.toggleMarker();
+        QVERIFY(controller.setMarker(25, QStringLiteral("dialog starts")));
+        QCOMPARE(controller.markers().size(), size_t(3));
+
+        // Walking: next and previous, staying put at the ends.
+        controller.setCurrentFrame(0);
+        QVERIFY(controller.goToMarker(+1));
+        QCOMPARE(controller.currentFrame(), 10);
+        QVERIFY(controller.goToMarker(+1));
+        QCOMPARE(controller.currentFrame(), 25);
+        QVERIFY(controller.goToMarker(+1));
+        QCOMPARE(controller.currentFrame(), 40);
+        QVERIFY(!controller.goToMarker(+1));
+        QCOMPARE(controller.currentFrame(), 40);
+        QVERIFY(controller.goToMarker(-1));
+        QCOMPARE(controller.currentFrame(), 25);
+        controller.setCurrentFrame(5);
+        QVERIFY(!controller.goToMarker(-1));
+        QCOMPARE(controller.currentFrame(), 5);
+
+        // Moving one: not onto another, not one that is not there.
+        QVERIFY(!controller.moveMarker(25, 10));
+        QVERIFY(!controller.moveMarker(26, 30));
+        QVERIFY(controller.moveMarker(25, 30));
+        QVERIFY(controller.markers().count(30) && !controller.markers().count(25));
+        QCOMPARE(controller.markers().at(30), std::string("dialog starts")); // the name goes with it
+        controller.undo();
+        QVERIFY(controller.markers().count(25) && !controller.markers().count(30));
+        // On the current frame the key takes it away.
+        controller.setCurrentFrame(40);
+        controller.toggleMarker();
+        QVERIFY(!controller.markers().count(40));
+        QVERIFY(!controller.removeMarker(40));
+        controller.undo();
+        QVERIFY(controller.markers().count(40));
+    }
+
+    // A marker's flag, dragged in the strip at the top of the ruler, moves it (one undo step). The strip is not for the
+    // cursor: neither a click nor a drag there moves it; the numbers below do.
+    void aMarkerIsDraggedOnTheRuler()
+    {
+        document::DocumentController controller;
+        controller.setSceneLength(60);
+        controller.setMarker(10, QStringLiteral("a"));
+        controller.setMarker(20, QStringLiteral("b"));
+        controller.setCurrentFrame(2);
+        ui::TimelineView view(&controller);
+        view.resize(800, 200);
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        ui::TimelineMetrics m;
+        auto flag = [&](int frame) { return QPoint(m.frameX(frame) + m.frameWidth / 2, m.markerStrip / 2); };
+        auto *vp = view.viewport();
+
+        QTest::mouseClick(vp, Qt::LeftButton, {}, flag(10));
+        QCOMPARE(controller.currentFrame(), 2); // the cursor stays where it was
+        QCOMPARE(controller.markers().size(), size_t(2));
+
+        QTest::mousePress(vp, Qt::LeftButton, {}, flag(10));
+        QTest::mouseMove(vp, flag(12));
+        QTest::mouseMove(vp, flag(15));
+        QTest::mouseRelease(vp, Qt::LeftButton, {}, flag(15));
+        QVERIFY(controller.markers().count(15) && !controller.markers().count(10));
+        QCOMPARE(controller.markers().at(15), std::string("a"));
+        QCOMPARE(controller.currentFrame(), 2); // not here either
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo markers"));
+
+        // Not onto another marker: it stays where it was.
+        QTest::mousePress(vp, Qt::LeftButton, {}, flag(15));
+        QTest::mouseMove(vp, flag(20));
+        QTest::mouseRelease(vp, Qt::LeftButton, {}, flag(20));
+        QVERIFY(controller.markers().count(15) && controller.markers().count(20));
+
+        // A flag taken by its pennant (right of the pole, over the next slot) moves by as many frames as the pointer.
+        QTest::mousePress(vp, Qt::LeftButton, {}, flag(15) + QPoint(8, 0));
+        QTest::mouseMove(vp, flag(17) + QPoint(8, 0));
+        QTest::mouseMove(vp, flag(18) + QPoint(8, 0));
+        QTest::mouseRelease(vp, Qt::LeftButton, {}, flag(18) + QPoint(8, 0));
+        QVERIFY(controller.markers().count(18) && !controller.markers().count(15)); // 3 frames, not 4
+        controller.undo();
+
+        // The strip, off a flag, does nothing; the ruler under it is the way to move the cursor.
+        QTest::mouseClick(vp, Qt::LeftButton, {}, flag(30));
+        QCOMPARE(controller.currentFrame(), 2);
+        QCOMPARE(controller.markers().size(), size_t(2));
+        QTest::mouseClick(vp, Qt::LeftButton, {}, QPoint(m.frameX(30) + m.frameWidth / 2, m.markerStrip + 6));
+        QCOMPARE(controller.currentFrame(), 30);
+    }
+
+    // The button on the timeline's bar: pressed while the current frame has a marker, and it adds or takes one away.
+    void theMarkerButtonFollowsTheFrame()
+    {
+        document::DocumentController controller;
+        controller.setSceneLength(60);
+        tools::ToolState state;
+        ui::TimelinePanel panel(&controller, &state);
+        auto *button = panel.findChild<QToolButton *>(QStringLiteral("markerButton"));
+        QVERIFY(button);
+        QVERIFY(!button->isChecked());
+        auto *previous = panel.findChild<QToolButton *>(QStringLiteral("previousMarker"));
+        auto *next = panel.findChild<QToolButton *>(QStringLiteral("nextMarker"));
+        QVERIFY(previous && next);
+        QVERIFY(!previous->isEnabled() && !next->isEnabled()); // no markers
+        controller.setMarker(3, QString());
+        controller.setMarker(20, QString());
+        controller.setCurrentFrame(10);
+        QVERIFY(previous->isEnabled() && next->isEnabled());
+        next->click();
+        QCOMPARE(controller.currentFrame(), 20);
+        QVERIFY(!next->isEnabled() && previous->isEnabled()); // the last one: nothing further on
+        previous->click();
+        QCOMPARE(controller.currentFrame(), 3);
+        QVERIFY(!previous->isEnabled());
+        controller.removeMarker(3);
+        controller.removeMarker(20);
+        controller.setCurrentFrame(7);
+        button->click();
+        QVERIFY(controller.markers().count(7));
+        QVERIFY(button->isChecked());
+        controller.setCurrentFrame(8);
+        QVERIFY(!button->isChecked()); // no marker on this frame
+        controller.setCurrentFrame(7);
+        QVERIFY(button->isChecked());
+        button->click(); // takes it away
+        QVERIFY(controller.markers().empty());
+        QVERIFY(!button->isChecked());
+        controller.undo();
+        QVERIFY(button->isChecked());
+    }
 };
 
 QTEST_MAIN(TestUiTimeline)

@@ -431,6 +431,32 @@ void drawGlyph(QPainter &p, IconId id)
         path.lineTo(20.5, 16.5);
         path.lineTo(15.5, 13.5);
         break;
+    case IconId::Flag: // a pennant on its pole
+        path.moveTo(6.5, 3);
+        path.lineTo(6.5, 21);
+        path.moveTo(6.5, 4.5);
+        path.lineTo(19, 4.5);
+        path.lineTo(15, 9);
+        path.lineTo(19, 13.5);
+        path.lineTo(6.5, 13.5);
+        break;
+    case IconId::PreviousMarker:
+    case IconId::NextMarker: // a small pennant and an arrow head: the next (or previous) marker
+        if (id == IconId::PreviousMarker) {
+            p.translate(24, 0);
+            p.scale(-1, 1);
+        }
+        path.moveTo(4.5, 5);
+        path.lineTo(4.5, 19);
+        path.moveTo(4.5, 6);
+        path.lineTo(13, 6);
+        path.lineTo(10, 9.75);
+        path.lineTo(13, 13.5);
+        path.lineTo(4.5, 13.5);
+        path.moveTo(16.5, 8);
+        path.lineTo(20.5, 12);
+        path.lineTo(16.5, 16);
+        break;
     case IconId::MaskAdd: // a square with a hole in it, and a plus
     case IconId::MaskDelete: { // the same, and a cross
         path.addRect(QRectF(3.5, 3.5, 13, 13));

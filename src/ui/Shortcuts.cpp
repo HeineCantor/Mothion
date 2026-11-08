@@ -95,6 +95,9 @@ Shortcuts::Shortcuts()
     add(QStringLiteral("anim.nextSlot"), animation, tr("Next time slot"), {seq(Qt::Key_Period)});
     add(QStringLiteral("anim.previousFrame"), animation, tr("Previous frame"), {seq(Qt::Key_Comma, Qt::ShiftModifier)});
     add(QStringLiteral("anim.nextFrame"), animation, tr("Next frame"), {seq(Qt::Key_Period, Qt::ShiftModifier)});
+    add(QStringLiteral("anim.toggleMarker"), animation, tr("Add or remove a marker on this frame"), {ctrl(Qt::Key_M)});
+    add(QStringLiteral("anim.previousMarker"), animation, tr("Previous marker"), {seq(Qt::Key_Comma, Qt::AltModifier)});
+    add(QStringLiteral("anim.nextMarker"), animation, tr("Next marker"), {seq(Qt::Key_Period, Qt::AltModifier)});
     add(QStringLiteral("anim.lengthen"), animation, tr("Lengthen frame"),
         {seq(Qt::Key_Plus), seq(Qt::Key_Plus, Qt::KeypadModifier)});
     add(QStringLiteral("anim.shorten"), animation, tr("Shorten frame"),

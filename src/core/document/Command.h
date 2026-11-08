@@ -23,13 +23,15 @@ struct ChangeSet
 
     bool structure = false;     // cels, drawings, layers, timing or document properties
     bool camera = false;        // the camera: its keys or whether it is on
+    bool markers = false;       // the timeline's markers
     std::vector<Pixels> pixels; // painted tiles
 
-    bool isEmpty() const { return !structure && !camera && pixels.empty(); }
+    bool isEmpty() const { return !structure && !camera && !markers && pixels.empty(); }
     void merge(ChangeSet other)
     {
         structure = structure || other.structure;
         camera = camera || other.camera;
+        markers = markers || other.markers;
         for (Pixels &p : other.pixels)
             pixels.push_back(std::move(p));
     }
@@ -75,6 +77,7 @@ enum class CommandKind {
     EditCamera,
     SceneLength,
     ChangeMask,
+    EditMarkers,
 };
 
 // An undoable change to a Document.

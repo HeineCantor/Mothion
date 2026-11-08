@@ -9,6 +9,7 @@
 #include "core/document/commands/GroupCommand.h"
 #include "core/document/commands/AudioCommands.h"
 #include "core/document/commands/CameraCommands.h"
+#include "core/document/commands/MarkerCommands.h"
 #include "core/document/commands/CompositingCommands.h"
 #include "core/document/commands/CelCommands.h"
 #include "core/document/commands/LayerCommands.h"
@@ -817,6 +818,65 @@ bool DocumentController::deleteLayerMask()
     return true;
 }
 
+bool DocumentController::setMarker(int frame, const QString &name)
+{
+    if (frame < 0)
+        return false;
+    std::map<int, std::string> markers = m_document->markers();
+    const std::string text = name.toStdString();
+    if (const auto it = markers.find(frame); it != markers.end() && it->second == text)
+        return false;
+    markers[frame] = text;
+    execute(std::make_unique<doc::SetMarkersCommand>(std::move(markers)));
+    return true;
+}
+
+bool DocumentController::removeMarker(int frame)
+{
+    std::map<int, std::string> markers = m_document->markers();
+    if (markers.erase(frame) == 0)
+        return false;
+    execute(std::make_unique<doc::SetMarkersCommand>(std::move(markers)));
+    return true;
+}
+
+bool DocumentController::moveMarker(int from, int to)
+{
+    std::map<int, std::string> markers = m_document->markers();
+    const auto it = markers.find(from);
+    if (it == markers.end() || to < 0 || (to != from && markers.count(to)))
+        return false;
+    if (to == from)
+        return false;
+    markers[to] = it->second;
+    markers.erase(from);
+    execute(std::make_unique<doc::SetMarkersCommand>(std::move(markers)));
+    return true;
+}
+
+void DocumentController::toggleMarker()
+{
+    if (!removeMarker(m_currentFrame))
+        setMarker(m_currentFrame, QString());
+}
+
+bool DocumentController::goToMarker(int direction)
+{
+    const auto &markers = m_document->markers();
+    if (direction > 0) {
+        const auto it = markers.upper_bound(m_currentFrame);
+        if (it == markers.end())
+            return false;
+        setCurrentFrame(it->first);
+        return true;
+    }
+    auto it = markers.lower_bound(m_currentFrame);
+    if (it == markers.begin())
+        return false;
+    setCurrentFrame(std::prev(it)->first);
+    return true;
+}
+
 void DocumentController::setSceneLength(int frames)
 {
     frames = std::max(1, frames);
@@ -1338,6 +1398,7 @@ QString DocumentController::commandName(doc::CommandKind kind)
     case doc::CommandKind::Tween: return tr("tween");
     case doc::CommandKind::EditCamera: return tr("camera");
     case doc::CommandKind::SceneLength: return tr("scene length");
+    case doc::CommandKind::EditMarkers: return tr("markers");
     case doc::CommandKind::ChangeMask: return tr("mask");
     case doc::CommandKind::ClearLayer: return tr("clear");
     case doc::CommandKind::Move: return tr("move");
@@ -1381,6 +1442,8 @@ void DocumentController::publish(const doc::ChangeSet &changes)
         }
         emit cameraChanged();
     }
+    if (changes.markers)
+        emit markersChanged();
     if (changes.structure) {
         ensureValidCurrentCel();
         resolveCurrentLayer();

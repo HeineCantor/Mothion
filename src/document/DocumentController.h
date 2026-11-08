@@ -8,6 +8,9 @@
 #include <functional>
 #include <QObject>
 #include <QPainterPath>
+
+#include <map>
+#include <string>
 #include <QRect>
 #include <QString>
 
@@ -137,6 +140,19 @@ public:
     const std::optional<doc::Camera> &camera() const { return m_document->camera(); }
     void addCamera();                                      // one that shows the whole sheet, from the first frame
     void removeCamera();
+    // Markers on the timeline (frame -> name; see doc::Document::markers()). Each change is one undo step.
+    const std::map<int, std::string> &markers() const { return m_document->markers(); }
+    // A marker on `frame` (>= 0) with this name; renames the one that is there. False if nothing changes.
+    bool setMarker(int frame, const QString &name);
+    // Takes the marker on `frame` away. False if there is none.
+    bool removeMarker(int frame);
+    // Moves the marker on `from` to `to`: refused (false) if `to` has a marker or `from` has none.
+    bool moveMarker(int from, int to);
+    // A marker on the current frame, or none if there is one: for a key.
+    void toggleMarker();
+    // Goes to the next marker after the current frame (direction > 0) or the previous one; false, staying put, if there
+    // is none that way.
+    bool goToMarker(int direction);
     // The scene's length, in frames (1 or more; exposures past it stay, they are just not part of the scene).
     void setSceneLength(int frames);
     int sceneLength() const;
@@ -340,6 +356,8 @@ signals:
     void audioChanged();
     // The camera changed (a key, whether it is on, or it was added or taken away; also a preview).
     void cameraChanged();
+    // A marker was added, renamed, moved or taken away.
+    void markersChanged();
     // The camera was selected, or another row was (see cameraSelected()).
     void cameraSelectionChanged();
     // Pixels of (a layer of) `drawing` changed in `rect` (document coordinates).
