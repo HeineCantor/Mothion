@@ -10,7 +10,7 @@ enum class IconId {
     Collapse, Expand, Float, Close,
     ZoomOut, ZoomFit, ZoomActual, RotateLeft, RotateRight, RotateReset,
     FlipHorizontal, FlipVertical, Eye, Lock, Add, Delete, ArrowUp, ArrowDown, Clear,
-    Deselect, InvertSelection, EraseSelection, CutToLayer, CopyToLayer, MergeLayers,
+    Deselect, InvertSelection, EraseSelection, CutToLayer, CopyToLayer, MergeLayers, MergeDown,
     Folder, Frame, PreviousFrame, NextFrame, Wrench, Play, Stop, Pause, Speaker, SpeakerOff, Camera, MaskAdd, MaskDelete,
 };
 

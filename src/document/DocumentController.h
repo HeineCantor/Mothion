@@ -85,6 +85,11 @@ public:
     // fewer than two are left. The result becomes the current layer.
     bool mergeLayers(const std::vector<doc::LayerId> &layers, QString *reason = nullptr);
     bool canMergeLayers(const std::vector<doc::LayerId> &layers) const;
+    // Merges the layers into the one right below the lowest of them (it keeps its name and place; the result is drawn
+    // plainly, as in mergeLayers()). One layer chosen is "merge down". False, with `reason`, when there is no layer
+    // below, or it, or a chosen one, is hidden, locked or not a drawing layer.
+    bool mergeDown(const std::vector<doc::LayerId> &layers, QString *reason = nullptr);
+    bool canMergeDown(const std::vector<doc::LayerId> &layers) const;
     bool addLayer(bool onTop = false, doc::LayerKind kind = doc::LayerKind::Raster);
     // Puts a new frame (a drawing with one empty layer, named like the layer
     // worked on) at `frame` of `cel`, the frames from there on moving one
@@ -388,6 +393,8 @@ private:
     QPainterPath m_selection;
     std::vector<LayerRef> m_layerSelection;
     std::vector<doc::Layer> m_copiedLayers; // bottom to top
+    // The layer the chosen ones merge down into: the one under the lowest of them (kNoId if there is none).
+    doc::LayerId layerBelow(const std::vector<doc::LayerId> &ids) const;
     std::vector<const doc::Layer *> mergeableLayers(const std::vector<doc::LayerId> &ids) const;
 
     struct PaintState
