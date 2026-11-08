@@ -18,6 +18,10 @@
 #include "ui/DiscordPresence.h"
 #include "ui/ImportSequenceDialog.h"
 #include "ui/NewProjectDialog.h"
+#include "ui/SessionDialogs.h"
+#include "ui/SessionWindow.h"
+#include "sync/SyncClient.h"
+#include "sync/SyncHost.h"
 #include "ui/DockLayout.h"
 #include "io/VideoExport.h"
 #include "ui/ExportDialog.h"
@@ -173,7 +177,30 @@ MainWindow::MainWindow(QWidget *parent)
                 w->installEventFilter(follow);
     }
     m_dockLayout = new DockLayout(this, panels);
+    m_host = new sync::SyncHost(m_document, QString(), this);
+    m_client = new sync::SyncClient(m_document, QString(), this);
     createMenus();
+    for (const auto *signalSource : std::initializer_list<const QObject *>{m_host, m_client}) {
+        connect(signalSource, SIGNAL(notice(QString)), this, SLOT(onSessionNotice(QString)));
+        connect(signalSource, SIGNAL(participantsChanged()), this, SLOT(onSessionChanged()));
+    }
+    connect(m_client, &sync::SyncClient::joined, this, [this] {
+        m_filePath.clear(); // the project received has no file of its own yet
+        updateTitle();
+        updateSessionActions();
+        qInfo().noquote() << "Session: joined the session of" << m_client->hostName();
+        statusBar()->showMessage(tr("Joined the session of %1").arg(m_client->hostName()), 6000);
+        showSessionWindow();
+    });
+    connect(m_client, &sync::SyncClient::failed, this, [this](const QString &why) {
+        updateSessionActions();
+        QMessageBox::warning(this, tr("Join a session"), why);
+    });
+    connect(m_client, &sync::SyncClient::left, this, [this] {
+        updateTitle();
+        updateSessionActions();
+        statusBar()->showMessage(tr("You left the session: the project stays here as a copy"), 8000);
+    });
     statusBar()->showMessage(tr("Ready"));
     connect(m_canvas, &canvas::CanvasView::statusMessage, this,
             [this](const QString &text) { statusBar()->showMessage(text, 4000); });
@@ -432,6 +459,14 @@ void MainWindow::createMenus()
     keymap.bind(longer, QStringLiteral("anim.lengthen"));
     QAction *shorter = animation->addAction(tr("Shorten frame"), this, [this] { m_document->changeCurrentHold(-1); });
     keymap.bind(shorter, QStringLiteral("anim.shorten"));
+
+    QMenu *collaboration = menuBar()->addMenu(tr("&Collaboration"));
+    m_hostAction = collaboration->addAction(tr("Host a session…"), this, &MainWindow::hostSessionDialog);
+    m_joinAction = collaboration->addAction(tr("Join a session…"), this, &MainWindow::joinSessionDialog);
+    collaboration->addSeparator();
+    m_sessionAction = collaboration->addAction(tr("Session window"), this, &MainWindow::showSessionWindow);
+    m_endSessionAction = collaboration->addAction(tr("Leave the session"), this, &MainWindow::endSession);
+    updateSessionActions();
 
     QMenu *window = menuBar()->addMenu(tr("&Window"));
     for (PanelDock *dock : m_dockLayout->docks())
@@ -1051,6 +1086,16 @@ bool MainWindow::saveTo(const QString &path)
 
 bool MainWindow::maybeSave()
 {
+    if (inSession()) { // putting the project away ends the session
+        const auto answer = QMessageBox::question(
+            this, tr("Shared session"),
+            m_host->isSharing() ? tr("This ends the session you are hosting: the others are left with their copies. Go on?")
+                                : tr("This leaves the session. Go on?"),
+            QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
+        if (answer != QMessageBox::Yes)
+            return false;
+        endSession();
+    }
     m_document->finishEdits();
     if (!m_document->isModified())
         return true;
@@ -1067,8 +1112,114 @@ bool MainWindow::maybeSave()
 void MainWindow::updateTitle()
 {
     const QString name = m_filePath.isEmpty() ? tr("Untitled") : QFileInfo(m_filePath).completeBaseName();
-    setWindowTitle(name + QStringLiteral("[*] — Mothion"));
+    QString title = name + QStringLiteral("[*] — Mothion");
+    if (m_host->isSharing())
+        title += tr(" — hosting a session");
+    else if (m_client->isJoined())
+        title += tr(" — session of %1").arg(m_client->hostName());
+    setWindowTitle(title);
     setWindowModified(m_document->isModified());
+}
+
+// --- shared sessions ------------------------------------------------------------------------
+
+bool MainWindow::inSession() const { return m_host->isSharing() || m_client->isActive(); }
+bool MainWindow::sessionJoined() const { return m_client->isJoined(); }
+quint16 MainWindow::sessionPort() const { return m_host->port(); }
+
+void MainWindow::updateSessionActions()
+{
+    const bool hosting = m_host->isSharing();
+    const bool guest = m_client->isActive();
+    m_hostAction->setEnabled(!hosting && !guest);
+    m_joinAction->setEnabled(!hosting && !guest);
+    m_sessionAction->setEnabled(true);
+    m_endSessionAction->setEnabled(hosting || guest);
+    m_endSessionAction->setText(hosting ? tr("Stop sharing") : tr("Leave the session"));
+}
+
+void MainWindow::onSessionNotice(const QString &text)
+{
+    qInfo().noquote() << "Session:" << text; // in the log, for a bug report
+    statusBar()->showMessage(text, 6000);
+}
+
+void MainWindow::onSessionChanged()
+{
+    updateTitle();
+    updateSessionActions();
+}
+
+bool MainWindow::startHosting(const QString &name, quint16 port, const QString &code, QString *error)
+{
+    if (inSession())
+        endSession();
+    m_host->setName(name);
+    m_sessionCode = code;
+    if (!m_host->listen(port, code, error)) {
+        updateSessionActions();
+        return false;
+    }
+    updateTitle();
+    updateSessionActions();
+    statusBar()->showMessage(tr("Sharing this project on port %1, code %2").arg(m_host->port()).arg(code), 10000);
+    showSessionWindow();
+    return true;
+}
+
+void MainWindow::joinSession(const QString &host, quint16 port, const QString &code, const QString &name)
+{
+    if (!maybeSave()) // the project here is replaced by the host's
+        return;
+    m_client->setName(name);
+    m_client->connectTo(host, port, code);
+    updateSessionActions();
+    statusBar()->showMessage(tr("Joining %1:%2…").arg(host).arg(port), 10000);
+}
+
+void MainWindow::endSession()
+{
+    if (m_host->isSharing())
+        m_host->stop();
+    if (m_client->isActive())
+        m_client->leave();
+    updateTitle();
+    updateSessionActions();
+    if (m_sessionWindow)
+        m_sessionWindow->refresh();
+}
+
+void MainWindow::hostSessionDialog()
+{
+    HostSessionDialog dialog(this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    QString error;
+    if (!startHosting(dialog.name(), dialog.port(), dialog.code(), &error))
+        QMessageBox::warning(this, tr("Host a session"), tr("The session could not start: %1").arg(error));
+}
+
+void MainWindow::joinSessionDialog()
+{
+    JoinSessionDialog dialog(this);
+    if (dialog.exec() == QDialog::Accepted)
+        joinSession(dialog.host(), dialog.port(), dialog.code(), dialog.name());
+}
+
+void MainWindow::showSessionWindow()
+{
+    if (!m_sessionWindow) {
+        m_sessionWindow = new SessionWindow(m_host, m_client, this);
+        connect(m_sessionWindow, &SessionWindow::endRequested, this, [this] {
+            if (inSession())
+                endSession();
+            else
+                m_sessionWindow->close();
+        });
+    }
+    m_sessionWindow->setInvitation(m_sessionCode, m_host->port());
+    m_sessionWindow->show();
+    m_sessionWindow->raise();
 }
 
 void MainWindow::exportFrames()

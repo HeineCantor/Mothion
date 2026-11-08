@@ -34,6 +34,9 @@ public:
     // The same over another kind of line (and tests): owned from now on.
     void attach(Transport *transport, const QString &token);
     void leave();
+    void setName(const QString &name) { m_name = name.isEmpty() ? tr("Guest") : name; }
+    quint32 id() const { return m_id; }
+    QString hostName() const { return m_hostName; }
 
     bool isJoined() const { return m_state == State::Joined; }
     bool isActive() const { return m_state != State::Idle; }
@@ -67,6 +70,7 @@ private:
     quint32 m_id = 0;
     quint32 m_stride = 1;
     qint64 m_expected = 0;
+    QString m_hostName;
     QByteArray m_file;
     LockTable m_locks;
     std::pair<qint64, qint64> m_ownLock{0, 0};

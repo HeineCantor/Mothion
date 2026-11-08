@@ -43,6 +43,8 @@
 #include "tools/Preferences.h"
 #include "ui/ImportSequenceDialog.h"
 #include "ui/NewProjectDialog.h"
+#include "ui/SessionDialogs.h"
+#include "ui/SessionWindow.h"
 #include "ui/VideoExportDialog.h"
 #include "ui/SettingsDialog.h"
 #include "ui/Theme.h"

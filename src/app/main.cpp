@@ -4,6 +4,7 @@
 #include "diagnostics/CrashHandler.h"
 #include "input/TabletBackend.h"
 #include "ui/MainWindow.h"
+#include "ui/SessionDialogs.h"
 #include "ui/SplashScreen.h"
 #include "ui/Theme.h"
 
@@ -11,6 +12,7 @@
 #include <QCommandLineParser>
 #include <QElapsedTimer>
 #include <QIcon>
+#include <QDebug>
 #include <QScreen>
 #include <QSplashScreen>
 #include <QTimer>
@@ -38,6 +40,19 @@ int main(int argc, char *argv[])
     const QCommandLineOption wintab(QStringLiteral("wintab"),
                                     QStringLiteral("Windows: use the Wintab tablet API instead of Windows Ink."));
     parser.addOption(wintab);
+    // To try a shared session with two Mothions on one computer (or two): one hosts, the other joins.
+    const QCommandLineOption hostOption(QStringLiteral("host-session"),
+                                        QStringLiteral("Share the project on this port as soon as it is open."),
+                                        QStringLiteral("port"));
+    const QCommandLineOption joinOption(QStringLiteral("join-session"),
+                                        QStringLiteral("Join the shared session of a host (address:port)."),
+                                        QStringLiteral("address:port"));
+    const QCommandLineOption codeOption(QStringLiteral("session-code"),
+                                        QStringLiteral("The invitation code of the session (a host makes one if none is given)."),
+                                        QStringLiteral("code"));
+    const QCommandLineOption nameOption(QStringLiteral("session-name"), QStringLiteral("Your name in a shared session."),
+                                        QStringLiteral("name"));
+    parser.addOptions({hostOption, joinOption, codeOption, nameOption});
     parser.addPositionalArgument(QStringLiteral("project"), QStringLiteral("A .moth project to open."),
                                  QStringLiteral("[project]"));
     parser.process(app);
@@ -65,6 +80,24 @@ int main(int argc, char *argv[])
         if (!parser.positionalArguments().isEmpty())
             window.openFile(parser.positionalArguments().constFirst());
         window.checkRecovery();
+        const QString name = parser.value(nameOption);
+        if (parser.isSet(hostOption)) {
+            const QString code = parser.isSet(codeOption) ? parser.value(codeOption) : mothion::ui::makeInvitationCode();
+            const quint16 port = quint16(parser.value(hostOption).toUInt());
+            QString error;
+            if (window.startHosting(name.isEmpty() ? mothion::ui::defaultPersonName() : name,
+                                    port ? port : mothion::ui::kDefaultSessionPort, code, &error))
+                qInfo().noquote() << "Sharing the project: port" << window.sessionPort() << "code" << code;
+            else
+                qWarning().noquote() << "The session could not start:" << error;
+        } else if (parser.isSet(joinOption)) {
+            const QString target = parser.value(joinOption);
+            const int colon = target.lastIndexOf(QLatin1Char(':'));
+            const QString host = colon > 0 ? target.left(colon) : target;
+            const quint16 port = colon > 0 ? quint16(target.mid(colon + 1).toUInt()) : quint16(0);
+            window.joinSession(host, port ? port : mothion::ui::kDefaultSessionPort, parser.value(codeOption),
+                               name.isEmpty() ? mothion::ui::defaultPersonName() : name);
+        }
     });
     return app.exec();
 }

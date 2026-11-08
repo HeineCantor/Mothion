@@ -78,6 +78,16 @@ doc::DrawingId drawingOf(const QTreeWidgetItem *item)
     return item->data(0, kDrawingRole).value<doc::DrawingId>();
 }
 
+QString exposureText(const doc::Timing &timing, doc::DrawingId drawing);
+
+// The text of a frame's row: its name (and who else is working on it, in a shared session) and where it is shown.
+QString frameLabel(const doc::Cel &cel, const doc::Drawing &drawing, const QString &holder)
+{
+    const QString name = QCoreApplication::translate("LayersPanel", "Frame %1").arg(QString::fromStdString(drawing.name));
+    const QString first = holder.isEmpty() ? name : name + QStringLiteral(" · ") + holder;
+    return first + QLatin1Char('\n') + exposureText(cel.timing(), drawing.id);
+}
+
 // Where a drawing is shown, 1-based as the timeline counts: "1–2, 5, 9–12".
 QString exposureText(const doc::Timing &timing, doc::DrawingId drawing)
 {
@@ -580,6 +590,7 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
             m_thumbnailTimer.start();
     });
     connect(m_document, &DocumentController::currentCelChanged, this, &LayersPanel::selectCurrentRow);
+    connect(m_document, &DocumentController::editGuardChanged, this, &LayersPanel::refreshLockLabels);
     // The chosen cel's column is whole, the others' fainter: they follow the current cel.
     connect(m_document, &DocumentController::currentCelChanged, this, [this] { m_tree->viewport()->update(); });
     connect(m_document, &DocumentController::cameraSelectionChanged, this, [this] { m_tree->viewport()->update(); });
@@ -793,10 +804,7 @@ void LayersPanel::rebuildTree()
             frameThumb->setObjectName(QStringLiteral("thumbnail"));
             frameThumb->setPixmap(blank); // made soon, apart (fillThumbnails())
             m_pendingThumbnails.push_back(drawing->id);
-            auto *frameText = new QLabel(QStringLiteral("%1\n%2").arg(
-                                             tr("Frame %1").arg(QString::fromStdString(drawing->name)),
-                                             exposureText(cel.timing(), drawing->id)),
-                                         frameRow);
+            auto *frameText = new QLabel(frameLabel(cel, *drawing, m_document->lockHolder(celId, drawing->id)), frameRow);
             frameText->setObjectName(QStringLiteral("frameText"));
             fh->addWidget(iconLabel(IconId::Frame, frameRow));
             fh->addWidget(frameThumb);
@@ -1075,6 +1083,22 @@ void LayersPanel::refreshThumbnails()
             set(frameItem(id), thumbnail(nullptr, drawing, docSize, nullptr));
             for (const doc::Layer &layer : drawing->layers)
                 setLayer(layerItem(layer.id), layer);
+        }
+    }
+}
+
+void LayersPanel::refreshLockLabels()
+{
+    const doc::Document &d = m_document->document();
+    for (int i = 0; i < m_tree->topLevelItemCount(); ++i) {
+        QTreeWidgetItem *celRow = m_tree->topLevelItem(i);
+        const doc::Cel *cel = kindOf(celRow) == Row::Cel ? d.cel(celOf(celRow)) : nullptr;
+        for (int f = 0; cel && f < celRow->childCount(); ++f) {
+            const doc::Drawing *drawing = cel->drawing(drawingOf(celRow->child(f)));
+            QWidget *row = m_tree->itemWidget(celRow->child(f), 0);
+            auto *text = row ? row->findChild<QLabel *>(QStringLiteral("frameText")) : nullptr;
+            if (drawing && text)
+                text->setText(frameLabel(*cel, *drawing, m_document->lockHolder(cel->id(), drawing->id)));
         }
     }
 }

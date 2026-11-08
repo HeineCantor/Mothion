@@ -120,6 +120,8 @@ qt_add_library(mothion_gui STATIC
     ui/ShapeBar.h ui/ShapeBar.cpp
     ui/PuppetBar.h ui/PuppetBar.cpp
     ui/AutoplayWindow.h ui/AutoplayWindow.cpp
+    ui/SessionDialogs.h ui/SessionDialogs.cpp
+    ui/SessionWindow.h ui/SessionWindow.cpp
     sync/Transport.h sync/Transport.cpp
     sync/Wire.h sync/Wire.cpp
     sync/DocumentSync.h sync/DocumentSync.cpp

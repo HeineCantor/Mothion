@@ -169,6 +169,8 @@ build\RelWithDebInfo\mothion.exe
 
 - `mothion [project.moth]`: open a project at startup.
 - `--wintab` (Windows): use Wintab instead of Windows Ink. Requires the tablet driver's `wintab32.dll`.
+- `--host-session <port>` (with `--session-code`, `--session-name`): share the project on that port as soon as it is open (see *Shared sessions*).
+- `--join-session <address:port>` (with `--session-code`, `--session-name`): join the session of a host as soon as the window is up.
 
 ## Architecture
 
@@ -275,6 +277,34 @@ While a project has unsaved work, Mothion keeps a copy of it every few minutes (
 copy is made when the user is not drawing, and replaced at each autosave: there is one for each project. Saving the
 project, or closing it on purpose, takes the copy away. If the program (or the machine) dies, the next start offers to
 recover the work; a copy older than the project's file is dropped without asking.
+
+## Shared sessions
+
+Two or more people can work on the same project at once (*Collaboration* menu). One **hosts**: the project in the
+window is shared, on a TCP port, with an invitation code. The others **join** with the host's address, port and code:
+they receive the project (it replaces the one in their window) and from then on every change one makes, at once in
+its own copy, is sent to the host, who applies it and passes it on. Drawing goes by turns: the others see a stroke
+when the pen lifts.
+
+- **Locks:** whoever is on a frame (the one shown at the current point of the current cel) holds it. The others cannot
+  draw on it (the pointer shows the forbidden sign) and see who is there: *Frame 1 · Anna* in the Layers panel, a
+  hatched block with the name in the timeline. A change to a frame held by someone else is refused by the host and
+  put right.
+- **Ids:** each person's new cels, drawings and layers get ids of their own (the host's are multiples of 8, the guests'
+  take the remainders), so two people adding at once do not clash.
+- **Not shared yet:** the audio track, the selection, the undo history (each one's undo is its own) and the tools.
+- **Network:** the host is reached directly, so on the same network (or a VPN such as Tailscale) it just works; over
+  the Internet the port has to be open on the router. The traffic is not encrypted yet.
+
+To try it with two Mothions on one computer:
+
+```
+mothion --host-session 4848 --session-code ABC123 --session-name Ada
+mothion --join-session 127.0.0.1:4848 --session-code ABC123 --session-name Ben
+```
+
+The code is in `sync/`: `SyncHost` and `SyncClient` (the session), `DocumentSync` (what changed in the document, and
+putting in what comes), `Transport` (TCP, and a pair of ends in memory for the tests) and `Wire` (the messages).
 
 ## Controls (provisional)
 

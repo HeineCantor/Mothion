@@ -766,6 +766,84 @@ private slots:
     }
 
 
+    // The windows that start a shared session: the host's name, port and a code to invite with (new each time, made of
+    // letters that are not mistaken), and the guest's, where the address may carry the port.
+    void sessionDialogsAskForTheNeeded()
+    {
+        QSettings().remove(QStringLiteral("collaboration"));
+        const QString code = ui::makeInvitationCode();
+        QCOMPARE(code.size(), 6);
+        QVERIFY(!code.contains(QLatin1Char('0')) && !code.contains(QLatin1Char('O')) && !code.contains(QLatin1Char('1')));
+        QVERIFY(ui::makeInvitationCode() != code || ui::makeInvitationCode() != code); // not always the same
+        {
+            ui::HostSessionDialog host;
+            QCOMPARE(host.port(), quint16(ui::kDefaultSessionPort));
+            QCOMPARE(host.code().size(), 6);
+            QVERIFY(!host.name().isEmpty());
+            host.findChild<QLineEdit *>(QStringLiteral("name"))->setText(QStringLiteral("Ada"));
+            host.findChild<QSpinBox *>(QStringLiteral("port"))->setValue(5050);
+            host.accept();
+        }
+        {
+            ui::HostSessionDialog again; // it remembers the name and the port, not the code
+            QCOMPARE(again.name(), QStringLiteral("Ada"));
+            QCOMPARE(again.port(), quint16(5050));
+        }
+        ui::JoinSessionDialog join;
+        join.findChild<QLineEdit *>(QStringLiteral("host"))->setText(QStringLiteral("192.168.1.9:6000"));
+        QCOMPARE(join.host(), QStringLiteral("192.168.1.9"));
+        QCOMPARE(join.port(), quint16(6000));
+        join.findChild<QLineEdit *>(QStringLiteral("host"))->setText(QStringLiteral("example.org"));
+        join.findChild<QSpinBox *>(QStringLiteral("port"))->setValue(4900);
+        QCOMPARE(join.host(), QStringLiteral("example.org"));
+        QCOMPARE(join.port(), quint16(4900));
+        QSettings().remove(QStringLiteral("collaboration"));
+    }
+
+    // Two windows, the first sharing its project and the second joining it: the project goes over, and what one
+    // draws is seen in the other, whose frame shows who is on it; leaving ends it for the guest only.
+    void twoWindowsShareAProject()
+    {
+        ui::MainWindow hostWindow, guestWindow;
+        auto *hostDoc = hostWindow.findChild<document::DocumentController *>();
+        auto *guestDoc = guestWindow.findChild<document::DocumentController *>();
+        QImage red(100, 80, QImage::Format_ARGB32);
+        red.fill(Qt::red);
+        hostDoc->importImage(red, QStringLiteral("x"));
+        const doc::CelId cel = hostDoc->currentCel();
+        const doc::DrawingId shown = hostDoc->currentDrawing()->id;
+        hostDoc->addCel(); // the host works elsewhere
+
+        QString error;
+        QVERIFY2(hostWindow.startHosting(QStringLiteral("Heine"), 0, QStringLiteral("ABC123"), &error), qPrintable(error));
+        QVERIFY(hostWindow.inSession() && hostWindow.sessionPort() != 0);
+        QVERIFY(hostWindow.windowTitle().contains(QStringLiteral("hosting")));
+
+        guestWindow.joinSession(QStringLiteral("127.0.0.1"), hostWindow.sessionPort(), QStringLiteral("ABC123"),
+                                QStringLiteral("Anna"));
+        QTRY_VERIFY_WITH_TIMEOUT(guestWindow.sessionJoined(), 10000);
+        QVERIFY(guestWindow.windowTitle().contains(QStringLiteral("Heine")));
+        QCOMPARE(guestDoc->document().celCount(), hostDoc->document().celCount());
+
+        guestDoc->setCurrentCel(cel);
+        QTRY_COMPARE_WITH_TIMEOUT(hostDoc->lockHolder(cel, shown), QStringLiteral("Anna"), 5000); // who is on it
+        const auto target = guestDoc->beginPaint(true);
+        QVERIFY(target);
+        const doc::TiledImage before = *target->image;
+        target->image->setPixel(8, 8, 0xff000000);
+        guestDoc->notifyPainted(QRect(8, 8, 1, 1));
+        guestDoc->endPaint(before);
+        QTRY_COMPARE_WITH_TIMEOUT(hostDoc->document().cel(cel)->drawingAt(0)->layers.front().image.pixel(8, 8),
+                                  doc::Pixel(0xff000000), 5000);
+
+        guestWindow.endSession();
+        QVERIFY(!guestWindow.inSession());
+        QTRY_VERIFY_WITH_TIMEOUT(hostDoc->lockHolder(cel, shown).isEmpty(), 5000);
+        QVERIFY(hostWindow.inSession()); // the host goes on
+        hostWindow.endSession();
+        QVERIFY(!hostWindow.inSession());
+    }
+
     // The video dialog offers H.264, VP9 and ProRes 4444; the last two keep transparency and can leave the paper out;
     // the file's suffix follows the format.
     void videoDialogOffersFormatsWithTransparency()

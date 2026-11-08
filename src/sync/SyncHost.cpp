@@ -94,6 +94,10 @@ void SyncHost::ensureSharing()
     m_controller->setEditGuard([this](doc::CelId cel, doc::DrawingId drawing) {
         return refusalFor(qint64(cel), qint64(drawing));
     });
+    m_controller->setLockLabeler([this](doc::CelId cel, doc::DrawingId drawing) {
+        const auto it = m_locks.owners.find({qint64(cel), qint64(drawing)});
+        return it == m_locks.owners.end() || it->second == 0 ? QString() : m_locks.names.value(it->second);
+    });
     updateOwnLock();
     emit participantsChanged();
 }
@@ -120,6 +124,7 @@ void SyncHost::stop()
     m_ownLock = {0, 0};
     m_controller->remoteDocument().shareIds(1, 0);
     m_controller->setEditGuard({});
+    m_controller->setLockLabeler({});
     emit participantsChanged();
     emit locksChanged();
 }
@@ -231,7 +236,7 @@ void SyncHost::handleHello(Peer *peer, const QByteArray &payload)
     peer->name = name.isEmpty() ? tr("Guest %1").arg(id) : name;
     m_locks.names[id] = peer->name;
     sendTo(peer, encodeMessage(Msg::Welcome, payloadOf([&](QDataStream &out) {
-                                   out << id << quint32(kMaxParticipants) << qint64(file.size());
+                                   out << id << quint32(kMaxParticipants) << qint64(file.size()) << m_name;
                                })));
     for (;;) {
         const QByteArray chunk = file.read(kFileChunk);

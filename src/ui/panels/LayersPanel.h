@@ -121,7 +121,8 @@ private:
     void publishSelection();  // the chosen rows' layers, for the tools (a move)
     void fillThumbnails();    // the pending ones, for a few milliseconds, then again from the event loop
     void refreshThumbnails(); // throttled: the cels' (the frame changed) and those of the frames painted on
-    void markCurrentFrames(); // the frames shown now, in bold
+    void markCurrentFrames();
+    void refreshLockLabels(); // the frames somebody else is working on say who (a shared session) // the frames shown now, in bold
     void selectCurrentRow();  // the current cel / layer chosen elsewhere
     void restoreSelection();  // after rebuildTree()
     void paintRowColors();    // the text and glyphs of the selected rows, in the highlighted text color

@@ -43,6 +43,7 @@ public:
     // Takes one more participant, whose line is `transport` (owned from now on): for other kinds of line, and tests.
     void addTransport(Transport *transport);
     void setToken(const QString &token) { m_token = token; }
+    void setName(const QString &name) { m_name = name.isEmpty() ? tr("Host") : name; }
     void stop();
 
     bool isSharing() const { return m_sharing; }

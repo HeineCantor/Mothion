@@ -45,6 +45,13 @@ public:
         emit editGuardChanged();
     }
     void notifyEditGuardChanged() { emit editGuardChanged(); } // who is working on what changed
+    // Who else is on a frame, for the views to show (empty: nobody else); changes are announced with editGuardChanged().
+    using LockLabeler = std::function<QString(doc::CelId, doc::DrawingId)>;
+    void setLockLabeler(LockLabeler labeler) { m_lockLabeler = std::move(labeler); }
+    QString lockHolder(doc::CelId cel, doc::DrawingId drawing) const
+    {
+        return m_lockLabeler && drawing != doc::kNoId ? m_lockLabeler(cel, drawing) : QString();
+    }
     QString editRefusal(doc::CelId cel, doc::DrawingId drawing) const
     {
         return m_editGuard && drawing != doc::kNoId ? m_editGuard(cel, drawing) : QString();
@@ -419,6 +426,7 @@ private:
     std::optional<PaintState> m_paint;
     doc::LayerId m_maskLayer = doc::kNoId;
     EditGuard m_editGuard;
+    LockLabeler m_lockLabeler;
 };
 
 } // namespace mothion::document

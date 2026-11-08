@@ -51,6 +51,7 @@ TimelineView::TimelineView(DocumentController *document, QWidget *parent)
 
     connect(QGuiApplication::clipboard(), &QClipboard::dataChanged, this, [this] { m_blocksNewer = false; });
     connect(m_document, &DocumentController::structureChanged, this, &TimelineView::onStructureChanged);
+    connect(m_document, &DocumentController::editGuardChanged, viewport(), qOverload<>(&QWidget::update)); // who is on what
     connect(m_document, &DocumentController::currentFrameChanged, this, [this](int frame) {
         ensureFrameVisible(frame);
         viewport()->update();
@@ -346,6 +347,8 @@ void TimelineView::paintCells(QPainter &p) const
             const QString name = drawing ? QString::fromStdString(drawing->name) : QStringLiteral("?");
             const bool selected = isSelected(cel.id(), e.start - shift);
             paintExposure(p, e, name, colorForCel(celIndex), m.rowY(row), selected);
+            if (const QString holder = m_document->lockHolder(cel.id(), e.drawing); !holder.isEmpty())
+                paintHeld(p, e, holder, m.rowY(row)); // somebody else is on this frame
         }
         // A drop refused: the selected blocks still where they are, and
         // striped where the pen would put them.
@@ -382,6 +385,25 @@ void TimelineView::paintExposure(QPainter &p, const doc::Exposure &e, const QStr
         const int cy = block.center().y();
         p.drawLine(lineStart, cy, block.right() - 4, cy);
     }
+}
+
+// A frame somebody else is working on (a shared session): hatched, with the person's name in a tag.
+void TimelineView::paintHeld(QPainter &p, const doc::Exposure &e, const QString &holder, int y) const
+{
+    const TimelineMetrics &m = m_metrics;
+    const QRect block(m.frameX(e.start) + 1, y + 2, e.length * m.frameWidth - 2, m.rowHeight - 4);
+    p.save();
+    p.setClipRect(block);
+    p.fillRect(block, QBrush(QColor(255, 255, 255, 90), Qt::BDiagPattern));
+    const QFontMetrics fm = p.fontMetrics();
+    const int width = fm.horizontalAdvance(holder) + 10;
+    if (block.width() >= width + 30) { // room for the name besides the drawing's, which is at the start
+        const QRect tag(block.left() + 26, block.top() + 1, width, block.height() - 2);
+        p.fillRect(tag, ui::selectionOutlineColor(QApplication::palette()).darker(110));
+        p.setPen(Qt::white);
+        p.drawText(tag, Qt::AlignCenter, holder);
+    }
+    p.restore();
 }
 
 // --- camera -----------------------------------------------------------------------

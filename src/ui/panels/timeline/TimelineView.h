@@ -128,6 +128,8 @@ private:
     void paintCells(QPainter &p) const;
     void paintExposure(QPainter &p, const doc::Exposure &e, const QString &name, const QColor &color, int y,
                        bool selected) const;
+    // A frame somebody else is working on: hatched, with their name.
+    void paintHeld(QPainter &p, const doc::Exposure &e, const QString &holder, int y) const;
     // A dragged block where it cannot be dropped: striped, over what is there.
     void paintBlockedExposure(QPainter &p, const doc::Exposure &e, int y) const;
     void paintRuler(QPainter &p) const;

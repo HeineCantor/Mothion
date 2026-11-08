@@ -24,9 +24,15 @@ namespace mothion::audio {
 class AudioPlayer;
 }
 
+namespace mothion::sync {
+class SyncClient;
+class SyncHost;
+} // namespace mothion::sync
+
 namespace mothion::ui {
 
 class AutoplayWindow;
+class SessionWindow;
 class CompositingWindow;
 class DockLayout;
 
@@ -55,6 +61,15 @@ public:
     // Saves the project to `path` (and takes the autosave copies of it away).
     bool saveTo(const QString &path);
 
+    // Shared sessions (see sync/): this window's project is shared with others who join, or this window joins the
+    // project of somebody who shares theirs. startHosting() is false, with `error`, if the port is taken.
+    bool startHosting(const QString &name, quint16 port, const QString &code, QString *error = nullptr);
+    void joinSession(const QString &host, quint16 port, const QString &code, const QString &name);
+    void endSession(); // stops sharing, or leaves
+    bool inSession() const;
+    bool sessionJoined() const;  // a guest, with the project received
+    quint16 sessionPort() const; // the port a host listens on (0: none)
+
 protected:
     void closeEvent(QCloseEvent *event) override;
     // Undo/redo keys pressed in a number field go to the document, and the
@@ -74,6 +89,14 @@ private:
     // Asks what to do with unsaved changes; false if the user cancels.
     bool maybeSave();
     void updateTitle();
+    void hostSessionDialog();
+    void joinSessionDialog();
+    void showSessionWindow();
+    void updateSessionActions();
+private slots:
+    void onSessionNotice(const QString &text);
+    void onSessionChanged();
+private:
     void applyAutosaveInterval();
     void autosaveTick();
     void discardAutosave(); // the project is saved or its changes given up: its copy is of no use
@@ -118,6 +141,14 @@ private:
     audio::AudioPlayer *m_audioPlayer = nullptr; // the audio track, heard with the frames and as they are stepped
     QPointer<AutoplayWindow> m_autoplay; // one at a time, made when first asked for
     QPointer<CompositingWindow> m_compositing; // the node editor, made when first asked for
+    sync::SyncHost *m_host = nullptr;
+    sync::SyncClient *m_client = nullptr;
+    QPointer<SessionWindow> m_sessionWindow;
+    QString m_sessionCode;
+    QAction *m_hostAction = nullptr;
+    QAction *m_joinAction = nullptr;
+    QAction *m_sessionAction = nullptr;
+    QAction *m_endSessionAction = nullptr;
     QList<QAction *> m_fileActions;
     QList<QAction *> m_editActions;
     QAction *m_saveAsAction = nullptr;

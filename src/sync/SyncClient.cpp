@@ -113,6 +113,7 @@ void SyncClient::end(const QString &failure)
     if (wasJoined) {
         m_controller->remoteDocument().shareIds(1, 0);
         m_controller->setEditGuard({});
+        m_controller->setLockLabeler({});
     }
     if (wasJoined)
         emit left();
@@ -128,7 +129,7 @@ void SyncClient::onFrame(const QByteArray &frame)
     case Msg::Welcome: {
         QDataStream s(payload);
         s.setVersion(QDataStream::Qt_6_5);
-        s >> m_id >> m_stride >> m_expected;
+        s >> m_id >> m_stride >> m_expected >> m_hostName;
         if (s.status() != QDataStream::Ok || m_stride < 2 || m_id >= m_stride)
             return end(tr("The host's answer was not understood."));
         m_state = State::Receiving;
@@ -215,6 +216,10 @@ void SyncClient::finishReceiving()
         if (it == m_locks.owners.end() || it->second == m_id)
             return QString();
         return tr("%1 is working on this frame").arg(m_locks.names.value(it->second));
+    });
+    m_controller->setLockLabeler([this](doc::CelId cel, doc::DrawingId drawing) {
+        const auto it = m_locks.owners.find({qint64(cel), qint64(drawing)});
+        return it == m_locks.owners.end() || it->second == m_id ? QString() : m_locks.names.value(it->second);
     });
     m_transport->send(encodeMessage(Msg::Ready));
     updateOwnLock();

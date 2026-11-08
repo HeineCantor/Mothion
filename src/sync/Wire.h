@@ -14,7 +14,7 @@ namespace mothion::sync {
 // What a session says, and how. A message is one byte for its kind and then its parts (QDataStream, Qt 6.5).
 //
 //   Hello      client -> host   protocol version, the client's name, the invitation token
-//   Welcome    host -> client   the client's number, the id stride, the size of the project that follows
+//   Welcome    host -> client   the client's number, the id stride, the size of the project that follows, the host's name
 //   FileChunk  host -> client   a piece of the project, as a .moth file; FileEnd closes it
 //   Ready      client -> host   the project is loaded: what happened since goes to it from now on
 //   Propose    client -> host   a change the client has made (an Op)
