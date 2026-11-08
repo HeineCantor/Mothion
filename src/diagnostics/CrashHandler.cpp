@@ -12,8 +12,10 @@
 #include <QSysInfo>
 #include <QTextStream>
 #include <QThread>
+#include <QTimer>
 
 #include <atomic>
+#include <chrono>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
@@ -21,6 +23,7 @@
 #include <ctime>
 #include <cwchar>
 #include <exception>
+#include <thread>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -33,6 +36,7 @@
 #include <dbghelp.h>
 #else
 #include <execinfo.h>
+#include <pthread.h>
 #include <fcntl.h>
 #include <unistd.h>
 #endif
@@ -202,16 +206,17 @@ void writeAll(int fd, const char *text)
 }
 
 // Writes the report, and returns its path in `path`.
-void writeReportFile(const char *reason, void *, char *path, size_t pathSize)
+void writeReportFile(const char *reason, void *, char *path, size_t pathSize, const char *kind = "crash")
 {
     char stampText[32];
     currentStamp(stampText, sizeof stampText);
-    std::snprintf(path, pathSize, "%s/crash-%s.txt", g_reportDirectory, stampText);
+    std::snprintf(path, pathSize, "%s/%s-%s.txt", g_reportDirectory, kind, stampText);
     const int fd = ::open(path, O_CREAT | O_WRONLY | O_TRUNC, 0644);
     if (fd < 0)
         return;
     char line[3 * kPath];
-    writeAll(fd, "Mothion crash report\n");
+    std::snprintf(line, sizeof line, "Mothion %s report\n", kind);
+    writeAll(fd, line);
     std::snprintf(line, sizeof line, "Version: %s\nReason: %s\nProject: %s\nTime: %s\n\nStack of the crashing thread "
                                      "(addr2line -e mothion -f -C -p <offset> turns an offset into a place):\n",
                   g_versionText, reason, g_projectText[0] ? g_projectText : "(none)", stampText);
@@ -271,15 +276,15 @@ void writeStack(FILE *file, EXCEPTION_POINTERS *exception)
 #endif
 }
 
-void writeReportFile(const char *reason, void *exceptionInfo, char *path, size_t pathSize)
+void writeReportFile(const char *reason, void *exceptionInfo, char *path, size_t pathSize, const char *kind = "crash")
 {
     char stampText[32];
     currentStamp(stampText, sizeof stampText);
-    std::snprintf(path, pathSize, "%s/crash-%s.txt", g_reportDirectory, stampText);
+    std::snprintf(path, pathSize, "%s/%s-%s.txt", g_reportDirectory, kind, stampText);
     FILE *file = openFile(path, "wb");
     if (!file)
         return;
-    std::fprintf(file, "Mothion crash report\nVersion: %s\nReason: %s\nProject: %s\nTime: %s\n", g_versionText, reason,
+    std::fprintf(file, "Mothion %s report\nVersion: %s\nReason: %s\nProject: %s\nTime: %s\n", kind, g_versionText, reason,
                  g_projectText[0] ? g_projectText : "(none)", stampText);
     auto *exception = static_cast<EXCEPTION_POINTERS *>(exceptionInfo);
     if (exception && exception->ExceptionRecord) {
@@ -302,7 +307,7 @@ void writeReportFile(const char *reason, void *exceptionInfo, char *path, size_t
 }
 
 // The minidump, next to the text: Visual Studio or WinDbg open it (with the .pdb of the build).
-void writeMiniDump(EXCEPTION_POINTERS *exception, const char *reportPath)
+void writeMiniDump(EXCEPTION_POINTERS *exception, const char *reportPath, DWORD threadId = GetCurrentThreadId())
 {
     wchar_t path[kReportPath];
     wchar_t name[kReportPath];
@@ -317,7 +322,7 @@ void writeMiniDump(EXCEPTION_POINTERS *exception, const char *reportPath)
     if (file == INVALID_HANDLE_VALUE)
         return;
     MINIDUMP_EXCEPTION_INFORMATION info;
-    info.ThreadId = GetCurrentThreadId();
+    info.ThreadId = threadId;
     info.ExceptionPointers = exception;
     info.ClientPointers = FALSE;
     MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), file,
@@ -434,6 +439,121 @@ void installHandlers()
 
 #endif
 
+
+// ---- The program not answering ------------------------------------------------------------------------------------
+// A hang leaves nothing behind by itself: the user closes the program and the crash handlers never run. A thread
+// watches a heartbeat the main thread's event loop keeps up; when it stops for too long the thread writes what a crash
+// would (the stack of the main thread, on Windows a minidump), while the program is still stuck. If the program comes
+// back, the marker is taken away: the next start does not talk about a crash that did not happen.
+
+std::atomic<qint64> g_heartbeat{0};
+std::atomic<int> g_watchGeneration{0};
+std::atomic<bool> g_hangMarker{false};
+
+qint64 nowMs()
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+
+#ifdef _WIN32
+HANDLE g_mainThread = nullptr;
+DWORD g_mainThreadId = 0;
+#else
+pthread_t g_mainThread;
+std::atomic<int> g_hangFd{-1};
+std::atomic<bool> g_hangStackDone{false};
+
+void onHangSignal(int)
+{
+    const int fd = g_hangFd.load();
+    if (fd >= 0) {
+        void *frames[96];
+        const int count = ::backtrace(frames, 96);
+        ::backtrace_symbols_fd(frames, count, fd);
+    }
+    g_hangStackDone = true;
+}
+#endif
+
+void reportHang(qint64 stalledMs)
+{
+    char reason[96];
+    std::snprintf(reason, sizeof reason, "the program did not respond for %d seconds", int(stalledMs / 1000));
+    char reportPath[kReportPath];
+    reportPath[0] = '\0';
+#ifdef _WIN32
+    CONTEXT context;
+    std::memset(&context, 0, sizeof context);
+    context.ContextFlags = CONTEXT_FULL;
+    // Stopped only to read where it is: the rest is done with the copy, the thread going on (it is stuck, its stack
+    // does not move).
+    bool got = false;
+    if (SuspendThread(g_mainThread) != DWORD(-1)) {
+        got = GetThreadContext(g_mainThread, &context) != 0;
+        ResumeThread(g_mainThread);
+    }
+#if defined(_M_X64) || defined(__x86_64__)
+    if (got) {
+        EXCEPTION_RECORD record;
+        std::memset(&record, 0, sizeof record);
+        record.ExceptionCode = 0xE0000002; // ours: "not responding"
+        record.ExceptionAddress = reinterpret_cast<PVOID>(context.Rip);
+        EXCEPTION_POINTERS pointers;
+        pointers.ExceptionRecord = &record;
+        pointers.ContextRecord = &context;
+        writeReportFile(reason, &pointers, reportPath, sizeof reportPath, "hang");
+        if (reportPath[0])
+            writeMiniDump(&pointers, reportPath, g_mainThreadId);
+    }
+#endif
+    if (!reportPath[0]) {
+        writeReportFile(reason, nullptr, reportPath, sizeof reportPath, "hang");
+        if (reportPath[0])
+            writeMiniDump(nullptr, reportPath);
+    }
+#else
+    char stampText[32];
+    currentStamp(stampText, sizeof stampText);
+    std::snprintf(reportPath, sizeof reportPath, "%s/hang-%s.txt", g_reportDirectory, stampText);
+    const int fd = ::open(reportPath, O_CREAT | O_WRONLY | O_TRUNC, 0644);
+    if (fd < 0) {
+        reportPath[0] = '\0';
+    } else {
+        char line[3 * kPath];
+        std::snprintf(line, sizeof line,
+                      "Mothion hang report\nVersion: %s\nReason: %s\nProject: %s\nTime: %s\n\nStack of the main thread "
+                      "(addr2line -e mothion -f -C -p <offset> turns an offset into a place):\n",
+                      g_versionText, reason, g_projectText[0] ? g_projectText : "(none)", stampText);
+        writeAll(fd, line);
+        // The main thread writes its own stack: it is asked with a signal, and given a moment to answer.
+        g_hangStackDone = false;
+        g_hangFd = fd;
+        pthread_kill(g_mainThread, SIGUSR2);
+        for (int i = 0; i < 50 && !g_hangStackDone; ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        g_hangFd = -1;
+        if (!g_hangStackDone)
+            writeAll(fd, "(the thread did not answer)\n");
+        writeAll(fd, "\nThe log of the run is among the other runs' logs; its last lines come before the hang.\n");
+        ::close(fd);
+    }
+#endif
+    if (reportPath[0]) {
+        markerAppend("report", reportPath);
+        markerAppend("kind", "hang");
+        g_hangMarker = true;
+    }
+    note(QStringLiteral("not responding for %1 s, report: %2").arg(stalledMs / 1000).arg(QString::fromUtf8(reportPath)));
+}
+
+void backAgain()
+{
+    note(QStringLiteral("responding again"));
+    if (g_hangMarker.exchange(false))
+        QFile::remove(QString::fromUtf8(g_markerPath)); // nothing crashed
+}
+
 } // namespace
 
 void install(const QString &version, const QString &baseDirectory)
@@ -497,6 +617,61 @@ void setEmergencySave(std::function<bool(const QString &)> save)
     g_emergencySave = std::move(save);
 }
 
+void watchForHangs(int milliseconds)
+{
+    const int generation = ++g_watchGeneration;
+    g_heartbeat = nowMs();
+#ifdef _WIN32
+    if (!g_mainThread) {
+        g_mainThreadId = GetCurrentThreadId();
+        g_mainThread = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION, FALSE,
+                                  g_mainThreadId);
+    }
+#else
+    g_mainThread = pthread_self();
+    struct sigaction action;
+    std::memset(&action, 0, sizeof action);
+    action.sa_handler = onHangSignal;
+    sigemptyset(&action.sa_mask);
+    action.sa_flags = SA_RESTART;
+    sigaction(SIGUSR2, &action, nullptr);
+    void *warm[4];
+    ::backtrace(warm, 4);
+#endif
+    auto *beat = new QTimer(QCoreApplication::instance());
+    beat->setInterval(200);
+    QObject::connect(beat, &QTimer::timeout, beat, [beat, generation] {
+        if (generation != g_watchGeneration)
+            beat->deleteLater(); // another watch took over (or none)
+        else
+            g_heartbeat = nowMs();
+    });
+    beat->start();
+    std::thread([milliseconds, generation] {
+        bool reported = false;
+        while (generation == g_watchGeneration) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            if (generation != g_watchGeneration)
+                break;
+            const qint64 stalled = nowMs() - g_heartbeat;
+            if (stalled >= milliseconds && !g_crashing) {
+                if (!reported) {
+                    reported = true;
+                    reportHang(stalled);
+                }
+            } else if (reported && stalled < milliseconds) {
+                reported = false;
+                backAgain();
+            }
+        }
+    }).detach();
+}
+
+void stopWatchingForHangs()
+{
+    ++g_watchGeneration;
+}
+
 void writeCrashReport(const char *reason)
 {
     g_crashing = false;
@@ -518,6 +693,8 @@ PreviousCrash takePreviousCrash()
             crash.report = line.mid(7);
         else if (line.startsWith(QLatin1String("backup=")))
             crash.backup = line.mid(7);
+        else if (line == QLatin1String("kind=hang"))
+            crash.hang = true;
     }
     marker.close();
     marker.remove();

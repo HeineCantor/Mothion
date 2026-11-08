@@ -66,6 +66,44 @@ private slots:
         diagnostics::setEmergencySave({});
     }
 
+    // The program stuck: the report is there while it still is, and the next start hears of it only if it was closed.
+    void aHangLeavesAReportWhileStuck()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        diagnostics::install(QStringLiteral("9.9"), dir.path());
+        diagnostics::watchForHangs(300);
+        QTest::qWait(100);
+        QThread::msleep(1000); // the event loop does not turn
+        QDir crashes(diagnostics::crashDirectory());
+        const QStringList reports = crashes.entryList({QStringLiteral("hang-*.txt")});
+        QCOMPARE(reports.size(), 1);
+        QFile report(crashes.filePath(reports.first()));
+        QVERIFY(report.open(QIODevice::ReadOnly));
+        const QString text = QString::fromUtf8(report.readAll());
+        QVERIFY(text.contains(QLatin1String("did not respond")));
+        QVERIFY(text.contains(QLatin1String("9.9")));
+        QVERIFY(QFile::exists(crashes.filePath(QStringLiteral("pending.txt"))));
+        // It came back: nothing crashed, nothing to tell.
+        QTRY_VERIFY_WITH_TIMEOUT(!QFile::exists(crashes.filePath(QStringLiteral("pending.txt"))), 3000);
+        diagnostics::stopWatchingForHangs();
+    }
+
+    void aHangThatEndsWithTheProgramClosedIsToldNextTime()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        diagnostics::install(QStringLiteral("9.9"), dir.path());
+        diagnostics::watchForHangs(300);
+        QTest::qWait(100);
+        QThread::msleep(1000);
+        diagnostics::stopWatchingForHangs(); // (the user closes it here)
+        const diagnostics::PreviousCrash crash = diagnostics::takePreviousCrash();
+        QVERIFY(crash.happened);
+        QVERIFY(crash.hang);
+        QVERIFY(QFile::exists(crash.report));
+    }
+
     void aCrashWithoutACopyStillLeavesTheReport()
     {
         QTemporaryDir dir;

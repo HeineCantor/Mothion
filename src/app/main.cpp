@@ -31,6 +31,7 @@ int main(int argc, char *argv[])
     QApplication::setApplicationVersion(QStringLiteral(MOTHION_VERSION));
     QApplication::setWindowIcon(QIcon(QStringLiteral(":/icon/mothion.png")));
     mothion::diagnostics::install(QApplication::applicationVersion()); // the log, and what a crash leaves behind
+    mothion::diagnostics::watchForHangs(); // and a program that stops answering
 
     QCommandLineParser parser;
     parser.addHelpOption();

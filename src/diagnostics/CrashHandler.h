@@ -35,9 +35,17 @@ void setEmergencySave(std::function<bool(const QString &path)> save);
 // into the report. Meant for the handlers, and for the tests.
 void writeCrashReport(const char *reason);
 
+// Watches that the program keeps answering: if the main thread's event loop stops for `milliseconds`, a report is written
+// at once (the stack of the main thread, on Windows a minidump too), because a user whose program does not answer
+// closes it, and the crash handlers never run. If the program comes back, the report stays but the next start says
+// nothing. Call it from the main thread, with the application running.
+void watchForHangs(int milliseconds = 10000);
+void stopWatchingForHangs(); // for the tests
+
 struct PreviousCrash
 {
     bool happened = false;
+    bool hang = false; // the program did not answer, and was closed
     QString report;
     QString backup; // empty if there is none
     QDateTime when;

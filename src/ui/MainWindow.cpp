@@ -989,14 +989,16 @@ void MainWindow::checkPreviousCrash()
     const diagnostics::PreviousCrash crash = diagnostics::takePreviousCrash();
     if (!crash.happened)
         return;
-    QString text = tr("Mothion closed unexpectedly the last time it ran.\n\nThe report is in:\n%1\n\nThe log is in:\n%2")
+    QString text = (crash.hang ? tr("Mothion stopped responding the last time it ran, and was closed.")
+                               : tr("Mothion closed unexpectedly the last time it ran."))
+                   + tr("\n\nThe report is in:\n%1\n\nThe log is in:\n%2")
                        .arg(crash.report.isEmpty() ? diagnostics::crashDirectory() : crash.report, diagnostics::logDirectory());
     if (!crash.backup.isEmpty())
         text += tr("\n\nA copy of your project was saved:\n%1").arg(crash.backup);
-    else
+    else if (!crash.hang)
         text += tr("\n\nNo copy of the project could be saved.");
     text += tr("\n\nIf you report the problem, please send the report and the log.");
-    QMessageBox box(QMessageBox::Warning, tr("Mothion crashed"), text, QMessageBox::Close, this);
+    QMessageBox box(QMessageBox::Warning, crash.hang ? tr("Mothion stopped responding") : tr("Mothion crashed"), text, QMessageBox::Close, this);
     QPushButton *folder = box.addButton(tr("Open the folder"), QMessageBox::ActionRole);
     QPushButton *open = crash.backup.isEmpty() ? nullptr : box.addButton(tr("Open the copy"), QMessageBox::AcceptRole);
     box.exec();
