@@ -571,7 +571,10 @@ private slots:
         QVERIFY2(io::exportFrame(*d, 0, jpg, {io::ImageFormat::Jpeg, false, 95}, &error), qPrintable(error));
         const QImage j(jpg);
         QVERIFY(qRed(j.pixel(0, 0)) > 250 && qGreen(j.pixel(0, 0)) > 250 && qBlue(j.pixel(0, 0)) > 250); // white, not black
-        QVERIFY(qRed(j.pixel(10, 20)) > 200 && qGreen(j.pixel(10, 20)) < 60); // the drawing as it is
+        // The drawing as it is: a single red pixel, which JPEG may wash out (chroma is kept at half the resolution by some
+        // versions of the library, and not by others), but not turn into the white behind it.
+        const QRgb drawn = j.pixel(10, 20);
+        QVERIFY(qRed(drawn) > qGreen(drawn) + 20 && qRed(drawn) > qBlue(drawn) + 20);
         // The same through a camera that moves the sheet.
         const QImage flat = io::flattenedOnWhite(io::renderOutputFrame(*d, 0, false));
         QCOMPARE(flat.pixel(0, 0), QRgb(0xffffffff));
