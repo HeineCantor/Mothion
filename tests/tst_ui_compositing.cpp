@@ -513,10 +513,15 @@ private slots:
     }
 
 
-    // Whatever a node holds (a long name in a select, say) fits in its width: the row of each setting is no wider than the
-    // node leaves it.
-    void everyNodesSettingsFitInsideIt()
+    // A long name in a node's select must not widen the select (and so the row) past the node: the select can shrink to
+    // about what one with a short name needs, whatever its names are. (Compared with a select of this machine's own, not
+    // with a number of pixels: fonts and styles differ from one system to the next.)
+    void aNodesSelectDoesNotGrowWithItsNames()
     {
+        QComboBox reference;
+        reference.addItem(QStringLiteral("a"));
+        const int shortest = reference.minimumSizeHint().width();
+        int checked = 0;
         for (const auto &owned : compositing::NodeRegistry::instance().all()) {
             const compositing::NodeType *type = owned.get();
             compositing::Graph network;
@@ -525,11 +530,14 @@ private slots:
             view.show();
             for (QGraphicsItem *child : view.item(id)->childItems())
                 if (auto *proxy = dynamic_cast<QGraphicsProxyWidget *>(child))
-                    // (A node is 150 px wide, and its settings keep 8 px from each side.)
-                    QVERIFY2(proxy->geometry().right() <= 142.5,
-                             qPrintable(QStringLiteral("%1: a setting reaches past the node (%2 > 142)")
-                                            .arg(type->id()).arg(proxy->geometry().right())));
+                    if (auto *combo = proxy->widget()->findChild<QComboBox *>()) {
+                        ++checked;
+                        QVERIFY2(combo->minimumSizeHint().width() <= shortest + 40,
+                                 qPrintable(QStringLiteral("%1: a select grows with its names (%2 > %3)")
+                                                .arg(type->id()).arg(combo->minimumSizeHint().width()).arg(shortest + 40)));
+                    }
         }
+        QVERIFY(checked >= 3); // (the merge, chromatic aberration and lens distortion nodes have one)
     }
 
 

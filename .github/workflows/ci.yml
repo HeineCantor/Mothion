@@ -161,4 +161,7 @@ jobs:
       - name: Test
         env:
           QT_QPA_PLATFORM: offscreen
+          # Without this Qt Test writes its results to the debugger on Windows, not to the console: a failed test then
+          # shows nothing in the log.
+          QT_ASSUME_STDERR_HAS_CONSOLE: 1
         run: ctest --test-dir build-ci -C RelWithDebInfo --output-on-failure --parallel 4
