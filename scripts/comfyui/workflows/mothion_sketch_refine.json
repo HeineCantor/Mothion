@@ -1,0 +1,88 @@
+{
+  "1": {
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {"title": "MOTHION_CHECKPOINT"},
+    "inputs": {"ckpt_name": "NoobAI-XL-v1.1.safetensors"}
+  },
+  "2": {
+    "class_type": "LoadImage",
+    "_meta": {"title": "MOTHION_INPUT"},
+    "inputs": {"image": "example.png"}
+  },
+  "3": {
+    "class_type": "ImageScaleToTotalPixels",
+    "_meta": {"title": "Scale the sketch to about 1 megapixel"},
+    "inputs": {"image": ["2", 0], "upscale_method": "lanczos", "megapixels": 1.0, "resolution_steps": 8}
+  },
+  "4": {
+    "class_type": "ImageInvert",
+    "_meta": {"title": "Black lines on white to white lines on black (what the ControlNet reads)"},
+    "inputs": {"image": ["3", 0]}
+  },
+  "5": {
+    "class_type": "ControlNetLoader",
+    "_meta": {"title": "MOTHION_CONTROLNET"},
+    "inputs": {"control_net_name": "mistoLine_rank256.safetensors"}
+  },
+  "6": {
+    "class_type": "CLIPTextEncode",
+    "_meta": {"title": "MOTHION_PROMPT"},
+    "inputs": {
+      "text": "1girl, solo, detailed eyes, flat colors, clean lineart, anime coloring, masterpiece, best quality, newest, absurdres, highres",
+      "clip": ["1", 1]
+    }
+  },
+  "7": {
+    "class_type": "CLIPTextEncode",
+    "_meta": {"title": "MOTHION_NEGATIVE"},
+    "inputs": {
+      "text": "worst quality, low quality, bad anatomy, bad hands, extra fingers, blurry, jpeg artifacts, watermark, signature, text",
+      "clip": ["1", 1]
+    }
+  },
+  "8": {
+    "class_type": "ControlNetApplyAdvanced",
+    "_meta": {"title": "Keep the drawing: ControlNet strength and when it lets go"},
+    "inputs": {
+      "positive": ["6", 0],
+      "negative": ["7", 0],
+      "control_net": ["5", 0],
+      "image": ["4", 0],
+      "strength": 0.7,
+      "start_percent": 0.0,
+      "end_percent": 0.7,
+      "vae": ["1", 2]
+    }
+  },
+  "9": {
+    "class_type": "VAEEncode",
+    "_meta": {"title": "The sketch itself is where the picture starts from"},
+    "inputs": {"pixels": ["3", 0], "vae": ["1", 2]}
+  },
+  "10": {
+    "class_type": "KSampler",
+    "_meta": {"title": "MOTHION_SAMPLER"},
+    "inputs": {
+      "model": ["1", 0],
+      "positive": ["8", 0],
+      "negative": ["8", 1],
+      "latent_image": ["9", 0],
+      "seed": 12345,
+      "steps": 28,
+      "cfg": 5.0,
+      "sampler_name": "euler_ancestral",
+      "scheduler": "normal",
+      "denoise": 0.75
+    }
+  },
+  "11": {
+    "class_type": "VAEDecode",
+    "_meta": {"title": "VAE Decode"},
+    "inputs": {"samples": ["10", 0], "vae": ["1", 2]}
+  },
+  "12": {
+    "class_type": "SaveImage",
+    "_meta": {"title": "MOTHION_OUTPUT"},
+    "inputs": {"images": ["11", 0], "filename_prefix": "Mothion/refine"}
+  }
+}
