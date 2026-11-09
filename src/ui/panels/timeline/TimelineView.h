@@ -85,6 +85,9 @@ signals:
     void audioImportRequested();
     // The current frame was moved by the person, with the pointer or the arrow keys (the sound is heard).
     void frameScrubbed(int frame);
+    // The pointer is dragging the current frame along the timeline (the canvas shows the animation as it is, not the cel
+    // as drawn, while it does).
+    void scrubbingChanged(bool scrubbing);
     // The sound of the track could not be decoded (so there is no waveform, and the length is unknown).
     void audioFailed(const QString &reason);
 
@@ -159,6 +162,7 @@ private:
     void updateScrollBars();
     void ensureFrameVisible(int frame);
     void scrubTo(const QPoint &pos, bool selectCel);
+    void setScrubbing(bool on);
 
     void paintCells(QPainter &p) const;
     void paintExposure(QPainter &p, const doc::Exposure &e, const QString &name, const QColor &color, int y,

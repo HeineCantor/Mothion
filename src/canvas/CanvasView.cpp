@@ -536,7 +536,7 @@ void CanvasView::syncCelAsDrawn()
     // A cel moved by its keys is drawn where it is drawn while a tool that works on its pixels is chosen (the tools that move
     // the cel, the hand and the zoom see it posed): what the pen paints is where the pixels are.
     const ToolId tool = m_toolState->activeTool();
-    const bool editing = !m_playing && !m_toolState->movesTheCel() && tool != ToolId::Hand && tool != ToolId::Zoom;
+    const bool editing = !m_playing && !m_scrubbing && !m_toolState->movesTheCel() && tool != ToolId::Hand && tool != ToolId::Zoom;
     m_frame.setCelAsDrawn(editing ? m_document->currentCel() : doc::kNoId);
 }
 
@@ -547,6 +547,15 @@ void CanvasView::setPlaying(bool playing)
     m_playing = playing;
     m_onionImages.clear();
     renderWholeFrame(); // the cel as drawn, or as the animation has it
+}
+
+void CanvasView::setScrubbing(bool scrubbing)
+{
+    if (scrubbing == m_scrubbing)
+        return;
+    m_scrubbing = scrubbing;
+    m_onionImages.clear();
+    renderWholeFrame();
 }
 
 void CanvasView::syncAnimateTool()
@@ -1278,7 +1287,7 @@ bool CanvasView::event(QEvent *event)
 QRectF CanvasView::transformBounds() const
 {
     if (m_toolState->movesTheCel())
-        return m_playing ? QRectF() : static_cast<const AnimateTool *>(m_animateTool.get())->shownBounds();
+        return m_playing || m_scrubbing ? QRectF() : static_cast<const AnimateTool *>(m_animateTool.get())->shownBounds();
     const auto *tool = static_cast<const TransformTool *>(m_transformTool.get());
     if (!tool->hasPendingEdit())
         return {};

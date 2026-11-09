@@ -488,6 +488,10 @@ private slots:
         QCOMPARE(canvas.documentImage().pixelColor(1240, 540), QColor(Qt::red)); // as the animation has it
         canvas.setPlaying(false);
         QCOMPARE(canvas.documentImage().pixelColor(1240, 540), QColor(Qt::white));
+        canvas.setScrubbing(true); // dragged along the timeline: the same
+        QCOMPARE(canvas.documentImage().pixelColor(1240, 540), QColor(Qt::red));
+        canvas.setScrubbing(false);
+        QCOMPARE(canvas.documentImage().pixelColor(1240, 540), QColor(Qt::white));
     }
 
     // Position, rotation, scale and opacity are keyed on their own: a channel with no key stays as drawn, one with keys goes

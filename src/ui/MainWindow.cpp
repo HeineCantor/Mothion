@@ -186,6 +186,7 @@ MainWindow::MainWindow(QWidget *parent)
         TimelineView *timeline = static_cast<TimelinePanel *>(panels.timeline)->view();
         connect(timeline, &TimelineView::audioImportRequested, this, &MainWindow::importAudio);
         connect(timeline, &TimelineView::frameScrubbed, m_audioPlayer, &audio::AudioPlayer::scrub);
+        connect(timeline, &TimelineView::scrubbingChanged, m_canvas, &canvas::CanvasView::setScrubbing);
         connect(timeline, &TimelineView::audioFailed, this, [this](const QString &reason) {
             statusBar()->showMessage(tr("The audio cannot be read: %1").arg(reason), 8000);
         });

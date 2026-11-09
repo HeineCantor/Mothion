@@ -278,6 +278,14 @@ void TimelineView::pruneSelection()
     });
 }
 
+void TimelineView::setScrubbing(bool on)
+{
+    if (on == m_scrubbing)
+        return;
+    m_scrubbing = on;
+    emit scrubbingChanged(on);
+}
+
 void TimelineView::onStructureChanged()
 {
     syncAudio();
@@ -1256,7 +1264,7 @@ void TimelineView::mousePressEvent(QMouseEvent *event)
         if (m_document->camera()->keyAt(frame))
             m_cameraDrag = CameraDrag{frame, frame};
         else
-            m_scrubbing = true;
+            setScrubbing(true);
         scrubTo(pos, false);
         return;
     }
@@ -1268,7 +1276,7 @@ void TimelineView::mousePressEvent(QMouseEvent *event)
             viewport()->update();
             return;
         }
-        m_scrubbing = true;
+        setScrubbing(true);
         scrubTo(pos, false);
         return;
     }
@@ -1284,7 +1292,7 @@ void TimelineView::mousePressEvent(QMouseEvent *event)
             emit frameScrubbed(frame);
         } else {
             m_selectedKey.reset();
-            m_scrubbing = true;
+            setScrubbing(true);
             scrubTo(pos, false);
         }
         viewport()->update();
@@ -1309,7 +1317,7 @@ void TimelineView::mousePressEvent(QMouseEvent *event)
         m_anchor.reset();
         viewport()->update();
     }
-    m_scrubbing = true;
+    setScrubbing(true);
     scrubTo(pos, pos.y() >= m_metrics.rulerHeight);
 }
 
@@ -1474,7 +1482,7 @@ void TimelineView::mouseMoveEvent(QMouseEvent *event)
 
 void TimelineView::mouseReleaseEvent(QMouseEvent *)
 {
-    m_scrubbing = false;
+    setScrubbing(false);
     if (m_volumeBefore) {
         const float before = *m_volumeBefore;
         m_volumeBefore.reset();
