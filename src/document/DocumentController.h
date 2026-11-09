@@ -140,6 +140,34 @@ public:
     const std::optional<doc::Camera> &camera() const { return m_document->camera(); }
     void addCamera();                                      // one that shows the whole sheet, from the first frame
     void removeCamera();
+    // The motion of a cel (see doc::CelMotion): keys of where it is, as a rigid piece, on the frames they stand for.
+    // Each change is one undo step. The pose is a cel's as it is shown (as drawn where it has no key).
+    const doc::CelMotion *celMotion(doc::CelId cel) const;
+    doc::CelPose celPoseAt(doc::CelId cel, int frame) const;
+    // A key on `frame` with this pose (the first key of a cel puts its pivot at the middle of the page). False if there is no
+    // such cel or nothing changes.
+    bool setCelKey(doc::CelId cel, int frame, const doc::CelPose &pose);
+    bool setCelKeyEasing(doc::CelId cel, int frame, const doc::Easing &easing);
+    bool removeCelKey(doc::CelId cel, int frame);
+    // Moves the key on `from` to `to`: refused (false) if `to` has a key or `from` has none.
+    bool moveCelKey(doc::CelId cel, int frame, int to);
+    // Where the cel turns and scales around, in pixels of the page. The pose on every key stays as it was, so the cel is
+    // not moved on the frames with a key; between keys the piece goes round a different point.
+    bool setCelPivot(doc::CelId cel, double x, double y);
+    // A key on the current frame of the cel, or none if there is one: for a button and a key.
+    void toggleCelKey(doc::CelId cel);
+    // While a tool drags the pose: the key of `cel` on `frame` is put at `pose` at once, with no undo step (the first key of
+    // a cel is made, with its pivot). finishCelPose() then records the whole drag as one step, from `before` (the cel's
+    // motion when the drag began); cancelCelPose() puts it back.
+    void previewCelPose(doc::CelId cel, int frame, const doc::CelPose &pose);
+    // The cel's pose on `frame` set by hand (the options' fields): changes the key there, or, with none, leaves a pose
+    // that goes with the frame (see CelMotion::setTemporary) until the Cel key button makes it a key. A cel with no keys
+    // is not moved this way.
+    void setCelPose(doc::CelId cel, int frame, const doc::CelPose &pose);
+    void finishCelPose(doc::CelId cel, const doc::CelMotion &before);
+    void cancelCelPose(doc::CelId cel, const doc::CelMotion &before);
+    // Takes all the keys of the cel away (it stands still, as drawn).
+    bool clearCelMotion(doc::CelId cel);
     // Markers on the timeline (frame -> name; see doc::Document::markers()). Each change is one undo step.
     const std::map<int, std::string> &markers() const { return m_document->markers(); }
     // A marker on `frame` (>= 0) with this name; renames the one that is there. False if nothing changes.
@@ -347,6 +375,9 @@ public slots:
     void redo();
     void setCurrentFrame(int frame);
     void setCurrentCel(doc::CelId cel);
+    // The cel as a whole is chosen (its name in the timeline, as its row in the Layers panel): it is current, no layer is, and
+    // the layers of all its frames are the ones the tools act on together (a transform moves every frame of it).
+    void chooseCel(doc::CelId cel);
     // A layer of the current drawing.
     void setCurrentLayer(doc::LayerId layer);
     // Whether the Layers panel's selection is a layer (true) or a cel or a frame, which cannot be drawn on (see
@@ -364,6 +395,8 @@ signals:
     void cameraChanged();
     // A marker was added, renamed, moved or taken away.
     void markersChanged();
+    // The keys or the pivot of a cel's motion changed (the frame shown is drawn again, and the timeline's keys).
+    void motionChanged();
     // The camera was selected, or another row was (see cameraSelected()).
     void cameraSelectionChanged();
     // Pixels of (a layer of) `drawing` changed in `rect` (document coordinates).
@@ -377,6 +410,10 @@ signals:
     void layerChosenByDrawing();
     // Whether the selection is a layer changed (see layerChosen()).
     void layerChosenChanged();
+    // The layers chosen in the Layers panel (layerSelection()) changed.
+    void layerSelectionChanged();
+    // chooseCel() was called: the Layers panel shows the cel's row as chosen.
+    void celChosen(doc::CelId cel);
     // Which layer's mask is being edited changed (see setMaskEditing()), or a mask was made or taken away.
     void maskEditingChanged();
     // Undo/redo availability or labels changed.
@@ -385,6 +422,8 @@ signals:
     // Emitted before anything that must not happen mid-stroke (undo, frame
     // change...): whoever is painting should cancel its stroke now.
     void strokeInterrupted();
+    // The document is about to change under an open pose edit (another frame or cel, a command, undo): the canvas applies it.
+    void poseEditClosing();
     // A new or loaded document took the place of the old one (size and frame
     // rate may differ); structureChanged and the current-item signals follow.
     void documentReplaced();
@@ -397,6 +436,10 @@ private:
     doc::Layer *workLayer(bool changesIt, const QString &nothing, QString *reason);
     bool selectionToLayer(bool cut, QString *reason);
     bool flipSelection(bool horizontal, QString *reason);
+    // The first key of a cel: where it turns around (the middle of what it shows).
+    void clearTemporaryPose();
+    doc::CelId m_tempPoseCel = doc::kNoId; // the cel that has a pose that is not a key (one at a time)
+    void startMotion(doc::CelMotion &motion, const doc::Cel &cel, int frame) const;
     // Sets the selection as is, recording nothing.
     void assignSelection(const QPainterPath &area);
     void publish(const doc::ChangeSet &changes);

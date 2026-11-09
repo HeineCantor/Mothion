@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/document/CelMotion.h"
 #include "core/document/Drawing.h"
 #include "core/document/Timing.h"
 
@@ -45,6 +46,10 @@ public:
     Timing &timing() { return m_timing; }
     const Timing &timing() const { return m_timing; }
 
+    // What the animation does to the cel as a whole: its pivot and the keys of its pose (see CelMotion). Empty: still.
+    const CelMotion &motion() const { return m_motion; }
+    void setMotion(CelMotion motion) { m_motion = std::move(motion); }
+
     // Smallest positive number not already used as a name: "1", "2", ...
     std::string nextDrawingName() const;
 
@@ -53,6 +58,7 @@ private:
     CelProperties m_properties;
     std::map<DrawingId, Drawing> m_drawings;
     Timing m_timing;
+    CelMotion m_motion;
 };
 
 } // namespace mothion::doc

@@ -65,6 +65,8 @@ const char *const kSchema[] = {
     " y integer not null, pixels blob not null, primary key (layer, x, y))",
     // Format 10: the timeline's markers.
     "create table markers (frame integer primary key, name text not null)",
+    // Format 11: the motion of the cels (the keys of their pose), as JSON.
+    "create table cel_motion (cel integer primary key references cels(id), data text not null)",
 };
 
 // Stored by name, so reordering the enum cannot change old files.
@@ -366,6 +368,57 @@ doc::Camera cameraFromJson(const QString &text)
     return camera;
 }
 
+// A cel's motion as JSON text: the pivot and its keys (frame, position, scale, rotation, opacity, and the easing to the next
+// key as the camera's has it).
+QString motionToJson(const doc::CelMotion &motion)
+{
+    QJsonArray keys;
+    for (const doc::CelKey &k : motion.keys()) {
+        QJsonObject key{{"f", k.frame}, {"x", k.pose.x}, {"y", k.pose.y}, {"sx", k.pose.scaleX}, {"sy", k.pose.scaleY},
+                        {"r", k.pose.rotation}, {"o", k.pose.opacity}};
+        switch (k.easing.kind) {
+        case doc::Easing::Kind::Hold: key["e"] = QStringLiteral("h"); break;
+        case doc::Easing::Kind::Linear: key["e"] = QStringLiteral("l"); break;
+        case doc::Easing::Kind::Bezier: key["e"] = QJsonArray{k.easing.x1, k.easing.y1, k.easing.x2, k.easing.y2}; break;
+        }
+        keys.append(key);
+    }
+    return QString::fromUtf8(QJsonDocument(QJsonObject{{"px", motion.pivotX}, {"py", motion.pivotY}, {"keys", keys}})
+                                 .toJson(QJsonDocument::Compact));
+}
+
+doc::CelMotion motionFromJson(const QString &text)
+{
+    doc::CelMotion motion;
+    const QJsonObject root = QJsonDocument::fromJson(text.toUtf8()).object();
+    motion.pivotX = root.value("px").toDouble();
+    motion.pivotY = root.value("py").toDouble();
+    for (const QJsonValue &value : root.value("keys").toArray()) {
+        const QJsonObject o = value.toObject();
+        doc::CelPose pose;
+        pose.x = o.value("x").toDouble();
+        pose.y = o.value("y").toDouble();
+        pose.scaleX = o.value("sx").toDouble(1.0);
+        pose.scaleY = o.value("sy").toDouble(1.0);
+        if (pose.scaleX == 0)
+            pose.scaleX = 1.0; // a scale of nothing would leave no piece to move
+        if (pose.scaleY == 0)
+            pose.scaleY = 1.0;
+        pose.rotation = o.value("r").toDouble();
+        pose.opacity = std::clamp(o.value("o").toDouble(1.0), 0.0, 1.0);
+        doc::Easing easing = doc::Easing::linear();
+        const QJsonValue e = o.value("e");
+        if (e.isString() && e.toString() == QLatin1String("h")) {
+            easing = doc::Easing::hold();
+        } else if (e.isArray() && e.toArray().size() == 4) {
+            const QJsonArray a = e.toArray();
+            easing = doc::Easing::bezier(a[0].toDouble(), a[1].toDouble(), a[2].toDouble(), a[3].toDouble());
+        }
+        motion.setKey(o.value("f").toInt(), pose, easing);
+    }
+    return motion;
+}
+
 doc::GraphView viewFromJson(const QString &text)
 {
     doc::GraphView view;
@@ -529,6 +582,19 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
         audio.addBindValue(track->scrub);
         if (!audio.exec()) {
             failure = sqlError(audio);
+            return false;
+        }
+    }
+    for (int i = 0; i < d.celCount(); ++i) {
+        const doc::Cel &cel = d.celAt(i);
+        if (cel.motion().isEmpty())
+            continue;
+        QSqlQuery motion(db);
+        motion.prepare(QStringLiteral("insert into cel_motion values (?, ?)"));
+        motion.addBindValue(qint64(cel.id()));
+        motion.addBindValue(motionToJson(cel.motion()));
+        if (!motion.exec()) {
+            failure = sqlError(motion);
             return false;
         }
     }
@@ -776,6 +842,12 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
         track.data = std::make_shared<const std::vector<unsigned char>>(bytes.cbegin(), bytes.cend());
         track.scrub = q.value(7).toBool();
         d->setAudio(std::move(track));
+    }
+
+    if (version >= 11 && q.exec(QStringLiteral("select cel, data from cel_motion"))) {
+        while (q.next())
+            if (doc::Cel *cel = d->cel(doc::CelId(q.value(0).toLongLong())))
+                cel->setMotion(motionFromJson(q.value(1).toString()));
     }
 
     if (version >= 10 && q.exec(QStringLiteral("select frame, name from markers"))) {

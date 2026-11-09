@@ -101,8 +101,24 @@ private:
         int newLength = 1;
     };
 
+    // The rows, top first: for each cel its own, and under it (when it has keys of motion) a row for them, a cell tall,
+    // with a diamond at each key and a line between two keys that are not held. A click on a diamond goes to its frame
+    // and, dragged, moves the key (one undo step on release); a double click on an empty cell makes a key there at the
+    // pose the cel has; right click: how the cel goes from that key to the next, delete, and where to add one.
+    struct RowRef
+    {
+        int celIndex = 0;
+        bool motion = false;
+    };
+    RowRef rowRef(int row) const;
+    bool isMotionRow(int row) const;
     int rowCount() const;
-    int celIndexForRow(int row) const; // rows are top-first, cels bottom-first
+    int celIndexForRow(int row) const; // the cel of a row (cels are bottom-first, rows top-first)
+    // A diamond of the motion row `row` under `pos`: its frame, or -1.
+    int motionKeyAt(const QPoint &pos, int row) const;
+    void paintMotionRow(QPainter &p, int celIndex, int y) const;
+    void paintMotionHeader(QPainter &p, int celIndex, int y) const;
+    void showMotionMenu(const QPoint &globalPos, int celIndex, int frame);
     int rowAt(int y) const;              // -1 outside the rows
     int frameAt(int x) const;
     // The eye and lock toggles in a row's header.
@@ -195,6 +211,14 @@ private:
         int to = 0;   // where it would go
     };
     std::optional<CameraDrag> m_cameraDrag;
+    struct MotionDrag
+    {
+        doc::CelId cel = doc::kNoId;
+        int from = 0; // the key's frame
+        int to = 0;   // where it would go
+    };
+    std::optional<MotionDrag> m_motionDrag;
+    std::optional<std::pair<doc::CelId, int>> m_selectedKey; // the key last clicked, by cel and frame
     struct MarkerDrag
     {
         int from = 0; // the marker's frame

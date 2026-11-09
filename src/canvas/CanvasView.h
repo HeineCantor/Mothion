@@ -185,6 +185,10 @@ private:
     // Draws the recorded points not drawn yet.
     void drawPendingPoints();
 
+    // The current cel is drawn as it is drawn (not as its keys pose it) while a tool that edits its pixels is active.
+    void syncCelAsDrawn();
+    void syncAnimateTool();
+    void syncPoseMode(); // the current cel has keys: Transform and Move move it as a piece
     void renderWholeFrame();                     // frame, layers or timing changed
     void renderDocumentRect(const QRect &docRect); // pixels changed
     void updateDocumentRect(const QRect &docRect);
@@ -224,6 +228,7 @@ private:
     std::unique_ptr<CanvasTool> m_liquifyTool;
     std::unique_ptr<CanvasTool> m_shapeTool;
     std::unique_ptr<CanvasTool> m_transformTool;
+    std::unique_ptr<CanvasTool> m_animateTool;
     CanvasTool *m_editTool = nullptr; // the canvas tool between its press and release
     PerspectiveGizmo m_gizmo;
     CameraGizmo m_cameraGizmo;

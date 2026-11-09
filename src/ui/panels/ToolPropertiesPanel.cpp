@@ -1,6 +1,7 @@
 #include "ui/panels/ToolPropertiesPanel.h"
 
 #include "canvas/Resample.h"
+#include "document/DocumentController.h"
 #include "tools/Preferences.h"
 #include "ui/AdvancedToolSettings.h"
 #include "ui/IconFactory.h"
@@ -9,6 +10,7 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDoubleSpinBox>
 #include <QEvent>
 #include <QFormLayout>
 #include <QHBoxLayout>
@@ -183,6 +185,60 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
     m_transformHelp->setWordWrap(true);
     m_transformHelp->setEnabled(false); // dimmed, as a hint
     layout->addWidget(m_transformHelp);
+
+    connect(m_state, &ToolState::keyframeModeChanged, this, [this] { syncFromState(); });
+
+    // Where the current cel is on the current frame, as numbers (the box on the canvas does the same by hand).
+    m_animateControls = new QWidget(this);
+    m_animateCel = new QLabel(m_animateControls);
+    m_animateCel->setWordWrap(true);
+    auto pose = [this](const QString &name, double min, double max, int decimals, const QString &suffix) {
+        auto *box = new QDoubleSpinBox(m_animateControls);
+        box->setObjectName(name);
+        box->setRange(min, max);
+        box->setDecimals(decimals);
+        box->setSuffix(suffix);
+        box->setKeyboardTracking(false);
+        return box;
+    };
+    m_poseX = pose(QStringLiteral("poseX"), -20000, 20000, 1, tr(" px"));
+    m_poseY = pose(QStringLiteral("poseY"), -20000, 20000, 1, tr(" px"));
+    m_poseRotation = pose(QStringLiteral("poseRotation"), -36000, 36000, 1, QStringLiteral("°"));
+    m_poseScale = pose(QStringLiteral("poseScale"), 1, 5000, 1, QStringLiteral(" %"));
+    m_poseOpacity = pose(QStringLiteral("poseOpacity"), 0, 100, 0, QStringLiteral(" %"));
+    m_poseEasing = new QComboBox(m_animateControls);
+    m_poseEasing->setObjectName(QStringLiteral("poseEasing"));
+    m_poseEasing->addItem(tr("Ease in and out"), int(doc::Easing::Kind::Bezier));
+    m_poseEasing->addItem(tr("Linear"), int(doc::Easing::Kind::Linear));
+    m_poseEasing->addItem(tr("Hold"), int(doc::Easing::Kind::Hold));
+    m_poseEasing->addItem(tr("Ease in"), 100);
+    m_poseEasing->addItem(tr("Ease out"), 101);
+    m_poseEasing->setToolTip(tr("How the cel goes from this key to the next"));
+    m_poseKey = new QPushButton(tr("Key here"), m_animateControls);
+    m_poseKey->setObjectName(QStringLiteral("poseKey"));
+    m_poseKey->setToolTip(tr("A key at this frame, at the pose the cel has"));
+    m_poseDelete = new QPushButton(tr("Delete key"), m_animateControls);
+    m_poseDelete->setObjectName(QStringLiteral("poseDelete"));
+    auto *animateForm = new QFormLayout(m_animateControls);
+    animateForm->setContentsMargins(0, 0, 0, 0);
+    animateForm->addRow(m_animateCel);
+    animateForm->addRow(tr("X"), m_poseX);
+    animateForm->addRow(tr("Y"), m_poseY);
+    animateForm->addRow(tr("Rotation"), m_poseRotation);
+    animateForm->addRow(tr("Scale"), m_poseScale);
+    animateForm->addRow(tr("Opacity"), m_poseOpacity);
+    animateForm->addRow(tr("To the next key"), m_poseEasing);
+    auto *keyRow = new QHBoxLayout;
+    keyRow->addWidget(m_poseKey);
+    keyRow->addWidget(m_poseDelete);
+    animateForm->addRow(keyRow);
+    auto *animateHelp = new QLabel(tr("Drag the box to move the cel, a corner to scale it, the handle above to turn it "
+                                      "(Shift: 15° steps). Where the pen is let go there is a key. The cross is the pivot."),
+                                   m_animateControls);
+    animateHelp->setWordWrap(true);
+    animateHelp->setEnabled(false); // dimmed, as a hint
+    animateForm->addRow(animateHelp);
+    layout->addWidget(m_animateControls);
     layout->addStretch(0);
 
     connect(m_size, &SliderField::valueEdited, this,
@@ -274,7 +330,8 @@ void ToolPropertiesPanel::syncFromState()
     const bool transform = tool == ToolId::Transform;
     const bool effect = tool == ToolId::Blend || tool == ToolId::Liquify;
     const bool shape = tool == ToolId::Shape;
-    const bool brush = !puppet && !fill && !transform && !effect && !shape;
+    const bool movesCel = m_state->movesTheCel();
+    const bool brush = !puppet && !fill && !transform && !effect && !shape && !movesCel;
     m_brushControls->setVisible(brush);
     if (m_footer->parentWidget() != this) // in a dock: shown with the brush options
         m_footer->setVisible(brush);
@@ -283,6 +340,8 @@ void ToolPropertiesPanel::syncFromState()
     syncEffectFromState();
     m_transformHelp->setVisible(transform);
     m_transformControls->setVisible(transform);
+    m_animateControls->setVisible(movesCel);
+    m_transformHelp->setVisible(transform && !movesCel);
     m_puppetControls->setVisible(puppet);
     m_fillControls->setVisible(fill);
     m_size->setEnabled(paint);
@@ -366,6 +425,102 @@ void ToolPropertiesPanel::syncFillFromState()
     m_tolerance->setEnabled(bucket);
     m_fillExpand->setEnabled(bucket);
     m_fillSource->setEnabled(bucket);
+}
+
+} // namespace mothion::ui
+
+namespace mothion::ui {
+
+void ToolPropertiesPanel::setDocument(document::DocumentController *document)
+{
+    if (m_document == document)
+        return;
+    m_document = document;
+    using document::DocumentController;
+    connect(m_document, &DocumentController::motionChanged, this, &ToolPropertiesPanel::syncAnimateFromDocument);
+    connect(m_document, &DocumentController::currentFrameChanged, this, &ToolPropertiesPanel::syncAnimateFromDocument);
+    connect(m_document, &DocumentController::currentCelChanged, this, &ToolPropertiesPanel::syncAnimateFromDocument);
+    connect(m_document, &DocumentController::documentReplaced, this, &ToolPropertiesPanel::syncAnimateFromDocument);
+    // A field edited is the pose of the cel on this frame: a key is made there (or changed).
+    auto edit = [this](QDoubleSpinBox *box, auto change) {
+        connect(box, &QDoubleSpinBox::valueChanged, this, [this, change](double value) {
+            if (!m_document)
+                return;
+            const doc::CelId cel = m_document->currentCel();
+            doc::CelPose pose = m_document->celPoseAt(cel, m_document->currentFrame());
+            change(pose, value);
+            m_document->setCelPose(cel, m_document->currentFrame(), pose);
+        });
+    };
+    edit(m_poseX, [](doc::CelPose &p, double v) { p.x = v; });
+    edit(m_poseY, [](doc::CelPose &p, double v) { p.y = v; });
+    edit(m_poseRotation, [](doc::CelPose &p, double v) { p.rotation = v; });
+    edit(m_poseScale, [](doc::CelPose &p, double v) {
+        p.scaleX = (p.scaleX < 0 ? -1 : 1) * v / 100.0; // a turned-over piece stays turned over
+        p.scaleY = (p.scaleY < 0 ? -1 : 1) * v / 100.0;
+    });
+    edit(m_poseOpacity, [](doc::CelPose &p, double v) { p.opacity = v / 100.0; });
+    connect(m_poseEasing, &QComboBox::activated, this, [this](int index) {
+        if (!m_document)
+            return;
+        const int code = m_poseEasing->itemData(index).toInt();
+        const doc::Easing easing = code == int(doc::Easing::Kind::Linear) ? doc::Easing::linear()
+                                   : code == int(doc::Easing::Kind::Hold) ? doc::Easing::hold()
+                                   : code == 100                         ? doc::Easing::easeIn()
+                                   : code == 101                         ? doc::Easing::easeOut()
+                                                                         : doc::Easing::easeInOut();
+        m_document->setCelKeyEasing(m_document->currentCel(), m_document->currentFrame(), easing);
+    });
+    connect(m_poseKey, &QPushButton::clicked, this, [this] {
+        if (m_document)
+            m_document->setCelKey(m_document->currentCel(), m_document->currentFrame(),
+                                  m_document->celPoseAt(m_document->currentCel(), m_document->currentFrame()));
+    });
+    connect(m_poseDelete, &QPushButton::clicked, this, [this] {
+        if (m_document)
+            m_document->removeCelKey(m_document->currentCel(), m_document->currentFrame());
+    });
+    syncAnimateFromDocument();
+}
+
+void ToolPropertiesPanel::syncAnimateFromDocument()
+{
+    if (!m_document)
+        return;
+    const doc::CelId id = m_document->currentCel();
+    const doc::Cel *cel = m_document->document().cel(id);
+    const int frame = m_document->currentFrame();
+    const doc::CelPose pose = m_document->celPoseAt(id, frame);
+    const doc::CelMotion *motion = m_document->celMotion(id);
+    const doc::CelKey *key = motion ? motion->keyAt(frame) : nullptr;
+    m_animateCel->setText(cel ? tr("Cel “%1”, frame %2%3")
+                                    .arg(QString::fromStdString(cel->properties().name))
+                                    .arg(frame + 1)
+                                    .arg(key ? tr(" (a key)")
+                                          : motion && motion->hasTemporaryAt(frame)
+                                              ? tr(" (not a key: it goes when you leave the frame, unless you press Cel key)")
+                                          : motion && !motion->isEmpty() ? tr(" (between keys)")
+                                                                         : tr(" (no keys yet)"))
+                              : QString());
+    const QSignalBlocker a(m_poseX), b(m_poseY), c(m_poseRotation), d(m_poseScale), e(m_poseOpacity);
+    m_poseX->setValue(pose.x);
+    m_poseY->setValue(pose.y);
+    m_poseRotation->setValue(pose.rotation);
+    m_poseScale->setValue(std::abs(pose.scaleX) * 100.0);
+    m_poseOpacity->setValue(pose.opacity * 100.0);
+    m_poseKey->setEnabled(cel && !key);
+    m_poseDelete->setEnabled(key != nullptr);
+    m_poseEasing->setEnabled(key != nullptr);
+    if (key) {
+        const QSignalBlocker f(m_poseEasing);
+        const doc::Easing &easing = key->easing;
+        const int code = easing.kind == doc::Easing::Kind::Linear ? int(doc::Easing::Kind::Linear)
+                         : easing.kind == doc::Easing::Kind::Hold ? int(doc::Easing::Kind::Hold)
+                         : easing == doc::Easing::easeIn()        ? 100
+                         : easing == doc::Easing::easeOut()       ? 101
+                                                                  : int(doc::Easing::Kind::Bezier);
+        m_poseEasing->setCurrentIndex(std::max(0, m_poseEasing->findData(code)));
+    }
 }
 
 } // namespace mothion::ui

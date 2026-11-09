@@ -141,6 +141,7 @@ MainWindow::MainWindow(QWidget *parent)
     applyAutosaveInterval();
 
     auto *properties = new ToolPropertiesPanel(m_toolState, this);
+    properties->setDocument(m_document); // for the keyframe options of Transform and Move
     WorkspacePanels panels;
     panels.tools = new ToolPalettePanel(m_toolState, this);
     panels.subTools = new SubToolPanel(m_toolState, m_brushes, this);

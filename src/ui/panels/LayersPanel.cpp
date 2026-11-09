@@ -583,6 +583,11 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
             m_thumbnailTimer.start();
     });
     connect(m_document, &DocumentController::currentCelChanged, this, &LayersPanel::selectCurrentRow);
+    // The cel as a whole was chosen elsewhere (its name in the timeline): its row, as if it had been clicked here.
+    connect(m_document, &DocumentController::celChosen, this, [this] {
+        m_focus = Focus::Cel;
+        selectCurrentRow();
+    });
     // The chosen cel's column is whole, the others' fainter: they follow the current cel.
     connect(m_document, &DocumentController::currentCelChanged, this, [this] { m_tree->viewport()->update(); });
     connect(m_document, &DocumentController::cameraSelectionChanged, this, [this] { m_tree->viewport()->update(); });

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "canvas/Resample.h"
 #include "core/document/Document.h"
 
 #include <QImage>
@@ -17,6 +18,9 @@ QRect drawingBounds(const doc::Drawing &drawing, bool guides = true);
 // (document coordinates), as an image of that size: what its cel shows,
 // before the cel's own opacity and blend mode.
 QImage composeDrawing(const doc::Drawing &drawing, const QRect &area, bool guides = true);
+// The smallest rect holding the pixels the drawing's visible layers show (not tile bounds: exact); empty if they show
+// nothing.
+QRect visibleBounds(const doc::Drawing &drawing, bool guides = false);
 
 // Draws a perspective layer's grid (and horizon) in document coordinates,
 // with the painter's opacity and composition mode.
@@ -41,6 +45,13 @@ public:
     // Without guides perspective layers are left out (export, playback).
     void setGuidesVisible(bool visible) { m_guides = visible; }
 
+    // How the pixels of a cel that is moved, turned or scaled by its motion are read (see canvas/Resample.h). The painter's
+    // own bilinear (fast) by default; a wider filter for export.
+    void setResampleFilter(ResampleFilter filter) { m_filter = filter; }
+    // This cel is drawn as it is, without its motion: to draw on it where its pixels are (kNoId: none).
+    void setCelAsDrawn(doc::CelId cel) { m_asDrawn = cel; }
+    doc::CelId celAsDrawn() const { return m_asDrawn; }
+
     // Whole frame (frame changed, cels changed, document resized...).
     void renderAll(const doc::Document &doc, int frame);
     // Only `rect` (document coordinates).
@@ -50,6 +61,8 @@ private:
     QImage m_image;
     bool m_paper = true;
     bool m_guides = true;
+    ResampleFilter m_filter = ResampleFilter::Bilinear;
+    doc::CelId m_asDrawn = doc::kNoId;
 };
 
 } // namespace mothion::canvas

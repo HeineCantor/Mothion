@@ -10,6 +10,7 @@
 #include "core/document/commands/AudioCommands.h"
 #include "core/document/commands/CameraCommands.h"
 #include "core/document/commands/MarkerCommands.h"
+#include "core/document/commands/MotionCommands.h"
 #include "core/document/commands/CompositingCommands.h"
 #include "core/document/commands/CelCommands.h"
 #include "core/document/commands/LayerCommands.h"
@@ -165,6 +166,7 @@ void DocumentController::replaceDocument(std::unique_ptr<doc::Document> document
         m_currentLayerName = drawing->layers.back().properties.name;
     }
 
+    m_tempPoseCel = doc::kNoId;
     emit documentReplaced();
     if (cameraWasSelected)
         emit cameraSelectionChanged();
@@ -766,6 +768,22 @@ void DocumentController::removeCamera()
         execute(std::make_unique<doc::SetCameraCommand>(std::nullopt));
 }
 
+void DocumentController::chooseCel(doc::CelId id)
+{
+    const doc::Cel *cel = m_document->cel(id);
+    if (!cel)
+        return;
+    selectCamera(false);
+    setLayerChosen(false); // a cel is not a layer: the pixel tools wait for one to be chosen
+    setCurrentCel(id);
+    std::vector<LayerRef> layers;
+    for (const auto &[drawingId, drawing] : cel->drawings())
+        for (const doc::Layer &layer : drawing.layers)
+            layers.push_back({id, drawingId, layer.id});
+    setLayerSelection(std::move(layers));
+    emit celChosen(id);
+}
+
 void DocumentController::setLayerChosen(bool chosen)
 {
     if (chosen == m_layerChosen)
@@ -815,6 +833,186 @@ bool DocumentController::deleteLayerMask()
     if (m_maskLayer == m_currentLayer)
         setMaskEditing(doc::kNoId);
     emit maskEditingChanged();
+    return true;
+}
+
+const doc::CelMotion *DocumentController::celMotion(doc::CelId id) const
+{
+    const doc::Cel *cel = m_document->cel(id);
+    return cel ? &cel->motion() : nullptr;
+}
+
+doc::CelPose DocumentController::celPoseAt(doc::CelId id, int frame) const
+{
+    const doc::Cel *cel = m_document->cel(id);
+    return cel ? cel->motion().poseAt(frame) : doc::CelPose{};
+}
+
+bool DocumentController::setCelKey(doc::CelId id, int frame, const doc::CelPose &pose)
+{
+    const doc::Cel *cel = m_document->cel(id);
+    if (!cel || frame < 0)
+        return false;
+    clearTemporaryPose(); // what is made a key now is the pose that was shown (the caller has it already)
+    doc::CelMotion motion = cel->motion();
+    if (motion.isEmpty())
+        startMotion(motion, *cel, frame);
+    if (const doc::CelKey *existing = motion.keyAt(frame); existing && existing->pose == pose)
+        return false;
+    motion.setKey(frame, pose);
+    execute(std::make_unique<doc::SetCelMotionCommand>(id, std::move(motion)));
+    return true;
+}
+
+void DocumentController::startMotion(doc::CelMotion &motion, const doc::Cel &cel, int frame) const
+{
+    // The first key: the cel turns and scales around the middle of what its frame shows (the page's, if it shows nothing).
+    QRect bounds;
+    if (const doc::Drawing *drawing = cel.drawingAt(frame))
+        bounds = canvas::visibleBounds(*drawing);
+    const QPointF middle = QRectF(bounds).center();
+    motion.pivotX = bounds.isEmpty() ? m_document->width() / 2.0 : middle.x();
+    motion.pivotY = bounds.isEmpty() ? m_document->height() / 2.0 : middle.y();
+}
+
+void DocumentController::toggleCelKey(doc::CelId id)
+{
+    interruptStroke(); // a pose edit left open (Transform, Move) is applied first
+    const doc::CelMotion *motion = celMotion(id);
+    if (motion && motion->keyAt(m_currentFrame))
+        removeCelKey(id, m_currentFrame);
+    else
+        setCelKey(id, m_currentFrame, celPoseAt(id, m_currentFrame)); // the pose left on the frame, or the one it has
+}
+
+void DocumentController::previewCelPose(doc::CelId id, int frame, const doc::CelPose &pose)
+{
+    doc::Cel *cel = m_document->cel(id);
+    if (!cel || frame < 0)
+        return;
+    doc::CelMotion motion = cel->motion();
+    if (motion.keyAt(frame)) {
+        motion.setKey(frame, pose);
+    } else {
+        // No key here: the pose stays only while this frame is the one shown (or until it is made a key).
+        if (m_tempPoseCel != id)
+            clearTemporaryPose();
+        motion.setTemporary(frame, pose);
+        m_tempPoseCel = id;
+    }
+    cel->setMotion(std::move(motion));
+    doc::ChangeSet changes;
+    changes.motion = true;
+    publish(changes);
+}
+
+void DocumentController::setCelPose(doc::CelId id, int frame, const doc::CelPose &pose)
+{
+    const doc::Cel *cel = m_document->cel(id);
+    if (!cel || frame < 0 || cel->motion().isEmpty())
+        return;
+    if (cel->motion().keyAt(frame))
+        setCelKey(id, frame, pose);
+    else
+        previewCelPose(id, frame, pose);
+}
+
+void DocumentController::clearTemporaryPose()
+{
+    if (m_tempPoseCel == doc::kNoId)
+        return;
+    const doc::CelId id = m_tempPoseCel;
+    m_tempPoseCel = doc::kNoId;
+    doc::Cel *cel = m_document->cel(id);
+    if (!cel || !cel->motion().hasTemporary())
+        return;
+    doc::CelMotion motion = cel->motion();
+    motion.clearTemporary();
+    cel->setMotion(std::move(motion));
+    doc::ChangeSet changes;
+    changes.motion = true;
+    publish(changes);
+}
+
+void DocumentController::finishCelPose(doc::CelId id, const doc::CelMotion &before)
+{
+    const doc::Cel *cel = m_document->cel(id);
+    if (!cel || cel->motion() == before)
+        return;
+    m_history.pushApplied(std::make_unique<doc::SetCelMotionCommand>(id, before, cel->motion()));
+    emit historyChanged();
+}
+
+void DocumentController::cancelCelPose(doc::CelId id, const doc::CelMotion &before)
+{
+    doc::Cel *cel = m_document->cel(id);
+    if (!cel)
+        return;
+    cel->setMotion(before);
+    doc::ChangeSet changes;
+    changes.motion = true;
+    publish(changes);
+}
+
+bool DocumentController::setCelKeyEasing(doc::CelId id, int frame, const doc::Easing &easing)
+{
+    const doc::Cel *cel = m_document->cel(id);
+    if (!cel)
+        return false;
+    clearTemporaryPose();
+    doc::CelMotion motion = cel->motion();
+    const doc::CelKey *key = motion.keyAt(frame);
+    if (!key || key->easing == easing)
+        return false;
+    motion.setEasing(frame, easing);
+    execute(std::make_unique<doc::SetCelMotionCommand>(id, std::move(motion)));
+    return true;
+}
+
+bool DocumentController::removeCelKey(doc::CelId id, int frame)
+{
+    const doc::Cel *cel = m_document->cel(id);
+    if (!cel)
+        return false;
+    clearTemporaryPose();
+    doc::CelMotion motion = cel->motion();
+    if (!motion.removeKey(frame))
+        return false;
+    execute(std::make_unique<doc::SetCelMotionCommand>(id, std::move(motion)));
+    return true;
+}
+
+bool DocumentController::moveCelKey(doc::CelId id, int frame, int to)
+{
+    const doc::Cel *cel = m_document->cel(id);
+    if (!cel || frame == to)
+        return false;
+    clearTemporaryPose();
+    doc::CelMotion motion = cel->motion();
+    if (!motion.moveKey(frame, to))
+        return false;
+    execute(std::make_unique<doc::SetCelMotionCommand>(id, std::move(motion)));
+    return true;
+}
+
+bool DocumentController::setCelPivot(doc::CelId id, double x, double y)
+{
+    const doc::Cel *cel = m_document->cel(id);
+    if (!cel || (cel->motion().pivotX == x && cel->motion().pivotY == y))
+        return false;
+    doc::CelMotion motion = cel->motion();
+    motion.pivotX = x;
+    motion.pivotY = y;
+    execute(std::make_unique<doc::SetCelMotionCommand>(id, std::move(motion)));
+    return true;
+}
+
+bool DocumentController::clearCelMotion(doc::CelId id)
+{
+    const doc::Cel *cel = m_document->cel(id);
+    if (!cel || cel->motion().isEmpty())
+        return false;
+    execute(std::make_unique<doc::SetCelMotionCommand>(id, doc::CelMotion{}));
     return true;
 }
 
@@ -1451,6 +1649,7 @@ QString DocumentController::commandName(doc::CommandKind kind)
     case doc::CommandKind::SceneLength: return tr("scene length");
     case doc::CommandKind::EditMarkers: return tr("markers");
     case doc::CommandKind::Flip: return tr("flip");
+    case doc::CommandKind::EditMotion: return tr("keyframes");
     case doc::CommandKind::ChangeMask: return tr("mask");
     case doc::CommandKind::ClearLayer: return tr("clear");
     case doc::CommandKind::Move: return tr("move");
@@ -1496,6 +1695,8 @@ void DocumentController::publish(const doc::ChangeSet &changes)
     }
     if (changes.markers)
         emit markersChanged();
+    if (changes.motion)
+        emit motionChanged();
     if (changes.structure) {
         ensureValidCurrentCel();
         resolveCurrentLayer();
@@ -1548,6 +1749,7 @@ void DocumentController::setCurrentFrame(int frame)
     if (frame == m_currentFrame)
         return;
     interruptStroke();
+    clearTemporaryPose(); // a pose left on a frame that is not a key goes with the frame
     m_currentFrame = frame;
     emit currentFrameChanged(frame);
     resolveCurrentLayer();
@@ -1558,6 +1760,7 @@ void DocumentController::setCurrentCel(doc::CelId cel)
     if (cel == m_currentCel || !m_document->cel(cel))
         return;
     interruptStroke();
+    clearTemporaryPose();
     m_currentCel = cel;
     emit currentCelChanged(cel);
     resolveCurrentLayer();
@@ -1638,7 +1841,10 @@ void DocumentController::setLayerSelection(std::vector<LayerRef> layers)
 {
     if (layers.size() == 1 && layers.front().layer == m_currentLayer)
         layers.clear(); // just the current one
+    if (layers == m_layerSelection)
+        return;
     m_layerSelection = std::move(layers);
+    emit layerSelectionChanged();
 }
 
 std::vector<DocumentController::PaintTarget> DocumentController::beginPaintLayers(QString *reason)
@@ -1747,6 +1953,7 @@ void DocumentController::cancelPaint()
 
 void DocumentController::interruptStroke()
 {
+    emit poseEditClosing(); // a pose edit left open (Transform, Move on a cel with keys) is applied as it is
     if (!m_paint)
         return;
     emit strokeInterrupted(); // the painter restores pixels and calls cancelPaint()

@@ -72,6 +72,7 @@ QImage renderFrame(const doc::Document &document, int frame, bool transparent)
     canvas::FrameRenderer renderer;
     renderer.setPaperVisible(!transparent);
     renderer.setGuidesVisible(false); // perspective layers are guides, not the picture
+    renderer.setResampleFilter(canvas::ResampleFilter::Bicubic); // a cel moved by its keys: read with care
     renderer.renderAll(document, frame);
     return renderer.image();
 }

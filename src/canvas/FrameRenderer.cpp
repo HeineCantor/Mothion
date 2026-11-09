@@ -235,6 +235,27 @@ QImage composeDrawing(const doc::Drawing &drawing, const QRect &area, bool guide
     return image;
 }
 
+QRect visibleBounds(const doc::Drawing &drawing, bool guides)
+{
+    const QRect tiles = drawingBounds(drawing, guides);
+    if (tiles.isEmpty())
+        return {};
+    const QImage image = composeDrawing(drawing, tiles, guides);
+    int left = image.width(), top = image.height(), right = -1, bottom = -1;
+    for (int y = 0; y < image.height(); ++y) {
+        const QRgb *line = reinterpret_cast<const QRgb *>(image.constScanLine(y));
+        for (int x = 0; x < image.width(); ++x) {
+            if (qAlpha(line[x]) == 0)
+                continue;
+            left = std::min(left, x);
+            right = std::max(right, x);
+            top = std::min(top, y);
+            bottom = std::max(bottom, y);
+        }
+    }
+    return right < left ? QRect() : QRect(QPoint(left, top), QPoint(right, bottom)).translated(tiles.topLeft());
+}
+
 void FrameRenderer::renderAll(const doc::Document &doc, int frame)
 {
     const QSize size(doc.width(), doc.height());
@@ -259,7 +280,11 @@ void FrameRenderer::render(const doc::Document &doc, int frame, const QRect &rec
         const doc::Cel &cel = doc.celAt(i);
         const doc::CelProperties &props = cel.properties();
         const doc::Drawing *drawing = cel.drawingAt(frame);
-        if (!props.visible || props.opacity <= 0.0f || !drawing)
+        // What the animation does to the cel on this frame (nothing for a cel with no keys, or one shown as drawn).
+        const bool animated = !cel.motion().isEmpty() && cel.id() != m_asDrawn;
+        const doc::CelPose pose = animated ? cel.motion().poseAt(frame) : doc::CelPose{};
+        const float opacity = props.opacity * float(pose.opacity);
+        if (!props.visible || opacity <= 0.0f || !drawing)
             continue;
         const doc::Layer *only = nullptr; // the one layer shown, if there is just one
         int shown = 0;
@@ -270,18 +295,51 @@ void FrameRenderer::render(const doc::Document &doc, int frame, const QRect &rec
             }
         if (shown == 0)
             continue;
+        if (animated && !pose.movesNothing()) {
+            // Moved as one piece: what its layers show together, read through the pose into this area.
+            const doc::Matrix2x3 m = pose.matrix(cel.motion().pivotX, cel.motion().pivotY);
+            const QTransform forward(m.a, m.b, m.c, m.d, m.e, m.f);
+            bool invertible = false;
+            const QTransform back = forward.inverted(&invertible);
+            if (!invertible)
+                continue;
+            const QRect source = back.mapRect(QRectF(area)).toAlignedRect().adjusted(-3, -3, 3, 3)
+                                 & drawingBounds(*drawing, m_guides);
+            if (source.isEmpty())
+                continue;
+            const QImage content = composeDrawing(*drawing, source, m_guides);
+            QImage moved;
+            const QTransform toArea = forward * QTransform::fromTranslate(-area.x(), -area.y());
+            if (m_filter == ResampleFilter::Bilinear || m_filter == ResampleFilter::Nearest) {
+                moved = QImage(area.size(), QImage::Format_ARGB32_Premultiplied);
+                moved.fill(Qt::transparent);
+                QPainter mp(&moved);
+                mp.setRenderHint(QPainter::SmoothPixmapTransform, m_filter != ResampleFilter::Nearest);
+                mp.setTransform(toArea);
+                mp.drawImage(source.topLeft(), content);
+            } else {
+                moved = resampleTransformed(content, QTransform::fromTranslate(source.x(), source.y()) * toArea,
+                                            area.size(), m_filter);
+            }
+            if (doc::needsSoftwareBlend(props.blend)) {
+                blendImage(m_image, area.topLeft(), area, moved, opacity, props.blend);
+            } else {
+                p.setOpacity(opacity);
+                p.setCompositionMode(compositionFor(props.blend));
+                p.drawImage(area.topLeft(), moved);
+            }
+            continue;
+        }
         if (shown == 1 && only->properties.blend == doc::BlendMode::Normal) {
             // A lone normal layer over transparency is itself: no folder needed.
-            drawLayer(p, m_image, QPoint(0, 0), area, *only, tiles, props.opacity * only->properties.opacity,
-                      props.blend);
+            drawLayer(p, m_image, QPoint(0, 0), area, *only, tiles, opacity * only->properties.opacity, props.blend);
             continue;
         }
         if (doc::needsSoftwareBlend(props.blend)) {
-            blendImage(m_image, area.topLeft(), area, composeDrawing(*drawing, area, m_guides), props.opacity,
-                       props.blend);
+            blendImage(m_image, area.topLeft(), area, composeDrawing(*drawing, area, m_guides), opacity, props.blend);
             continue;
         }
-        p.setOpacity(props.opacity);
+        p.setOpacity(opacity);
         p.setCompositionMode(compositionFor(props.blend));
         p.drawImage(area.topLeft(), composeDrawing(*drawing, area, m_guides));
     }

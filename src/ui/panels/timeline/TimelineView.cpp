@@ -63,6 +63,10 @@ TimelineView::TimelineView(DocumentController *document, QWidget *parent)
     });
     connect(m_document, &DocumentController::cameraSelectionChanged, viewport(), qOverload<>(&QWidget::update));
     connect(m_document, &DocumentController::markersChanged, viewport(), qOverload<>(&QWidget::update));
+    connect(m_document, &DocumentController::motionChanged, this, [this] { // a row of keys comes and goes
+        updateScrollBars();
+        viewport()->update();
+    });
     connect(&m_analyzer, &audio::AudioAnalyzer::finished, this,
             [this](const void *key, const audio::Waveform &wave) {
                 const auto &track = m_document->audioTrack();
@@ -88,12 +92,35 @@ TimelineView::TimelineView(DocumentController *document, QWidget *parent)
 
 int TimelineView::rowCount() const
 {
-    return m_document->document().celCount();
+    const doc::Document &d = m_document->document();
+    int rows = d.celCount();
+    for (int i = 0; i < d.celCount(); ++i)
+        if (!d.celAt(i).motion().isEmpty())
+            ++rows; // the row of its keys
+    return rows;
+}
+
+TimelineView::RowRef TimelineView::rowRef(int row) const
+{
+    const doc::Document &d = m_document->document();
+    int at = 0;
+    for (int i = d.celCount() - 1; i >= 0; --i) {
+        if (at++ == row)
+            return {i, false};
+        if (!d.celAt(i).motion().isEmpty() && at++ == row)
+            return {i, true};
+    }
+    return {0, false};
+}
+
+bool TimelineView::isMotionRow(int row) const
+{
+    return rowRef(row).motion;
 }
 
 int TimelineView::celIndexForRow(int row) const
 {
-    return rowCount() - 1 - row;
+    return rowRef(row).celIndex;
 }
 
 int TimelineView::rowAt(int y) const
@@ -132,7 +159,7 @@ const doc::Timing &TimelineView::timingForPainting(int celIndex) const
 std::optional<TimelineView::Resize> TimelineView::edgeAt(const QPoint &pos) const
 {
     const int row = rowAt(pos.y());
-    if (row < 0 || pos.x() < m_metrics.headerWidth)
+    if (row < 0 || pos.x() < m_metrics.headerWidth || isMotionRow(row))
         return std::nullopt;
     const int celIndex = celIndexForRow(row);
     for (const doc::Exposure &e : m_document->document().celAt(celIndex).timing().exposures()) {
@@ -299,7 +326,8 @@ void TimelineView::paintSelection(QPainter &p) const
         p.drawRect(bar.adjusted(1, 1, -1, -1));
     };
     for (int row = 0; row < rowCount(); ++row)
-        if (d.celAt(celIndexForRow(row)).id() == m_document->currentCel() && !m_document->cameraSelected())
+        if (!isMotionRow(row) && d.celAt(celIndexForRow(row)).id() == m_document->currentCel()
+            && !m_document->cameraSelected())
             outline(m.rowY(row));
     if (m_document->camera() && m_document->cameraSelected())
         outline(cameraTop());
@@ -339,6 +367,10 @@ void TimelineView::paintCells(QPainter &p) const
     // Exposures.
     for (int row = 0; row < rowCount(); ++row) {
         const int celIndex = celIndexForRow(row);
+        if (isMotionRow(row)) {
+            paintMotionRow(p, celIndex, m.rowY(row));
+            continue;
+        }
         const doc::Cel &cel = d.celAt(celIndex);
         const bool dragging = m_frameDrag && m_frameDrag->moved;
         const int shift = dragging && !m_frameDrag->blocked ? m_frameDrag->offset : 0;
@@ -412,6 +444,104 @@ QRect TimelineView::cameraEyeRect() const
 bool TimelineView::inCameraRow(int y) const
 {
     return hasCamera() && y >= m_metrics.rulerHeight && y >= cameraTop() && y < cameraTop() + cameraHeight();
+}
+
+namespace {
+
+QColor motionColor() { return QColor(240, 178, 61); }
+
+} // namespace
+
+int TimelineView::motionKeyAt(const QPoint &pos, int row) const
+{
+    if (!isMotionRow(row) || pos.x() < m_metrics.headerWidth)
+        return -1;
+    const doc::Cel &cel = m_document->document().celAt(celIndexForRow(row));
+    int best = -1, nearest = 8;
+    for (const doc::CelKey &key : cel.motion().keys()) {
+        const int distance = std::abs(pos.x() - (m_metrics.frameX(key.frame) + m_metrics.frameWidth / 2));
+        if (distance < nearest) {
+            nearest = distance;
+            best = key.frame;
+        }
+    }
+    return best;
+}
+
+void TimelineView::paintMotionHeader(QPainter &p, int celIndex, int y) const
+{
+    const TimelineMetrics &m = m_metrics;
+    const doc::Cel &cel = m_document->document().celAt(celIndex);
+    const QRect r(0, y, m.headerWidth - 1, m.rowHeight);
+    p.fillRect(r, palette().window());
+    p.fillRect(QRect(r.left() + 4, r.top() + 6, 4, r.height() - 12), motionColor());
+    QFont small = font();
+    small.setPointSizeF(std::max(6.0, small.pointSizeF() - 1.0));
+    p.setFont(small);
+    p.setPen(cel.properties().visible ? palette().placeholderText().color()
+                                      : palette().color(QPalette::Disabled, QPalette::Text));
+    p.drawText(r.adjusted(28, 0, -4, 0), Qt::AlignVCenter | Qt::AlignLeft, tr("Keyframes"));
+    p.setFont(font());
+    p.setPen(palette().mid().color());
+    p.drawLine(r.bottomLeft(), r.bottomRight());
+}
+
+void TimelineView::paintMotionRow(QPainter &p, int celIndex, int y) const
+{
+    const TimelineMetrics &m = m_metrics;
+    const doc::Cel &cel = m_document->document().celAt(celIndex);
+    const int midY = y + m.rowHeight / 2;
+    const QColor ink = motionColor();
+    const auto &keys = cel.motion().keys();
+    for (std::size_t i = 0; i + 1 < keys.size(); ++i) {
+        if (keys[i].easing.kind == doc::Easing::Kind::Hold)
+            continue;
+        p.setPen(QPen(ink.darker(110), 1.5));
+        p.drawLine(m.frameX(keys[i].frame) + m.frameWidth / 2, midY, m.frameX(keys[i + 1].frame) + m.frameWidth / 2, midY);
+    }
+    const int current = m_document->currentFrame();
+    p.setRenderHint(QPainter::Antialiasing);
+    for (const doc::CelKey &key : keys) {
+        int frame = key.frame;
+        const bool dragged = m_motionDrag && m_motionDrag->cel == cel.id() && m_motionDrag->from == frame;
+        if (dragged)
+            frame = m_motionDrag->to;
+        const bool chosen = m_selectedKey && m_selectedKey->first == cel.id() && m_selectedKey->second == key.frame;
+        const int cx = m.frameX(frame) + m.frameWidth / 2;
+        const int r = key.frame == current || dragged || chosen ? 7 : 5;
+        const QPolygon diamond({QPoint(cx, midY - r), QPoint(cx + r, midY), QPoint(cx, midY + r), QPoint(cx - r, midY)});
+        p.setPen(QPen(chosen || key.frame == current ? Qt::white : ink.darker(170), chosen ? 2 : 1));
+        p.setBrush(dragged ? ink.lighter(130) : ink);
+        p.drawPolygon(diamond);
+    }
+    p.setRenderHint(QPainter::Antialiasing, false);
+}
+
+void TimelineView::showMotionMenu(const QPoint &globalPos, int celIndex, int frame)
+{
+    const doc::Cel &cel = m_document->document().celAt(celIndex);
+    const doc::CelId id = cel.id();
+    QMenu menu(this);
+    if (const doc::CelKey *key = cel.motion().keyAt(frame)) {
+        QMenu *easing = menu.addMenu(tr("To the next key"));
+        auto add = [&](const QString &text, const doc::Easing &e) {
+            QAction *action = easing->addAction(text, this, [this, id, frame, e] { m_document->setCelKeyEasing(id, frame, e); });
+            action->setCheckable(true);
+            action->setChecked(key->easing == e);
+        };
+        add(tr("Linear"), doc::Easing::linear());
+        add(tr("Hold"), doc::Easing::hold());
+        add(tr("Ease in"), doc::Easing::easeIn());
+        add(tr("Ease out"), doc::Easing::easeOut());
+        add(tr("Ease in and out"), doc::Easing::easeInOut());
+        menu.addAction(tr("Delete keyframe"), this, [this, id, frame] { m_document->removeCelKey(id, frame); });
+    } else {
+        menu.addAction(tr("Add keyframe here"), this,
+                       [this, id, frame] { m_document->setCelKey(id, frame, m_document->celPoseAt(id, frame)); });
+    }
+    menu.addSeparator();
+    menu.addAction(tr("Delete all keyframes of the cel"), this, [this, id] { m_document->clearCelMotion(id); });
+    menu.exec(globalPos);
 }
 
 void TimelineView::paintCamera(QPainter &p) const
@@ -868,6 +998,10 @@ void TimelineView::paintHeaders(QPainter &p) const
     p.fillRect(QRect(0, m.rulerHeight, m.headerWidth, viewport()->height()), palette().window());
     for (int row = 0; row < rowCount(); ++row) {
         const int celIndex = celIndexForRow(row);
+        if (isMotionRow(row)) {
+            paintMotionHeader(p, celIndex, m.rowY(row));
+            continue;
+        }
         const doc::Cel &cel = d.celAt(celIndex);
         const QRect r(0, m.rowY(row), m.headerWidth - 1, m.rowHeight);
         const QColor ink = palette().text().color();
@@ -951,13 +1085,17 @@ void TimelineView::mousePressEvent(QMouseEvent *event)
             return;
         const doc::Cel &cel = m_document->document().celAt(celIndexForRow(row));
         const QPoint pos = event->position().toPoint();
+        if (isMotionRow(row)) { // the keys' row: its cel is chosen, and no toggles are there
+            m_document->chooseCel(cel.id());
+            return;
+        }
         doc::CelProperties p = cel.properties();
         if (eyeRect(row).contains(pos))
             p.visible = !p.visible;
         else if (lockRect(row).contains(pos))
             p.locked = !p.locked;
         else
-            m_document->setCurrentCel(cel.id());
+            m_document->chooseCel(cel.id()); // the cel as a whole: all its frames (a transform moves them all)
         m_document->execute(doc::makeSetCelProperties(m_document->document(), cel.id(), p));
         return;
     }
@@ -988,6 +1126,23 @@ void TimelineView::mousePressEvent(QMouseEvent *event)
         }
         m_scrubbing = true;
         scrubTo(pos, false);
+        return;
+    }
+    if (const int row = rowAt(pos.y()); row >= 0 && isMotionRow(row)) {
+        // The keys of a cel: on a diamond its frame is shown, and a drag moves the key; elsewhere the frame under the pointer.
+        const doc::Cel &cel = m_document->document().celAt(celIndexForRow(row));
+        m_document->setCurrentCel(cel.id());
+        if (const int frame = motionKeyAt(pos, row); frame >= 0) {
+            m_motionDrag = MotionDrag{cel.id(), frame, frame};
+            m_selectedKey = std::make_pair(cel.id(), frame);
+            m_document->setCurrentFrame(frame);
+            emit frameScrubbed(frame);
+        } else {
+            m_selectedKey.reset();
+            m_scrubbing = true;
+            scrubTo(pos, false);
+        }
+        viewport()->update();
         return;
     }
     if (auto edge = edgeAt(pos)) {
@@ -1122,6 +1277,14 @@ void TimelineView::mouseMoveEvent(QMouseEvent *event)
         }
         return;
     }
+    if (m_motionDrag) {
+        const int to = std::max(0, frameAt(pos.x()));
+        if (to != m_motionDrag->to) {
+            m_motionDrag->to = to;
+            viewport()->update();
+        }
+        return;
+    }
     if (m_cameraDrag) {
         const int to = std::max(0, frameAt(pos.x()));
         if (to != m_cameraDrag->to) {
@@ -1181,6 +1344,18 @@ void TimelineView::mouseReleaseEvent(QMouseEvent *)
         viewport()->update();
         return;
     }
+    if (m_motionDrag) {
+        const MotionDrag drag = *m_motionDrag;
+        m_motionDrag.reset();
+        // A key goes where there is none (one on the way is not jumped: it is a place taken).
+        if (drag.to != drag.from && m_document->moveCelKey(drag.cel, drag.from, drag.to)) {
+            m_selectedKey = std::make_pair(drag.cel, drag.to);
+            m_document->setCurrentFrame(drag.to);
+            emit frameScrubbed(drag.to);
+        }
+        viewport()->update();
+        return;
+    }
     if (m_cameraDrag) {
         const CameraDrag drag = *m_cameraDrag;
         m_cameraDrag.reset();
@@ -1231,6 +1406,16 @@ void TimelineView::mouseDoubleClickEvent(QMouseEvent *event)
         const int frame = frameAt(pos.x()); // a key here, at the pose the camera has
         if (frame >= 0 && !m_document->camera()->keyAt(frame))
             m_document->setCameraKey(frame, m_document->camera()->poseAt(frame));
+        return;
+    }
+    if (event->button() == Qt::LeftButton && row >= 0 && isMotionRow(row)) {
+        // On the keys' row: a key here, at the pose the cel has. (In its header: nothing.)
+        if (pos.x() >= m_metrics.headerWidth) {
+            const doc::CelId cel = m_document->document().celAt(celIndexForRow(row)).id();
+            const int frame = frameAt(pos.x());
+            if (frame >= 0 && !m_document->celMotion(cel)->keyAt(frame))
+                m_document->setCelKey(cel, frame, m_document->celPoseAt(cel, frame));
+        }
         return;
     }
     if (event->button() == Qt::LeftButton && row >= 0 && pos.x() < m_metrics.headerWidth
@@ -1339,6 +1524,11 @@ void TimelineView::contextMenuEvent(QContextMenuEvent *event)
     if (row < 0 || event->pos().x() < m_metrics.headerWidth)
         return;
     const int frame = frameAt(event->pos().x());
+    if (isMotionRow(row)) {
+        m_document->setCurrentCel(m_document->document().celAt(celIndexForRow(row)).id());
+        showMotionMenu(event->globalPos(), celIndexForRow(row), frame);
+        return;
+    }
     const doc::Cel &cel = m_document->document().celAt(celIndexForRow(row));
     const doc::CelId celId = cel.id();
     m_document->setCurrentCel(celId);

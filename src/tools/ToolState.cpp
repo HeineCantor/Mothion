@@ -162,6 +162,14 @@ void ToolState::setUseTilt(bool use)
     emit useTiltChanged(use);
 }
 
+void ToolState::setKeyframeMode(bool on)
+{
+    if (on == m_keyframeMode)
+        return;
+    m_keyframeMode = on;
+    emit keyframeModeChanged(on);
+}
+
 void ToolState::setSharpCorners(bool on)
 {
     if (on == m_sharpCorners)

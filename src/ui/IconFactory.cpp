@@ -431,6 +431,13 @@ void drawGlyph(QPainter &p, IconId id)
         path.lineTo(20.5, 16.5);
         path.lineTo(15.5, 13.5);
         break;
+    case IconId::Keyframe: // a diamond
+        path.moveTo(12, 4.5);
+        path.lineTo(19.5, 12);
+        path.lineTo(12, 19.5);
+        path.lineTo(4.5, 12);
+        path.closeSubpath();
+        break;
     case IconId::Flag: // a pennant on its pole
         path.moveTo(6.5, 3);
         path.lineTo(6.5, 21);

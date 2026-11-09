@@ -6,8 +6,14 @@
 
 class QCheckBox;
 class QComboBox;
+class QDoubleSpinBox;
 class QLabel;
+class QPushButton;
 class QSpinBox;
+
+namespace mothion::document {
+class DocumentController;
+}
 
 namespace mothion::ui {
 
@@ -27,6 +33,8 @@ public:
     explicit ToolPropertiesPanel(tools::ToolState *state, QWidget *parent = nullptr);
 
     PressureCurveEditor *curveEditor() const { return m_curveEditor; }
+    // The document whose cels the Animate tool's options show and edit (the pose of the current cel on the current frame).
+    void setDocument(document::DocumentController *document);
     // A bar with the wrench (Advanced Tool Settings), for the dock to keep
     // under the panel, outside its scrolling (see PanelDock).
     QWidget *footer() const { return m_footer; }
@@ -82,6 +90,19 @@ private:
     // Transform: how the pixels are read when they are scaled or turned (tools::Preferences::transformFilter()).
     QWidget *m_transformControls = nullptr;
     QComboBox *m_transformFilter = nullptr;
+    // Animate: the pose of the current cel on the current frame, and its key (auto-key: a field edited makes it).
+    void syncAnimateFromDocument();
+    document::DocumentController *m_document = nullptr;
+    QWidget *m_animateControls = nullptr;
+    QLabel *m_animateCel = nullptr;
+    QDoubleSpinBox *m_poseX = nullptr;
+    QDoubleSpinBox *m_poseY = nullptr;
+    QDoubleSpinBox *m_poseRotation = nullptr;
+    QDoubleSpinBox *m_poseScale = nullptr;
+    QDoubleSpinBox *m_poseOpacity = nullptr;
+    QComboBox *m_poseEasing = nullptr;
+    QPushButton *m_poseKey = nullptr;
+    QPushButton *m_poseDelete = nullptr;
     AdvancedToolSettings *m_advanced = nullptr; // made on first use
 };
 

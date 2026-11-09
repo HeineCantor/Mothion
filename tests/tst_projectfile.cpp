@@ -85,6 +85,21 @@ std::unique_ptr<doc::Document> sampleDocument()
     camera.setKey(30, {160, 120, 1, 720}, doc::Easing::linear());
     d->setCamera(camera);
     d->setMarkers({{0, "start"}, {12, ""}, {30, "o fim ✓"}});
+    doc::CelMotion motion; // the keys of a cel: moved, turned, scaled and faded, with the three kinds of easing
+    motion.pivotX = 111.5;
+    motion.pivotY = -20.25;
+    doc::CelPose first;
+    first.x = 12.5;
+    first.y = -3;
+    first.rotation = 33;
+    first.scaleX = 1.5;
+    first.scaleY = -0.75;
+    first.opacity = 0.4;
+    motion.setKey(0, first, doc::Easing::hold());
+    motion.setKey(9, doc::CelPose{}, doc::Easing::bezier(0.42, 0, 0.58, 1));
+    first.rotation = 720;
+    motion.setKey(40, first, doc::Easing::linear());
+    d->celAt(1).setMotion(motion);
     doc::GraphData graph;
     graph.nodes.push_back({1, "frame", -330.5, 12, {}});
     graph.nodes.push_back({4, "blur", 20, -7.25, {{"radius", 17}}});
@@ -132,6 +147,7 @@ void compareDocuments(const doc::Document &x, const doc::Document &y)
         const doc::Cel &lx = x.celAt(i), &ly = y.celAt(i);
         QCOMPARE(lx.id(), ly.id());
         QVERIFY(lx.properties() == ly.properties());
+        QVERIFY(lx.motion() == ly.motion());
         QVERIFY(lx.timing() == ly.timing());
         QCOMPARE(lx.drawings().size(), ly.drawings().size());
         for (const auto &[id, dx] : lx.drawings()) {
@@ -217,6 +233,8 @@ private slots:
         original->setCompositingView({});
         original->setCamera(std::nullopt); // and the camera with format 8
         original->setMarkers({}); // and the markers with format 10
+        for (int i = 0; i < original->celCount(); ++i) // and the motion of the cels with format 11
+            original->celAt(i).setMotion({});
         for (int i = 0; i < original->celCount(); ++i) // and the masks with format 9
             for (const auto &[id, drawing] : original->celAt(i).drawings())
                 for (doc::Layer &layer : original->celAt(i).drawing(id)->layers)

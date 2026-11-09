@@ -1267,6 +1267,186 @@ private slots:
     }
 
 
+    // A cel chosen in the Layers panel is all its frames: a transform moves the drawing of every frame, not only the one
+    // shown.
+    void transformMovesEveryFrameOfAChosenCel()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        controller.setSceneLength(30);
+        QImage image(60, 40, QImage::Format_ARGB32);
+        image.fill(Qt::red);
+        controller.importImage(image, QStringLiteral("piece")); // x 930..989, y 520..559, one drawing for the whole scene
+        const doc::CelId celId = controller.currentCel();
+        // Three frames of their own: the drawing is split at 10 and at 20.
+        controller.execute(doc::makeSplitDrawing(controller.documentForCommands(), celId, 10).command);
+        controller.execute(doc::makeSplitDrawing(controller.documentForCommands(), celId, 20).command);
+        const doc::Cel &cel = *controller.document().cel(celId);
+        QCOMPARE(cel.drawings().size(), size_t(3));
+        ui::LayersPanel panel(&controller);
+        panel.resize(320, 700);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        auto *tree = panel.findChild<QTreeWidget *>();
+        QVERIFY(tree && panel.celItem(celId));
+        tree->setCurrentItem(panel.celItem(celId)); // the cel itself
+        QCoreApplication::processEvents();
+        controller.setCurrentFrame(0);
+        QCOMPARE(controller.layerSelection().size(), size_t(3)); // the layer of each frame
+
+        state.setActiveTool(tools::ToolId::Transform);
+        canvas::TransformTool tool(&controller, &state, [](const QString &) {}, [] {});
+        tool.activated();
+        QVERIFY(tool.hasPendingEdit());
+        tool.press({960, 540}, Qt::NoModifier); // inside: moves
+        tool.move({1060, 590}, Qt::NoModifier);
+        tool.release({1060, 590}, Qt::NoModifier);
+        QVERIFY(tool.keyPress(Qt::Key_Return));
+        // Each frame's drawing moved by (100, 50).
+        for (const auto &[id, drawing] : controller.document().cel(celId)->drawings()) {
+            const doc::TiledImage &layer = drawing.layers.front().image;
+            QCOMPARE(qAlpha(layer.pixel(935, 525)), 0);                 // not where it was
+            QCOMPARE(qAlpha(layer.pixel(1035, 575)), 255);              // where it went
+        }
+    }
+
+
+    // The cel chosen by its name in the timeline is the cel as a whole too: the Layers panel shows its row, and a transform
+    // moves every frame of it (not only the layer of the frame shown).
+    void transformMovesEveryFrameWhenTheTimelineChoosesTheCel()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        controller.setSceneLength(30);
+        QImage image(60, 40, QImage::Format_ARGB32);
+        image.fill(Qt::red);
+        controller.importImage(image, QStringLiteral("piece")); // x 930..989, y 520..559
+        const doc::CelId celId = controller.currentCel();
+        controller.execute(doc::makeSplitDrawing(controller.documentForCommands(), celId, 10).command);
+        controller.execute(doc::makeSplitDrawing(controller.documentForCommands(), celId, 20).command);
+        ui::LayersPanel panel(&controller);
+        panel.resize(320, 700);
+        panel.show();
+        ui::TimelineView view(&controller);
+        view.resize(800, 200);
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        ui::TimelineMetrics m;
+        QVERIFY(controller.layerSelection().empty()); // only the current layer, so far
+        // Clicking its name in the timeline: the cel as a whole.
+        QTest::mouseClick(view.viewport(), Qt::LeftButton, {}, QPoint(70, m.rowY(0) + m.rowHeight / 2));
+        QCOMPARE(controller.currentCel(), celId);
+        QCOMPARE(controller.layerSelection().size(), size_t(3)); // the layer of each frame
+        QVERIFY(!controller.layerChosen());                      // a cel, not a layer
+        auto *tree = panel.findChild<QTreeWidget *>();
+        QVERIFY(tree && tree->currentItem() == panel.celItem(celId)); // its row in the Layers panel
+
+        controller.setCurrentFrame(0);
+        state.setActiveTool(tools::ToolId::Transform);
+        canvas::TransformTool tool(&controller, &state, [](const QString &) {}, [] {});
+        tool.activated();
+        tool.press({960, 540}, Qt::NoModifier);
+        tool.move({1060, 590}, Qt::NoModifier);
+        tool.release({1060, 590}, Qt::NoModifier);
+        QVERIFY(tool.keyPress(Qt::Key_Return));
+        for (const auto &[id, drawing] : controller.document().cel(celId)->drawings()) {
+            const doc::TiledImage &layer = drawing.layers.front().image;
+            QCOMPARE(qAlpha(layer.pixel(935, 525)), 0);    // not where it was
+            QCOMPARE(qAlpha(layer.pixel(1035, 575)), 255); // where it went
+        }
+    }
+
+
+    // The Transform tool is open (it comes up as soon as it is chosen) when the cel is chosen: the box is made again round
+    // the layers that are chosen now, so every frame of the cel moves, not only the layer that was current.
+    void transformOpenBeforeTheCelIsChosenStillMovesEveryFrame()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        controller.setSceneLength(30);
+        QImage image(60, 40, QImage::Format_ARGB32);
+        image.fill(Qt::red);
+        controller.importImage(image, QStringLiteral("piece")); // x 930..989, y 520..559
+        const doc::CelId celId = controller.currentCel();
+        controller.execute(doc::makeSplitDrawing(controller.documentForCommands(), celId, 10).command);
+        controller.execute(doc::makeSplitDrawing(controller.documentForCommands(), celId, 20).command);
+        ui::LayersPanel panel(&controller);
+        panel.resize(320, 700);
+        panel.show();
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(900, 520);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        controller.setCurrentFrame(0);
+        state.setActiveTool(tools::ToolId::Transform); // open on the layer that is current
+        auto *tree = panel.findChild<QTreeWidget *>();
+        QVERIFY(tree && panel.celItem(celId));
+        tree->setCurrentItem(panel.celItem(celId)); // and then the whole cel
+        QCoreApplication::processEvents();
+        QCOMPARE(controller.layerSelection().size(), size_t(3));
+        const QTransform toView = canvas.view().documentToView();
+        auto at = [&](double x, double y) { return toView.map(QPointF(x, y)).toPoint(); };
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, at(960, 540));
+        QTest::mouseMove(&canvas, at(1010, 540));
+        QTest::mouseMove(&canvas, at(1060, 590));
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, at(1060, 590));
+        QTest::keyClick(&canvas, Qt::Key_Return); // applied
+        for (const auto &[id, drawing] : controller.document().cel(celId)->drawings()) {
+            const doc::TiledImage &layer = drawing.layers.front().image;
+            QCOMPARE(qAlpha(layer.pixel(935, 525)), 0);    // not where it was
+            QCOMPARE(qAlpha(layer.pixel(1035, 575)), 255); // where it went
+        }
+    }
+
+    // With the onion skin on, the frames it shows move with the box as it is dragged (to line a pose up with them); the
+    // others follow when it is applied.
+    void transformMovesTheFramesOfTheOnionSkinWhileDragging()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        controller.setSceneLength(30);
+        QImage image(60, 40, QImage::Format_ARGB32);
+        image.fill(Qt::red);
+        controller.importImage(image, QStringLiteral("piece"));
+        const doc::CelId celId = controller.currentCel();
+        controller.execute(doc::makeSplitDrawing(controller.documentForCommands(), celId, 2).command);  // frames 0-1, 2-3, 4-
+        controller.execute(doc::makeSplitDrawing(controller.documentForCommands(), celId, 4).command);
+        tools::OnionSkinSettings onion;
+        onion.enabled = true;
+        onion.before = 2;
+        onion.after = 2; // frame 0 sees frames 1 and 2: the drawings of frames 0-1 and 2-3, not that of 4-
+        state.setOnionSkin(onion);
+        ui::LayersPanel panel(&controller);
+        panel.resize(320, 700);
+        panel.show();
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(900, 520);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        controller.setCurrentFrame(0);
+        auto *tree = panel.findChild<QTreeWidget *>();
+        tree->setCurrentItem(panel.celItem(celId));
+        QCoreApplication::processEvents();
+        state.setActiveTool(tools::ToolId::Transform);
+        const doc::Cel &cel = *controller.document().cel(celId);
+        const doc::DrawingId first = cel.timing().drawingAt(0), second = cel.timing().drawingAt(2), third = cel.timing().drawingAt(4);
+        auto moved = [&](doc::DrawingId id) {
+            return qAlpha(cel.drawing(id)->layers.front().image.pixel(1035, 575)) == 255;
+        };
+        const QTransform toView = canvas.view().documentToView();
+        auto at = [&](double x, double y) { return toView.map(QPointF(x, y)).toPoint(); };
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, at(960, 540));
+        QTest::mouseMove(&canvas, at(1010, 540));
+        QTest::mouseMove(&canvas, at(1060, 590));
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, at(1060, 590));
+        QVERIFY(moved(first));
+        QVERIFY(moved(second));  // the onion skin shows it: it is dragged with the box
+        QVERIFY(!moved(third));  // out of the onion skin's reach: when applied
+        QTest::keyClick(&canvas, Qt::Key_Return);
+        QVERIFY(moved(third));
+    }
+
+
     void selectionChangesAreUndoable()
     {
         document::DocumentController controller;

@@ -50,6 +50,8 @@ add_library(mothion_core STATIC
     core/document/commands/CompositingCommands.h core/document/commands/CompositingCommands.cpp
     core/document/commands/CameraCommands.h core/document/commands/CameraCommands.cpp
     core/document/commands/MarkerCommands.h core/document/commands/MarkerCommands.cpp
+    core/document/commands/MotionCommands.h core/document/commands/MotionCommands.cpp
+    core/document/CelMotion.h core/document/CelMotion.cpp
     core/document/Compositing.h
 )
 set_target_properties(mothion_core PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
@@ -104,6 +106,7 @@ qt_add_library(mothion_gui STATIC
     canvas/EffectBrushTools.h canvas/EffectBrushTools.cpp
     canvas/TransformTool.h canvas/TransformTool.cpp
     canvas/Resample.h canvas/Resample.cpp
+    canvas/AnimateTool.h canvas/AnimateTool.cpp
     canvas/SelectionMask.h canvas/SelectionMask.cpp
     canvas/SelectionTool.h canvas/SelectionTool.cpp
     canvas/PuppetTool.h canvas/PuppetTool.cpp

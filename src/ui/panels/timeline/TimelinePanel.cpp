@@ -196,7 +196,7 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
     // is none: it then shows the whole sheet).
     auto *cameraKey = celButton(IconId::Camera, QStringLiteral("cameraKey"),
                                 tr("Camera keyframe at this frame (makes the camera if there is none)"), this);
-    cameraKey->setText(tr("Key"));
+    cameraKey->setText(tr("Camera key"));
     cameraKey->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     connect(cameraKey, &QToolButton::clicked, this, [this] {
         const int frame = m_document->currentFrame();
@@ -205,6 +205,28 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
         m_document->setCameraKey(frame, camera && !camera->isEmpty() ? camera->poseAt(frame)
                                                                        : doc::CameraPose::wholeSheet(d.width(), d.height()));
     });
+
+    // A keyframe of the current cel at the current frame, at the pose it has there: pressed while there is one, and the
+    // button adds or takes it away. The cel's keys then have their own row in the timeline, and the Transform and Move
+    // tools move the cel as a piece (its pose) instead of its pixels.
+    auto *celKey = celButton(IconId::Keyframe, QStringLiteral("celKey"),
+                             tr("Keyframe of the current cel at this frame: add or remove it. The first one makes the cel a moving piece: "
+                                "Transform and Move then change the pose of the cel (the key, or, on a frame with none, "
+                                "a pose that goes when you leave the frame unless you press this button)."),
+                             this);
+    celKey->setText(tr("Cel key"));
+    celKey->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    celKey->setCheckable(true);
+    connect(celKey, &QToolButton::clicked, m_document, [this] { m_document->toggleCelKey(m_document->currentCel()); });
+    auto syncCelKey = [this, celKey] {
+        const doc::CelMotion *motion = m_document->celMotion(m_document->currentCel());
+        celKey->setChecked(motion && motion->keyAt(m_document->currentFrame()));
+    };
+    connect(m_document, &DocumentController::motionChanged, celKey, syncCelKey);
+    connect(m_document, &DocumentController::currentFrameChanged, celKey, syncCelKey);
+    connect(m_document, &DocumentController::currentCelChanged, celKey, syncCelKey);
+    connect(m_document, &DocumentController::documentReplaced, celKey, syncCelKey);
+    syncCelKey();
 
     // A marker on the current frame: pressed while there is one; the button adds or takes it away (Ctrl+M).
     auto *marker = celButton(IconId::Flag, QStringLiteral("markerButton"),
@@ -246,6 +268,7 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
     bar->addWidget(onion);
     bar->addWidget(importAudio);
     bar->addWidget(cameraKey);
+    bar->addWidget(celKey);
     bar->addWidget(prevMarker);
     bar->addWidget(marker);
     bar->addWidget(nextMarker);

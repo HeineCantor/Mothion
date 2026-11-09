@@ -9,6 +9,7 @@
 #include "canvas/MoveTool.h"
 #include "canvas/PuppetTool.h"
 #include "canvas/SelectionTool.h"
+#include "canvas/AnimateTool.h"
 #include "canvas/ShapeTool.h"
 #include "canvas/TransformTool.h"
 #include "document/DocumentController.h"
@@ -108,17 +109,26 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
     connect(m_document, &DocumentController::pixelsChanged, this,
             [this](doc::CelId celId, doc::DrawingId drawing, const QRect &rect) {
                 m_onionImages.erase(drawing);
+                static_cast<AnimateTool *>(m_animateTool.get())->invalidate(); // its box is of the pixels
                 // Only a drawing shown at the current frame changes the frame; one of another frame (a
                 // transform of a whole cel tells of every one of them) at most the onion skin, painted over it.
                 const doc::Cel *cel = m_document->document().cel(celId);
                 // doc::kNoId: a change of the cel itself (its opacity, say), which every drawing of it shows.
                 const doc::DrawingId shown = cel ? cel->timing().drawingAt(m_document->currentFrame()) : doc::kNoId;
-                if (cel && shown != doc::kNoId && (drawing == doc::kNoId || shown == drawing))
-                    renderDocumentRect(rect);
+                if (cel && shown != doc::kNoId && (drawing == doc::kNoId || shown == drawing)) {
+                    // A cel moved by its keys shows these pixels somewhere else: the whole frame is drawn again.
+                    if (!cel->motion().isEmpty())
+                        renderWholeFrame();
+                    else
+                        renderDocumentRect(rect);
+                }
                 else if (m_toolState->onionSkin().enabled)
                     update();
             });
-    connect(m_document, &DocumentController::structureChanged, this, [this] { m_onionImages.clear(); });
+    connect(m_document, &DocumentController::structureChanged, this, [this] {
+        m_onionImages.clear();
+        static_cast<AnimateTool *>(m_animateTool.get())->invalidate();
+    });
     // The camera's frame follows it (a drag, a key, the frame of the timeline, it being selected or turned off).
     connect(m_document, &DocumentController::cameraChanged, this, qOverload<>(&QWidget::update));
     connect(m_document, &DocumentController::cameraSelectionChanged, this, qOverload<>(&QWidget::update));
@@ -127,8 +137,22 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
     connect(m_document, &DocumentController::currentLayerChanged, this, qOverload<>(&QWidget::update));
     connect(m_toolState, &ToolState::onionSkinChanged, this, qOverload<>(&QWidget::update));
     connect(m_document, &DocumentController::structureChanged, this, &CanvasView::renderWholeFrame);
+    connect(m_document, &DocumentController::motionChanged, this, [this] { // a key or a pivot: the frame as it is posed
+        syncPoseMode();
+        m_onionImages.clear();
+        renderWholeFrame();
+    });
     connect(m_document, &DocumentController::currentFrameChanged, this, &CanvasView::renderWholeFrame);
+    connect(m_document, &DocumentController::currentCelChanged, this, &CanvasView::syncPoseMode);
+    connect(m_document, &DocumentController::documentReplaced, this, &CanvasView::syncPoseMode);
     connect(m_document, &DocumentController::strokeInterrupted, this, &CanvasView::cancelStroke);
+    connect(m_document, &DocumentController::poseEditClosing, this, [this] {
+        if (m_animateTool->hasPendingEdit()) {
+            m_animateTool->commit();
+            emit editStepsChanged();
+            emit transformChanged();
+        }
+    });
     connect(m_document, &DocumentController::documentReplaced, this, [this] {
         const doc::Document &replaced = m_document->document();
         m_view.setDocumentSize(QSizeF(replaced.width(), replaced.height()));
@@ -168,6 +192,11 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
             emit shapeChanged();
         });
     connect(m_toolState, &ToolState::shapeSettingsChanged, this, &CanvasView::shapeChanged);
+    m_animateTool = std::make_unique<AnimateTool>(
+        m_document, m_toolState, [this](const QString &text) { emit statusMessage(text); }, [this] {
+            update();
+            emit transformChanged();
+        });
     m_transformTool = std::make_unique<TransformTool>(
         m_document, m_toolState, [this](const QString &text) { emit statusMessage(text); },
         [this] {
@@ -185,6 +214,31 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
     connect(m_document, &DocumentController::documentReplaced, this, &CanvasView::updateAnts);
 
     connect(m_toolState, &ToolState::activeToolChanged, this, &CanvasView::commitPendingEdits);
+    // Other layers (a cel, a frame...) chosen while a transform is open: it was made for the layers there were, so what is
+    // done is applied and the box comes up again round the layers that are chosen now.
+    connect(m_document, &DocumentController::layerSelectionChanged, this, [this] {
+        if (m_toolState->activeTool() != ToolId::Transform || m_toolState->keyframeMode() || m_transformTool->isActive())
+            return;
+        if (m_transformTool->hasPendingEdit())
+            m_transformTool->commit();
+        m_transformTool->activated();
+        update();
+    });
+    connect(m_toolState, &ToolState::activeToolChanged, this, &CanvasView::renderWholeFrame); // posed or as drawn
+    // The Transform and Move tools move the pixels, or (the cel has keys) the cel as a piece, with a key: another tool then
+    // is the one at work (what the first left open is applied), and the cel is shown posed or as drawn.
+    connect(m_toolState, &ToolState::activeToolChanged, this, &CanvasView::syncAnimateTool);
+    connect(m_toolState, &ToolState::keyframeModeChanged, this, [this] {
+        syncAnimateTool();
+        commitPendingEdits();
+        if (CanvasTool *tool = canvasTool()) {
+            tool->setViewZoom(m_view.zoom());
+            tool->activated();
+        }
+        renderWholeFrame();
+        updateCursor();
+    });
+    connect(m_document, &DocumentController::currentCelChanged, this, &CanvasView::renderWholeFrame);
     connect(m_toolState, &ToolState::activeToolChanged, this, &CanvasView::updateCursor);
     for (auto signal : {&DocumentController::layerChosenChanged, &DocumentController::cameraSelectionChanged,
                         &DocumentController::structureChanged, &DocumentController::documentReplaced})
@@ -209,6 +263,7 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
         update();
     });
     updateCursor();
+    syncPoseMode(); // a document that comes with keys
 }
 
 // --- onion skin --------------------------------------------------------------
@@ -283,8 +338,19 @@ void CanvasView::paintOnionSkin(QPainter &p)
                                              distance < 0 ? s.beforeColor : s.afterColor);
         if (ghost.tinted.isNull())
             continue;
-        p.setOpacity(s.opacity * fade);
-        p.drawImage(ghost.origin, ghost.tinted);
+        // A ghost is the cel as it is on its own frame: posed by its keys, unless the cel is shown as drawn (to line pixels up).
+        const bool posed = !cel->motion().isEmpty() && m_frame.celAsDrawn() != cel->id();
+        const doc::CelPose pose = posed ? cel->motion().poseAt(m_document->currentFrame() + distance) : doc::CelPose{};
+        p.setOpacity(s.opacity * fade * pose.opacity);
+        if (posed && !pose.movesNothing()) {
+            const doc::Matrix2x3 m = pose.matrix(cel->motion().pivotX, cel->motion().pivotY);
+            p.save();
+            p.setWorldTransform(QTransform(m.a, m.b, m.c, m.d, m.e, m.f) * p.worldTransform());
+            p.drawImage(ghost.origin, ghost.tinted);
+            p.restore();
+        } else {
+            p.drawImage(ghost.origin, ghost.tinted);
+        }
     }
     p.setOpacity(1.0);
 }
@@ -465,8 +531,24 @@ void CanvasView::updateBrushOutline(const QPointF &newPos)
         update(); // the line follows the pen
 }
 
+void CanvasView::syncCelAsDrawn()
+{
+    // A cel moved by its keys is drawn where it is drawn while a tool that works on its pixels is chosen (the tools that move
+    // the cel, the hand and the zoom see it posed): what the pen paints is where the pixels are.
+    const ToolId tool = m_toolState->activeTool();
+    const bool editing = !m_toolState->movesTheCel() && tool != ToolId::Hand && tool != ToolId::Zoom;
+    m_frame.setCelAsDrawn(editing ? m_document->currentCel() : doc::kNoId);
+}
+
+void CanvasView::syncAnimateTool()
+{
+    // The Move tool, when it moves the cel, is the animate tool without handles: a drag anywhere moves the cel.
+    static_cast<AnimateTool *>(m_animateTool.get())->setMoveOnly(m_toolState->activeTool() == ToolId::Move);
+}
+
 void CanvasView::renderWholeFrame()
 {
+    syncCelAsDrawn();
     m_frame.renderAll(m_document->document(), m_document->currentFrame());
     update();
     emit documentChanged(m_frame.image().rect());
@@ -475,6 +557,7 @@ void CanvasView::renderWholeFrame()
 void CanvasView::renderDocumentRect(const QRect &docRect)
 {
     // Re-composing all layers of the rect is correct whichever layer changed.
+    syncCelAsDrawn();
     m_frame.render(m_document->document(), m_document->currentFrame(), docRect);
     updateDocumentRect(docRect);
 }
@@ -979,13 +1062,13 @@ void CanvasView::endStroke()
 CanvasTool *CanvasView::canvasTool() const
 {
     switch (m_toolState->activeTool()) {
-    case ToolId::Move: return m_moveTool.get();
+    case ToolId::Move: return m_toolState->keyframeMode() ? m_animateTool.get() : m_moveTool.get();
     case ToolId::RectSelect: return m_rectSelectTool.get();
     case ToolId::LassoSelect: return m_lassoSelectTool.get();
     case ToolId::Puppet: return m_puppetTool.get();
     case ToolId::Eyedropper: return m_eyedropperTool.get();
     case ToolId::Fill: return m_fillTool.get();
-    case ToolId::Transform: return m_transformTool.get();
+    case ToolId::Transform: return m_toolState->keyframeMode() ? m_animateTool.get() : m_transformTool.get();
     case ToolId::Blend: return m_blendTool.get();
     case ToolId::Liquify: return m_liquifyTool.get();
     case ToolId::Shape: return m_shapeTool.get();
@@ -997,10 +1080,11 @@ void CanvasView::commitPendingEdits()
 {
     // An edit left open (a puppet warp) is applied when another tool takes over.
     for (CanvasTool *tool : {m_moveTool.get(), m_rectSelectTool.get(), m_lassoSelectTool.get(), m_puppetTool.get(),
-                              m_shapeTool.get(), m_transformTool.get()})
+                              m_shapeTool.get(), m_transformTool.get(), m_animateTool.get()})
         if (tool != canvasTool() && tool->hasPendingEdit())
             tool->commit();
     emit editStepsChanged();
+    emit transformChanged();
 }
 
 QPointF CanvasView::lineStartOf(const std::vector<brush::BrushInput> &points) const
@@ -1107,10 +1191,11 @@ void CanvasView::cancelStroke()
     // An open edit is applied: undo then takes it back, a frame or layer
     // change keeps it.
     for (CanvasTool *tool : {m_moveTool.get(), m_rectSelectTool.get(), m_lassoSelectTool.get(), m_puppetTool.get(),
-                              m_transformTool.get()})
+                              m_transformTool.get(), m_animateTool.get()})
         if (tool->hasPendingEdit())
             tool->commit();
     emit editStepsChanged();
+    emit transformChanged();
     if (!m_stroke)
         return;
     // Restore pixels first: cancelPaint() may remove the drawing they live in.
@@ -1182,6 +1267,8 @@ bool CanvasView::event(QEvent *event)
 
 QRectF CanvasView::transformBounds() const
 {
+    if (m_animateTool->hasPendingEdit())
+        return static_cast<const AnimateTool *>(m_animateTool.get())->pendingBounds();
     const auto *tool = static_cast<const TransformTool *>(m_transformTool.get());
     if (!tool->hasPendingEdit())
         return {};
@@ -1190,8 +1277,11 @@ QRectF CanvasView::transformBounds() const
 
 void CanvasView::finishTransform(bool apply)
 {
-    if (m_transformTool->keyPress(apply ? Qt::Key_Return : Qt::Key_Escape))
+    CanvasTool *tool = m_animateTool->hasPendingEdit() ? m_animateTool.get() : m_transformTool.get();
+    if (tool->keyPress(apply ? Qt::Key_Return : Qt::Key_Escape)) {
         emit editStepsChanged();
+        emit transformChanged();
+    }
 }
 
 QRectF CanvasView::puppetBounds() const
@@ -1365,6 +1455,13 @@ void CanvasView::updateCursor()
     else
         setCursor(Qt::CrossCursor);
     update();
+}
+
+void CanvasView::syncPoseMode()
+{
+    // Transform and Move move the cel as a piece (not its pixels) once it has keys.
+    const doc::CelMotion *motion = m_document->celMotion(m_document->currentCel());
+    m_toolState->setKeyframeMode(motion && !motion->isEmpty());
 }
 
 } // namespace mothion::canvas

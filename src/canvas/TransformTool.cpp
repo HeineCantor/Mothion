@@ -118,6 +118,7 @@ bool TransformTool::start()
     std::vector<Part> parts(targets.size());
     std::vector<QRect> opaque(targets.size());
     const int shownFrame = m_document->currentFrame();
+    const tools::OnionSkinSettings onion = m_toolState->onionSkin();
     parallelFor(int(targets.size()), [&](int i) {
         const auto &target = targets[std::size_t(i)];
         Part &part = parts[std::size_t(i)];
@@ -136,6 +137,13 @@ bool TransformTool::start()
         }
         const doc::Cel *cel = m_document->document().cel(target.cel);
         part.live = cel && cel->timing().drawingAt(shownFrame) == target.drawing;
+        // The frames the onion skin shows move with it while the box is dragged (they are what one lines the pose up with).
+        if (!part.live && cel && onion.enabled && cel->id() == m_document->currentCel())
+            for (int k = -onion.before; k <= onion.after && !part.live; ++k) {
+                const int frame = shownFrame + k;
+                part.live = frame >= 0 && frame < m_document->document().frameCount()
+                            && cel->timing().drawingAt(frame) == target.drawing;
+            }
     });
     QRect box;
     for (const QRect &r : opaque)

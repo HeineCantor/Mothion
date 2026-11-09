@@ -172,6 +172,14 @@ public:
     double smoothing() const { return m_smoothing; }
     void setSmoothing(double amount);
 
+    // The current cel has keyframes of motion (doc::CelMotion): the Transform and Move tools then do not move its pixels,
+    // they move the cel as a whole, as a piece (the key on the frame, or a pose that goes with the frame). Without keys
+    // they work on the pixels, as ever. Not a setting of the person's: the canvas keeps it up to date.
+    bool keyframeMode() const { return m_keyframeMode; }
+    void setKeyframeMode(bool on);
+    // The tool and the mode say that the cel is the one moved (not its pixels).
+    bool movesTheCel() const { return m_keyframeMode && (m_activeTool == ToolId::Transform || m_activeTool == ToolId::Move); }
+
     // Off: the pen's tilt is ignored (dynamics and pen direction), for pens
     // that report it badly or brushes that react to it too much.
     bool usesTilt() const { return m_useTilt; }
@@ -227,6 +235,7 @@ signals:
     void pressureCurveChanged();
     void smoothingChanged(double amount);
     void useTiltChanged(bool use);
+    void keyframeModeChanged(bool on);
     void correctStartAfterStrokeChanged(bool on);
     void sharpCornersChanged(bool on);
     void puppetSettingsChanged();
@@ -251,6 +260,7 @@ private:
     PressureCurve m_pressureCurve;
     double m_smoothing = 0.3;
     bool m_useTilt = true;
+    bool m_keyframeMode = false;
     bool m_correctStartAfterStroke = false;
     bool m_sharpCorners = false;
     PuppetSettings m_puppet;
