@@ -111,25 +111,34 @@ bool TimelineView::hasKeys(int celIndex) const
     return !m_document->document().celAt(celIndex).motion().isEmpty();
 }
 
+bool TimelineView::keyframesRowShown(int celIndex) const
+{
+    return hasKeys(celIndex) && !m_foldedCel.count(m_document->document().celAt(celIndex).id());
+}
+
 bool TimelineView::channelRowsShown(int celIndex) const
 {
-    return hasKeys(celIndex) && !m_folded.count(m_document->document().celAt(celIndex).id());
+    return keyframesRowShown(celIndex) && !m_folded.count(m_document->document().celAt(celIndex).id());
 }
 
 QRect TimelineView::foldRect(int row) const
 {
-    // Only the "Keyframes" row has the arrow, at its right end: it folds the rows of the channels under it.
+    // The arrow at the right end of a header: in the cel's (when it has keys) it folds "Keyframes" away under it, in the
+    // "Keyframes" one the rows of the channels. The channels' own have none.
     const RowRef ref = rowRef(row);
-    if (!ref.motion || ref.channel >= 0)
+    if (ref.motion && ref.channel >= 0)
+        return {};
+    if (!ref.motion && !hasKeys(ref.celIndex))
         return {};
     const QRect r(0, m_metrics.rowY(row), m_metrics.headerWidth - 1, m_metrics.rowHeight);
     return QRect(r.right() - 18, r.top() + (r.height() - 14) / 2, 14, 14);
 }
 
-void TimelineView::toggleFold(doc::CelId cel)
+void TimelineView::toggleFold(doc::CelId cel, bool keyframesRow)
 {
-    if (!m_folded.erase(cel))
-        m_folded.insert(cel);
+    std::set<doc::CelId> &set = keyframesRow ? m_folded : m_foldedCel;
+    if (!set.erase(cel))
+        set.insert(cel);
     updateScrollBars();
     viewport()->update();
 }
@@ -139,7 +148,7 @@ int TimelineView::rowCount() const
     const doc::Document &d = m_document->document();
     int rows = d.celCount();
     for (int i = 0; i < d.celCount(); ++i)
-        if (hasKeys(i))
+        if (keyframesRowShown(i))
             rows += 1 + (channelRowsShown(i) ? channelRowCount(i) : 0); // the row of its keys, and one for each channel
     return rows;
 }
@@ -151,7 +160,7 @@ TimelineView::RowRef TimelineView::rowRef(int row) const
     for (int i = d.celCount() - 1; i >= 0; --i) {
         if (at++ == row)
             return {i, false};
-        if (!hasKeys(i))
+        if (!keyframesRowShown(i))
             continue;
         if (at++ == row)
             return {i, true, -1};
@@ -1145,8 +1154,11 @@ void TimelineView::paintHeaders(QPainter &p) const
             icon(IconId::Lock, tone).paint(&p, lockRect(row).adjusted(1, 1, -1, -1));
         p.setPen(cel.properties().visible ? ink
                                           : palette().color(QPalette::Disabled, QPalette::Text));
-        p.drawText(r.adjusted(lockRect(row).right() + 6, 0, -4, 0), Qt::AlignVCenter | Qt::AlignLeft,
+        const bool keyed = hasKeys(celIndex);
+        p.drawText(r.adjusted(lockRect(row).right() + 6, 0, keyed ? -22 : -4, 0), Qt::AlignVCenter | Qt::AlignLeft,
                    QString::fromStdString(cel.properties().name));
+        if (keyed)
+            paintFoldArrow(p, foldRect(row), !keyframesRowShown(celIndex));
         p.setPen(palette().mid().color());
         p.drawLine(r.bottomLeft(), r.bottomRight());
     }
@@ -1214,7 +1226,7 @@ void TimelineView::mousePressEvent(QMouseEvent *event)
         const doc::Cel &cel = m_document->document().celAt(celIndexForRow(row));
         const QPoint pos = event->position().toPoint();
         if (hasKeys(celIndexForRow(row)) && foldRect(row).contains(pos)) { // the arrow: fold or unfold the keys
-            toggleFold(cel.id());
+            toggleFold(cel.id(), isMotionRow(row));
             return;
         }
         if (isMotionRow(row)) { // the keys' row: its cel is chosen, and no toggles are there
@@ -1293,6 +1305,7 @@ void TimelineView::mousePressEvent(QMouseEvent *event)
             return;
         }
         m_selected.clear(); // an empty cell
+        m_selectedKey.reset();
         m_anchor.reset();
         viewport()->update();
     }
@@ -1302,6 +1315,7 @@ void TimelineView::mousePressEvent(QMouseEvent *event)
 
 void TimelineView::pressFrame(const doc::ExposureRef &ref, int frame, int x, Qt::KeyboardModifiers modifiers)
 {
+    m_selectedKey.reset(); // Delete is for the blocks now
     FrameDrag drag;
     drag.pressX = x;
     drag.grabbed = ref;

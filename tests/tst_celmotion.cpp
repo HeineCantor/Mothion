@@ -446,6 +446,30 @@ private slots:
         QVERIFY(!motion->keyAt(doc::Channel::Position, 4) && !motion->keyAt(doc::Channel::Scale, 4));
     }
 
+    // Played, the frames show the cels moved by their keys even with a pixel tool chosen (which shows the cel as drawn
+    // for working on it).
+    void playingShowsTheCelsMoved()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        controller.setSceneLength(30);
+        QImage image(60, 40, QImage::Format_ARGB32);
+        image.fill(Qt::red);
+        controller.importImage(image, QStringLiteral("piece")); // x 930..989
+        const doc::CelId cel = controller.currentCel();
+        controller.setCelKey(cel, 0, [] { doc::CelPose p; p.x = 300; return p; }());
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(900, 520);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        state.setActiveTool(tools::ToolId::Brush);
+        QCOMPARE(canvas.documentImage().pixelColor(1240, 540), QColor(Qt::white)); // as drawn, to work on it
+        canvas.setPlaying(true);
+        QCOMPARE(canvas.documentImage().pixelColor(1240, 540), QColor(Qt::red)); // as the animation has it
+        canvas.setPlaying(false);
+        QCOMPARE(canvas.documentImage().pixelColor(1240, 540), QColor(Qt::white));
+    }
+
     // Position, rotation, scale and opacity are keyed on their own: a channel with no key stays as drawn, one with keys goes
     // along its own, and the keys of one channel do not touch another's.
     void theChannelsAreKeyedOnTheirOwn()
@@ -817,6 +841,11 @@ private slots:
         QCOMPARE(controller.celMotion(cel)->keyFrames().size(), size_t(2));
         QTest::mouseClick(vp, Qt::LeftButton, {}, QPoint(m.headerWidth - 12, motionY));
         QVERIFY(view->channelRowsShown(0)); // it is back
+        // The arrow in the cel's own header folds "Keyframes" away, and the channels with it.
+        QTest::mouseClick(vp, Qt::LeftButton, {}, QPoint(m.headerWidth - 12, m.rowY(0) + m.rowHeight / 2));
+        QVERIFY(!view->keyframesRowShown(0) && !view->channelRowsShown(0));
+        QTest::mouseClick(vp, Qt::LeftButton, {}, QPoint(m.headerWidth - 12, m.rowY(0) + m.rowHeight / 2));
+        QVERIFY(view->keyframesRowShown(0) && view->channelRowsShown(0));
         QCOMPARE(controller.document().cel(cel)->properties().visible, visible); // the arrow is no toggle of the cel
         // The button takes the key of the current frame away, and the row goes with the last key.
         controller.setCurrentFrame(9);

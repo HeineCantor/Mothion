@@ -12,6 +12,7 @@
 #include "tools/ToolState.h"
 #include "audio/AudioPlayer.h"
 #include "ui/AutoplayWindow.h"
+#include "ui/panels/timeline/TimelinePlayer.h"
 #include "ui/compositing/CompositingWindow.h"
 #include "tools/Preferences.h"
 #include "core/Parallel.h"
@@ -154,6 +155,8 @@ MainWindow::MainWindow(QWidget *parent)
     panels.navigator = new NavigatorPanel(m_canvas, this);
     panels.layers = new LayersPanel(m_document, this);
     panels.timeline = new TimelinePanel(m_document, m_toolState, m_audioPlayer, this);
+    connect(static_cast<TimelinePanel *>(panels.timeline)->player(), &TimelinePlayer::playingChanged, m_canvas,
+            &canvas::CanvasView::setPlaying); // played, the cels are shown moved by their keys
 
     // Pen proximity only reaches the QApplication; the filter forwards it to the canvas.
     auto *proximity = new input::ProximityFilter(this);

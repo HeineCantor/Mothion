@@ -77,6 +77,7 @@ public:
     std::optional<doc::Channel> selectedKeyChannel() const { return m_selectedChannel; }
     // The rows of the cel's channels are on view (it has keys and its "Keyframes" row is not folded).
     bool channelRowsShown(int celIndex) const;
+    bool keyframesRowShown(int celIndex) const; // under the cel: its "Keyframes" row, unless the cel folds it away
 
 signals:
     void frameWidthChanged(int width);
@@ -126,7 +127,7 @@ private:
     // Under the "Keyframes" row, a row for each channel (position, rotation, scale, opacity) that has keys, with its own.
     std::optional<doc::Channel> channelOfRow(int row) const;
     int channelRowCount(int celIndex) const; // the arrow, in the header of a cel with keys or of its row of keys
-    void toggleFold(doc::CelId cel);
+    void toggleFold(doc::CelId cel, bool keyframesRow); // the arrow of the cel folds "Keyframes", the one of "Keyframes" the channels
     RowRef rowRef(int row) const;
     bool isMotionRow(int row) const;
     int rowCount() const;
@@ -237,7 +238,8 @@ private:
         std::optional<doc::Channel> channel; // the key of this channel, or the keys of every one on that frame
     };
     std::optional<MotionDrag> m_motionDrag;
-    std::set<doc::CelId> m_folded; // the cels whose row of keys is folded away
+    std::set<doc::CelId> m_folded;      // the cels whose channel rows are folded away under "Keyframes"
+    std::set<doc::CelId> m_foldedCel;   // the cels that fold "Keyframes" (and so the channels) away under them
     std::optional<std::pair<doc::CelId, int>> m_selectedKey; // the key last clicked, by cel and frame
     std::optional<doc::Channel> m_selectedChannel; // of that key: its channel's alone, or (none) all the keys of the frame
     struct MarkerDrag

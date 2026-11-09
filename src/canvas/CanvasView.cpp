@@ -536,8 +536,17 @@ void CanvasView::syncCelAsDrawn()
     // A cel moved by its keys is drawn where it is drawn while a tool that works on its pixels is chosen (the tools that move
     // the cel, the hand and the zoom see it posed): what the pen paints is where the pixels are.
     const ToolId tool = m_toolState->activeTool();
-    const bool editing = !m_toolState->movesTheCel() && tool != ToolId::Hand && tool != ToolId::Zoom;
+    const bool editing = !m_playing && !m_toolState->movesTheCel() && tool != ToolId::Hand && tool != ToolId::Zoom;
     m_frame.setCelAsDrawn(editing ? m_document->currentCel() : doc::kNoId);
+}
+
+void CanvasView::setPlaying(bool playing)
+{
+    if (playing == m_playing)
+        return;
+    m_playing = playing;
+    m_onionImages.clear();
+    renderWholeFrame(); // the cel as drawn, or as the animation has it
 }
 
 void CanvasView::syncAnimateTool()

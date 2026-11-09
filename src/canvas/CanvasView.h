@@ -107,6 +107,9 @@ public slots:
     void setFlipVertical(bool flipped);
     void centerOn(const QPointF &docPoint);
     void setPenProximity(const mothion::ProximityEvent &event);
+    // The timeline is playing: the frames show as the animation has them, every cel moved by its keys (a pixel tool's
+    // "as drawn" is for working on one frame).
+    void setPlaying(bool playing);
     void setDebugOverlayVisible(bool visible);
 
 signals:
@@ -273,6 +276,7 @@ private:
     QColor colorAt(const QPointF &docPos) const;
     bool *panKeyFlag(int key); // the flag of a pan key, nullptr for other keys
     bool m_fittedOnce = false;
+    bool m_playing = false;
     // Onion skin: the current layer's drawings around the current frame,
     // tinted (cached per drawing, made again when it or its color changes).
     struct OnionImage
