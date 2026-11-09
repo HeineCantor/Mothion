@@ -116,8 +116,10 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
                 // doc::kNoId: a change of the cel itself (its opacity, say), which every drawing of it shows.
                 const doc::DrawingId shown = cel ? cel->timing().drawingAt(m_document->currentFrame()) : doc::kNoId;
                 if (cel && shown != doc::kNoId && (drawing == doc::kNoId || shown == drawing)) {
-                    // A cel moved by its keys shows these pixels somewhere else: the whole frame is drawn again.
-                    if (!cel->motion().isEmpty())
+                    // A cel moved by its keys shows these pixels somewhere else: where the pose puts them.
+                    if (cel->id() == m_document->currentCel())
+                        renderDocumentRect(posedRect(rect));
+                    else if (!cel->motion().isEmpty())
                         renderWholeFrame();
                     else
                         renderDocumentRect(rect);
@@ -486,9 +488,19 @@ void CanvasView::paintEvent(QPaintEvent *)
     paintOnionSkin(p);
     p.restore();
 
+    p.save();
+    if (celIsPosed()) { // a selection is of the cel's own place: through the pose
+        const doc::Matrix2x3 m = celPose();
+        p.setWorldTransform(m_view.viewToDocument() * QTransform(m.a, m.b, m.c, m.d, m.e, m.f) * m_view.documentToView());
+    }
     paintSelectionOutline(p, m_view, m_document->selection(), m_antsPhase);
+    p.restore();
     if (const CanvasTool *tool = canvasTool()) {
         p.save();
+        if (celIsPosed() && toolWorksInCel(tool)) { // what the tool shows is of the cel's own place: through the pose
+            const QTransform pose(celPose().a, celPose().b, celPose().c, celPose().d, celPose().e, celPose().f);
+            p.setWorldTransform(m_view.viewToDocument() * pose * m_view.documentToView());
+        }
         tool->paintOverlay(p, m_view);
         p.restore();
     }
@@ -533,11 +545,56 @@ void CanvasView::updateBrushOutline(const QPointF &newPos)
 
 void CanvasView::syncCelAsDrawn()
 {
-    // A cel moved by its keys is drawn where it is drawn while a tool that works on its pixels is chosen (the tools that move
-    // the cel, the hand and the zoom see it posed): what the pen paints is where the pixels are.
-    const ToolId tool = m_toolState->activeTool();
-    const bool editing = !m_playing && !m_scrubbing && !m_toolState->movesTheCel() && tool != ToolId::Hand && tool != ToolId::Zoom;
-    m_frame.setCelAsDrawn(editing ? m_document->currentCel() : doc::kNoId);
+    // A cel moved by its keys is always shown moved, at rest and with a pixel tool too: the pen works on it as shown (see
+    // toCel()).
+    m_frame.setCelAsDrawn(doc::kNoId);
+}
+
+doc::Matrix2x3 CanvasView::celPose() const
+{
+    const doc::Cel *cel = m_document->document().cel(m_document->currentCel());
+    if (!cel || cel->motion().isEmpty())
+        return {};
+    return m_document->celPoseAt(cel->id(), m_document->currentFrame()).matrix(cel->motion().pivotX, cel->motion().pivotY);
+}
+
+bool CanvasView::celIsPosed() const
+{
+    const doc::Cel *cel = m_document->document().cel(m_document->currentCel());
+    return cel && !cel->motion().isEmpty() && !m_document->celPoseAt(cel->id(), m_document->currentFrame()).movesNothing();
+}
+
+QPointF CanvasView::toCel(const QPointF &page) const
+{
+    if (!celIsPosed())
+        return page;
+    double x = 0, y = 0;
+    celPose().inverted().map(page.x(), page.y(), x, y);
+    return {x, y};
+}
+
+bool CanvasView::toolWorksInCel(const CanvasTool *tool) const
+{
+    return tool != m_animateTool.get() && tool != m_eyedropperTool.get();
+}
+
+QRect CanvasView::posedRect(const QRect &celRect) const
+{
+    if (!celIsPosed() || celRect.isEmpty())
+        return celRect;
+    const doc::Matrix2x3 m = celPose();
+    double minX = 1e18, minY = 1e18, maxX = -1e18, maxY = -1e18;
+    for (const QPointF &c : {QPointF(celRect.left(), celRect.top()), QPointF(celRect.right() + 1, celRect.top()),
+                             QPointF(celRect.right() + 1, celRect.bottom() + 1), QPointF(celRect.left(), celRect.bottom() + 1)}) {
+        double x = 0, y = 0;
+        m.map(c.x(), c.y(), x, y);
+        minX = std::min(minX, x);
+        minY = std::min(minY, y);
+        maxX = std::max(maxX, x);
+        maxY = std::max(maxY, y);
+    }
+    // A pixel or two more: the resampling of the pose reaches beyond the pixels it came from.
+    return QRectF(QPointF(minX, minY), QPointF(maxX, maxY)).toAlignedRect().adjusted(-3, -3, 3, 3);
 }
 
 void CanvasView::setPlaying(bool playing)
@@ -681,6 +738,9 @@ void CanvasView::handleSample(const PenSample &sample)
     const bool busy = m_gesture.isActive() || m_stroke.has_value() || m_editTool || m_gizmo.isDragging()
                       || m_cameraGizmo.isDragging() || m_flip.has_value();
     const QPointF docPos = m_view.mapToDocument(QPointF(sample.x, sample.y));
+    const QPointF celPos = toCel(docPos);
+    // The place a tool is given: the cel's own, but for the tools that work on what is shown.
+    auto at = [&](const CanvasTool *tool) { return tool && toolWorksInCel(tool) ? celPos : docPos; };
     const Qt::KeyboardModifiers modifiers = QGuiApplication::keyboardModifiers();
     switch (sample.phase) {
     case SamplePhase::Press:
@@ -703,7 +763,7 @@ void CanvasView::handleSample(const PenSample &sample)
                 beginStroke(sample);
         } else if (CanvasTool *tool = canvasTool(); tool && sample.tipDown()) {
             tool->setViewZoom(m_view.zoom());
-            tool->press(docPos, modifiers);
+            tool->press(at(tool), modifiers);
             m_editTool = tool->isActive() ? tool : nullptr;
             update();
         }
@@ -735,9 +795,9 @@ void CanvasView::handleSample(const PenSample &sample)
         } else if (m_stroke) {
             continueStroke(sample);
         } else if (m_editTool) {
-            m_editTool->move(docPos, modifiers);
+            m_editTool->move(at(m_editTool), modifiers);
             update();
-        } else if (CanvasTool *tool = canvasTool(); tool && tool->hover(docPos)) {
+        } else if (CanvasTool *tool = canvasTool(); tool && tool->hover(at(tool))) {
             update();
         }
         break;
@@ -773,7 +833,7 @@ void CanvasView::handleSample(const PenSample &sample)
         if (m_editTool) {
             CanvasTool *tool = m_editTool;
             m_editTool = nullptr; // cleared first: releasing may interrupt (and cancel) itself
-            tool->release(docPos, modifiers);
+            tool->release(at(tool), modifiers);
             update();
             emit editStepsChanged();
         }
@@ -788,7 +848,7 @@ void CanvasView::handleSample(const PenSample &sample)
             update();
         }
         if (CanvasTool *tool = canvasTool(); tool && !busy) {
-            if (tool->hover(docPos))
+            if (tool->hover(at(tool)))
                 update();
             if (tool == m_transformTool.get() && m_gizmo.hovered() == PerspectiveGizmo::Handle::None)
                 setCursor(tool->cursor()); // the handle or turn under the pointer
@@ -1010,8 +1070,8 @@ void CanvasView::releaseHeldSamples(bool end)
         corner.corner = true;
         addStrokePoint(corner);
         // Its point, between the ways in and out.
-        const QPointF in = m_view.mapToDocument(QPointF(d.before.x, d.before.y));
-        const QPointF out = m_view.mapToDocument(QPointF(d.after.x, d.after.y));
+        const QPointF in = toCel(m_view.mapToDocument(QPointF(d.before.x, d.before.y)));
+        const QPointF out = toCel(m_view.mapToDocument(QPointF(d.after.x, d.after.y)));
         const brush::BrushDab dab = m_dabs->dabHere(corner);
         if (const auto tip = brush::cornerTip(corner.x, corner.y, corner.x - in.x(), corner.y - in.y(),
                                               out.x() - corner.x, out.y() - corner.y, dab.radius))
@@ -1233,7 +1293,7 @@ void CanvasView::cancelStroke()
 brush::BrushInput CanvasView::brushInput(const PenSample &smoothed)
 {
     brush::BrushInput in;
-    const QPointF doc = m_view.mapToDocument(QPointF(smoothed.x, smoothed.y));
+    const QPointF doc = toCel(m_view.mapToDocument(QPointF(smoothed.x, smoothed.y))); // the cel as it is shown
     in.x = doc.x();
     in.y = doc.y();
     in.pressure = m_placingLine ? 1.0 : m_toolState->pressureCurve().map(smoothed.pressure);

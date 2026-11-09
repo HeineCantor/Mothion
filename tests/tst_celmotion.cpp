@@ -390,14 +390,14 @@ private slots:
         QCOMPARE(controller.celPoseAt(cel, 0).scaleY, 1.0);
         controller.undo();
 
-        // Outside the box nothing happens, and with a drawing tool the cel is shown as it is drawn, not posed.
+        // Outside the box nothing happens (but a turn), and with a drawing tool the cel is shown as ever: moved by its keys.
         QTest::mouseClick(&canvas, Qt::LeftButton, {}, at(100, 100));
         QCOMPARE(controller.celPoseAt(cel, 0), doc::CelPose{});
         controller.setCelKey(cel, 0, [] { doc::CelPose p; p.x = 300; return p; }());
         QCOMPARE(canvas.documentImage().pixelColor(1240, 540), QColor(Qt::red)); // posed (the tool moves the cel)
         state.setActiveTool(tools::ToolId::Brush);
-        QCOMPARE(canvas.documentImage().pixelColor(1240, 540), QColor(Qt::white)); // as drawn
-        QCOMPARE(canvas.documentImage().pixelColor(960, 540), QColor(Qt::red));
+        QCOMPARE(canvas.documentImage().pixelColor(1240, 540), QColor(Qt::red)); // moved, to draw on it as it is shown
+        QCOMPARE(canvas.documentImage().pixelColor(960, 540), QColor(Qt::white));
         state.setActiveTool(tools::ToolId::Transform);
         QCOMPARE(canvas.documentImage().pixelColor(1240, 540), QColor(Qt::red));
         controller.removeCelKey(cel, 0); // no keys: the same tool is on the pixels, the cel is as drawn
@@ -466,32 +466,45 @@ private slots:
         QVERIFY(!motion->keyAt(doc::Channel::Position, 4) && !motion->keyAt(doc::Channel::Scale, 4));
     }
 
-    // Played, the frames show the cels moved by their keys even with a pixel tool chosen (which shows the cel as drawn
-    // for working on it).
-    void playingShowsTheCelsMoved()
+    // A cel moved by its keys is shown moved at rest too, whatever the tool, and the pen draws on it as it is shown: what is
+    // drawn at the pen goes into the cel's pixels at their own place, and shows under the pen.
+    void drawingOnAPosedCelPaintsWhereThePenIs()
     {
         tools::ToolState state;
         document::DocumentController controller;
         controller.setSceneLength(30);
         QImage image(60, 40, QImage::Format_ARGB32);
         image.fill(Qt::red);
-        controller.importImage(image, QStringLiteral("piece")); // x 930..989
+        controller.importImage(image, QStringLiteral("piece")); // x 930..989, y 520..559
         const doc::CelId cel = controller.currentCel();
-        controller.setCelKey(cel, 0, [] { doc::CelPose p; p.x = 300; return p; }());
+        controller.setCelKey(cel, 0, [] { doc::CelPose p; p.x = 300; return p; }()); // shown at x 1230..1289
         canvas::CanvasView canvas(&state, &controller);
         canvas.resize(900, 520);
         canvas.show();
         QVERIFY(QTest::qWaitForWindowExposed(&canvas));
         state.setActiveTool(tools::ToolId::Brush);
-        QCOMPARE(canvas.documentImage().pixelColor(1240, 540), QColor(Qt::white)); // as drawn, to work on it
-        canvas.setPlaying(true);
-        QCOMPARE(canvas.documentImage().pixelColor(1240, 540), QColor(Qt::red)); // as the animation has it
-        canvas.setPlaying(false);
-        QCOMPARE(canvas.documentImage().pixelColor(1240, 540), QColor(Qt::white));
-        canvas.setScrubbing(true); // dragged along the timeline: the same
-        QCOMPARE(canvas.documentImage().pixelColor(1240, 540), QColor(Qt::red));
-        canvas.setScrubbing(false);
-        QCOMPARE(canvas.documentImage().pixelColor(1240, 540), QColor(Qt::white));
+        state.setColor(QColor(0, 0, 255));
+        QCOMPARE(canvas.documentImage().pixelColor(1240, 540), QColor(Qt::red)); // shown moved, with the pen tool
+        const QTransform toView = canvas.view().documentToView();
+        auto at = [&](double x, double y) { return toView.map(QPointF(x, y)).toPoint(); };
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, at(1240, 540));
+        for (int x = 1241; x <= 1270; x += 3)
+            QTest::mouseMove(&canvas, at(x, 540));
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, at(1270, 540));
+        // In the cel's own pixels the stroke is where the cel is drawn (the pose taken off), not under the pen.
+        const doc::TiledImage &pixels = controller.document().cel(cel)->drawingAt(0)->layers.front().image;
+        QVERIFY(qBlue(pixels.pixel(950, 540)) > 200 && qRed(pixels.pixel(950, 540)) < 80);
+        QCOMPARE(qAlpha(pixels.pixel(1250, 540)), 0);
+        // And on the canvas it shows under the pen.
+        const QColor shown = canvas.documentImage().pixelColor(1250, 540);
+        QVERIFY(shown.blue() > 200 && shown.red() < 80);
+        QCOMPARE(canvas.documentImage().pixelColor(960, 540), QColor(Qt::white)); // nothing where the cel was drawn
+
+        // A turned cel: a quarter turn round the middle (960, 540) shows the pixel at (980, 525) at (975, 560).
+        controller.setCelKey(cel, 0, [] { doc::CelPose p; p.rotation = 90; return p; }());
+        QCOMPARE(qRed(pixels.pixel(980, 525)), 255);
+        QTest::mouseClick(&canvas, Qt::LeftButton, {}, at(975, 560));
+        QVERIFY(qBlue(pixels.pixel(980, 525)) > 200 && qRed(pixels.pixel(980, 525)) < 80);
     }
 
     // Position, rotation, scale and opacity are keyed on their own: a channel with no key stays as drawn, one with keys goes
@@ -749,11 +762,11 @@ private slots:
         };
         QVERIFY(bluish(1180)); // the ghost of frame 7, where the keys put the cel then (1140..1199)
         QVERIFY(!bluish(1250));
-        // As drawn (a pixel tool): the ghosts are where the pixels are.
+        // The same with a pixel tool: the cel is shown moved, and so are its ghosts.
         state.setActiveTool(tools::ToolId::Brush);
         QTest::qWait(50);
-        QVERIFY(!bluish(1180));
-        QVERIFY(bluish(960)); // the frame's own place (930..989), where the ghost is drawn
+        QVERIFY(bluish(1180));
+        QVERIFY(!bluish(960));
     }
 
     // The options of Transform and Move, in keyframe mode, hold the pose of the current cel on the current frame; editing a field makes a key.

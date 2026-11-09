@@ -192,6 +192,16 @@ private:
 
     // The current cel is drawn as it is drawn (not as its keys pose it) while a tool that edits its pixels is active.
     void syncCelAsDrawn();
+    // The current cel moved by its keys on the frame: where a point of its own pixels is shown, and back. Drawing tools work
+    // on the cel as it is shown: the pen is taken to the cel's own place before it paints, and what a tool draws over the
+    // canvas (the selection, a shape in the making) goes through the pose. Identity for a cel with no keys.
+    doc::Matrix2x3 celPose() const;
+    bool celIsPosed() const;
+    QPointF toCel(const QPointF &page) const;
+    // The tool that takes the pen in the cel's own place (the Transform and Move tools of a posed cel, and the dropper, take it
+    // as it is shown).
+    bool toolWorksInCel(const CanvasTool *tool) const;
+    QRect posedRect(const QRect &celRect) const; // where a rect of the cel's pixels is shown
     void syncAnimateTool();
     void syncPoseMode(); // the current cel has keys: Transform and Move move it as a piece
     void renderWholeFrame();                     // frame, layers or timing changed
