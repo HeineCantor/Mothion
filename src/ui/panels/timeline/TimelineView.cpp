@@ -90,12 +90,38 @@ TimelineView::TimelineView(DocumentController *document, QWidget *parent)
 
 // --- model helpers ---------------------------------------------------------------
 
+bool TimelineView::hasKeys(int celIndex) const
+{
+    return !m_document->document().celAt(celIndex).motion().isEmpty();
+}
+
+bool TimelineView::motionRowShown(int celIndex) const
+{
+    return hasKeys(celIndex) && !m_folded.count(m_document->document().celAt(celIndex).id());
+}
+
+QRect TimelineView::foldRect(int row) const
+{
+    const QRect r(0, m_metrics.rowY(row), m_metrics.headerWidth - 1, m_metrics.rowHeight);
+    // Right end of a cel's header; left of the keys' own, where its name would not be in the way.
+    return isMotionRow(row) ? QRect(r.left() + 11, r.top() + (r.height() - 14) / 2, 14, 14)
+                            : QRect(r.right() - 18, r.top() + (r.height() - 14) / 2, 14, 14);
+}
+
+void TimelineView::toggleFold(doc::CelId cel)
+{
+    if (!m_folded.erase(cel))
+        m_folded.insert(cel);
+    updateScrollBars();
+    viewport()->update();
+}
+
 int TimelineView::rowCount() const
 {
     const doc::Document &d = m_document->document();
     int rows = d.celCount();
     for (int i = 0; i < d.celCount(); ++i)
-        if (!d.celAt(i).motion().isEmpty())
+        if (motionRowShown(i))
             ++rows; // the row of its keys
     return rows;
 }
@@ -107,7 +133,7 @@ TimelineView::RowRef TimelineView::rowRef(int row) const
     for (int i = d.celCount() - 1; i >= 0; --i) {
         if (at++ == row)
             return {i, false};
-        if (!d.celAt(i).motion().isEmpty() && at++ == row)
+        if (motionRowShown(i) && at++ == row)
             return {i, true};
     }
     return {0, false};
@@ -468,11 +494,11 @@ int TimelineView::motionKeyAt(const QPoint &pos, int row) const
     return best;
 }
 
-void TimelineView::paintMotionHeader(QPainter &p, int celIndex, int y) const
+void TimelineView::paintMotionHeader(QPainter &p, int celIndex, int row) const
 {
     const TimelineMetrics &m = m_metrics;
     const doc::Cel &cel = m_document->document().celAt(celIndex);
-    const QRect r(0, y, m.headerWidth - 1, m.rowHeight);
+    const QRect r(0, m.rowY(row), m.headerWidth - 1, m.rowHeight);
     p.fillRect(r, palette().window());
     p.fillRect(QRect(r.left() + 4, r.top() + 6, 4, r.height() - 12), motionColor());
     QFont small = font();
@@ -481,9 +507,26 @@ void TimelineView::paintMotionHeader(QPainter &p, int celIndex, int y) const
     p.setPen(cel.properties().visible ? palette().placeholderText().color()
                                       : palette().color(QPalette::Disabled, QPalette::Text));
     p.drawText(r.adjusted(28, 0, -4, 0), Qt::AlignVCenter | Qt::AlignLeft, tr("Keyframes"));
+    paintFoldArrow(p, foldRect(row), false);
     p.setFont(font());
     p.setPen(palette().mid().color());
     p.drawLine(r.bottomLeft(), r.bottomRight());
+}
+
+void TimelineView::paintFoldArrow(QPainter &p, const QRect &r, bool folded) const
+{
+    const QPointF c = r.center();
+    QPolygonF triangle;
+    if (folded) // pointing right: the keys are folded away
+        triangle << QPointF(c.x() - 2.5, c.y() - 4) << QPointF(c.x() + 3.5, c.y()) << QPointF(c.x() - 2.5, c.y() + 4);
+    else // pointing down: the keys are open
+        triangle << QPointF(c.x() - 4, c.y() - 2.5) << QPointF(c.x() + 4, c.y() - 2.5) << QPointF(c.x(), c.y() + 3.5);
+    p.save();
+    p.setRenderHint(QPainter::Antialiasing);
+    p.setPen(Qt::NoPen);
+    p.setBrush(palette().placeholderText().color());
+    p.drawPolygon(triangle);
+    p.restore();
 }
 
 void TimelineView::paintMotionRow(QPainter &p, int celIndex, int y) const
@@ -999,7 +1042,7 @@ void TimelineView::paintHeaders(QPainter &p) const
     for (int row = 0; row < rowCount(); ++row) {
         const int celIndex = celIndexForRow(row);
         if (isMotionRow(row)) {
-            paintMotionHeader(p, celIndex, m.rowY(row));
+            paintMotionHeader(p, celIndex, row);
             continue;
         }
         const doc::Cel &cel = d.celAt(celIndex);
@@ -1017,8 +1060,11 @@ void TimelineView::paintHeaders(QPainter &p) const
             icon(IconId::Lock, tone).paint(&p, lockRect(row).adjusted(1, 1, -1, -1));
         p.setPen(cel.properties().visible ? ink
                                           : palette().color(QPalette::Disabled, QPalette::Text));
-        p.drawText(r.adjusted(lockRect(row).right() + 6, 0, -4, 0), Qt::AlignVCenter | Qt::AlignLeft,
+        const bool keyed = hasKeys(celIndex);
+        p.drawText(r.adjusted(lockRect(row).right() + 6, 0, keyed ? -22 : -4, 0), Qt::AlignVCenter | Qt::AlignLeft,
                    QString::fromStdString(cel.properties().name));
+        if (keyed)
+            paintFoldArrow(p, foldRect(row), !motionRowShown(celIndex));
         p.setPen(palette().mid().color());
         p.drawLine(r.bottomLeft(), r.bottomRight());
     }
@@ -1085,6 +1131,10 @@ void TimelineView::mousePressEvent(QMouseEvent *event)
             return;
         const doc::Cel &cel = m_document->document().celAt(celIndexForRow(row));
         const QPoint pos = event->position().toPoint();
+        if (hasKeys(celIndexForRow(row)) && foldRect(row).contains(pos)) { // the arrow: fold or unfold the keys
+            toggleFold(cel.id());
+            return;
+        }
         if (isMotionRow(row)) { // the keys' row: its cel is chosen, and no toggles are there
             m_document->chooseCel(cel.id());
             return;
@@ -1419,7 +1469,7 @@ void TimelineView::mouseDoubleClickEvent(QMouseEvent *event)
         return;
     }
     if (event->button() == Qt::LeftButton && row >= 0 && pos.x() < m_metrics.headerWidth
-        && !eyeRect(row).contains(pos) && !lockRect(row).contains(pos)) {
+        && !eyeRect(row).contains(pos) && !lockRect(row).contains(pos) && !(hasKeys(celIndexForRow(row)) && foldRect(row).contains(pos))) {
         renameCel(celIndexForRow(row));
         return;
     }

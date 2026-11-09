@@ -9,6 +9,7 @@
 #include <QAbstractScrollArea>
 
 #include <map>
+#include <set>
 #include <optional>
 #include <vector>
 
@@ -70,6 +71,9 @@ public:
     bool pasteFrames(bool asCopies);
     bool canPasteFrames() const;
 
+    // The cel's row of keys is on view (it has keys and is not folded away under it).
+    bool motionRowShown(int celIndex) const;
+
 signals:
     void frameWidthChanged(int width);
     // "Import audio…" was chosen in a menu of the timeline (the window asks for the file).
@@ -110,6 +114,11 @@ private:
         int celIndex = 0;
         bool motion = false;
     };
+    // The row of keys of a cel folds away under it (an arrow in its header, and at the left of the keys' own header): it is
+    // there for a cel that has keys unless it is folded. Only the view: the keys are as they were.
+    bool hasKeys(int celIndex) const;
+    QRect foldRect(int row) const; // the arrow, in the header of a cel with keys or of its row of keys
+    void toggleFold(doc::CelId cel);
     RowRef rowRef(int row) const;
     bool isMotionRow(int row) const;
     int rowCount() const;
@@ -117,7 +126,8 @@ private:
     // A diamond of the motion row `row` under `pos`: its frame, or -1.
     int motionKeyAt(const QPoint &pos, int row) const;
     void paintMotionRow(QPainter &p, int celIndex, int y) const;
-    void paintMotionHeader(QPainter &p, int celIndex, int y) const;
+    void paintMotionHeader(QPainter &p, int celIndex, int row) const;
+    void paintFoldArrow(QPainter &p, const QRect &r, bool folded) const;
     void showMotionMenu(const QPoint &globalPos, int celIndex, int frame);
     int rowAt(int y) const;              // -1 outside the rows
     int frameAt(int x) const;
@@ -218,6 +228,7 @@ private:
         int to = 0;   // where it would go
     };
     std::optional<MotionDrag> m_motionDrag;
+    std::set<doc::CelId> m_folded; // the cels whose row of keys is folded away
     std::optional<std::pair<doc::CelId, int>> m_selectedKey; // the key last clicked, by cel and frame
     struct MarkerDrag
     {

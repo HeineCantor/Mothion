@@ -625,9 +625,18 @@ private slots:
         QVERIFY(controller.celMotion(cel)->keyAt(20));
         // The header of the row of keys has no toggles: a click on it chooses the cel and changes nothing else.
         const bool visible = controller.document().cel(cel)->properties().visible;
-        QTest::mouseClick(vp, Qt::LeftButton, {}, QPoint(20, motionY));
+        QTest::mouseClick(vp, Qt::LeftButton, {}, QPoint(60, motionY));
         QCOMPARE(controller.document().cel(cel)->properties().visible, visible);
         QCOMPARE(controller.currentCel(), cel);
+        // The arrow at the left of the keys' header folds the row away under its cel (the keys stay); the one in the cel's
+        // header at the right brings it back.
+        QVERIFY(view->motionRowShown(0));
+        QTest::mouseClick(vp, Qt::LeftButton, {}, QPoint(18, motionY));
+        QVERIFY(!view->motionRowShown(0));
+        QCOMPARE(controller.celMotion(cel)->keys().size(), size_t(2));
+        QTest::mouseClick(vp, Qt::LeftButton, {}, QPoint(m.headerWidth - 12, m.rowY(0) + m.rowHeight / 2));
+        QVERIFY(view->motionRowShown(0)); // it is back
+        QCOMPARE(controller.document().cel(cel)->properties().visible, visible); // the arrow is no toggle of the cel
         // The button takes the key of the current frame away, and the row goes with the last key.
         controller.setCurrentFrame(9);
         button->click();
