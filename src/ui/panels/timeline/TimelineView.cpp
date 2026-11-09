@@ -1772,6 +1772,16 @@ void TimelineView::keyPressEvent(QKeyEvent *event)
     if ((event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) && m_document->cameraSelected()
         && m_document->removeCameraKey(m_document->currentFrame()))
         return;
+    // A key of motion chosen (its channel's, or those of the frame): Delete takes it away, one undo step.
+    if ((event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) && m_selectedKey) {
+        const auto [cel, keyFrame] = *m_selectedKey;
+        const std::optional<doc::Channel> channel = m_selectedChannel;
+        m_selectedKey.reset();
+        m_selectedChannel.reset();
+        viewport()->update();
+        if (m_document->removeCelKey(cel, keyFrame, channel))
+            return;
+    }
     const int celIndex = d.indexOf(m_document->currentCel());
     switch (event->key()) {
     case Qt::Key_Left: m_document->setCurrentFrame(frame - 1); emit frameScrubbed(m_document->currentFrame()); break;

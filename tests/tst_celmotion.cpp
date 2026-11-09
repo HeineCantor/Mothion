@@ -428,6 +428,16 @@ private slots:
         QCOMPARE(panel.view()->selectedKeyChannel(), std::optional<doc::Channel>(doc::Channel::Position));
         QTest::mouseClick(vp, Qt::LeftButton, {}, center(1, 4));
         QVERIFY(!panel.view()->selectedKeyChannel());
+        // Delete takes away the key that is chosen: the position's alone, one undo step; and then nothing is chosen.
+        QTest::mouseClick(vp, Qt::LeftButton, {}, center(2, 4));
+        QTest::keyClick(panel.view(), Qt::Key_Delete);
+        QVERIFY(!motion->keyAt(doc::Channel::Position, 4));
+        QVERIFY(motion->keyAt(doc::Channel::Scale, 4) && motion->keyAt(doc::Channel::Rotation, 9));
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo keyframes"));
+        controller.undo();
+        QVERIFY(motion->keyAt(doc::Channel::Position, 4));
+        QTest::keyClick(panel.view(), Qt::Key_Delete); // nothing chosen now: nothing happens
+        QVERIFY(motion->keyAt(doc::Channel::Position, 4));
         // A double click on the scale's row: a key of the scale alone.
         QMouseEvent press(QEvent::MouseButtonDblClick, QPointF(center(4, 20)), vp->mapToGlobal(QPointF(center(4, 20))),
                           Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
