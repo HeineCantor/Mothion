@@ -453,6 +453,39 @@ private slots:
     }
 
 
+    // The Transform tool's options hold the filter that reads the pixels (not the OK / Cancel bar): shown with that
+    // tool only, kept in the preferences, and followed back.
+    void transformOptionsHoldTheFilter()
+    {
+        tools::Preferences &prefs = tools::Preferences::instance();
+        const int before = prefs.transformFilter();
+        tools::ToolState state;
+        ui::ToolPropertiesPanel panel(&state);
+        panel.show();
+        auto *filter = panel.findChild<QComboBox *>(QStringLiteral("transformFilter"));
+        QVERIFY(filter);
+        state.setActiveTool(tools::ToolId::Brush);
+        QVERIFY(!filter->isVisible()); // only for the transform
+        state.setActiveTool(tools::ToolId::Transform);
+        QVERIFY(filter->isVisible());
+        QCOMPARE(filter->count(), canvas::kResampleFilters);
+        QCOMPARE(filter->itemText(int(canvas::ResampleFilter::Lanczos3)), QStringLiteral("Lanczos3"));
+        QCOMPARE(filter->currentIndex(), prefs.transformFilter());
+        filter->setCurrentIndex(int(canvas::ResampleFilter::Lanczos3));
+        emit filter->activated(int(canvas::ResampleFilter::Lanczos3)); // as a choice from the list
+        QCOMPARE(prefs.transformFilter(), int(canvas::ResampleFilter::Lanczos3));
+        prefs.setTransformFilter(int(canvas::ResampleFilter::Nearest)); // changed elsewhere
+        QCOMPARE(filter->currentIndex(), int(canvas::ResampleFilter::Nearest));
+        // And the bar with OK and Cancel has no filter in it.
+        tools::ToolState other;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&other, &controller);
+        ui::TransformBar bar(&canvas);
+        QVERIFY(bar.findChildren<QComboBox *>().isEmpty());
+        prefs.setTransformFilter(before);
+    }
+
+
     // The wrench opens Advanced Tool Settings, whose correction options edit
     // ToolState and the active brush, and follow them back.
     void advancedSettingsEditTheBrush()

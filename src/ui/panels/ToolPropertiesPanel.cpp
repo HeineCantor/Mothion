@@ -1,5 +1,7 @@
 #include "ui/panels/ToolPropertiesPanel.h"
 
+#include "canvas/Resample.h"
+#include "tools/Preferences.h"
 #include "ui/AdvancedToolSettings.h"
 #include "ui/IconFactory.h"
 #include "ui/panels/PressureCurveEditor.h"
@@ -157,6 +159,27 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
     layout->addWidget(m_fillControls);
     layout->addWidget(m_effectControls);
     layout->addWidget(m_shapeControls);
+    // The filter of the transform (as in Krita's): bicubic by default, Lanczos3 for making a small picture bigger, nearest
+    // neighbor for pixel art. The choice is kept (Preferences), and is taken up at once by a transform that is open.
+    m_transformControls = new QWidget(this);
+    m_transformFilter = new QComboBox(m_transformControls);
+    m_transformFilter->setObjectName(QStringLiteral("transformFilter"));
+    m_transformFilter->setToolTip(tr("How the pixels are read when they are scaled or turned.\n"
+                                     "Bicubic is sharp; Lanczos3 the sharpest, for making a picture bigger; Bilinear is "
+                                     "soft; Nearest neighbor keeps hard edges (pixel art)."));
+    for (int i = 0; i < canvas::kResampleFilters; ++i)
+        m_transformFilter->addItem(canvas::filterName(canvas::ResampleFilter(i)));
+    m_transformFilter->setCurrentIndex(tools::Preferences::instance().transformFilter());
+    auto *transformForm = new QFormLayout(m_transformControls);
+    transformForm->setContentsMargins(0, 0, 0, 0);
+    transformForm->addRow(tr("Filter"), m_transformFilter);
+    layout->addWidget(m_transformControls);
+    connect(m_transformFilter, &QComboBox::activated, this,
+            [](int index) { tools::Preferences::instance().setTransformFilter(index); });
+    connect(&tools::Preferences::instance(), &tools::Preferences::changed, m_transformFilter, [this] {
+        const QSignalBlocker block(m_transformFilter);
+        m_transformFilter->setCurrentIndex(tools::Preferences::instance().transformFilter());
+    });
     m_transformHelp->setWordWrap(true);
     m_transformHelp->setEnabled(false); // dimmed, as a hint
     layout->addWidget(m_transformHelp);
@@ -259,6 +282,7 @@ void ToolPropertiesPanel::syncFromState()
     m_shapeControls->setVisible(shape);
     syncEffectFromState();
     m_transformHelp->setVisible(transform);
+    m_transformControls->setVisible(transform);
     m_puppetControls->setVisible(puppet);
     m_fillControls->setVisible(fill);
     m_size->setEnabled(paint);

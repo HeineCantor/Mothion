@@ -18,7 +18,7 @@ class SliderField;
 // Properties of the active tool: size and opacity (paint tools only),
 // plus the global smoothing, pen tilt switch and pressure curve (the rarer brush
 // options are in AdvancedToolSettings, behind the wrench button); for the puppet warp, its
-// mesh options instead; for the fill, its area options.
+// mesh options instead; for the fill, its area options; for the transform, the filter that reads the pixels.
 class ToolPropertiesPanel : public QWidget
 {
     Q_OBJECT
@@ -79,6 +79,9 @@ private:
 
     QWidget *m_footer;
     QLabel *m_transformHelp;
+    // Transform: how the pixels are read when they are scaled or turned (tools::Preferences::transformFilter()).
+    QWidget *m_transformControls = nullptr;
+    QComboBox *m_transformFilter = nullptr;
     AdvancedToolSettings *m_advanced = nullptr; // made on first use
 };
 
