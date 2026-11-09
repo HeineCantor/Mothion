@@ -245,48 +245,42 @@ bool TransformTool::hover(const QPointF &docPos)
     return false;
 }
 
-QCursor TransformTool::cursor() const
+QCursor turnCursor()
 {
-    if (!m_session || !m_hover)
-        return Qt::SizeAllCursor;
-    switch (m_hover->grip) {
-    case Grip::Move: return Qt::SizeAllCursor;
-    case Grip::Rotate: {
-        // A turning arrow, drawn once: dark with a white edge to show on any paper.
-        static const QCursor turning = [] {
-            QPixmap pixmap(28, 28);
-            pixmap.fill(Qt::transparent);
-            QPainter p(&pixmap);
-            p.setRenderHint(QPainter::Antialiasing);
-            QPainterPath arc;
-            arc.arcMoveTo(QRectF(5, 5, 18, 18), 40);
-            arc.arcTo(QRectF(5, 5, 18, 18), 40, 260);
-            QPainterPath head;
-            head.moveTo(23.5, 6.5);
-            head.lineTo(24, 14.5);
-            head.lineTo(16.5, 11.5);
-            head.closeSubpath();
-            p.setBrush(Qt::NoBrush);
-            p.setPen(QPen(Qt::white, 4.5, Qt::SolidLine, Qt::RoundCap));
-            p.drawPath(arc);
-            p.setPen(QPen(Qt::white, 2.5, Qt::SolidLine, Qt::FlatCap, Qt::RoundJoin));
-            p.setBrush(Qt::white);
-            p.drawPath(head);
-            p.setPen(QPen(Qt::black, 2, Qt::SolidLine, Qt::RoundCap));
-            p.setBrush(Qt::NoBrush);
-            p.drawPath(arc);
-            p.setBrush(Qt::black);
-            p.setPen(Qt::NoPen);
-            p.drawPath(head);
-            return QCursor(pixmap, 14, 14);
-        }();
-        return turning;
-    }
-    default: break;
-    }
-    // A handle: the arrows along the way from the middle of the box to it.
-    const QPointF from = m_session->transform.map(QRectF(m_session->box).center());
-    const QPointF to = m_session->transform.map(handlePoint(m_hover->handle));
+    // A turning arrow, drawn once: dark with a white edge to show on any paper.
+    static const QCursor turning = [] {
+        QPixmap pixmap(28, 28);
+        pixmap.fill(Qt::transparent);
+        QPainter p(&pixmap);
+        p.setRenderHint(QPainter::Antialiasing);
+        QPainterPath arc;
+        arc.arcMoveTo(QRectF(5, 5, 18, 18), 40);
+        arc.arcTo(QRectF(5, 5, 18, 18), 40, 260);
+        QPainterPath head;
+        head.moveTo(23.5, 6.5);
+        head.lineTo(24, 14.5);
+        head.lineTo(16.5, 11.5);
+        head.closeSubpath();
+        p.setBrush(Qt::NoBrush);
+        p.setPen(QPen(Qt::white, 4.5, Qt::SolidLine, Qt::RoundCap));
+        p.drawPath(arc);
+        p.setPen(QPen(Qt::white, 2.5, Qt::SolidLine, Qt::FlatCap, Qt::RoundJoin));
+        p.setBrush(Qt::white);
+        p.drawPath(head);
+        p.setPen(QPen(Qt::black, 2, Qt::SolidLine, Qt::RoundCap));
+        p.setBrush(Qt::NoBrush);
+        p.drawPath(arc);
+        p.setBrush(Qt::black);
+        p.setPen(Qt::NoPen);
+        p.drawPath(head);
+        return QCursor(pixmap, 14, 14);
+    }();
+    return turning;
+}
+
+QCursor resizeCursor(const QPointF &from, const QPointF &to)
+{
+    // The arrows along the way from the middle of the box to a handle.
     double degrees = std::atan2(to.y() - from.y(), to.x() - from.x()) * 180.0 / std::numbers::pi;
     degrees = std::fmod(std::fmod(degrees, 180.0) + 180.0, 180.0); // 0..180, y points down
     if (degrees < 22.5 || degrees >= 157.5)
@@ -296,6 +290,19 @@ QCursor TransformTool::cursor() const
     if (degrees < 112.5)
         return Qt::SizeVerCursor;
     return Qt::SizeBDiagCursor;
+}
+
+QCursor TransformTool::cursor() const
+{
+    if (!m_session || !m_hover)
+        return Qt::SizeAllCursor;
+    switch (m_hover->grip) {
+    case Grip::Move: return Qt::SizeAllCursor;
+    case Grip::Rotate: return turnCursor();
+    default: break;
+    }
+    return resizeCursor(m_session->transform.map(QRectF(m_session->box).center()),
+                        m_session->transform.map(handlePoint(m_hover->handle)));
 }
 
 void TransformTool::move(const QPointF &docPos, Qt::KeyboardModifiers modifiers)

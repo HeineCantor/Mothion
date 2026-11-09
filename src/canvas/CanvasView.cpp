@@ -561,6 +561,7 @@ void CanvasView::renderWholeFrame()
     m_frame.renderAll(m_document->document(), m_document->currentFrame());
     update();
     emit documentChanged(m_frame.image().rect());
+    emit transformChanged(); // the box of a cel moved by its keys follows the frame
 }
 
 void CanvasView::renderDocumentRect(const QRect &docRect)
@@ -1276,8 +1277,8 @@ bool CanvasView::event(QEvent *event)
 
 QRectF CanvasView::transformBounds() const
 {
-    if (m_animateTool->hasPendingEdit())
-        return static_cast<const AnimateTool *>(m_animateTool.get())->pendingBounds();
+    if (m_toolState->movesTheCel())
+        return m_playing ? QRectF() : static_cast<const AnimateTool *>(m_animateTool.get())->shownBounds();
     const auto *tool = static_cast<const TransformTool *>(m_transformTool.get());
     if (!tool->hasPendingEdit())
         return {};
@@ -1286,7 +1287,7 @@ QRectF CanvasView::transformBounds() const
 
 void CanvasView::finishTransform(bool apply)
 {
-    CanvasTool *tool = m_animateTool->hasPendingEdit() ? m_animateTool.get() : m_transformTool.get();
+    CanvasTool *tool = m_toolState->movesTheCel() ? m_animateTool.get() : m_transformTool.get();
     if (tool->keyPress(apply ? Qt::Key_Return : Qt::Key_Escape)) {
         emit editStepsChanged();
         emit transformChanged();

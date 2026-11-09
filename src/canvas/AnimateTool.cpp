@@ -1,6 +1,7 @@
 #include "canvas/AnimateTool.h"
 
 #include "canvas/FrameRenderer.h"
+#include "canvas/TransformTool.h"
 #include "canvas/ViewTransform.h"
 #include "document/DocumentController.h"
 #include "tools/ToolState.h"
@@ -16,14 +17,15 @@ namespace mothion::canvas {
 
 namespace {
 
-constexpr double kHandle = 9;       // screen pixels, half the side of a grabbed handle
-constexpr double kTurnReach = 30;   // screen pixels from the box to the turning handle
+constexpr double kHandleSize = 8.0;  // screen px, as drawn
+constexpr double kGrabRadius = 6.0;  // screen px, to pick a handle: just outside it is the turn
+constexpr double kRotateSnap = 15.0; // degrees, with Shift
+constexpr double kMinScale = 0.02;
 constexpr double kRadians = std::numbers::pi / 180.0;
 
-QPointF unit(QPointF v)
+double clampScale(double s)
 {
-    const double length = std::hypot(v.x(), v.y());
-    return length > 1e-9 ? v / length : QPointF(0, -1);
+    return std::abs(s) < kMinScale ? (s < 0 ? -kMinScale : kMinScale) : s;
 }
 
 } // namespace
@@ -75,26 +77,47 @@ QPointF AnimateTool::mapped(const Shape &s, const QPointF &local) const
     return {x, y};
 }
 
-QPointF AnimateTool::turnHandle(const Shape &s) const
+QPointF AnimateTool::handlePoint(const Shape &s, int index) const
 {
-    const QPointF top = mapped(s, QPointF(s.box.center().x(), s.box.top()));
-    const QPointF centre = mapped(s, s.box.center());
-    return top + unit(top - centre) * (kTurnReach / std::max(0.05, m_zoom));
+    const QRectF &b = s.box;
+    switch (index) {
+    case 0: return b.topLeft();
+    case 1: return b.topRight();
+    case 2: return b.bottomRight();
+    case 3: return b.bottomLeft();
+    case 4: return {b.center().x(), b.top()};
+    case 5: return {b.right(), b.center().y()};
+    case 6: return {b.center().x(), b.bottom()};
+    default: return {b.left(), b.center().y()};
+    }
 }
 
-AnimateTool::Grip AnimateTool::pick(const QPointF &docPos, const Shape &s) const
+AnimateTool::Pick AnimateTool::pick(const QPointF &docPos, const Shape &s) const
 {
-    const double reach = kHandle / std::max(0.05, m_zoom);
-    auto near = [&](const QPointF &p) { return std::hypot(docPos.x() - p.x(), docPos.y() - p.y()) <= reach; };
-    if (near(turnHandle(s)))
-        return Grip::Rotate;
-    for (const QPointF &corner : {s.box.topLeft(), s.box.topRight(), s.box.bottomRight(), s.box.bottomLeft()})
-        if (near(mapped(s, corner)))
-            return Grip::Scale;
-    QPolygonF frame;
-    for (const QPointF &corner : {s.box.topLeft(), s.box.topRight(), s.box.bottomRight(), s.box.bottomLeft()})
-        frame << mapped(s, corner);
-    return frame.containsPoint(docPos, Qt::OddEvenFill) ? Grip::Move : Grip::None;
+    if (m_moveOnly)
+        return {Grip::Move, -1};
+    // The handle nearest the pen, if close enough on screen; on a small box less close, so there is room inside it to move.
+    QPolygonF corners;
+    for (int i = 0; i < 4; ++i)
+        corners << mapped(s, handlePoint(s, i));
+    const double shorter = std::min(QLineF(corners[0], corners[1]).length(), QLineF(corners[1], corners[2]).length());
+    int nearest = -1;
+    double best = std::min(kGrabRadius / std::max(0.05, m_zoom), shorter / 4);
+    for (int i = 0; i < 8; ++i) {
+        const double distance = QLineF(mapped(s, handlePoint(s, i)), docPos).length();
+        if (distance <= best) {
+            best = distance;
+            nearest = i;
+        }
+    }
+    if (nearest >= 0)
+        return {nearest < 4 ? Grip::Corner : Grip::Side, nearest};
+    return {corners.containsPoint(docPos, Qt::OddEvenFill) ? Grip::Move : Grip::Rotate, -1};
+}
+
+bool AnimateTool::showsBox() const
+{
+    return !m_moveOnly || m_pending.has_value();
 }
 
 void AnimateTool::press(const QPointF &docPos, Qt::KeyboardModifiers)
@@ -109,11 +132,9 @@ void AnimateTool::press(const QPointF &docPos, Qt::KeyboardModifiers)
         m_status(QObject::tr("The cel is locked"));
         return;
     }
-    const Grip grip = m_moveOnly ? Grip::Move : pick(docPos, *s);
-    if (grip == Grip::None)
-        return;
+    const Pick picked = pick(docPos, *s);
     Drag d;
-    d.grip = grip;
+    d.grip = picked.grip;
     d.cel = m_document->currentCel();
     d.frame = m_document->currentFrame();
     d.before = cel->motion();
@@ -121,11 +142,17 @@ void AnimateTool::press(const QPointF &docPos, Qt::KeyboardModifiers)
         commit(); // another cel: what was open is applied
     if (!m_pending)
         m_pending = Pending{d.cel, d.before};
-    d.start = s->pose;
+    d.start = *s;
     d.press = docPos;
-    d.pivotNow = s->pivotNow();
-    d.startDistance = std::max(1e-3, std::hypot(docPos.x() - d.pivotNow.x(), docPos.y() - d.pivotNow.y()));
-    d.lastAngle = std::atan2(docPos.y() - d.pivotNow.y(), docPos.x() - d.pivotNow.x());
+    if (picked.handle >= 0) {
+        d.handle = handlePoint(*s, picked.handle);
+        // The opposite corner, or the middle of the opposite side.
+        d.anchor = handlePoint(*s, picked.handle < 4 ? (picked.handle + 2) % 4 : 4 + (picked.handle - 4 + 2) % 4);
+        d.horizontal = picked.handle == 5 || picked.handle == 7;
+    }
+    const QPointF centre = mapped(*s, s->box.center());
+    d.lastAngle = std::atan2(docPos.y() - centre.y(), docPos.x() - centre.x());
+    m_hover = picked; // what the pointer stays over during the drag
     m_drag = d;
 }
 
@@ -134,15 +161,26 @@ void AnimateTool::move(const QPointF &docPos, Qt::KeyboardModifiers modifiers)
     if (!m_drag)
         return;
     Drag &d = *m_drag;
-    doc::CelPose pose = d.start;
+    const Shape &start = d.start;
+    doc::CelPose pose = start.pose;
+    // The turn and the scale are around the pivot; the point that stays put (the box's middle, the anchor) is then brought
+    // back to where it was by the move.
+    auto keepPut = [&](const QPointF &local) {
+        const QPointF before = mapped(start, local);
+        double x = 0, y = 0;
+        pose.matrix(start.pivot.x(), start.pivot.y()).map(local.x(), local.y(), x, y);
+        pose.x += before.x() - x;
+        pose.y += before.y() - y;
+    };
     switch (d.grip) {
     case Grip::Move:
-        pose.x = d.start.x + docPos.x() - d.press.x();
-        pose.y = d.start.y + docPos.y() - d.press.y();
+        pose.x = start.pose.x + docPos.x() - d.press.x();
+        pose.y = start.pose.y + docPos.y() - d.press.y();
         break;
     case Grip::Rotate: {
-        // By how much the pen has gone round the pivot (past a half turn too, not wrapped).
-        const double angle = std::atan2(docPos.y() - d.pivotNow.y(), docPos.x() - d.pivotNow.x());
+        // By how much the pen has gone round the middle of the box (past a half turn too, not wrapped).
+        const QPointF centre = mapped(start, start.box.center());
+        const double angle = std::atan2(docPos.y() - centre.y(), docPos.x() - centre.x());
         double step = angle - d.lastAngle;
         while (step > std::numbers::pi)
             step -= 2 * std::numbers::pi;
@@ -150,25 +188,40 @@ void AnimateTool::move(const QPointF &docPos, Qt::KeyboardModifiers modifiers)
             step += 2 * std::numbers::pi;
         d.turned += step / kRadians;
         d.lastAngle = angle;
-        double rotation = d.start.rotation + d.turned;
+        double degrees = d.turned;
         if (modifiers & Qt::ShiftModifier)
-            rotation = std::round(rotation / 15.0) * 15.0;
-        pose.rotation = rotation;
+            degrees = std::round(degrees / kRotateSnap) * kRotateSnap;
+        pose.rotation = start.pose.rotation + degrees;
+        keepPut(start.box.center());
         break;
     }
-    case Grip::Scale: {
-        const double factor = std::max(0.02, std::hypot(docPos.x() - d.pivotNow.x(), docPos.y() - d.pivotNow.y())
-                                                 / d.startDistance);
-        pose.scaleX = d.start.scaleX * factor;
-        pose.scaleY = d.start.scaleY * factor;
+    case Grip::Corner:
+    case Grip::Side: {
+        // The pen in the cel's own coordinates, and how many times further from the anchor than the handle it is.
+        double px = 0, py = 0;
+        start.matrix.inverted().map(docPos.x(), docPos.y(), px, py);
+        const QPointF span = d.handle - d.anchor;
+        double sx = d.grip == Grip::Side && !d.horizontal ? 1.0 : clampScale((px - d.anchor.x()) / span.x());
+        double sy = d.grip == Grip::Side && d.horizontal ? 1.0 : clampScale((py - d.anchor.y()) / span.y());
+        if (d.grip == Grip::Corner && (modifiers & Qt::ShiftModifier)) {
+            const double both = std::max(std::abs(sx), std::abs(sy));
+            sx = std::copysign(both, sx);
+            sy = std::copysign(both, sy);
+        }
+        pose.scaleX = start.pose.scaleX * sx;
+        pose.scaleY = start.pose.scaleY * sy;
+        keepPut(d.anchor);
         break;
     }
-    case Grip::None: break;
+    case Grip::None: return;
     }
-    const doc::Channel channel = d.grip == Grip::Rotate  ? doc::Channel::Rotation
-                                 : d.grip == Grip::Scale ? doc::Channel::Scale
-                                                         : doc::Channel::Position; // what the drag changes: its own keys
-    m_document->previewCelPose(d.cel, d.frame, pose, channel);
+    // What changed: the keys of those channels (a turn or a scale moves the piece too, unless it goes round its middle).
+    std::vector<doc::Channel> channels;
+    for (doc::Channel c : doc::kChannels)
+        if (doc::channelsDiffer(c, start.pose, pose))
+            channels.push_back(c);
+    if (!channels.empty())
+        m_document->previewCelPose(d.cel, d.frame, pose, channels);
     m_repaint();
 }
 
@@ -200,47 +253,51 @@ void AnimateTool::commit()
         return;
     const Pending pending = *m_pending;
     m_pending.reset();
-    m_document->finishCelPose(pending.cel, pending.before); // one undo step for what was done (nothing for a pose that is no key)
+    m_document->finishCelPose(pending.cel, pending.before); // one undo step for what was done (nothing for a value that is no key)
     m_repaint();
 }
 
 bool AnimateTool::keyPress(int key)
 {
-    if (!m_pending)
+    if (key != Qt::Key_Return && key != Qt::Key_Enter && key != Qt::Key_Escape)
         return false;
-    if (key == Qt::Key_Return || key == Qt::Key_Enter) {
-        commit();
-        return true;
-    }
+    // The Move tool has something to close only after a drag; the Transform tool's box is always open.
+    if (m_moveOnly && !m_pending)
+        return false;
     if (key == Qt::Key_Escape) {
-        const Pending pending = *m_pending;
         m_drag.reset();
-        m_pending.reset();
-        m_document->cancelCelPose(pending.cel, pending.before);
+        if (m_pending) {
+            const Pending pending = *m_pending;
+            m_pending.reset();
+            m_document->cancelCelPose(pending.cel, pending.before);
+        }
         m_repaint();
-        return true;
+    } else {
+        commit();
     }
-    return false;
+    if (!m_moveOnly)
+        m_toolState->setActiveTool(m_toolState->previousTool()); // as the Transform tool of the pixels does
+    return true;
 }
 
-QRectF AnimateTool::pendingBounds() const
+QRectF AnimateTool::shownBounds() const
 {
-    if (!m_pending)
+    if (!showsBox())
         return {};
     const std::optional<Shape> s = shape();
     if (!s)
         return {};
     QPolygonF frame;
-    for (const QPointF &corner : {s->box.topLeft(), s->box.topRight(), s->box.bottomRight(), s->box.bottomLeft()})
-        frame << mapped(*s, corner);
+    for (int i = 0; i < 4; ++i)
+        frame << mapped(*s, handlePoint(*s, i));
     return frame.boundingRect();
 }
 
 bool AnimateTool::hover(const QPointF &docPos)
 {
     const std::optional<Shape> s = shape();
-    const Grip now = s ? (m_moveOnly ? Grip::Move : pick(docPos, *s)) : Grip::None;
-    if (now == m_hover)
+    const Pick now = s ? pick(docPos, *s) : Pick{};
+    if (now.grip == m_hover.grip && now.handle == m_hover.handle)
         return false;
     m_hover = now;
     return true;
@@ -248,10 +305,14 @@ bool AnimateTool::hover(const QPointF &docPos)
 
 QCursor AnimateTool::cursor() const
 {
-    switch (m_hover) {
+    switch (m_hover.grip) {
     case Grip::Move: return Qt::SizeAllCursor;
-    case Grip::Rotate: return Qt::CrossCursor;
-    case Grip::Scale: return Qt::SizeFDiagCursor;
+    case Grip::Rotate: return turnCursor();
+    case Grip::Corner:
+    case Grip::Side:
+        if (const std::optional<Shape> s = shape())
+            return resizeCursor(mapped(*s, s->box.center()), mapped(*s, handlePoint(*s, m_hover.handle)));
+        break;
     case Grip::None: break;
     }
     return Qt::ArrowCursor;
@@ -282,12 +343,11 @@ void AnimateTool::paintOverlay(QPainter &painter, const ViewTransform &view) con
         painter.setBrush(Qt::NoBrush);
     }
 
-    if (!m_pending)
-        return; // the box, its handles and the pivot are of an edit that is open (as the Transform tool's): OK or Esc close them
-
+    if (!showsBox())
+        return;
     QPolygonF frame;
-    for (const QPointF &corner : {s->box.topLeft(), s->box.topRight(), s->box.bottomRight(), s->box.bottomLeft()})
-        frame << toView.map(mapped(*s, corner));
+    for (int i = 0; i < 4; ++i)
+        frame << toView.map(mapped(*s, handlePoint(*s, i)));
     painter.setPen(QPen(Qt::white, 3));
     painter.drawPolygon(frame);
     painter.setPen(QPen(QColor(40, 110, 230), 1));
@@ -295,25 +355,10 @@ void AnimateTool::paintOverlay(QPainter &painter, const ViewTransform &view) con
     if (m_moveOnly)
         return; // the box alone: a drag anywhere moves it
     painter.setBrush(Qt::white);
-    for (const QPointF &corner : frame)
-        painter.drawRect(QRectF(corner.x() - kHandle / 2, corner.y() - kHandle / 2, kHandle, kHandle));
-    // The turning handle, over the top side.
-    const QPointF top = toView.map(mapped(*s, QPointF(s->box.center().x(), s->box.top())));
-    const QPointF turn = toView.map(turnHandle(*s));
-    painter.setPen(QPen(QColor(40, 110, 230), 1));
-    painter.drawLine(top, turn);
-    painter.drawEllipse(turn, kHandle / 2 + 1, kHandle / 2 + 1);
-    // The pivot.
-    const QPointF pivot = toView.map(s->pivotNow());
-    painter.setBrush(Qt::NoBrush);
-    painter.setPen(QPen(Qt::white, 3));
-    painter.drawEllipse(pivot, 6, 6);
-    painter.drawLine(QPointF(pivot.x() - 10, pivot.y()), QPointF(pivot.x() + 10, pivot.y()));
-    painter.drawLine(QPointF(pivot.x(), pivot.y() - 10), QPointF(pivot.x(), pivot.y() + 10));
-    painter.setPen(QPen(QColor(220, 70, 70), 1.5));
-    painter.drawEllipse(pivot, 6, 6);
-    painter.drawLine(QPointF(pivot.x() - 10, pivot.y()), QPointF(pivot.x() + 10, pivot.y()));
-    painter.drawLine(QPointF(pivot.x(), pivot.y() - 10), QPointF(pivot.x(), pivot.y() + 10));
+    for (int i = 0; i < 8; ++i) {
+        const QPointF at = toView.map(mapped(*s, handlePoint(*s, i)));
+        painter.drawRect(QRectF(at.x() - kHandleSize / 2, at.y() - kHandleSize / 2, kHandleSize, kHandleSize));
+    }
 }
 
 } // namespace mothion::canvas

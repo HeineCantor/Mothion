@@ -163,9 +163,9 @@ public:
     // While a tool drags the pose: the key of `cel` on `frame` is put at `pose` at once, with no undo step (the first key of
     // a cel is made, with its pivot). finishCelPose() then records the whole drag as one step, from `before` (the cel's
     // motion when the drag began); cancelCelPose() puts it back.
-    // Only the channel's part of `pose` is the drag's: a key of that channel there is changed, with none the pose goes with
-    // the frame.
-    void previewCelPose(doc::CelId cel, int frame, const doc::CelPose &pose, doc::Channel channel);
+    // Only the `channels` of `pose` are the drag's: a key of a channel there is changed, with none its value goes with the
+    // frame.
+    void previewCelPose(doc::CelId cel, int frame, const doc::CelPose &pose, const std::vector<doc::Channel> &channels);
     // The cel's pose on `frame` set by hand (the options' fields): changes the key there, or, with none, leaves a pose
     // that goes with the frame (see CelMotion::setTemporary) until the Cel key button makes it a key. A cel with no keys
     // is not moved this way.

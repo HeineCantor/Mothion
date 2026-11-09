@@ -19,16 +19,18 @@ class ToolState;
 
 namespace mothion::canvas {
 
-// Moves, turns and scales the current cel as one piece on the current frame, and changes the cel's pose (a
-// keyframe of the cel's motion, see doc::CelMotion): a box round what the cel shows on the frame, drawn as the pose has
-// it, with a handle at each corner (scale, from the pivot), another above (turn, around the pivot; Shift: 15° steps),
-// inside the box a drag moves it, and a cross at the pivot, where it turns and scales around. The cel's drawings are not
-// touched. The box and the path of the pivot over the frames follow the keys.
+// The Transform and Move tools on a cel that has keys: they move, turn and scale it as one piece on the current frame, the
+// Transform tool as it does the pixels: a box round what the cel shows (drawn as the pose has it) with eight handles, a
+// corner scales (Shift keeps the proportions), a side scales one way, inside the box moves, outside turns (Shift: 15°
+// steps); the box is there as soon as the tool is chosen, Enter (or OK) applies and Esc (or Cancel) drops, and either goes
+// back to the tool used before. The Move tool only moves, by a drag anywhere. The cel's drawings are not touched.
 //
-// It is not a tool of the palette: the Transform and the Move tools are this (the Move tool only moves) when the keyframe
-// current cel has keys (ToolState::keyframeMode()), and they work on the pixels otherwise. On a frame with a key the
-// drag changes that key; on a frame with none it leaves a pose that goes when another frame is chosen, unless the Cel key
-// button makes it a key.
+// What a drag changes goes into the keys of those channels (position, rotation, scale) on the frame: on a frame with a
+// key of a channel its key changes, on one with none the value goes when another frame is chosen, unless the Cel key
+// button makes it a key. The path of the pivot over the frames follows the keys.
+//
+// It is not a tool of the palette: the Transform and the Move tools are this when the current cel has keys
+// (ToolState::keyframeMode()), and work on the pixels otherwise.
 class AnimateTool : public CanvasTool
 {
 public:
@@ -45,8 +47,8 @@ public:
     bool hasPendingEdit() const override { return m_pending.has_value(); }
     void commit() override;
     bool keyPress(int key) override;
-    // The box of the open edit, as it is posed (null without one): where the OK / Cancel bar goes.
-    QRectF pendingBounds() const;
+    // The box as it is posed, while it shows (null otherwise): where the OK / Cancel bar goes.
+    QRectF shownBounds() const;
     bool hover(const QPointF &docPos) override;
     void setViewZoom(double zoom) override { m_zoom = zoom; }
     // Only moving: a drag anywhere moves the cel (the Move tool's way), with no handles to turn or scale it.
@@ -57,7 +59,7 @@ public:
     QCursor cursor() const override;
 
 private:
-    enum class Grip { None, Move, Rotate, Scale };
+    enum class Grip { None, Move, Rotate, Corner, Side };
     // What the tool works on now: the box round the cel's drawing on the current frame, its pivot and its pose.
     struct Shape
     {
@@ -65,12 +67,17 @@ private:
         QPointF pivot;
         doc::CelPose pose;
         doc::Matrix2x3 matrix;
-        QPointF pivotNow() const { return pivot + QPointF(pose.x, pose.y); }
     };
     std::optional<Shape> shape() const;
     QPointF mapped(const Shape &s, const QPointF &local) const;
-    QPointF turnHandle(const Shape &s) const;
-    Grip pick(const QPointF &docPos, const Shape &s) const;
+    QPointF handlePoint(const Shape &s, int index) const; // in the cel's own coordinates: corners 0..3, then side middles
+    struct Pick
+    {
+        Grip grip = Grip::None;
+        int handle = -1; // 0..7 for a corner or a side
+    };
+    Pick pick(const QPointF &docPos, const Shape &s) const;
+    bool showsBox() const; // the Transform tool's box is always there; the Move tool's only while an edit is open
 
     struct Drag
     {
@@ -78,12 +85,13 @@ private:
         doc::CelId cel = doc::kNoId;
         int frame = 0;
         doc::CelMotion before; // the motion when the pen went down
-        doc::CelPose start;
+        Shape start;           // the shape then
         QPointF press;
-        QPointF pivotNow;
-        double startDistance = 1;
-        double lastAngle = 0; // radians, of the pen around the pivot
-        double turned = 0;    // degrees turned so far (past a half turn too)
+        QPointF handle;        // the grabbed handle, in the cel's coordinates
+        QPointF anchor;        // the point that stays put (the opposite corner or side)
+        bool horizontal = false; // a side handle: which way it scales
+        double lastAngle = 0;  // radians, of the pen around the middle of the box
+        double turned = 0;     // degrees turned so far (past a half turn too)
     };
 
     document::DocumentController *m_document;
@@ -91,7 +99,7 @@ private:
     std::function<void(const QString &)> m_status;
     std::function<void()> m_repaint;
     double m_zoom = 1.0;
-    Grip m_hover = Grip::None;
+    Pick m_hover;
     bool m_moveOnly = false;
     // The box round a cel's drawing is measured once (it takes a pass over the pixels) until something invalidates it.
     mutable bool m_boundsValid = false;

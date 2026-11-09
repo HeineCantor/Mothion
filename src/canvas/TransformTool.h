@@ -3,6 +3,7 @@
 #include "canvas/CanvasTool.h"
 #include "core/document/TiledImage.h"
 
+#include <QCursor>
 #include <QImage>
 #include <QPainterPath>
 #include <QRect>
@@ -23,6 +24,11 @@ class ToolState;
 }
 
 namespace mothion::canvas {
+
+// The cursors of the free transform, shared by the tool that moves a cel the same way (AnimateTool): a turning arrow, and
+// the arrows of a handle (from the middle of the box to the handle, in the page).
+QCursor turnCursor();
+QCursor resizeCursor(const QPointF &from, const QPointF &to);
 
 // Free transform of the selected pixels (all of them when nothing is
 // selected) of the current layer, or of every layer chosen in the Layers

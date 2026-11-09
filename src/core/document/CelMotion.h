@@ -87,12 +87,13 @@ public:
     bool removeKeysAt(int frame);
     bool moveKeysAt(int from, int to);
 
-    // A pose the cel has on one frame that is not a key (yet): what the Transform and Move tools leave on a frame with no
-    // key. It shows (poseAt answers it there) but is not part of the motion: it is not saved and not compared, and it
-    // goes when another frame is chosen, unless the person makes it a key first.
-    void setTemporary(int frame, const CelPose &pose) { m_temporary = std::make_pair(frame, pose); }
+    // A value of a channel the cel has on one frame that is not a key (yet): what the Transform and Move tools leave on a
+    // frame with no key of the channel. It shows (poseAt answers it there, over what the keys say) but is not part of the
+    // motion: it is not saved and not compared, and it goes when another frame is chosen, unless the person makes it a key
+    // first. Only one frame has them.
+    void setTemporary(Channel channel, int frame, const CelPose &pose);
     void clearTemporary() { m_temporary.reset(); }
-    bool hasTemporaryAt(int frame) const { return m_temporary && m_temporary->first == frame; }
+    bool hasTemporaryAt(int frame) const { return m_temporary && m_temporary->frame == frame; }
     bool hasTemporary() const { return m_temporary.has_value(); }
 
     bool operator==(const CelMotion &o) const { return pivotX == o.pivotX && pivotY == o.pivotY && m_keys == o.m_keys; }
@@ -100,7 +101,13 @@ public:
 private:
     CelPose channelPose(Channel channel, int frame) const;
     std::array<std::vector<CelKey>, kChannelCount> m_keys; // by channel, by frame, one for each
-    std::optional<std::pair<int, CelPose>> m_temporary;
+    struct Temporary
+    {
+        int frame = 0;
+        CelPose pose;
+        std::array<bool, kChannelCount> channels{}; // the ones that are set
+    };
+    std::optional<Temporary> m_temporary;
 };
 
 } // namespace mothion::doc

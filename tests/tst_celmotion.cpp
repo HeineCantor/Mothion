@@ -372,12 +372,22 @@ private slots:
         QVERIFY2(std::abs(controller.celPoseAt(cel, 0).rotation - 90) < 6, qPrintable(QString::number(controller.celPoseAt(cel, 0).rotation)));
         controller.undo();
 
-        // A corner scales it from the pivot: twice as far out, twice as big.
+        // A corner scales it from the opposite corner, as the Transform tool of the pixels does: twice as far out, twice as
+        // big, and that corner stays where it was. Shift keeps the proportions; a side scales one way only.
         QTest::mousePress(&canvas, Qt::LeftButton, {}, at(990, 560));
-        QTest::mouseMove(&canvas, at(960 + 2 * 30, 540 + 2 * 20));
-        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, at(960 + 2 * 30, 540 + 2 * 20));
+        QTest::mouseMove(&canvas, at(930 + 2 * 60, 520 + 2 * 40));
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, at(930 + 2 * 60, 520 + 2 * 40));
         QVERIFY2(std::abs(controller.celPoseAt(cel, 0).scaleX - 2.0) < 0.1, qPrintable(QString::number(controller.celPoseAt(cel, 0).scaleX)));
-        QCOMPARE(controller.celPoseAt(cel, 0).scaleX, controller.celPoseAt(cel, 0).scaleY);
+        QVERIFY(std::abs(controller.celPoseAt(cel, 0).scaleY - 2.0) < 0.1);
+        QCOMPARE(canvas.documentImage().pixelColor(935, 525), QColor(Qt::red));  // the top left corner stayed
+        QCOMPARE(canvas.documentImage().pixelColor(1040, 580), QColor(Qt::red)); // and the piece grew from it
+        controller.undo();
+        // The middle of the right side: only the width.
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, at(990, 540));
+        QTest::mouseMove(&canvas, at(930 + 120, 540));
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, at(930 + 120, 540));
+        QVERIFY(std::abs(controller.celPoseAt(cel, 0).scaleX - 2.0) < 0.1);
+        QCOMPARE(controller.celPoseAt(cel, 0).scaleY, 1.0);
         controller.undo();
 
         // Outside the box nothing happens, and with a drawing tool the cel is shown as it is drawn, not posed.
@@ -580,6 +590,7 @@ private slots:
         QTest::mouseMove(&canvas, at2(1000, 540));
         QTest::mouseRelease(&canvas, Qt::LeftButton, {}, at2(1000, 540));
         canvas.finishTransform(true);
+        state.setActiveTool(tools::ToolId::Transform); // (OK went back to the tool used before)
         const doc::CelMotion *m = controller.celMotion(cel);
         QVERIFY(m->keyAt(doc::Channel::Position, 0)->pose.x > 20);
         QCOMPARE(m->keyAt(doc::Channel::Rotation, 0)->pose.rotation, 20.0);
@@ -616,7 +627,7 @@ private slots:
         auto at = [&](double x, double y) { return toView.map(QPointF(x, y)).toPoint(); };
         state.setActiveTool(tools::ToolId::Transform);
         controller.toggleCelKey(cel);
-        QVERIFY(canvas.transformBounds().isNull());
+        QVERIFY(!canvas.transformBounds().isNull()); // the box is there as soon as the tool is chosen, as the pixels' is
         auto drag = [&](double fromX, double toX) {
             QTest::mousePress(&canvas, Qt::LeftButton, {}, at(fromX, 540));
             QTest::mouseMove(&canvas, at(toX, 540));
@@ -627,9 +638,11 @@ private slots:
         QVERIFY(!canvas.transformBounds().isNull()); // the bar has a place
         const double moved = controller.celPoseAt(cel, 0).x;
         QVERIFY(moved > 70);
-        canvas.finishTransform(false); // Cancel
+        canvas.finishTransform(false); // Cancel: back to the tool used before
         QVERIFY(canvas.transformBounds().isNull());
+        QVERIFY(state.activeTool() != tools::ToolId::Transform);
         QCOMPARE(controller.celPoseAt(cel, 0).x, 0.0);
+        state.setActiveTool(tools::ToolId::Transform);
         drag(960, 1000);
         drag(1000, 1040);
         canvas.finishTransform(true); // OK: one step for both drags
@@ -639,10 +652,9 @@ private slots:
         QCOMPARE(controller.celPoseAt(cel, 0).x, 0.0);
         QCOMPARE(controller.celMotion(cel)->keyFrames().size(), size_t(1)); // the key stays: it was one step before
         // Leaving the frame applies an edit that was open.
+        state.setActiveTool(tools::ToolId::Transform);
         drag(960, 1000);
-        QVERIFY(!canvas.transformBounds().isNull());
         controller.setCurrentFrame(3);
-        QVERIFY(canvas.transformBounds().isNull());
         QVERIFY(controller.celPoseAt(cel, 0).x > 30);
         controller.undo();
         QCOMPARE(controller.celPoseAt(cel, 0).x, 0.0);

@@ -912,22 +912,23 @@ void DocumentController::toggleCelKey(doc::CelId id)
         setCelKey(id, m_currentFrame, celPoseAt(id, m_currentFrame)); // the pose left on the frame, or the one it has
 }
 
-void DocumentController::previewCelPose(doc::CelId id, int frame, const doc::CelPose &pose, doc::Channel channel)
+void DocumentController::previewCelPose(doc::CelId id, int frame, const doc::CelPose &pose,
+                                        const std::vector<doc::Channel> &channels)
 {
     doc::Cel *cel = m_document->cel(id);
     if (!cel || frame < 0)
         return;
     doc::CelMotion motion = cel->motion();
-    if (motion.keyAt(channel, frame)) {
-        motion.setKey(channel, frame, pose);
-    } else {
-        // No key of this channel here: the pose stays only while this frame is the one shown (or until it is made a key).
-        if (m_tempPoseCel != id)
-            clearTemporaryPose();
-        doc::CelPose shown = motion.poseAt(frame);
-        doc::copyChannel(channel, pose, shown);
-        motion.setTemporary(frame, shown);
-        m_tempPoseCel = id;
+    for (doc::Channel channel : channels) {
+        if (motion.keyAt(channel, frame)) {
+            motion.setKey(channel, frame, pose);
+        } else {
+            // No key of this channel here: the value stays only while this frame is the one shown (or until it is made a key).
+            if (m_tempPoseCel != id)
+                clearTemporaryPose();
+            motion.setTemporary(channel, frame, pose);
+            m_tempPoseCel = id;
+        }
     }
     cel->setMotion(std::move(motion));
     doc::ChangeSet changes;
@@ -943,7 +944,7 @@ void DocumentController::setCelPose(doc::CelId id, int frame, const doc::CelPose
     if (cel->motion().keyAt(channel, frame))
         setCelChannelKey(id, channel, frame, pose);
     else
-        previewCelPose(id, frame, pose, channel);
+        previewCelPose(id, frame, pose, {channel});
 }
 
 void DocumentController::clearTemporaryPose()

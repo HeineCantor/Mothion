@@ -87,9 +87,20 @@ bool CelMotion::hasKeyAt(int frame) const
 
 CelPose CelMotion::poseAt(int frame) const
 {
-    if (m_temporary && m_temporary->first == frame)
-        return m_temporary->second;
-    return interpolatedAt(frame);
+    CelPose pose = interpolatedAt(frame);
+    if (m_temporary && m_temporary->frame == frame)
+        for (Channel c : kChannels)
+            if (m_temporary->channels[int(c)])
+                copyChannel(c, m_temporary->pose, pose);
+    return pose;
+}
+
+void CelMotion::setTemporary(Channel channel, int frame, const CelPose &pose)
+{
+    if (!m_temporary || m_temporary->frame != frame)
+        m_temporary = Temporary{frame, {}, {}};
+    copyChannel(channel, pose, m_temporary->pose);
+    m_temporary->channels[int(channel)] = true;
 }
 
 CelPose CelMotion::interpolatedAt(int frame) const
