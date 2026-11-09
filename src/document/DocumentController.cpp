@@ -855,11 +855,38 @@ bool DocumentController::setCelKey(doc::CelId id, int frame, const doc::CelPose 
         return false;
     clearTemporaryPose(); // what is made a key now is the pose that was shown (the caller has it already)
     doc::CelMotion motion = cel->motion();
+    const bool first = motion.isEmpty();
+    if (first)
+        startMotion(motion, *cel, frame);
+    const doc::CelPose now = motion.interpolatedAt(frame);
+    bool changed = false;
+    for (doc::Channel c : doc::kChannels) {
+        const bool wanted = motion.hasKeys(c) || doc::channelsDiffer(c, pose, now) || (first && c != doc::Channel::Opacity);
+        if (!wanted)
+            continue;
+        if (const doc::CelKey *existing = motion.keyAt(c, frame); existing && existing->pose == doc::channelOf(c, pose))
+            continue;
+        motion.setKey(c, frame, pose);
+        changed = true;
+    }
+    if (!changed)
+        return false;
+    execute(std::make_unique<doc::SetCelMotionCommand>(id, std::move(motion)));
+    return true;
+}
+
+bool DocumentController::setCelChannelKey(doc::CelId id, doc::Channel channel, int frame, const doc::CelPose &pose)
+{
+    const doc::Cel *cel = m_document->cel(id);
+    if (!cel || frame < 0)
+        return false;
+    clearTemporaryPose();
+    doc::CelMotion motion = cel->motion();
     if (motion.isEmpty())
         startMotion(motion, *cel, frame);
-    if (const doc::CelKey *existing = motion.keyAt(frame); existing && existing->pose == pose)
+    if (const doc::CelKey *existing = motion.keyAt(channel, frame); existing && existing->pose == doc::channelOf(channel, pose))
         return false;
-    motion.setKey(frame, pose);
+    motion.setKey(channel, frame, pose);
     execute(std::make_unique<doc::SetCelMotionCommand>(id, std::move(motion)));
     return true;
 }
@@ -879,25 +906,27 @@ void DocumentController::toggleCelKey(doc::CelId id)
 {
     interruptStroke(); // a pose edit left open (Transform, Move) is applied first
     const doc::CelMotion *motion = celMotion(id);
-    if (motion && motion->keyAt(m_currentFrame))
+    if (motion && motion->hasKeyAt(m_currentFrame))
         removeCelKey(id, m_currentFrame);
     else
         setCelKey(id, m_currentFrame, celPoseAt(id, m_currentFrame)); // the pose left on the frame, or the one it has
 }
 
-void DocumentController::previewCelPose(doc::CelId id, int frame, const doc::CelPose &pose)
+void DocumentController::previewCelPose(doc::CelId id, int frame, const doc::CelPose &pose, doc::Channel channel)
 {
     doc::Cel *cel = m_document->cel(id);
     if (!cel || frame < 0)
         return;
     doc::CelMotion motion = cel->motion();
-    if (motion.keyAt(frame)) {
-        motion.setKey(frame, pose);
+    if (motion.keyAt(channel, frame)) {
+        motion.setKey(channel, frame, pose);
     } else {
-        // No key here: the pose stays only while this frame is the one shown (or until it is made a key).
+        // No key of this channel here: the pose stays only while this frame is the one shown (or until it is made a key).
         if (m_tempPoseCel != id)
             clearTemporaryPose();
-        motion.setTemporary(frame, pose);
+        doc::CelPose shown = motion.poseAt(frame);
+        doc::copyChannel(channel, pose, shown);
+        motion.setTemporary(frame, shown);
         m_tempPoseCel = id;
     }
     cel->setMotion(std::move(motion));
@@ -906,15 +935,15 @@ void DocumentController::previewCelPose(doc::CelId id, int frame, const doc::Cel
     publish(changes);
 }
 
-void DocumentController::setCelPose(doc::CelId id, int frame, const doc::CelPose &pose)
+void DocumentController::setCelPose(doc::CelId id, int frame, const doc::CelPose &pose, doc::Channel channel)
 {
     const doc::Cel *cel = m_document->cel(id);
     if (!cel || frame < 0 || cel->motion().isEmpty())
         return;
-    if (cel->motion().keyAt(frame))
-        setCelKey(id, frame, pose);
+    if (cel->motion().keyAt(channel, frame))
+        setCelChannelKey(id, channel, frame, pose);
     else
-        previewCelPose(id, frame, pose);
+        previewCelPose(id, frame, pose, channel);
 }
 
 void DocumentController::clearTemporaryPose()
@@ -954,42 +983,48 @@ void DocumentController::cancelCelPose(doc::CelId id, const doc::CelMotion &befo
     publish(changes);
 }
 
-bool DocumentController::setCelKeyEasing(doc::CelId id, int frame, const doc::Easing &easing)
+bool DocumentController::setCelKeyEasing(doc::CelId id, int frame, const doc::Easing &easing, std::optional<doc::Channel> channel)
 {
     const doc::Cel *cel = m_document->cel(id);
     if (!cel)
         return false;
     clearTemporaryPose();
     doc::CelMotion motion = cel->motion();
-    const doc::CelKey *key = motion.keyAt(frame);
-    if (!key || key->easing == easing)
+    bool changed = false;
+    for (doc::Channel c : doc::kChannels) {
+        const doc::CelKey *key = motion.keyAt(c, frame);
+        if ((channel && *channel != c) || !key || key->easing == easing)
+            continue;
+        motion.setEasing(c, frame, easing);
+        changed = true;
+    }
+    if (!changed)
         return false;
-    motion.setEasing(frame, easing);
     execute(std::make_unique<doc::SetCelMotionCommand>(id, std::move(motion)));
     return true;
 }
 
-bool DocumentController::removeCelKey(doc::CelId id, int frame)
+bool DocumentController::removeCelKey(doc::CelId id, int frame, std::optional<doc::Channel> channel)
 {
     const doc::Cel *cel = m_document->cel(id);
     if (!cel)
         return false;
     clearTemporaryPose();
     doc::CelMotion motion = cel->motion();
-    if (!motion.removeKey(frame))
+    if (!(channel ? motion.removeKey(*channel, frame) : motion.removeKeysAt(frame)))
         return false;
     execute(std::make_unique<doc::SetCelMotionCommand>(id, std::move(motion)));
     return true;
 }
 
-bool DocumentController::moveCelKey(doc::CelId id, int frame, int to)
+bool DocumentController::moveCelKey(doc::CelId id, int frame, int to, std::optional<doc::Channel> channel)
 {
     const doc::Cel *cel = m_document->cel(id);
     if (!cel || frame == to)
         return false;
     clearTemporaryPose();
     doc::CelMotion motion = cel->motion();
-    if (!motion.moveKey(frame, to))
+    if (!(channel ? motion.moveKey(*channel, frame, to) : motion.moveKeysAt(frame, to)))
         return false;
     execute(std::make_unique<doc::SetCelMotionCommand>(id, std::move(motion)));
     return true;

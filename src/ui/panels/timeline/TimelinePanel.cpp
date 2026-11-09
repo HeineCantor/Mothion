@@ -220,7 +220,7 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
     connect(celKey, &QToolButton::clicked, m_document, [this] { m_document->toggleCelKey(m_document->currentCel()); });
     auto syncCelKey = [this, celKey] {
         const doc::CelMotion *motion = m_document->celMotion(m_document->currentCel());
-        celKey->setChecked(motion && motion->keyAt(m_document->currentFrame()));
+        celKey->setChecked(motion && motion->hasKeyAt(m_document->currentFrame()));
     };
     connect(m_document, &DocumentController::motionChanged, celKey, syncCelKey);
     connect(m_document, &DocumentController::currentFrameChanged, celKey, syncCelKey);

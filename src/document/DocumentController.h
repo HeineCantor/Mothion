@@ -144,13 +144,17 @@ public:
     // Each change is one undo step. The pose is a cel's as it is shown (as drawn where it has no key).
     const doc::CelMotion *celMotion(doc::CelId cel) const;
     doc::CelPose celPoseAt(doc::CelId cel, int frame) const;
-    // A key on `frame` with this pose (the first key of a cel puts its pivot at the middle of the page). False if there is no
-    // such cel or nothing changes.
+    // The "Cel key": keys on `frame` from this pose, in the channels (position, rotation, scale, opacity) that have keys
+    // already, those the pose changes there, and, for the first key of a cel, position, rotation and scale (its pivot is
+    // put at the middle of what it shows). False if there is no such cel or nothing changes.
     bool setCelKey(doc::CelId cel, int frame, const doc::CelPose &pose);
-    bool setCelKeyEasing(doc::CelId cel, int frame, const doc::Easing &easing);
-    bool removeCelKey(doc::CelId cel, int frame);
-    // Moves the key on `from` to `to`: refused (false) if `to` has a key or `from` has none.
-    bool moveCelKey(doc::CelId cel, int frame, int to);
+    // A key of one channel only (the part of `pose` that is the channel's).
+    bool setCelChannelKey(doc::CelId cel, doc::Channel channel, int frame, const doc::CelPose &pose);
+    // On the keys of one channel, or (none given) of all the channels that have a key on `frame`.
+    bool setCelKeyEasing(doc::CelId cel, int frame, const doc::Easing &easing, std::optional<doc::Channel> channel = {});
+    bool removeCelKey(doc::CelId cel, int frame, std::optional<doc::Channel> channel = {});
+    // Moves the key on `from` to `to`: refused (false) if `to` has a key (of the same channel) or `from` has none.
+    bool moveCelKey(doc::CelId cel, int frame, int to, std::optional<doc::Channel> channel = {});
     // Where the cel turns and scales around, in pixels of the page. The pose on every key stays as it was, so the cel is
     // not moved on the frames with a key; between keys the piece goes round a different point.
     bool setCelPivot(doc::CelId cel, double x, double y);
@@ -159,11 +163,13 @@ public:
     // While a tool drags the pose: the key of `cel` on `frame` is put at `pose` at once, with no undo step (the first key of
     // a cel is made, with its pivot). finishCelPose() then records the whole drag as one step, from `before` (the cel's
     // motion when the drag began); cancelCelPose() puts it back.
-    void previewCelPose(doc::CelId cel, int frame, const doc::CelPose &pose);
+    // Only the channel's part of `pose` is the drag's: a key of that channel there is changed, with none the pose goes with
+    // the frame.
+    void previewCelPose(doc::CelId cel, int frame, const doc::CelPose &pose, doc::Channel channel);
     // The cel's pose on `frame` set by hand (the options' fields): changes the key there, or, with none, leaves a pose
     // that goes with the frame (see CelMotion::setTemporary) until the Cel key button makes it a key. A cel with no keys
     // is not moved this way.
-    void setCelPose(doc::CelId cel, int frame, const doc::CelPose &pose);
+    void setCelPose(doc::CelId cel, int frame, const doc::CelPose &pose, doc::Channel channel);
     void finishCelPose(doc::CelId cel, const doc::CelMotion &before);
     void cancelCelPose(doc::CelId cel, const doc::CelMotion &before);
     // Takes all the keys of the cel away (it stands still, as drawn).

@@ -165,7 +165,10 @@ void AnimateTool::move(const QPointF &docPos, Qt::KeyboardModifiers modifiers)
     }
     case Grip::None: break;
     }
-    m_document->previewCelPose(d.cel, d.frame, pose);
+    const doc::Channel channel = d.grip == Grip::Rotate  ? doc::Channel::Rotation
+                                 : d.grip == Grip::Scale ? doc::Channel::Scale
+                                                         : doc::Channel::Position; // what the drag changes: its own keys
+    m_document->previewCelPose(d.cel, d.frame, pose, channel);
     m_repaint();
 }
 
@@ -266,12 +269,12 @@ void AnimateTool::paintOverlay(QPainter &painter, const ViewTransform &view) con
 
     // Where the pivot goes over the frames of the keys (a dot for each frame, a bigger one on each key).
     if (const doc::Cel *cel = m_document->document().cel(m_document->currentCel()); cel && !cel->motion().isEmpty()) {
-        const auto &keys = cel->motion().keys();
         const doc::CelMotion &motion = cel->motion();
-        for (int f = keys.front().frame; f <= keys.back().frame; ++f) {
+        const std::vector<int> keyFrames = motion.keyFrames();
+        for (int f = keyFrames.front(); f <= keyFrames.back(); ++f) {
             const doc::CelPose q = motion.poseAt(f);
             const QPointF at = toView.map(QPointF(motion.pivotX + q.x, motion.pivotY + q.y));
-            const bool isKey = motion.keyAt(f) != nullptr;
+            const bool isKey = motion.keyAt(doc::Channel::Position, f) != nullptr; // the dots are the path of the position
             painter.setPen(Qt::NoPen);
             painter.setBrush(isKey ? accent : QColor(accent.red(), accent.green(), accent.blue(), 150));
             painter.drawEllipse(at, isKey ? 3.5 : 1.5, isKey ? 3.5 : 1.5);

@@ -35,6 +35,18 @@ doc::CelPose at(double x, double y, double rotation = 0, double scale = 1, doubl
     return p;
 }
 
+// A key of every channel at once, as the whole pose of the frame.
+void keyAll(doc::CelMotion &motion, int frame, const doc::CelPose &pose)
+{
+    for (doc::Channel c : doc::kChannels)
+        motion.setKey(c, frame, pose);
+}
+void keyAll(doc::CelMotion &motion, int frame, const doc::CelPose &pose, const doc::Easing &easing)
+{
+    for (doc::Channel c : doc::kChannels)
+        motion.setKey(c, frame, pose, easing);
+}
+
 // A cel with one drawing held for the whole scene, holding a red square of `size` at (x, y).
 doc::CelId addSquare(doc::Document &document, int x, int y, int size, int index = 0, uint32_t color = 0xffff0000u)
 {
@@ -61,11 +73,11 @@ private slots:
         doc::CelMotion motion;
         QVERIFY(motion.isEmpty());
         QCOMPARE(motion.poseAt(7), doc::CelPose{}); // no key: as drawn
-        motion.setKey(10, at(100, 0, 90, 1, 1), doc::Easing::hold()); // (its easing is the one from 10 to 20)
-        motion.setKey(20, at(200, 50, 270, 4, 0), doc::Easing::linear());
-        motion.setKey(0, at(0, 0, 0, 1, 1), doc::Easing::linear());
-        QCOMPARE(motion.keys().size(), size_t(3));
-        QCOMPARE(motion.keys().front().frame, 0); // by frame, whatever the order they came in
+        keyAll(motion, 10, at(100, 0, 90, 1, 1), doc::Easing::hold()); // (its easing is the one from 10 to 20)
+        keyAll(motion, 20, at(200, 50, 270, 4, 0), doc::Easing::linear());
+        keyAll(motion, 0, at(0, 0, 0, 1, 1), doc::Easing::linear());
+        QCOMPARE(motion.keyFrames().size(), size_t(3));
+        QCOMPARE(motion.keyFrames().front(), 0); // by frame, whatever the order they came in
         // Before the first and after the last: as that key put it.
         QCOMPARE(motion.poseAt(-5).x, 0.0);
         QCOMPARE(motion.poseAt(99), at(200, 50, 270, 4, 0));
@@ -78,14 +90,14 @@ private slots:
         QCOMPARE(motion.poseAt(20), at(200, 50, 270, 4, 0));
         // The scale goes by ratios (from 1 to 4, 2 halfway), the opacity straight, within 0..1.
         doc::CelMotion scale;
-        scale.setKey(0, at(0, 0, 0, 1, 1), doc::Easing::linear());
-        scale.setKey(10, at(0, 0, 0, 4, 0), doc::Easing::linear());
+        keyAll(scale, 0, at(0, 0, 0, 1, 1), doc::Easing::linear());
+        keyAll(scale, 10, at(0, 0, 0, 4, 0), doc::Easing::linear());
         QVERIFY(std::abs(scale.poseAt(5).scaleX - 2.0) < 1e-9);
         QVERIFY(std::abs(scale.poseAt(5).opacity - 0.5) < 1e-9);
         // An ease in-out starts and ends slowly.
         doc::CelMotion eased;
-        eased.setKey(0, at(0, 0), doc::Easing::easeInOut());
-        eased.setKey(10, at(100, 0), doc::Easing::linear());
+        keyAll(eased, 0, at(0, 0), doc::Easing::easeInOut());
+        keyAll(eased, 10, at(100, 0), doc::Easing::linear());
         QVERIFY(eased.poseAt(1).x < 5);
         QVERIFY(eased.poseAt(9).x > 95);
         QVERIFY(std::abs(eased.poseAt(5).x - 50) < 1e-6);
@@ -94,22 +106,22 @@ private slots:
     void keysAreSetMovedAndTakenAway()
     {
         doc::CelMotion motion;
-        motion.setKey(5, at(1, 1));
-        QCOMPARE(motion.keyAt(5)->easing, doc::Easing::easeInOut()); // the first easing
-        QVERIFY(motion.setEasing(5, doc::Easing::hold()));
-        motion.setKey(5, at(2, 2)); // replaced, keeping the easing it had
-        QCOMPARE(motion.keyAt(5)->pose.x, 2.0);
-        QCOMPARE(motion.keyAt(5)->easing, doc::Easing::hold());
-        QVERIFY(!motion.setEasing(6, doc::Easing::linear()));
-        motion.setKey(9, at(9, 9));
-        QVERIFY(!motion.moveKey(5, 9)); // a place taken
-        QVERIFY(!motion.moveKey(4, 8)); // a key that is not there
-        QVERIFY(motion.moveKey(5, 7));
-        QVERIFY(motion.keyAt(7) && !motion.keyAt(5));
-        QVERIFY(motion.moveKey(7, 7));
-        QVERIFY(motion.removeKey(7));
-        QVERIFY(!motion.removeKey(7));
-        QCOMPARE(motion.keys().size(), size_t(1));
+        keyAll(motion, 5, at(1, 1));
+        QCOMPARE(motion.keyAt(doc::Channel::Position, 5)->easing, doc::Easing::easeInOut()); // the first easing
+        QVERIFY(motion.setEasingAll(5, doc::Easing::hold()));
+        keyAll(motion, 5, at(2, 2)); // replaced, keeping the easing it had
+        QCOMPARE(motion.keyAt(doc::Channel::Position, 5)->pose.x, 2.0);
+        QCOMPARE(motion.keyAt(doc::Channel::Position, 5)->easing, doc::Easing::hold());
+        QVERIFY(!motion.setEasingAll(6, doc::Easing::linear()));
+        keyAll(motion, 9, at(9, 9));
+        QVERIFY(!motion.moveKeysAt(5, 9)); // a place taken
+        QVERIFY(!motion.moveKeysAt(4, 8)); // a key that is not there
+        QVERIFY(motion.moveKeysAt(5, 7));
+        QVERIFY(motion.hasKeyAt(7) && !motion.hasKeyAt(5));
+        QVERIFY(motion.moveKeysAt(7, 7));
+        QVERIFY(motion.removeKeysAt(7));
+        QVERIFY(!motion.removeKeysAt(7));
+        QCOMPARE(motion.keyFrames().size(), size_t(1));
     }
 
     void aPoseTurnsAndScalesAroundThePivot()
@@ -154,7 +166,7 @@ private slots:
         QVERIFY(!controller.setCelKeyEasing(cel, 13, doc::Easing::hold())); // no key there
         QVERIFY(controller.moveCelKey(cel, 12, 20));
         QVERIFY(!controller.moveCelKey(cel, 12, 30));
-        QVERIFY(controller.celMotion(cel)->keyAt(20));
+        QVERIFY(controller.celMotion(cel)->hasKeyAt(20));
         QVERIFY(controller.setCelPivot(cel, 10, 20));
         QCOMPARE(controller.celMotion(cel)->pivotX, 10.0);
         QVERIFY(!controller.setCelPivot(cel, 10, 20));
@@ -185,9 +197,9 @@ private slots:
         doc::CelMotion motion;
         motion.pivotX = 50;
         motion.pivotY = 50;
-        motion.setKey(0, at(0, 0), doc::Easing::linear());
-        motion.setKey(10, at(100, 0), doc::Easing::linear());
-        motion.setKey(20, at(100, 0, 0, 1, 0.5), doc::Easing::linear());
+        keyAll(motion, 0, at(0, 0), doc::Easing::linear());
+        keyAll(motion, 10, at(100, 0), doc::Easing::linear());
+        keyAll(motion, 20, at(100, 0, 0, 1, 0.5), doc::Easing::linear());
         document.cel(piece)->setMotion(motion);
         renderer.renderAll(document, 0);
         QCOMPARE(renderer.image().pixelColor(50, 50), QColor(Qt::red)); // frame 0: on its place
@@ -219,7 +231,7 @@ private slots:
         doc::CelMotion motion;
         motion.pivotX = 100;
         motion.pivotY = 100;
-        motion.setKey(0, at(0, 0, 90), doc::Easing::hold()); // a quarter turn clockwise
+        keyAll(motion, 0, at(0, 0, 90), doc::Easing::hold()); // a quarter turn clockwise
         document.cel(piece)->setMotion(motion);
         canvas::FrameRenderer renderer;
         renderer.renderAll(document, 0);
@@ -227,7 +239,7 @@ private slots:
         QCOMPARE(renderer.image().pixelColor(100, 115), QColor(Qt::red));
         QCOMPARE(renderer.image().pixelColor(115, 100), QColor(Qt::white));
         // Scaled by 2 around the pivot (a key held on).
-        motion.setKey(0, at(0, 0, 0, 2));
+        keyAll(motion, 0, at(0, 0, 0, 2));
         document.cel(piece)->setMotion(motion);
         renderer.renderAll(document, 0);
         QCOMPARE(renderer.image().pixelColor(135, 100), QColor(Qt::red)); // 100..140 now
@@ -248,7 +260,7 @@ private slots:
         doc::CelMotion motion;
         motion.pivotX = 28;
         motion.pivotY = 28;
-        motion.setKey(0, at(40.5, 0.5, 0, 3), doc::Easing::hold()); // off the pixel grid, three times as big
+        keyAll(motion, 0, at(40.5, 0.5, 0, 3), doc::Easing::hold()); // off the pixel grid, three times as big
         document.cel(piece)->setMotion(motion);
         QImage out[canvas::kResampleFilters];
         for (int f = 0; f < canvas::kResampleFilters; ++f) {
@@ -296,13 +308,13 @@ private slots:
         const QTransform toView = canvas.view().documentToView();
         const double zoom = canvas.view().zoom();
         auto at = [&](double x, double y) { return toView.map(QPointF(x, y)).toPoint(); };
-        QCOMPARE(controller.celMotion(cel)->keys().size(), size_t(1));
+        QCOMPARE(controller.celMotion(cel)->keyFrames().size(), size_t(1));
 
         // On the key, inside the box: the key moves by as much as the pen moved.
         QTest::mousePress(&canvas, Qt::LeftButton, {}, at(960, 540));
         QTest::mouseMove(&canvas, at(1000, 560));
         QTest::mouseRelease(&canvas, Qt::LeftButton, {}, at(1000, 560));
-        QCOMPARE(controller.celMotion(cel)->keys().size(), size_t(1));
+        QCOMPARE(controller.celMotion(cel)->keyFrames().size(), size_t(1));
         const doc::CelPose moved = controller.celPoseAt(cel, 0);
         QVERIFY(std::abs(moved.x - 40) < 1.5 / zoom + 0.6 && std::abs(moved.y - 20) < 1.5 / zoom + 0.6);
         QCOMPARE(controller.celMotion(cel)->pivotX, 960.0); // the middle of what it shows
@@ -320,21 +332,21 @@ private slots:
         QTest::mousePress(&canvas, Qt::LeftButton, {}, at(1000, 560));
         QTest::mouseMove(&canvas, at(1100, 560));
         QTest::mouseRelease(&canvas, Qt::LeftButton, {}, at(1100, 560));
-        QCOMPARE(controller.celMotion(cel)->keys().size(), size_t(1)); // not a key
+        QCOMPARE(controller.celMotion(cel)->keyFrames().size(), size_t(1)); // not a key
         QVERIFY(controller.celPoseAt(cel, 10).x > 120);
         QCOMPARE(canvas.documentImage().pixelColor(1100, 560), QColor(Qt::red));
         const double temporary = controller.celPoseAt(cel, 10).x;
         controller.setCurrentFrame(0);
         controller.setCurrentFrame(10);
         QCOMPARE(controller.celPoseAt(cel, 10).x, moved.x); // all as before: it went when the frame was left
-        QCOMPARE(controller.celMotion(cel)->keys().size(), size_t(1));
+        QCOMPARE(controller.celMotion(cel)->keyFrames().size(), size_t(1));
 
         // The Cel key button before leaving makes it a key.
         QTest::mousePress(&canvas, Qt::LeftButton, {}, at(1000, 560));
         QTest::mouseMove(&canvas, at(1100, 560));
         QTest::mouseRelease(&canvas, Qt::LeftButton, {}, at(1100, 560));
         controller.toggleCelKey(cel);
-        QCOMPARE(controller.celMotion(cel)->keys().size(), size_t(2));
+        QCOMPARE(controller.celMotion(cel)->keyFrames().size(), size_t(2));
         QCOMPARE(controller.celPoseAt(cel, 10).x, temporary);
         controller.setCurrentFrame(0);
         controller.setCurrentFrame(10);
@@ -343,7 +355,7 @@ private slots:
         QVERIFY(midway > controller.celPoseAt(cel, 0).x && midway < temporary);
         QCOMPARE(controller.undoText(), QStringLiteral("Undo keyframes"));
         controller.undo(); // the key made
-        QCOMPARE(controller.celMotion(cel)->keys().size(), size_t(1));
+        QCOMPARE(controller.celMotion(cel)->keyFrames().size(), size_t(1));
         controller.undo(); // the drag of the first key
         controller.undo(); // the first key itself
         QVERIFY(controller.celMotion(cel)->isEmpty());
@@ -380,6 +392,175 @@ private slots:
         QCOMPARE(canvas.documentImage().pixelColor(1240, 540), QColor(Qt::red));
         controller.removeCelKey(cel, 0); // no keys: the same tool is on the pixels, the cel is as drawn
         QCOMPARE(canvas.documentImage().pixelColor(1240, 540), QColor(Qt::white));
+    }
+
+    // Under the "Keyframes" row, a row for each channel that has keys: a drag on a diamond there moves that channel's key
+    // alone, a double click on an empty cell makes a key of that channel alone.
+    void theTimelineHasARowForEachChannel()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        controller.setSceneLength(40);
+        const doc::CelId cel = controller.currentCel();
+        ui::TimelinePanel panel(&controller, &state);
+        panel.resize(900, 320);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        controller.setCurrentFrame(4);
+        controller.toggleCelKey(cel); // position, rotation and scale: three rows under "Keyframes"
+        ui::TimelineMetrics m;
+        auto *vp = panel.view()->viewport();
+        auto center = [&](int row, int frame) { return QPoint(m.frameX(frame) + m.frameWidth / 2, m.rowY(row) + m.rowHeight / 2); };
+        // Rows: 0 the cel, 1 Keyframes, 2 Position, 3 Rotation, 4 Scale.
+        QTest::mousePress(vp, Qt::LeftButton, {}, center(3, 4));
+        QTest::mouseMove(vp, center(3, 7));
+        QTest::mouseMove(vp, center(3, 9));
+        QTest::mouseRelease(vp, Qt::LeftButton, {}, center(3, 9));
+        const doc::CelMotion *motion = controller.celMotion(cel);
+        QVERIFY(motion->keyAt(doc::Channel::Rotation, 9) && !motion->keyAt(doc::Channel::Rotation, 4));
+        QVERIFY(motion->keyAt(doc::Channel::Position, 4) && motion->keyAt(doc::Channel::Scale, 4)); // the others stay
+        // A click on a diamond of a channel's row chooses that key alone; on the "Keyframes" row, the keys of the frame.
+        QTest::mouseClick(vp, Qt::LeftButton, {}, center(3, 9));
+        QVERIFY(panel.view()->selectedKey() && panel.view()->selectedKey()->second == 9);
+        QCOMPARE(panel.view()->selectedKeyChannel(), std::optional<doc::Channel>(doc::Channel::Rotation));
+        QTest::mouseClick(vp, Qt::LeftButton, {}, center(2, 4));
+        QCOMPARE(panel.view()->selectedKey()->second, 4);
+        QCOMPARE(panel.view()->selectedKeyChannel(), std::optional<doc::Channel>(doc::Channel::Position));
+        QTest::mouseClick(vp, Qt::LeftButton, {}, center(1, 4));
+        QVERIFY(!panel.view()->selectedKeyChannel());
+        // A double click on the scale's row: a key of the scale alone.
+        QMouseEvent press(QEvent::MouseButtonDblClick, QPointF(center(4, 20)), vp->mapToGlobal(QPointF(center(4, 20))),
+                          Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        QApplication::sendEvent(vp, &press);
+        QMouseEvent release(QEvent::MouseButtonRelease, QPointF(center(4, 20)), vp->mapToGlobal(QPointF(center(4, 20))),
+                            Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        QApplication::sendEvent(vp, &release);
+        QVERIFY(motion->keyAt(doc::Channel::Scale, 20));
+        QVERIFY(!motion->keyAt(doc::Channel::Position, 20) && !motion->keyAt(doc::Channel::Rotation, 20));
+        // On the "Keyframes" row a drag moves what is on that frame, all of its channels.
+        QTest::mousePress(vp, Qt::LeftButton, {}, center(1, 4));
+        QTest::mouseMove(vp, center(1, 6));
+        QTest::mouseMove(vp, center(1, 12));
+        QTest::mouseRelease(vp, Qt::LeftButton, {}, center(1, 12));
+        QVERIFY(motion->keyAt(doc::Channel::Position, 12) && motion->keyAt(doc::Channel::Scale, 12));
+        QVERIFY(!motion->keyAt(doc::Channel::Position, 4) && !motion->keyAt(doc::Channel::Scale, 4));
+    }
+
+    // Position, rotation, scale and opacity are keyed on their own: a channel with no key stays as drawn, one with keys goes
+    // along its own, and the keys of one channel do not touch another's.
+    void theChannelsAreKeyedOnTheirOwn()
+    {
+        doc::CelMotion motion;
+        motion.setKey(doc::Channel::Position, 0, at(0, 0), doc::Easing::linear());
+        motion.setKey(doc::Channel::Position, 10, at(100, 0), doc::Easing::linear());
+        motion.setKey(doc::Channel::Rotation, 4, at(0, 0, 90), doc::Easing::linear());
+        motion.setKey(doc::Channel::Rotation, 8, at(0, 0, 180), doc::Easing::linear());
+        QVERIFY(!motion.hasKeys(doc::Channel::Scale) && !motion.hasKeys(doc::Channel::Opacity));
+        QCOMPARE(motion.keyFrames(), (std::vector<int>{0, 4, 8, 10}));
+        QVERIFY(motion.hasKeyAt(4) && !motion.keyAt(doc::Channel::Position, 4)); // a key of the rotation only
+        const doc::CelPose six = motion.poseAt(6);
+        QCOMPARE(six.x, 60.0);              // along the position's own keys
+        QCOMPARE(six.rotation, 135.0);      // along the rotation's
+        QCOMPARE(six.scaleX, 1.0);          // no key: as drawn
+        QCOMPARE(six.opacity, 1.0);
+        QCOMPARE(motion.poseAt(2).rotation, 90.0); // before the first rotation key: as it puts it
+        QCOMPARE(motion.poseAt(30).rotation, 180.0);
+        // A key keeps only what is of its channel.
+        QCOMPARE(motion.keyAt(doc::Channel::Rotation, 4)->pose, doc::channelOf(doc::Channel::Rotation, at(55, 66, 90, 3, 0.2)));
+        // The keys of all the channels at once on a frame: moved only if every place is free.
+        motion.setKey(doc::Channel::Scale, 4, at(0, 0, 0, 2), doc::Easing::linear());
+        motion.setKey(doc::Channel::Rotation, 5, at(0, 0, 100));
+        QVERIFY(!motion.moveKeysAt(4, 5)); // the rotation has a key on 5: none of them moves
+        QVERIFY(motion.keyAt(doc::Channel::Rotation, 4) && motion.keyAt(doc::Channel::Scale, 4));
+        QVERIFY(motion.moveKeysAt(4, 6));
+        QVERIFY(motion.keyAt(doc::Channel::Rotation, 6) && motion.keyAt(doc::Channel::Scale, 6));
+        QVERIFY(motion.removeKeysAt(6));
+        QVERIFY(!motion.hasKeys(doc::Channel::Scale) && motion.keys(doc::Channel::Rotation).size() == 2);
+    }
+
+    // The Cel key and what the tools do keep to the channels: the first key is of position, rotation and scale; a drag keys
+    // (or changes) only what it changes; the key of a frame goes with its channels.
+    void theControllerKeysChannels()
+    {
+        document::DocumentController controller;
+        controller.setSceneLength(30);
+        QImage image(60, 40, QImage::Format_ARGB32);
+        image.fill(Qt::red);
+        controller.importImage(image, QStringLiteral("piece"));
+        const doc::CelId cel = controller.currentCel();
+        QVERIFY(controller.setCelKey(cel, 0, doc::CelPose{}));
+        const doc::CelMotion *m = controller.celMotion(cel);
+        QVERIFY(m->hasKeys(doc::Channel::Position) && m->hasKeys(doc::Channel::Rotation) && m->hasKeys(doc::Channel::Scale));
+        QVERIFY(!m->hasKeys(doc::Channel::Opacity)); // not unless it is used
+        // A key on another frame with the opacity changed: the channels that have keys, and the opacity, which changed.
+        QVERIFY(controller.setCelKey(cel, 10, at(50, 0, 0, 1, 0.5)));
+        QVERIFY(m->keyAt(doc::Channel::Opacity, 10) && !m->keyAt(doc::Channel::Opacity, 0));
+        QCOMPARE(controller.celPoseAt(cel, 10).opacity, 0.5);
+        // One channel's key on its own: no other is made.
+        QVERIFY(controller.setCelChannelKey(cel, doc::Channel::Rotation, 5, at(0, 0, 45)));
+        QVERIFY(m->keyAt(doc::Channel::Rotation, 5) && !m->keyAt(doc::Channel::Position, 5) && !m->keyAt(doc::Channel::Scale, 5));
+        QVERIFY(controller.removeCelKey(cel, 5, doc::Channel::Rotation));
+        QVERIFY(!m->hasKeyAt(5));
+        // Setting a pose by hand: a key of the channel on its frame is changed, with none the pose goes with the frame.
+        controller.setCelPose(cel, 10, at(80, 0), doc::Channel::Position);
+        QCOMPARE(controller.celPoseAt(cel, 10).x, 80.0);
+        QVERIFY(m->keyAt(doc::Channel::Position, 10)->pose.x == 80.0);
+        controller.setCelPose(cel, 3, at(0, 0, 30), doc::Channel::Rotation);
+        QCOMPARE(controller.celPoseAt(cel, 3).rotation, 30.0);
+        QVERIFY(!m->keyAt(doc::Channel::Rotation, 3)); // not a key
+        QCOMPARE(controller.celPoseAt(cel, 3).x, controller.celMotion(cel)->interpolatedAt(3).x); // the rest as the keys have it
+        controller.setCurrentFrame(4);
+        QCOMPARE(controller.celPoseAt(cel, 3).rotation, 0.0); // gone with the frame
+        // The easing and the move are for a channel, or for all the keys of the frame.
+        QVERIFY(controller.setCelKeyEasing(cel, 10, doc::Easing::hold()));
+        QCOMPARE(m->keyAt(doc::Channel::Position, 10)->easing, doc::Easing::hold());
+        QCOMPARE(m->keyAt(doc::Channel::Opacity, 10)->easing, doc::Easing::hold());
+        QVERIFY(controller.setCelKeyEasing(cel, 10, doc::Easing::linear(), doc::Channel::Opacity));
+        QCOMPARE(m->keyAt(doc::Channel::Position, 10)->easing, doc::Easing::hold());
+        QVERIFY(controller.moveCelKey(cel, 10, 12, doc::Channel::Opacity));
+        QVERIFY(m->keyAt(doc::Channel::Position, 10) && m->keyAt(doc::Channel::Opacity, 12));
+        QVERIFY(controller.moveCelKey(cel, 10, 11)); // the rest of them
+        QVERIFY(!m->keyAt(doc::Channel::Position, 10) && m->keyAt(doc::Channel::Position, 11));
+    }
+
+    // The Transform tool keys what it changes: a drag moves the position's key, and the rotation and scale's stay.
+    void aDragChangesOnlyItsOwnChannel()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        controller.setSceneLength(30);
+        QImage image(60, 40, QImage::Format_ARGB32);
+        image.fill(Qt::red);
+        controller.importImage(image, QStringLiteral("piece"));
+        const doc::CelId cel = controller.currentCel();
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(900, 520);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        const QTransform toView = canvas.view().documentToView();
+        auto at2 = [&](double x, double y) { return toView.map(QPointF(x, y)).toPoint(); };
+        state.setActiveTool(tools::ToolId::Transform);
+        controller.setCelKey(cel, 0, [] { doc::CelPose p; p.rotation = 20; p.scaleX = p.scaleY = 1.5; return p; }());
+        // The key of frame 0 moves: the position's key is changed, the rotation's and the scale's are as they were.
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, at2(960, 540));
+        QTest::mouseMove(&canvas, at2(1000, 540));
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, at2(1000, 540));
+        canvas.finishTransform(true);
+        const doc::CelMotion *m = controller.celMotion(cel);
+        QVERIFY(m->keyAt(doc::Channel::Position, 0)->pose.x > 20);
+        QCOMPARE(m->keyAt(doc::Channel::Rotation, 0)->pose.rotation, 20.0);
+        QCOMPARE(m->keyAt(doc::Channel::Scale, 0)->pose.scaleX, 1.5);
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo keyframes"));
+        // On a frame with no key the drag leaves a pose that goes with the frame, of the position alone.
+        controller.setCurrentFrame(7);
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, at2(1000, 540));
+        QTest::mouseMove(&canvas, at2(1060, 540));
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, at2(1060, 540));
+        QVERIFY(controller.celPoseAt(cel, 7).x > m->keyAt(doc::Channel::Position, 0)->pose.x + 30);
+        QCOMPARE(controller.celPoseAt(cel, 7).rotation, 20.0);
+        controller.toggleCelKey(cel); // the Cel key makes it a key of the channels that have keys
+        QVERIFY(m->keyAt(doc::Channel::Position, 7) && m->keyAt(doc::Channel::Rotation, 7) && m->keyAt(doc::Channel::Scale, 7));
+        QVERIFY(!m->keyAt(doc::Channel::Opacity, 7));
     }
 
     // A pose edit is open, as the Transform tool's: the bar's OK (Enter) applies it as one undo step, Cancel (Esc) puts the
@@ -422,7 +603,7 @@ private slots:
         QCOMPARE(controller.celPoseAt(cel, 0).x, moved);
         controller.undo();
         QCOMPARE(controller.celPoseAt(cel, 0).x, 0.0);
-        QCOMPARE(controller.celMotion(cel)->keys().size(), size_t(1)); // the key stays: it was one step before
+        QCOMPARE(controller.celMotion(cel)->keyFrames().size(), size_t(1)); // the key stays: it was one step before
         // Leaving the frame applies an edit that was open.
         drag(960, 1000);
         QVERIFY(!canvas.transformBounds().isNull());
@@ -458,7 +639,7 @@ private slots:
         QTest::mousePress(&canvas, Qt::LeftButton, {}, at(700, 300));
         QTest::mouseMove(&canvas, at(780, 330));
         QTest::mouseRelease(&canvas, Qt::LeftButton, {}, at(780, 330));
-        QVERIFY(controller.celMotion(cel)->keyAt(0));
+        QVERIFY(controller.celMotion(cel)->hasKeyAt(0));
         const doc::CelPose pose = controller.celPoseAt(cel, 0);
         QVERIFY(std::abs(pose.x - 80) < 1.5 / zoom + 0.6 && std::abs(pose.y - 30) < 1.5 / zoom + 0.6);
         QCOMPARE(pose.rotation, 0.0);
@@ -549,33 +730,33 @@ private slots:
         QCOMPARE(scale->value(), 100.0);
         QVERIFY(key->isEnabled() && !del->isEnabled()); // no key here yet
         key->click(); // the first one
-        QVERIFY(controller.celMotion(cel)->keyAt(0));
+        QVERIFY(controller.celMotion(cel)->hasKeyAt(0));
         QVERIFY(!key->isEnabled() && del->isEnabled());
         x->setValue(75); // on a key: the key changes
-        QCOMPARE(controller.celMotion(cel)->keys().size(), size_t(1));
+        QCOMPARE(controller.celMotion(cel)->keyFrames().size(), size_t(1));
         QCOMPARE(controller.celPoseAt(cel, 0).x, 75.0);
         controller.setCurrentFrame(12);
         QCOMPARE(x->value(), 75.0); // after the last key it stays as it was put
         rotation->setValue(45); // on a frame with no key: a pose that goes with the frame
         scale->setValue(150);
-        QCOMPARE(controller.celMotion(cel)->keys().size(), size_t(1));
+        QCOMPARE(controller.celMotion(cel)->keyFrames().size(), size_t(1));
         QCOMPARE(controller.celPoseAt(cel, 12).rotation, 45.0);
         QCOMPARE(controller.celPoseAt(cel, 12).scaleX, 1.5);
         key->click(); // made a key before leaving
-        QCOMPARE(controller.celMotion(cel)->keys().size(), size_t(2));
+        QCOMPARE(controller.celMotion(cel)->keyFrames().size(), size_t(2));
         QCOMPARE(controller.celPoseAt(cel, 12).rotation, 45.0);
         controller.setCurrentFrame(6);
         QVERIFY(x->value() == 75.0 && rotation->value() > 0 && rotation->value() < 45); // between: in between
         QVERIFY(!del->isEnabled());
         controller.setCurrentFrame(12);
         del->click();
-        QCOMPARE(controller.celMotion(cel)->keys().size(), size_t(1));
+        QCOMPARE(controller.celMotion(cel)->keyFrames().size(), size_t(1));
         // Changing the key's curve.
         controller.setCurrentFrame(0);
         auto *easing = panel.findChild<QComboBox *>(QStringLiteral("poseEasing"));
         easing->setCurrentIndex(easing->findText(QStringLiteral("Hold")));
         emit easing->activated(easing->currentIndex());
-        QCOMPARE(controller.celMotion(cel)->keyAt(0)->easing, doc::Easing::hold());
+        QCOMPARE(controller.celMotion(cel)->keyAt(doc::Channel::Position, 0)->easing, doc::Easing::hold());
     }
 
     // The "Cel key" button of the timeline, and the row of keys that comes with the first one: a click on a diamond shows
@@ -599,7 +780,7 @@ private slots:
         controller.setCurrentFrame(4);
         button->click(); // a key here
         QVERIFY(button->isChecked());
-        QVERIFY(controller.celMotion(cel)->keyAt(4));
+        QVERIFY(controller.celMotion(cel)->hasKeyAt(4));
         // The row of keys is under the cel's: one row more.
         const int motionY = m.rowY(1) + m.rowHeight / 2;
         auto diamond = [&](int frame) { return QPoint(m.frameX(frame) + m.frameWidth / 2, motionY); };
@@ -613,7 +794,7 @@ private slots:
         QTest::mouseMove(vp, diamond(7));
         QTest::mouseMove(vp, diamond(9));
         QTest::mouseRelease(vp, Qt::LeftButton, {}, diamond(9));
-        QVERIFY(controller.celMotion(cel)->keyAt(9) && !controller.celMotion(cel)->keyAt(4));
+        QVERIFY(controller.celMotion(cel)->hasKeyAt(9) && !controller.celMotion(cel)->hasKeyAt(4));
         QCOMPARE(controller.undoText(), QStringLiteral("Undo keyframes"));
         // A double click on an empty cell of the row: a key there.
         QMouseEvent press(QEvent::MouseButtonDblClick, QPointF(diamond(20)), vp->mapToGlobal(QPointF(diamond(20))),
@@ -622,25 +803,25 @@ private slots:
         QMouseEvent release(QEvent::MouseButtonRelease, QPointF(diamond(20)), vp->mapToGlobal(QPointF(diamond(20))),
                             Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
         QApplication::sendEvent(vp, &release);
-        QVERIFY(controller.celMotion(cel)->keyAt(20));
+        QVERIFY(controller.celMotion(cel)->hasKeyAt(20));
         // The header of the row of keys has no toggles: a click on it chooses the cel and changes nothing else.
         const bool visible = controller.document().cel(cel)->properties().visible;
         QTest::mouseClick(vp, Qt::LeftButton, {}, QPoint(60, motionY));
         QCOMPARE(controller.document().cel(cel)->properties().visible, visible);
         QCOMPARE(controller.currentCel(), cel);
-        // The arrow at the left of the keys' header folds the row away under its cel (the keys stay); the one in the cel's
-        // header at the right brings it back.
-        QVERIFY(view->motionRowShown(0));
-        QTest::mouseClick(vp, Qt::LeftButton, {}, QPoint(18, motionY));
-        QVERIFY(!view->motionRowShown(0));
-        QCOMPARE(controller.celMotion(cel)->keys().size(), size_t(2));
-        QTest::mouseClick(vp, Qt::LeftButton, {}, QPoint(m.headerWidth - 12, m.rowY(0) + m.rowHeight / 2));
-        QVERIFY(view->motionRowShown(0)); // it is back
+        // The arrow at the right of the "Keyframes" header folds the rows of the channels away under it (the keys stay, and
+        // so does the row itself); another click brings them back.
+        QVERIFY(view->channelRowsShown(0));
+        QTest::mouseClick(vp, Qt::LeftButton, {}, QPoint(m.headerWidth - 12, motionY));
+        QVERIFY(!view->channelRowsShown(0));
+        QCOMPARE(controller.celMotion(cel)->keyFrames().size(), size_t(2));
+        QTest::mouseClick(vp, Qt::LeftButton, {}, QPoint(m.headerWidth - 12, motionY));
+        QVERIFY(view->channelRowsShown(0)); // it is back
         QCOMPARE(controller.document().cel(cel)->properties().visible, visible); // the arrow is no toggle of the cel
         // The button takes the key of the current frame away, and the row goes with the last key.
         controller.setCurrentFrame(9);
         button->click();
-        QVERIFY(!controller.celMotion(cel)->keyAt(9));
+        QVERIFY(!controller.celMotion(cel)->hasKeyAt(9));
         controller.setCurrentFrame(20);
         button->click();
         QVERIFY(controller.celMotion(cel)->isEmpty());

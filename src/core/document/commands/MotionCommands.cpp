@@ -40,7 +40,10 @@ ChangeSet SetCelMotionCommand::revert(Document &doc)
 
 std::size_t SetCelMotionCommand::memoryBytes() const
 {
-    return sizeof(SetCelMotionCommand) + (m_after.keys().size() + m_before.keys().size()) * sizeof(CelKey);
+    std::size_t keys = 0;
+    for (Channel c : kChannels)
+        keys += m_after.keys(c).size() + m_before.keys(c).size();
+    return sizeof(SetCelMotionCommand) + keys * sizeof(CelKey);
 }
 
 } // namespace mothion::doc

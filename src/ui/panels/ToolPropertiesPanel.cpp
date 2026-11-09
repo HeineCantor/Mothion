@@ -442,24 +442,24 @@ void ToolPropertiesPanel::setDocument(document::DocumentController *document)
     connect(m_document, &DocumentController::currentCelChanged, this, &ToolPropertiesPanel::syncAnimateFromDocument);
     connect(m_document, &DocumentController::documentReplaced, this, &ToolPropertiesPanel::syncAnimateFromDocument);
     // A field edited is the pose of the cel on this frame: a key is made there (or changed).
-    auto edit = [this](QDoubleSpinBox *box, auto change) {
-        connect(box, &QDoubleSpinBox::valueChanged, this, [this, change](double value) {
+    auto edit = [this](QDoubleSpinBox *box, doc::Channel channel, auto change) {
+        connect(box, &QDoubleSpinBox::valueChanged, this, [this, channel, change](double value) {
             if (!m_document)
                 return;
             const doc::CelId cel = m_document->currentCel();
             doc::CelPose pose = m_document->celPoseAt(cel, m_document->currentFrame());
             change(pose, value);
-            m_document->setCelPose(cel, m_document->currentFrame(), pose);
+            m_document->setCelPose(cel, m_document->currentFrame(), pose, channel);
         });
     };
-    edit(m_poseX, [](doc::CelPose &p, double v) { p.x = v; });
-    edit(m_poseY, [](doc::CelPose &p, double v) { p.y = v; });
-    edit(m_poseRotation, [](doc::CelPose &p, double v) { p.rotation = v; });
-    edit(m_poseScale, [](doc::CelPose &p, double v) {
+    edit(m_poseX, doc::Channel::Position, [](doc::CelPose &p, double v) { p.x = v; });
+    edit(m_poseY, doc::Channel::Position, [](doc::CelPose &p, double v) { p.y = v; });
+    edit(m_poseRotation, doc::Channel::Rotation, [](doc::CelPose &p, double v) { p.rotation = v; });
+    edit(m_poseScale, doc::Channel::Scale, [](doc::CelPose &p, double v) {
         p.scaleX = (p.scaleX < 0 ? -1 : 1) * v / 100.0; // a turned-over piece stays turned over
         p.scaleY = (p.scaleY < 0 ? -1 : 1) * v / 100.0;
     });
-    edit(m_poseOpacity, [](doc::CelPose &p, double v) { p.opacity = v / 100.0; });
+    edit(m_poseOpacity, doc::Channel::Opacity, [](doc::CelPose &p, double v) { p.opacity = v / 100.0; });
     connect(m_poseEasing, &QComboBox::activated, this, [this](int index) {
         if (!m_document)
             return;
@@ -492,7 +492,12 @@ void ToolPropertiesPanel::syncAnimateFromDocument()
     const int frame = m_document->currentFrame();
     const doc::CelPose pose = m_document->celPoseAt(id, frame);
     const doc::CelMotion *motion = m_document->celMotion(id);
-    const doc::CelKey *key = motion ? motion->keyAt(frame) : nullptr;
+    // The key of the frame: the first one of any channel (the curve shown is theirs, set for all of them together).
+    const doc::CelKey *key = nullptr;
+    if (motion)
+        for (doc::Channel ch : doc::kChannels)
+            if (!key)
+                key = motion->keyAt(ch, frame);
     m_animateCel->setText(cel ? tr("Cel “%1”, frame %2%3")
                                     .arg(QString::fromStdString(cel->properties().name))
                                     .arg(frame + 1)
@@ -508,7 +513,7 @@ void ToolPropertiesPanel::syncAnimateFromDocument()
     m_poseRotation->setValue(pose.rotation);
     m_poseScale->setValue(std::abs(pose.scaleX) * 100.0);
     m_poseOpacity->setValue(pose.opacity * 100.0);
-    m_poseKey->setEnabled(cel && !key);
+    m_poseKey->setEnabled(cel && (!key || (motion && motion->hasTemporaryAt(frame))));
     m_poseDelete->setEnabled(key != nullptr);
     m_poseEasing->setEnabled(key != nullptr);
     if (key) {

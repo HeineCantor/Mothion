@@ -368,22 +368,54 @@ doc::Camera cameraFromJson(const QString &text)
     return camera;
 }
 
-// A cel's motion as JSON text: the pivot and its keys (frame, position, scale, rotation, opacity, and the easing to the next
-// key as the camera's has it).
+// A cel's motion as JSON text: the pivot and, for each channel (p position, r rotation, s scale, o opacity), its keys (frame,
+// the values of the channel, and the easing to the next key as the camera's has it).
+const char *channelName(doc::Channel c)
+{
+    switch (c) {
+    case doc::Channel::Position: return "p";
+    case doc::Channel::Rotation: return "r";
+    case doc::Channel::Scale: return "s";
+    case doc::Channel::Opacity: return "o";
+    }
+    return "p";
+}
+
+doc::Easing easingFromJson(const QJsonValue &e)
+{
+    if (e.isString() && e.toString() == QLatin1String("h"))
+        return doc::Easing::hold();
+    if (e.isArray() && e.toArray().size() == 4) {
+        const QJsonArray a = e.toArray();
+        return doc::Easing::bezier(a[0].toDouble(), a[1].toDouble(), a[2].toDouble(), a[3].toDouble());
+    }
+    return doc::Easing::linear();
+}
+
 QString motionToJson(const doc::CelMotion &motion)
 {
-    QJsonArray keys;
-    for (const doc::CelKey &k : motion.keys()) {
-        QJsonObject key{{"f", k.frame}, {"x", k.pose.x}, {"y", k.pose.y}, {"sx", k.pose.scaleX}, {"sy", k.pose.scaleY},
-                        {"r", k.pose.rotation}, {"o", k.pose.opacity}};
-        switch (k.easing.kind) {
-        case doc::Easing::Kind::Hold: key["e"] = QStringLiteral("h"); break;
-        case doc::Easing::Kind::Linear: key["e"] = QStringLiteral("l"); break;
-        case doc::Easing::Kind::Bezier: key["e"] = QJsonArray{k.easing.x1, k.easing.y1, k.easing.x2, k.easing.y2}; break;
+    QJsonObject channels;
+    for (doc::Channel c : doc::kChannels) {
+        QJsonArray keys;
+        for (const doc::CelKey &k : motion.keys(c)) {
+            QJsonObject key{{"f", k.frame}};
+            switch (c) {
+            case doc::Channel::Position: key["x"] = k.pose.x; key["y"] = k.pose.y; break;
+            case doc::Channel::Rotation: key["r"] = k.pose.rotation; break;
+            case doc::Channel::Scale: key["sx"] = k.pose.scaleX; key["sy"] = k.pose.scaleY; break;
+            case doc::Channel::Opacity: key["o"] = k.pose.opacity; break;
+            }
+            switch (k.easing.kind) {
+            case doc::Easing::Kind::Hold: key["e"] = QStringLiteral("h"); break;
+            case doc::Easing::Kind::Linear: key["e"] = QStringLiteral("l"); break;
+            case doc::Easing::Kind::Bezier: key["e"] = QJsonArray{k.easing.x1, k.easing.y1, k.easing.x2, k.easing.y2}; break;
+            }
+            keys.append(key);
         }
-        keys.append(key);
+        if (!keys.isEmpty())
+            channels[channelName(c)] = keys;
     }
-    return QString::fromUtf8(QJsonDocument(QJsonObject{{"px", motion.pivotX}, {"py", motion.pivotY}, {"keys", keys}})
+    return QString::fromUtf8(QJsonDocument(QJsonObject{{"px", motion.pivotX}, {"py", motion.pivotY}, {"ch", channels}})
                                  .toJson(QJsonDocument::Compact));
 }
 
@@ -393,8 +425,7 @@ doc::CelMotion motionFromJson(const QString &text)
     const QJsonObject root = QJsonDocument::fromJson(text.toUtf8()).object();
     motion.pivotX = root.value("px").toDouble();
     motion.pivotY = root.value("py").toDouble();
-    for (const QJsonValue &value : root.value("keys").toArray()) {
-        const QJsonObject o = value.toObject();
+    auto poseOf = [](const QJsonObject &o) {
         doc::CelPose pose;
         pose.x = o.value("x").toDouble();
         pose.y = o.value("y").toDouble();
@@ -406,15 +437,19 @@ doc::CelMotion motionFromJson(const QString &text)
             pose.scaleY = 1.0;
         pose.rotation = o.value("r").toDouble();
         pose.opacity = std::clamp(o.value("o").toDouble(1.0), 0.0, 1.0);
-        doc::Easing easing = doc::Easing::linear();
-        const QJsonValue e = o.value("e");
-        if (e.isString() && e.toString() == QLatin1String("h")) {
-            easing = doc::Easing::hold();
-        } else if (e.isArray() && e.toArray().size() == 4) {
-            const QJsonArray a = e.toArray();
-            easing = doc::Easing::bezier(a[0].toDouble(), a[1].toDouble(), a[2].toDouble(), a[3].toDouble());
+        return pose;
+    };
+    const QJsonObject channels = root.value("ch").toObject();
+    for (doc::Channel c : doc::kChannels)
+        for (const QJsonValue &value : channels.value(channelName(c)).toArray()) {
+            const QJsonObject o = value.toObject();
+            motion.setKey(c, o.value("f").toInt(), poseOf(o), easingFromJson(o.value("e")));
         }
-        motion.setKey(o.value("f").toInt(), pose, easing);
+    // The first form of the format 11 had whole-pose keys: each one is a key of every channel.
+    for (const QJsonValue &value : root.value("keys").toArray()) {
+        const QJsonObject o = value.toObject();
+        for (doc::Channel c : doc::kChannels)
+            motion.setKey(c, o.value("f").toInt(), poseOf(o), easingFromJson(o.value("e")));
     }
     return motion;
 }

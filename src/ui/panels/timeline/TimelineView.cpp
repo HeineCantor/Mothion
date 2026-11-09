@@ -90,22 +90,40 @@ TimelineView::TimelineView(DocumentController *document, QWidget *parent)
 
 // --- model helpers ---------------------------------------------------------------
 
+int TimelineView::channelRowCount(int celIndex) const
+{
+    int n = 0;
+    for (doc::Channel c : doc::kChannels)
+        n += m_document->document().celAt(celIndex).motion().hasKeys(c) ? 1 : 0;
+    return n;
+}
+
+std::optional<doc::Channel> TimelineView::channelOfRow(int row) const
+{
+    const RowRef ref = rowRef(row);
+    if (!ref.motion || ref.channel < 0)
+        return std::nullopt;
+    return doc::kChannels[ref.channel];
+}
+
 bool TimelineView::hasKeys(int celIndex) const
 {
     return !m_document->document().celAt(celIndex).motion().isEmpty();
 }
 
-bool TimelineView::motionRowShown(int celIndex) const
+bool TimelineView::channelRowsShown(int celIndex) const
 {
     return hasKeys(celIndex) && !m_folded.count(m_document->document().celAt(celIndex).id());
 }
 
 QRect TimelineView::foldRect(int row) const
 {
+    // Only the "Keyframes" row has the arrow, at its right end: it folds the rows of the channels under it.
+    const RowRef ref = rowRef(row);
+    if (!ref.motion || ref.channel >= 0)
+        return {};
     const QRect r(0, m_metrics.rowY(row), m_metrics.headerWidth - 1, m_metrics.rowHeight);
-    // Right end of a cel's header; left of the keys' own, where its name would not be in the way.
-    return isMotionRow(row) ? QRect(r.left() + 11, r.top() + (r.height() - 14) / 2, 14, 14)
-                            : QRect(r.right() - 18, r.top() + (r.height() - 14) / 2, 14, 14);
+    return QRect(r.right() - 18, r.top() + (r.height() - 14) / 2, 14, 14);
 }
 
 void TimelineView::toggleFold(doc::CelId cel)
@@ -121,8 +139,8 @@ int TimelineView::rowCount() const
     const doc::Document &d = m_document->document();
     int rows = d.celCount();
     for (int i = 0; i < d.celCount(); ++i)
-        if (motionRowShown(i))
-            ++rows; // the row of its keys
+        if (hasKeys(i))
+            rows += 1 + (channelRowsShown(i) ? channelRowCount(i) : 0); // the row of its keys, and one for each channel
     return rows;
 }
 
@@ -133,8 +151,15 @@ TimelineView::RowRef TimelineView::rowRef(int row) const
     for (int i = d.celCount() - 1; i >= 0; --i) {
         if (at++ == row)
             return {i, false};
-        if (motionRowShown(i) && at++ == row)
-            return {i, true};
+        if (!hasKeys(i))
+            continue;
+        if (at++ == row)
+            return {i, true, -1};
+        if (!channelRowsShown(i))
+            continue;
+        for (doc::Channel c : doc::kChannels)
+            if (d.celAt(i).motion().hasKeys(c) && at++ == row)
+                return {i, true, int(c)};
     }
     return {0, false};
 }
@@ -394,7 +419,7 @@ void TimelineView::paintCells(QPainter &p) const
     for (int row = 0; row < rowCount(); ++row) {
         const int celIndex = celIndexForRow(row);
         if (isMotionRow(row)) {
-            paintMotionRow(p, celIndex, m.rowY(row));
+            paintMotionRow(p, celIndex, row);
             continue;
         }
         const doc::Cel &cel = d.celAt(celIndex);
@@ -482,13 +507,20 @@ int TimelineView::motionKeyAt(const QPoint &pos, int row) const
 {
     if (!isMotionRow(row) || pos.x() < m_metrics.headerWidth)
         return -1;
-    const doc::Cel &cel = m_document->document().celAt(celIndexForRow(row));
+    const doc::CelMotion &motion = m_document->document().celAt(celIndexForRow(row)).motion();
+    std::vector<int> frames;
+    if (const auto channel = channelOfRow(row)) {
+        for (const doc::CelKey &key : motion.keys(*channel))
+            frames.push_back(key.frame);
+    } else {
+        frames = motion.keyFrames();
+    }
     int best = -1, nearest = 8;
-    for (const doc::CelKey &key : cel.motion().keys()) {
-        const int distance = std::abs(pos.x() - (m_metrics.frameX(key.frame) + m_metrics.frameWidth / 2));
+    for (const int frame : frames) {
+        const int distance = std::abs(pos.x() - (m_metrics.frameX(frame) + m_metrics.frameWidth / 2));
         if (distance < nearest) {
             nearest = distance;
-            best = key.frame;
+            best = frame;
         }
     }
     return best;
@@ -506,8 +538,17 @@ void TimelineView::paintMotionHeader(QPainter &p, int celIndex, int row) const
     p.setFont(small);
     p.setPen(cel.properties().visible ? palette().placeholderText().color()
                                       : palette().color(QPalette::Disabled, QPalette::Text));
-    p.drawText(r.adjusted(28, 0, -4, 0), Qt::AlignVCenter | Qt::AlignLeft, tr("Keyframes"));
-    paintFoldArrow(p, foldRect(row), false);
+    const auto channel = channelOfRow(row);
+    if (channel) {
+        const QString name = *channel == doc::Channel::Position   ? tr("Position")
+                             : *channel == doc::Channel::Rotation ? tr("Rotation")
+                             : *channel == doc::Channel::Scale    ? tr("Scale")
+                                                                  : tr("Opacity");
+        p.drawText(r.adjusted(40, 0, -4, 0), Qt::AlignVCenter | Qt::AlignLeft, name);
+    } else {
+        p.drawText(r.adjusted(28, 0, -22, 0), Qt::AlignVCenter | Qt::AlignLeft, tr("Keyframes"));
+        paintFoldArrow(p, foldRect(row), !channelRowsShown(celIndex));
+    }
     p.setFont(font());
     p.setPen(palette().mid().color());
     p.drawLine(r.bottomLeft(), r.bottomRight());
@@ -529,46 +570,67 @@ void TimelineView::paintFoldArrow(QPainter &p, const QRect &r, bool folded) cons
     p.restore();
 }
 
-void TimelineView::paintMotionRow(QPainter &p, int celIndex, int y) const
+void TimelineView::paintMotionRow(QPainter &p, int celIndex, int row) const
 {
     const TimelineMetrics &m = m_metrics;
     const doc::Cel &cel = m_document->document().celAt(celIndex);
+    const int y = m.rowY(row);
     const int midY = y + m.rowHeight / 2;
     const QColor ink = motionColor();
-    const auto &keys = cel.motion().keys();
-    for (std::size_t i = 0; i + 1 < keys.size(); ++i) {
-        if (keys[i].easing.kind == doc::Easing::Kind::Hold)
-            continue;
-        p.setPen(QPen(ink.darker(110), 1.5));
-        p.drawLine(m.frameX(keys[i].frame) + m.frameWidth / 2, midY, m.frameX(keys[i + 1].frame) + m.frameWidth / 2, midY);
+    const auto channel = channelOfRow(row);
+    // A channel's row: its keys, joined where one goes to the next; the "Keyframes" row: a diamond where any has one.
+    std::vector<int> frames;
+    if (channel) {
+        const auto &keys = cel.motion().keys(*channel);
+        for (std::size_t i = 0; i < keys.size(); ++i) {
+            frames.push_back(keys[i].frame);
+            if (i + 1 < keys.size() && keys[i].easing.kind != doc::Easing::Kind::Hold) {
+                p.setPen(QPen(ink.darker(110), 1.5));
+                p.drawLine(m.frameX(keys[i].frame) + m.frameWidth / 2, midY, m.frameX(keys[i + 1].frame) + m.frameWidth / 2, midY);
+            }
+        }
+    } else {
+        frames = cel.motion().keyFrames();
     }
     const int current = m_document->currentFrame();
     p.setRenderHint(QPainter::Antialiasing);
-    for (const doc::CelKey &key : keys) {
-        int frame = key.frame;
-        const bool dragged = m_motionDrag && m_motionDrag->cel == cel.id() && m_motionDrag->from == frame;
+    for (const int keyFrame : frames) {
+        int frame = keyFrame;
+        const bool dragged = m_motionDrag && m_motionDrag->cel == cel.id() && m_motionDrag->from == frame
+                             && m_motionDrag->channel == channel;
         if (dragged)
             frame = m_motionDrag->to;
-        const bool chosen = m_selectedKey && m_selectedKey->first == cel.id() && m_selectedKey->second == key.frame;
+        // The key of a channel alone shows chosen on its channel's row and on the "Keyframes" one; a click on the latter
+        // chooses the keys of the frame, on every row.
+        const bool chosen = m_selectedKey && m_selectedKey->first == cel.id() && m_selectedKey->second == keyFrame
+                            && (!channel || !m_selectedChannel || *m_selectedChannel == *channel);
         const int cx = m.frameX(frame) + m.frameWidth / 2;
-        const int r = key.frame == current || dragged || chosen ? 7 : 5;
+        const int r = keyFrame == current || dragged || chosen ? 7 : 5;
         const QPolygon diamond({QPoint(cx, midY - r), QPoint(cx + r, midY), QPoint(cx, midY + r), QPoint(cx - r, midY)});
-        p.setPen(QPen(chosen || key.frame == current ? Qt::white : ink.darker(170), chosen ? 2 : 1));
+        p.setPen(QPen(chosen || keyFrame == current ? Qt::white : ink.darker(170), chosen ? 2 : 1));
         p.setBrush(dragged ? ink.lighter(130) : ink);
         p.drawPolygon(diamond);
     }
     p.setRenderHint(QPainter::Antialiasing, false);
 }
 
-void TimelineView::showMotionMenu(const QPoint &globalPos, int celIndex, int frame)
+void TimelineView::showMotionMenu(const QPoint &globalPos, int celIndex, int frame, std::optional<doc::Channel> channel)
 {
     const doc::Cel &cel = m_document->document().celAt(celIndex);
     const doc::CelId id = cel.id();
+    const doc::CelMotion &motion = cel.motion();
+    // The key the curve shown is of: the channel's, or the first of the channels that have one on the frame.
+    const doc::CelKey *key = nullptr;
+    for (doc::Channel c : doc::kChannels)
+        if (!key && (!channel || *channel == c))
+            key = motion.keyAt(c, frame);
     QMenu menu(this);
-    if (const doc::CelKey *key = cel.motion().keyAt(frame)) {
+    if (key) {
         QMenu *easing = menu.addMenu(tr("To the next key"));
         auto add = [&](const QString &text, const doc::Easing &e) {
-            QAction *action = easing->addAction(text, this, [this, id, frame, e] { m_document->setCelKeyEasing(id, frame, e); });
+            QAction *action = easing->addAction(text, this, [this, id, frame, e, channel] {
+                m_document->setCelKeyEasing(id, frame, e, channel);
+            });
             action->setCheckable(true);
             action->setChecked(key->easing == e);
         };
@@ -577,10 +639,33 @@ void TimelineView::showMotionMenu(const QPoint &globalPos, int celIndex, int fra
         add(tr("Ease in"), doc::Easing::easeIn());
         add(tr("Ease out"), doc::Easing::easeOut());
         add(tr("Ease in and out"), doc::Easing::easeInOut());
-        menu.addAction(tr("Delete keyframe"), this, [this, id, frame] { m_document->removeCelKey(id, frame); });
+        menu.addAction(channel ? tr("Delete keyframe") : tr("Delete keyframes"), this,
+                       [this, id, frame, channel] { m_document->removeCelKey(id, frame, channel); });
+    }
+    if (channel) {
+        if (!key)
+            menu.addAction(tr("Add keyframe here"), this, [this, id, frame, channel] {
+                m_document->setCelChannelKey(id, *channel, frame, m_document->celPoseAt(id, frame));
+            });
     } else {
-        menu.addAction(tr("Add keyframe here"), this,
-                       [this, id, frame] { m_document->setCelKey(id, frame, m_document->celPoseAt(id, frame)); });
+        // On the "Keyframes" row: all the channels that move, or one of the others.
+        if (!motion.hasKeyAt(frame))
+            menu.addAction(tr("Add keyframe here"), this,
+                           [this, id, frame] { m_document->setCelKey(id, frame, m_document->celPoseAt(id, frame)); });
+        QMenu *only = nullptr;
+        for (doc::Channel c : doc::kChannels) {
+            if (motion.keyAt(c, frame))
+                continue;
+            if (!only)
+                only = menu.addMenu(tr("Add a keyframe of"));
+            const QString name = c == doc::Channel::Position   ? tr("Position")
+                                 : c == doc::Channel::Rotation ? tr("Rotation")
+                                 : c == doc::Channel::Scale    ? tr("Scale")
+                                                               : tr("Opacity");
+            only->addAction(name, this, [this, id, frame, c] {
+                m_document->setCelChannelKey(id, c, frame, m_document->celPoseAt(id, frame));
+            });
+        }
     }
     menu.addSeparator();
     menu.addAction(tr("Delete all keyframes of the cel"), this, [this, id] { m_document->clearCelMotion(id); });
@@ -1060,11 +1145,8 @@ void TimelineView::paintHeaders(QPainter &p) const
             icon(IconId::Lock, tone).paint(&p, lockRect(row).adjusted(1, 1, -1, -1));
         p.setPen(cel.properties().visible ? ink
                                           : palette().color(QPalette::Disabled, QPalette::Text));
-        const bool keyed = hasKeys(celIndex);
-        p.drawText(r.adjusted(lockRect(row).right() + 6, 0, keyed ? -22 : -4, 0), Qt::AlignVCenter | Qt::AlignLeft,
+        p.drawText(r.adjusted(lockRect(row).right() + 6, 0, -4, 0), Qt::AlignVCenter | Qt::AlignLeft,
                    QString::fromStdString(cel.properties().name));
-        if (keyed)
-            paintFoldArrow(p, foldRect(row), !motionRowShown(celIndex));
         p.setPen(palette().mid().color());
         p.drawLine(r.bottomLeft(), r.bottomRight());
     }
@@ -1183,8 +1265,9 @@ void TimelineView::mousePressEvent(QMouseEvent *event)
         const doc::Cel &cel = m_document->document().celAt(celIndexForRow(row));
         m_document->setCurrentCel(cel.id());
         if (const int frame = motionKeyAt(pos, row); frame >= 0) {
-            m_motionDrag = MotionDrag{cel.id(), frame, frame};
+            m_motionDrag = MotionDrag{cel.id(), frame, frame, channelOfRow(row)};
             m_selectedKey = std::make_pair(cel.id(), frame);
+            m_selectedChannel = channelOfRow(row);
             m_document->setCurrentFrame(frame);
             emit frameScrubbed(frame);
         } else {
@@ -1398,8 +1481,9 @@ void TimelineView::mouseReleaseEvent(QMouseEvent *)
         const MotionDrag drag = *m_motionDrag;
         m_motionDrag.reset();
         // A key goes where there is none (one on the way is not jumped: it is a place taken).
-        if (drag.to != drag.from && m_document->moveCelKey(drag.cel, drag.from, drag.to)) {
+        if (drag.to != drag.from && m_document->moveCelKey(drag.cel, drag.from, drag.to, drag.channel)) {
             m_selectedKey = std::make_pair(drag.cel, drag.to);
+            m_selectedChannel = drag.channel;
             m_document->setCurrentFrame(drag.to);
             emit frameScrubbed(drag.to);
         }
@@ -1463,7 +1547,11 @@ void TimelineView::mouseDoubleClickEvent(QMouseEvent *event)
         if (pos.x() >= m_metrics.headerWidth) {
             const doc::CelId cel = m_document->document().celAt(celIndexForRow(row)).id();
             const int frame = frameAt(pos.x());
-            if (frame >= 0 && !m_document->celMotion(cel)->keyAt(frame))
+            const auto channel = channelOfRow(row);
+            const doc::CelMotion &motion = *m_document->celMotion(cel);
+            if (frame >= 0 && channel && !motion.keyAt(*channel, frame))
+                m_document->setCelChannelKey(cel, *channel, frame, m_document->celPoseAt(cel, frame));
+            else if (frame >= 0 && !channel && !motion.hasKeyAt(frame))
                 m_document->setCelKey(cel, frame, m_document->celPoseAt(cel, frame));
         }
         return;
@@ -1576,7 +1664,7 @@ void TimelineView::contextMenuEvent(QContextMenuEvent *event)
     const int frame = frameAt(event->pos().x());
     if (isMotionRow(row)) {
         m_document->setCurrentCel(m_document->document().celAt(celIndexForRow(row)).id());
-        showMotionMenu(event->globalPos(), celIndexForRow(row), frame);
+        showMotionMenu(event->globalPos(), celIndexForRow(row), frame, channelOfRow(row));
         return;
     }
     const doc::Cel &cel = m_document->document().celAt(celIndexForRow(row));

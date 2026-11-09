@@ -95,10 +95,13 @@ std::unique_ptr<doc::Document> sampleDocument()
     first.scaleX = 1.5;
     first.scaleY = -0.75;
     first.opacity = 0.4;
-    motion.setKey(0, first, doc::Easing::hold());
-    motion.setKey(9, doc::CelPose{}, doc::Easing::bezier(0.42, 0, 0.58, 1));
+    for (doc::Channel c : doc::kChannels)
+        motion.setKey(c, 0, first, doc::Easing::hold());
+    for (doc::Channel c : doc::kChannels)
+        motion.setKey(c, 9, doc::CelPose{}, doc::Easing::bezier(0.42, 0, 0.58, 1));
     first.rotation = 720;
-    motion.setKey(40, first, doc::Easing::linear());
+    for (doc::Channel c : doc::kChannels)
+        motion.setKey(c, 40, first, doc::Easing::linear());
     d->celAt(1).setMotion(motion);
     doc::GraphData graph;
     graph.nodes.push_back({1, "frame", -330.5, 12, {}});

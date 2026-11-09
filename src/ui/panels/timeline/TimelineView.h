@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/document/CelMotion.h"
 #include "core/document/Timing.h"
 #include "core/document/commands/DrawingCommands.h"
 #include "core/document/commands/TimingCommands.h"
@@ -71,8 +72,11 @@ public:
     bool pasteFrames(bool asCopies);
     bool canPasteFrames() const;
 
-    // The cel's row of keys is on view (it has keys and is not folded away under it).
-    bool motionRowShown(int celIndex) const;
+    // The key last clicked in the rows of motion, by cel and frame, and its channel (none: the keys of the frame, all).
+    const std::optional<std::pair<doc::CelId, int>> &selectedKey() const { return m_selectedKey; }
+    std::optional<doc::Channel> selectedKeyChannel() const { return m_selectedChannel; }
+    // The rows of the cel's channels are on view (it has keys and its "Keyframes" row is not folded).
+    bool channelRowsShown(int celIndex) const;
 
 signals:
     void frameWidthChanged(int width);
@@ -113,11 +117,15 @@ private:
     {
         int celIndex = 0;
         bool motion = false;
+        int channel = -1; // of a row of motion: the channel it shows, or -1 for the one with the keys of all of them
     };
     // The row of keys of a cel folds away under it (an arrow in its header, and at the left of the keys' own header): it is
     // there for a cel that has keys unless it is folded. Only the view: the keys are as they were.
     bool hasKeys(int celIndex) const;
-    QRect foldRect(int row) const; // the arrow, in the header of a cel with keys or of its row of keys
+    QRect foldRect(int row) const;
+    // Under the "Keyframes" row, a row for each channel (position, rotation, scale, opacity) that has keys, with its own.
+    std::optional<doc::Channel> channelOfRow(int row) const;
+    int channelRowCount(int celIndex) const; // the arrow, in the header of a cel with keys or of its row of keys
     void toggleFold(doc::CelId cel);
     RowRef rowRef(int row) const;
     bool isMotionRow(int row) const;
@@ -125,10 +133,10 @@ private:
     int celIndexForRow(int row) const; // the cel of a row (cels are bottom-first, rows top-first)
     // A diamond of the motion row `row` under `pos`: its frame, or -1.
     int motionKeyAt(const QPoint &pos, int row) const;
-    void paintMotionRow(QPainter &p, int celIndex, int y) const;
+    void paintMotionRow(QPainter &p, int celIndex, int row) const;
     void paintMotionHeader(QPainter &p, int celIndex, int row) const;
     void paintFoldArrow(QPainter &p, const QRect &r, bool folded) const;
-    void showMotionMenu(const QPoint &globalPos, int celIndex, int frame);
+    void showMotionMenu(const QPoint &globalPos, int celIndex, int frame, std::optional<doc::Channel> channel);
     int rowAt(int y) const;              // -1 outside the rows
     int frameAt(int x) const;
     // The eye and lock toggles in a row's header.
@@ -226,10 +234,12 @@ private:
         doc::CelId cel = doc::kNoId;
         int from = 0; // the key's frame
         int to = 0;   // where it would go
+        std::optional<doc::Channel> channel; // the key of this channel, or the keys of every one on that frame
     };
     std::optional<MotionDrag> m_motionDrag;
     std::set<doc::CelId> m_folded; // the cels whose row of keys is folded away
     std::optional<std::pair<doc::CelId, int>> m_selectedKey; // the key last clicked, by cel and frame
+    std::optional<doc::Channel> m_selectedChannel; // of that key: its channel's alone, or (none) all the keys of the frame
     struct MarkerDrag
     {
         int from = 0; // the marker's frame
