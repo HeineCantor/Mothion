@@ -227,6 +227,12 @@ public:
     bool eraseSelection(QString *reason = nullptr);
     // Moves (cut) or copies what is selected to a new layer above the
     // current one, in the same drawing; the new layer becomes current.
+    // Mirrors the selected pixels across the middle of the selection's box (the selection turns with them, so it still
+    // outlines them); what is outside stays. It works on the layers the tools work on: the current one, or every layer
+    // chosen in the Layers panel (a chosen cel or frame: all its layers). One undo step. False, with `reason`, if nothing
+    // is selected or there is nothing under it.
+    bool flipSelectionHorizontally(QString *reason = nullptr) { return flipSelection(true, reason); }
+    bool flipSelectionVertically(QString *reason = nullptr) { return flipSelection(false, reason); }
     bool cutSelectionToLayer(QString *reason = nullptr);
     bool copySelectionToLayer(QString *reason = nullptr);
 
@@ -390,6 +396,7 @@ private:
     // no layer because the frame is empty (`nothing` then says why).
     doc::Layer *workLayer(bool changesIt, const QString &nothing, QString *reason);
     bool selectionToLayer(bool cut, QString *reason);
+    bool flipSelection(bool horizontal, QString *reason);
     // Sets the selection as is, recording nothing.
     void assignSelection(const QPainterPath &area);
     void publish(const doc::ChangeSet &changes);

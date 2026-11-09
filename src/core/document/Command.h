@@ -78,6 +78,7 @@ enum class CommandKind {
     SceneLength,
     ChangeMask,
     EditMarkers,
+    Flip,
 };
 
 // An undoable change to a Document.

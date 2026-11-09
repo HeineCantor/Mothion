@@ -1075,6 +1075,198 @@ private slots:
     }
 
 
+    // The selection bar's flips mirror what is selected across the middle of the selection's box, the outline with it;
+    // what is outside stays; one undo step.
+    void flipSelectionMirrorsThePixelsAndTheOutline()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        QImage image(60, 40, QImage::Format_ARGB32);
+        for (int y = 0; y < 40; ++y)
+            for (int x = 0; x < 60; ++x)
+                image.setPixelColor(x, y, x < 30 ? Qt::red : Qt::blue); // x 930..989, y 520..559
+        controller.importImage(image, QStringLiteral("two"));
+        const doc::Cel &cel = controller.document().celAt(1);
+        auto pixel = [&](int x, int y) {
+            return QColor::fromRgba(cel.drawing(cel.timing().drawingAt(0))->layers.front().image.pixel(x, y));
+        };
+        QString reason;
+        QVERIFY(!controller.flipSelectionHorizontally(&reason)); // nothing selected
+        QVERIFY(!reason.isEmpty());
+
+        // A box over the left 40 px: red 30, blue 10. Flipped, blue first then red; the rest is left alone.
+        QPainterPath box;
+        box.addRect(930, 520, 40, 40);
+        controller.setSelection(box);
+        QCOMPARE(pixel(935, 540), QColor(Qt::red));
+        QVERIFY(controller.flipSelectionHorizontally(&reason));
+        QCOMPARE(pixel(935, 540), QColor(Qt::blue)); // was x 960..965, blue
+        QCOMPARE(pixel(945, 540), QColor(Qt::red));  // the red moved to the right of it
+        QCOMPARE(pixel(969, 540), QColor(Qt::red));
+        QCOMPARE(pixel(975, 540), QColor(Qt::blue)); // outside the box: untouched
+        QCOMPARE(controller.selection().boundingRect(), QRectF(930, 520, 40, 40)); // the box is where it was
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo flip"));
+        controller.undo();
+        QCOMPARE(pixel(935, 540), QColor(Qt::red));
+        QCOMPARE(pixel(969, 540), QColor(Qt::blue));
+        QCOMPARE(controller.selection().boundingRect(), QRectF(930, 520, 40, 40));
+        controller.redo();
+        QCOMPARE(pixel(935, 540), QColor(Qt::blue));
+        controller.undo();
+
+        // Vertical: a selection over the top half of the left side, two colors one above the other.
+        QPainterPath top;
+        top.addRect(930, 520, 20, 20); // red above... make it two bands by painting the lower half green
+        controller.setSelection(top);
+        auto &layerImage = controller.documentForCommands().celAt(1).drawing(cel.timing().drawingAt(0))->layers.front().image;
+        for (int y = 530; y < 540; ++y)
+            for (int x = 930; x < 950; ++x)
+                layerImage.setPixel(x, y, 0xff00ff00u); // the lower half of the box is green
+        QVERIFY(controller.flipSelectionVertically(&reason));
+        QCOMPARE(pixel(935, 525), QColor(Qt::green)); // the green is on top now
+        QCOMPARE(pixel(935, 535), QColor(Qt::red));
+        QCOMPARE(pixel(935, 545), QColor(Qt::red));   // below the box: untouched
+
+        // A box that is not centered on its content: the pixels go to the mirror place in the box, and so does the
+        // outline of what is selected (an odd shape comes out mirrored).
+        controller.clearSelection();
+        QPainterPath lshape;
+        lshape.addRect(960, 520, 20, 10); // blue, in the box's top half...
+        lshape.addRect(960, 530, 10, 10); // ...and the bottom left
+        controller.setSelection(lshape);
+        QVERIFY(controller.flipSelectionHorizontally(&reason));
+        const QPainterPath mirrored = controller.selection();
+        QVERIFY(mirrored.contains(QPointF(975, 525)) && mirrored.contains(QPointF(975, 535)));
+        QVERIFY(!mirrored.contains(QPointF(962, 535))); // the bottom part is on the right now (x 970..979)
+
+        // Every layer chosen in the panel is flipped together (a chosen cel or frame is all its layers), the hidden and the
+        // locked ones left out; one undo step for all.
+        controller.undo(); // the L-shape's flip
+        controller.clearSelection();
+        QImage green(60, 40, QImage::Format_ARGB32);
+        for (int y = 0; y < 40; ++y)
+            for (int x = 0; x < 60; ++x)
+                green.setPixelColor(x, y, x < 30 ? Qt::green : Qt::yellow);
+        controller.importImage(green, QStringLiteral("other")); // a cel above, the same place, current now
+        const doc::Cel &upper = controller.document().celAt(2);
+        const doc::CelId lowerId = cel.id(), upperId = upper.id();
+        auto layerRef = [&](const doc::Cel &c) {
+            const doc::Drawing *drawing = c.drawing(c.timing().drawingAt(0));
+            return document::DocumentController::LayerRef{c.id(), drawing->id, drawing->layers.front().id};
+        };
+        auto upperPixel = [&](int x, int y) {
+            return QColor::fromRgba(upper.drawing(upper.timing().drawingAt(0))->layers.front().image.pixel(x, y));
+        };
+        QPainterPath both;
+        both.addRect(930, 520, 60, 40);
+        controller.setSelection(both);
+        controller.setLayerSelection({layerRef(upper), layerRef(cel)});
+        const QColor lowerBefore = pixel(935, 540), upperBefore = upperPixel(935, 540);
+        QVERIFY(controller.flipSelectionHorizontally(&reason));
+        QVERIFY(pixel(935, 540) != lowerBefore);        // both are flipped
+        QVERIFY(upperPixel(935, 540) != upperBefore);
+        QCOMPARE(upperPixel(935, 540), QColor(Qt::yellow));
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo flip"));
+        controller.undo(); // one step for all of them, and the selection with it
+        QCOMPARE(pixel(935, 540), lowerBefore);
+        QCOMPARE(upperPixel(935, 540), upperBefore);
+        // A hidden layer is left alone...
+        controller.setLayerSelection({layerRef(upper), layerRef(cel)});
+        doc::CelProperties hidden = upper.properties();
+        hidden.visible = false;
+        controller.execute(doc::makeSetCelProperties(controller.document(), upperId, hidden));
+        controller.setLayerSelection({layerRef(upper), layerRef(cel)});
+        QVERIFY(controller.flipSelectionHorizontally(&reason));
+        QCOMPARE(upperPixel(935, 540), upperBefore);   // (the one in the hidden cel)
+        QVERIFY(pixel(935, 540) != lowerBefore);
+        controller.undo();
+        // ...and with none of them there to flip, it says so.
+        controller.setLayerSelection({layerRef(upper)});
+        QVERIFY(!controller.flipSelectionHorizontally(&reason));
+        QVERIFY(!reason.isEmpty());
+        controller.undo(); // the cel shown again
+        Q_UNUSED(lowerId)
+
+        // The same through the bar.
+        controller.setLayerSelection({});
+        state.setActiveTool(tools::ToolId::Brush);
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(600, 400);
+        ui::SelectionBar bar(&canvas, &controller, &state);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        auto *flipH = bar.findChild<QAbstractButton *>(QStringLiteral("flipHorizontal"));
+        auto *flipV = bar.findChild<QAbstractButton *>(QStringLiteral("flipVertical"));
+        QVERIFY(flipH && flipV);
+        const QRectF before = controller.selection().boundingRect();
+        flipV->click();
+        QCOMPARE(controller.selection().boundingRect(), before); // a vertical flip keeps the box
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo flip"));
+    }
+
+
+    // A cel (or a frame) chosen in the Layers panel is all its layers: the flip turns every one of them.
+    void flipSelectionTurnsAllTheLayersOfAChosenCelOrFrame()
+    {
+        document::DocumentController controller;
+        QImage image(60, 40, QImage::Format_ARGB32);
+        for (int y = 0; y < 40; ++y)
+            for (int x = 0; x < 60; ++x)
+                image.setPixelColor(x, y, x < 30 ? Qt::red : Qt::blue); // x 930..989, y 520..559
+        controller.importImage(image, QStringLiteral("two"));
+        QVERIFY(controller.addLayer(true)); // a second layer in the same frame, drawn with a green bar
+        const doc::Cel &cel = *controller.document().cel(controller.currentCel());
+        const doc::Drawing &drawing = *controller.currentDrawing();
+        QCOMPARE(drawing.layers.size(), std::size_t(2));
+        const doc::LayerId first = drawing.layers[0].id, second = drawing.layers[1].id;
+        auto &celRef = *controller.documentForCommands().cel(cel.id());
+        auto *second_ = celRef.drawing(drawing.id)->layer(second);
+        for (int y = 520; y < 560; ++y)
+            for (int x = 930; x < 940; ++x)
+                second_->image.setPixel(x, y, 0xff00ff00u); // green, at the left
+        auto at = [&](doc::LayerId id, int x, int y) {
+            return QColor::fromRgba(drawing.layer(id)->image.pixel(x, y));
+        };
+        ui::LayersPanel panel(&controller);
+        panel.resize(320, 600);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        QPainterPath all;
+        all.addRect(930, 520, 60, 40);
+        controller.setSelection(all);
+
+        // The cel's row: all its layers.
+        auto *tree = panel.findChild<QTreeWidget *>();
+        QVERIFY(tree && panel.celItem(cel.id()));
+        tree->setCurrentItem(panel.celItem(cel.id()));
+        QCoreApplication::processEvents();
+        QString reason;
+        QVERIFY2(controller.flipSelectionHorizontally(&reason), qPrintable(reason));
+        QCOMPARE(at(first, 935, 540), QColor(Qt::blue));  // the red half went to the right
+        QCOMPARE(at(second, 985, 540), QColor(Qt::green)); // the green bar too
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo flip"));
+        controller.undo();
+        QCOMPARE(at(first, 935, 540), QColor(Qt::red));
+        QCOMPARE(at(second, 935, 540), QColor(Qt::green));
+
+        // The frame's row: the same.
+        QVERIFY(panel.frameItem(drawing.id));
+        tree->setCurrentItem(panel.frameItem(drawing.id));
+        QCoreApplication::processEvents();
+        QVERIFY2(controller.flipSelectionHorizontally(&reason), qPrintable(reason));
+        QCOMPARE(at(first, 935, 540), QColor(Qt::blue));
+        QCOMPARE(at(second, 985, 540), QColor(Qt::green));
+        controller.undo();
+
+        // One layer: only it.
+        tree->setCurrentItem(panel.layerItem(second));
+        QCoreApplication::processEvents();
+        QVERIFY2(controller.flipSelectionHorizontally(&reason), qPrintable(reason));
+        QCOMPARE(at(first, 935, 540), QColor(Qt::red)); // the other is left as it was
+        QCOMPARE(at(second, 985, 540), QColor(Qt::green));
+    }
+
+
     void selectionChangesAreUndoable()
     {
         document::DocumentController controller;

@@ -16,7 +16,7 @@ namespace mothion::ui {
 
 // Commands for the selection, floating over the canvas a few pixels under
 // it (above it when there is no room below), shown only while something is
-// selected: deselect, invert, erase, cut and copy to a new layer, transform.
+// selected: deselect, invert, erase, cut and copy to a new layer, transform, flip.
 class SelectionBar : public QFrame
 {
     Q_OBJECT

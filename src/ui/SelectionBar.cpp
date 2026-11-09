@@ -70,6 +70,10 @@ SelectionBar::SelectionBar(canvas::CanvasView *canvas, document::DocumentControl
     add(IconId::Transform, tr("Transform (Ctrl+T)"),
         [toolState] { toolState->setActiveTool(tools::ToolId::Transform); })
         ->setObjectName(QStringLiteral("transform"));
+    add(IconId::FlipHorizontal, tr("Flip horizontally"), withReason(&Controller::flipSelectionHorizontally))
+        ->setObjectName(QStringLiteral("flipHorizontal"));
+    add(IconId::FlipVertical, tr("Flip vertically"), withReason(&Controller::flipSelectionVertically))
+        ->setObjectName(QStringLiteral("flipVertical"));
 
     connect(m_document, &Controller::selectionChanged, this, &SelectionBar::place);
     connect(m_document, &Controller::documentReplaced, this, &SelectionBar::place);

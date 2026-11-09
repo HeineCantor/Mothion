@@ -1225,6 +1225,57 @@ bool DocumentController::eraseSelection(QString *reason)
     return true;
 }
 
+bool DocumentController::flipSelection(bool horizontal, QString *reason)
+{
+    interruptStroke();
+    const QString nothing = tr("Nothing in the selection on this frame");
+    if (!hasSelection()) {
+        if (reason)
+            *reason = tr("Nothing is selected");
+        return false;
+    }
+    // The layers the tools work on: the one current, or every one chosen in the Layers panel (those of a chosen cel or
+    // frame are all chosen together), the hidden and locked ones left out.
+    const std::vector<PaintTarget> targets = beginPaintLayers(reason);
+    if (targets.empty())
+        return false;
+    const canvas::SelectionMask mask = canvas::SelectionMask::fromPath(m_selection);
+    const QRect box = mask.bounds;
+    std::vector<doc::TiledImage> before;
+    bool anything = false;
+    for (const PaintTarget &target : targets) {
+        before.push_back(*target.image);
+        doc::TiledImage inside, outside;
+        canvas::splitByMask(*target.image, mask, inside, outside);
+        if (inside.isEmpty())
+            continue;
+        anything = true;
+        // The part under the selection, mirrored in the box it was in, and laid over what stays.
+        QImage area(box.size(), QImage::Format_ARGB32_Premultiplied);
+        inside.read(box.x(), box.y(), box.width(), box.height(), reinterpret_cast<doc::Pixel *>(area.bits()),
+                    area.bytesPerLine() / 4);
+        const QImage mirrored = area.mirrored(horizontal, !horizontal);
+        doc::TiledImage piece;
+        piece.write(box.x(), box.y(), box.width(), box.height(),
+                    reinterpret_cast<const doc::Pixel *>(mirrored.constBits()), mirrored.bytesPerLine() / 4);
+        canvas::compositeOver(outside, piece);
+        *target.image = std::move(outside);
+    }
+    if (!anything) {
+        cancelPaint();
+        if (reason)
+            *reason = nothing;
+        return false;
+    }
+    // The outline is mirrored across the same line (pixel x goes to left + right - x), and goes into the same undo step.
+    const QTransform across = horizontal ? QTransform(-1, 0, 0, 1, 2.0 * box.left() + box.width(), 0)
+                                         : QTransform(1, 0, 0, -1, 0, 2.0 * box.top() + box.height());
+    setSelection(across.map(m_selection), false);
+    notifyPainted(box);
+    endPaint(before, doc::CommandKind::Flip);
+    return true;
+}
+
 bool DocumentController::cutSelectionToLayer(QString *reason)
 {
     return selectionToLayer(true, reason);
@@ -1399,6 +1450,7 @@ QString DocumentController::commandName(doc::CommandKind kind)
     case doc::CommandKind::EditCamera: return tr("camera");
     case doc::CommandKind::SceneLength: return tr("scene length");
     case doc::CommandKind::EditMarkers: return tr("markers");
+    case doc::CommandKind::Flip: return tr("flip");
     case doc::CommandKind::ChangeMask: return tr("mask");
     case doc::CommandKind::ClearLayer: return tr("clear");
     case doc::CommandKind::Move: return tr("move");
