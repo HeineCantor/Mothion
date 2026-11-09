@@ -487,6 +487,68 @@ private slots:
 
     // The transform moves, scales and rotates the selected pixels with their
     // selection; Enter applies (one undo step), Esc drops it, either goes back.
+    // The filter chosen reads the pixels when they are scaled: with Lanczos3 an edge stays sharper than with bilinear.
+    // While the pen drags, the fast way is used; once it is up the pixels are drawn again with the filter.
+    void transformScalesWithTheFilterChosen()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        QImage image(40, 20, QImage::Format_ARGB32);
+        for (int y = 0; y < 20; ++y)
+            for (int x = 0; x < 40; ++x)
+                image.setPixelColor(x, y, x < 20 ? Qt::black : Qt::white);
+        controller.importImage(image, QStringLiteral("edge")); // x 940..979, y 530..549
+        const doc::Cel &cel = controller.document().celAt(1);
+        auto layerImage = [&]() -> const doc::TiledImage & {
+            return cel.drawing(cel.timing().drawingAt(0))->layers.front().image;
+        };
+        // Pixels between nearly black and nearly white, on a row through the edge, once the box is four times as wide.
+        auto softness = [&] {
+            int first = -1, last = -1;
+            for (int x = 940; x < 1100; ++x) {
+                const int v = qRed(layerImage().pixel(x, 540));
+                if (qAlpha(layerImage().pixel(x, 540)) == 0)
+                    continue;
+                if (v > 30 && first < 0)
+                    first = x;
+                if (v < 225)
+                    last = x;
+            }
+            return last - first + 1;
+        };
+        tools::Preferences &prefs = tools::Preferences::instance();
+        const int before = prefs.transformFilter();
+        state.setActiveTool(tools::ToolId::Transform);
+        canvas::TransformTool tool(&controller, &state, [](const QString &) {}, [] {});
+        tool.setDeferredRendering(false);
+        tool.activated();
+        QCOMPARE(tool.box(), QRect(940, 530, 40, 20));
+        prefs.setTransformFilter(int(canvas::ResampleFilter::Bilinear));
+        tool.press({979, 549}, Qt::NoModifier); // the bottom-right corner, taken to four times the size
+        tool.move({1100, 600}, Qt::NoModifier);
+        tool.release({1100, 600}, Qt::NoModifier);
+        const int bilinear = softness();
+        prefs.setTransformFilter(int(canvas::ResampleFilter::Lanczos3)); // the choice is taken up at once
+        tool.refreshRendering();
+        const int lanczos = softness();
+        QVERIFY2(lanczos < bilinear, qPrintable(QStringLiteral("Lanczos3 %1 px, bilinear %2 px").arg(lanczos).arg(bilinear)));
+        prefs.setTransformFilter(int(canvas::ResampleFilter::Nearest));
+        tool.refreshRendering();
+        QVERIFY(softness() <= lanczos); // hard edge
+        // Dragging uses the fast way, and the filter comes with the pen's release.
+        prefs.setTransformFilter(int(canvas::ResampleFilter::Lanczos3));
+        tool.refreshRendering();
+        tool.press({1100, 600}, Qt::NoModifier);
+        tool.move({1060, 590}, Qt::NoModifier); // (the bilinear way, while dragging)
+        tool.release({1060, 590}, Qt::NoModifier);
+        const doc::TiledImage afterRelease = layerImage();
+        tool.refreshRendering(); // drawn again with the filter: the same, the release has already done it
+        QCOMPARE(layerImage().pixel(1000, 540), afterRelease.pixel(1000, 540));
+        tool.commit();
+        prefs.setTransformFilter(before);
+    }
+
+
     void transformMovesScalesAndRotatesTheSelection()
     {
         tools::ToolState state;

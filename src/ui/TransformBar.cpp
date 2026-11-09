@@ -1,7 +1,10 @@
 #include "ui/TransformBar.h"
 
 #include "canvas/CanvasView.h"
+#include "canvas/Resample.h"
+#include "tools/Preferences.h"
 
+#include <QComboBox>
 #include <QEvent>
 #include <QHBoxLayout>
 #include <QToolButton>
@@ -39,6 +42,22 @@ TransformBar::TransformBar(canvas::CanvasView *canvas)
         connect(button, &QToolButton::clicked, this, [this, apply] { m_canvas->finishTransform(apply); });
         layout->addWidget(button);
     };
+    // How the pixels are read when they are scaled or turned (as the filter of Krita's transform): bicubic by default,
+    // Lanczos3 for making a small picture bigger, nearest neighbor for pixel art. The choice is kept.
+    auto *filter = new QComboBox(this);
+    filter->setObjectName(QStringLiteral("filter"));
+    filter->setToolTip(tr("Filter: how the pixels are read when they are scaled or turned.\n"
+                          "Bicubic is sharp; Lanczos3 the sharpest, for making a picture bigger; Bilinear is soft; "
+                          "Nearest neighbor keeps hard edges (pixel art)."));
+    for (int i = 0; i < canvas::kResampleFilters; ++i)
+        filter->addItem(canvas::filterName(canvas::ResampleFilter(i)));
+    filter->setCurrentIndex(tools::Preferences::instance().transformFilter());
+    filter->setFocusPolicy(Qt::NoFocus); // the keys stay with the canvas
+    connect(filter, &QComboBox::activated, this,
+            [](int index) { tools::Preferences::instance().setTransformFilter(index); });
+    connect(&tools::Preferences::instance(), &tools::Preferences::changed, filter,
+            [filter] { filter->setCurrentIndex(tools::Preferences::instance().transformFilter()); });
+    layout->addWidget(filter);
     add(tr("OK"), tr("Apply the transform (Enter)"), QStringLiteral("ok"), true);
     add(tr("Cancel"), tr("Drop the transform (Esc)"), QStringLiteral("cancel"), false);
 

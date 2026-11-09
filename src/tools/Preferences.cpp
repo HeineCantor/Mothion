@@ -14,6 +14,7 @@ constexpr auto kRecentLimit = "recentLimit";
 constexpr auto kZoomStep = "zoomStep";
 constexpr auto kRotateStep = "rotateStep";
 constexpr auto kBrushOutline = "brushOutline";
+constexpr auto kTransformFilter = "transformFilter";
 constexpr auto kNewWidth = "newWidth";
 constexpr auto kNewHeight = "newHeight";
 constexpr auto kNewFps = "newFrameRate";
@@ -44,6 +45,7 @@ Preferences::Preferences()
     m_zoomStep = std::clamp(settings.value(path(kZoomStep), kDefaultZoomStep).toInt(), 5, 100);
     m_rotateStep = std::clamp(settings.value(path(kRotateStep), kDefaultRotateStep).toInt(), 1, 90);
     m_brushOutline = settings.value(path(kBrushOutline), true).toBool();
+    m_transformFilter = std::clamp(settings.value(path(kTransformFilter), 2).toInt(), 0, 3);
     m_newWidth = std::clamp(settings.value(path(kNewWidth), kDefaultWidth).toInt(), 16, 16000);
     m_newHeight = std::clamp(settings.value(path(kNewHeight), kDefaultHeight).toInt(), 16, 16000);
     m_newFps = std::clamp(settings.value(path(kNewFps), kDefaultFrameRate).toInt(), 1, 120);
@@ -94,6 +96,15 @@ void Preferences::setRotateStep(int degrees)
         return;
     m_rotateStep = degrees;
     save(kRotateStep, degrees);
+}
+
+void Preferences::setTransformFilter(int filter)
+{
+    filter = std::clamp(filter, 0, 3);
+    if (filter == m_transformFilter)
+        return;
+    m_transformFilter = filter;
+    save(kTransformFilter, filter);
 }
 
 void Preferences::setBrushOutline(bool on)
@@ -184,6 +195,7 @@ void Preferences::resetAll()
     setZoomStepPercent(kDefaultZoomStep);
     setRotateStep(kDefaultRotateStep);
     setBrushOutline(true);
+    setTransformFilter(2);
     setAutosaveMinutes(kDefaultAutosaveMinutes);
 }
 

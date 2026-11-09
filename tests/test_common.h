@@ -13,6 +13,7 @@
 #include "canvas/PerspectiveGizmo.h"
 #include "canvas/PerspectiveSnap.h"
 #include "canvas/PuppetTool.h"
+#include "canvas/Resample.h"
 #include "canvas/SelectionTool.h"
 #include "canvas/ShapeTool.h"
 #include "canvas/TransformTool.h"

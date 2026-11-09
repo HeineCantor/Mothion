@@ -62,6 +62,8 @@ public:
     // pen sample: a pen sends them faster than a big layer can be redrawn, and each one would wait its turn. The
     // box follows at once; the release (and the end of the transform) draws what is pending. Off: every sample.
     void setDeferredRendering(bool on) { m_deferred = on; }
+    // Draws the pixels again with the filter now chosen (Preferences::transformFilter()): the transform is as it was.
+    void refreshRendering();
     void paintOverlay(QPainter &painter, const ViewTransform &view) const override;
     // Under the pointer: the arrows of a handle, all four inside the box, a turning arrow out of it.
     bool hover(const QPointF &docPos) override;
@@ -113,6 +115,7 @@ private:
     double m_zoom = 1.0;
     bool m_deferred = false;
     bool m_renderPending = false;
+    bool m_rough = false; // what is drawn was made the fast way, while dragging: the chosen filter is yet to come
     QTimer m_renderTimer;
 
     struct Part // one layer transformed

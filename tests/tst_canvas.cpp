@@ -1,4 +1,5 @@
 #include "canvas/FrameRenderer.h"
+#include "canvas/Resample.h"
 #include "canvas/StrokeSession.h"
 #include "core/brush/DabGenerator.h"
 #include "canvas/ViewTransform.h"
@@ -446,6 +447,87 @@ private slots:
         renderer.setGuidesVisible(false);
         renderer.renderAll(document, 0);
         QCOMPARE(renderer.image().pixelColor(200, 162), QColor(Qt::white));
+    }
+
+    // The filters of the transform: a small picture made bigger.
+    void resamplingFiltersScaleUpAndKeepWhatTheyShouldKeep()
+    {
+        using canvas::ResampleFilter;
+        // A hard edge, black and white, 8 px wide: made four times bigger.
+        QImage edge(8, 4, QImage::Format_ARGB32_Premultiplied);
+        for (int y = 0; y < 4; ++y)
+            for (int x = 0; x < 8; ++x)
+                edge.setPixel(x, y, x < 4 ? 0xff000000u : 0xffffffffu);
+        const QTransform scale = QTransform::fromScale(4, 4);
+        // Identity: every filter gives the picture back.
+        for (int f = 0; f < canvas::kResampleFilters; ++f)
+            QCOMPARE(canvas::resampleTransformed(edge, QTransform(), edge.size(), ResampleFilter(f)), edge);
+        // Nearest neighbor: only the two colors. The others: a ramp over a few pixels, steeper in the middle with the
+        // sharper filters (the biggest step from a pixel to the next is the measure).
+        auto steepest = [&](ResampleFilter filter) {
+            const QImage big = canvas::resampleTransformed(edge, scale, QSize(32, 16), filter);
+            int most = 0;
+            for (int x = 1; x < 32; ++x)
+                most = std::max(most, std::abs(qRed(big.pixel(x, 8)) - qRed(big.pixel(x - 1, 8))));
+            return most;
+        };
+        const QImage hard = canvas::resampleTransformed(edge, scale, QSize(32, 16), ResampleFilter::Nearest);
+        for (int x = 0; x < 32; ++x)
+            QVERIFY(hard.pixel(x, 8) == 0xff000000u || hard.pixel(x, 8) == 0xffffffffu);
+        QCOMPARE(steepest(ResampleFilter::Nearest), 255);
+        QVERIFY(steepest(ResampleFilter::Bicubic) > steepest(ResampleFilter::Bilinear) + 8);
+        QVERIFY(steepest(ResampleFilter::Lanczos3) > steepest(ResampleFilter::Bilinear) + 8);
+        QVERIFY(steepest(ResampleFilter::Bilinear) < 100); // a soft ramp
+        // Never a color past the alpha, and nothing outside the picture.
+        for (int f = 0; f < canvas::kResampleFilters; ++f) {
+            QImage half(6, 6, QImage::Format_ARGB32_Premultiplied);
+            half.fill(qPremultiply(qRgba(200, 40, 10, 128)));
+            half.setPixel(2, 2, 0xff000000u);
+            const QImage big = canvas::resampleTransformed(half, QTransform::fromTranslate(5, 5) * QTransform::fromScale(3, 3),
+                                                           QSize(60, 60), ResampleFilter(f));
+            for (int y = 0; y < 60; ++y)
+                for (int x = 0; x < 60; ++x) {
+                    const QRgb p = big.pixel(x, y);
+                    QVERIFY(qRed(p) <= qAlpha(p) && qGreen(p) <= qAlpha(p) && qBlue(p) <= qAlpha(p));
+                }
+            QCOMPARE(qAlpha(big.pixel(2, 2)), 0);   // before the picture starts
+            QVERIFY(qAlpha(big.pixel(30, 30)) > 100); // inside it
+            QCOMPARE(qAlpha(big.pixel(58, 58)), 0); // after it ends
+        }
+        // The edge of a picture fades over a pixel of the result: not a staircase when it is turned.
+        QImage solid(10, 10, QImage::Format_ARGB32_Premultiplied);
+        solid.fill(Qt::white);
+        const QImage turned = canvas::resampleTransformed(solid, QTransform().translate(20, 5).rotate(30) * QTransform::fromScale(1, 1),
+                                                          QSize(40, 40), ResampleFilter::Lanczos3);
+        bool partial = false;
+        for (int y = 0; y < 40 && !partial; ++y)
+            for (int x = 0; x < 40; ++x)
+                partial = partial || (qAlpha(turned.pixel(x, y)) > 10 && qAlpha(turned.pixel(x, y)) < 245);
+        QVERIFY(partial);
+    }
+
+    // Made smaller, the wide filters average what each pixel covers: a 1 px line pattern gives an even gray, not a
+    // pattern of what the sampling happened to hit.
+    void resamplingSmallerAveragesInsteadOfSkipping()
+    {
+        using canvas::ResampleFilter;
+        QImage lines(64, 8, QImage::Format_ARGB32_Premultiplied);
+        for (int y = 0; y < 8; ++y)
+            for (int x = 0; x < 64; ++x)
+                lines.setPixel(x, y, x % 2 ? 0xffffffffu : 0xff000000u); // black and white, a pixel each
+        auto spread = [&](ResampleFilter filter) { // how much the values vary across the row, from 8 to 56
+            const QImage small = canvas::resampleTransformed(lines, QTransform::fromScale(0.4, 0.4), QSize(25, 2), filter);
+            int lo = 255, hi = 0;
+            for (int x = 3; x < 22; ++x) {
+                lo = std::min(lo, qRed(small.pixel(x, 1)));
+                hi = std::max(hi, qRed(small.pixel(x, 1)));
+            }
+            return hi - lo;
+        };
+        QVERIFY2(spread(ResampleFilter::Lanczos3) < 10, "Lanczos3 averages the lines");
+        QVERIFY2(spread(ResampleFilter::Bicubic) < 10, "bicubic does");
+        QVERIFY2(spread(ResampleFilter::Bilinear) < 30, "and bilinear, stretched, nearly");
+        QVERIFY(spread(ResampleFilter::Nearest) > 200); // while skipping pixels gives black or white
     }
 
 private:

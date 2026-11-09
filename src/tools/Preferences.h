@@ -51,6 +51,10 @@ public:
 
     // The brush's outline, at its size, under the pen over the canvas; the system pointer is not shown
     // over it then.
+    // How the Transform tool reads the pixels when it scales or turns them: a ResampleFilter's number (see
+    // canvas/Resample.h; 2 is bicubic).
+    int transformFilter() const { return m_transformFilter; }
+    void setTransformFilter(int filter);
     bool brushOutline() const { return m_brushOutline; }
     void setBrushOutline(bool on);
 
@@ -83,6 +87,7 @@ private:
     int m_zoomStep = kDefaultZoomStep;
     int m_rotateStep = kDefaultRotateStep;
     bool m_brushOutline = true;
+    int m_transformFilter = 2;
     int m_newWidth = kDefaultWidth;
     int m_newHeight = kDefaultHeight;
     int m_newFps = kDefaultFrameRate;

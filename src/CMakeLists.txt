@@ -103,6 +103,7 @@ qt_add_library(mothion_gui STATIC
     canvas/PerspectiveSnap.h canvas/PerspectiveSnap.cpp
     canvas/EffectBrushTools.h canvas/EffectBrushTools.cpp
     canvas/TransformTool.h canvas/TransformTool.cpp
+    canvas/Resample.h canvas/Resample.cpp
     canvas/SelectionMask.h canvas/SelectionMask.cpp
     canvas/SelectionTool.h canvas/SelectionTool.cpp
     canvas/PuppetTool.h canvas/PuppetTool.cpp

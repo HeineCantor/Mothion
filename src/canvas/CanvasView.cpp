@@ -203,7 +203,8 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
         }
     });
     connect(m_toolState, &ToolState::toolSettingsChanged, this, [this] { updateBrushOutline(m_pointerPos); });
-    connect(&Preferences::instance(), &Preferences::changed, this, [this] { // the outline on or off
+    connect(&Preferences::instance(), &Preferences::changed, this, [this] { // the outline on or off, the filter
+        static_cast<TransformTool *>(m_transformTool.get())->refreshRendering();
         updateCursor();
         update();
     });

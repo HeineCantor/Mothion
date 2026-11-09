@@ -8,6 +8,9 @@
 #include "tools/ToolState.h"
 
 #include <QLineF>
+#include "canvas/Resample.h"
+#include "tools/Preferences.h"
+
 #include <QPainter>
 #include <QPainterPath>
 #include <QPixmap>
@@ -362,6 +365,14 @@ void TransformTool::release(const QPointF &docPos, Qt::KeyboardModifiers modifie
         m_session->redo.clear();
     }
     m_drag.reset();
+    if (m_session && m_rough)
+        render(); // the pen is up: the pixels with the filter chosen
+}
+
+void TransformTool::refreshRendering()
+{
+    if (m_session && !m_drag && !m_session->undo.empty())
+        render(); // (before any drag the layers are as they were: nothing to draw)
 }
 
 void TransformTool::show()
@@ -418,6 +429,11 @@ void TransformTool::renderParts(bool onlyLive)
     m_renderPending = false;
     m_renderTimer.stop();
     Session &s = *m_session;
+    // Dragging, the fast way (a pen sends samples faster than a big layer is read with a wide kernel); the filter chosen
+    // is used once the pen is up.
+    const ResampleFilter filter = ResampleFilter(tools::Preferences::instance().transformFilter());
+    const bool rough = m_drag.has_value() && (filter == ResampleFilter::Bicubic || filter == ResampleFilter::Lanczos3);
+    m_rough = rough;
     const doc::Document &d = m_document->document();
     const QRect now = s.transform.mapRect(QRectF(s.box)).toAlignedRect().adjusted(-1, -1, 1, 1)
                       & QRect(0, 0, d.width(), d.height());
@@ -436,13 +452,20 @@ void TransformTool::renderParts(bool onlyLive)
         if (!now.isEmpty()) {
             if (part.source.isNull())
                 part.source = sourceOf(part.moving, s.box);
-            QImage moved(now.size(), QImage::Format_ARGB32_Premultiplied);
-            moved.fill(Qt::transparent);
-            {
+            QImage moved;
+            if (rough || filter == ResampleFilter::Bilinear || filter == ResampleFilter::Nearest) {
+                // The fast way: what the painter does itself (while the pen drags, and for the two plain filters).
+                moved = QImage(now.size(), QImage::Format_ARGB32_Premultiplied);
+                moved.fill(Qt::transparent);
                 QPainter p(&moved);
-                p.setRenderHint(QPainter::SmoothPixmapTransform);
+                p.setRenderHint(QPainter::SmoothPixmapTransform, filter != ResampleFilter::Nearest);
                 p.setTransform(s.transform * QTransform::fromTranslate(-now.x(), -now.y()));
                 p.drawImage(s.box.topLeft(), part.source);
+            } else {
+                moved = resampleTransformed(part.source,
+                                            QTransform::fromTranslate(s.box.x(), s.box.y()) * s.transform
+                                                * QTransform::fromTranslate(-now.x(), -now.y()),
+                                            now.size(), filter);
             }
             doc::TiledImage piece;
             piece.write(now.x(), now.y(), now.width(), now.height(),
@@ -466,7 +489,10 @@ void TransformTool::commit()
 {
     if (!m_session)
         return;
+    m_drag.reset();
     flushRender();
+    if (m_rough)
+        renderParts(true); // what the pen left drawn the fast way, with the filter chosen
     if (m_session->changed && !m_session->everythingDrawn)
         renderParts(false); // the layers of the other frames, now
     const std::unique_ptr<Session> s = std::move(m_session);
