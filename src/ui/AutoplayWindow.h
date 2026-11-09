@@ -5,6 +5,8 @@
 
 #include <QPointer>
 #include <QTimer>
+#include "core/document/CelMotion.h"
+
 #include <QWidget>
 
 #include <vector>
@@ -76,6 +78,7 @@ private:
     // What a frame shows: each layer's drawing, if visible. Frames that show
     // the same are not composed again.
     std::vector<doc::DrawingId> exposedAt(int frame) const;
+    std::vector<doc::CelPose> posesAt(int frame) const;
 
     document::DocumentController *m_document;
     QPointer<audio::AudioPlayer> m_audio; // may go before the window (both are the main window's children)
@@ -98,6 +101,7 @@ private:
     int m_loopFirst = 0;
     int m_loopLast = -1; // -1: to the end, whatever it becomes
     std::vector<doc::DrawingId> m_shown; // what the composed image shows
+    std::vector<doc::CelPose> m_shownPoses; // and where the cels are moved to (a held drawing moves on its keys)
     bool m_stale = true;                 // the document changed since it was composed
 };
 

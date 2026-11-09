@@ -7,6 +7,7 @@
 #include "document/DocumentController.h"
 #include "tools/ToolState.h"
 #include "ui/panels/ToolPropertiesPanel.h"
+#include "ui/AutoplayWindow.h"
 #include "ui/panels/timeline/TimelinePanel.h"
 #include "ui/panels/timeline/TimelineView.h"
 
@@ -505,6 +506,35 @@ private slots:
         QCOMPARE(qRed(pixels.pixel(980, 525)), 255);
         QTest::mouseClick(&canvas, Qt::LeftButton, {}, at(975, 560));
         QVERIFY(qBlue(pixels.pixel(980, 525)) > 200 && qRed(pixels.pixel(980, 525)) < 80);
+    }
+
+    // The autoplay shows a cel moved by its keys frame by frame, though its drawing is held over all of them (it used to
+    // draw again only when the drawings shown changed, so the picture stood still).
+    void theAutoplayFollowsTheKeys()
+    {
+        document::DocumentController controller;
+        controller.setSceneLength(30);
+        QImage image(60, 40, QImage::Format_ARGB32);
+        image.fill(Qt::red);
+        controller.importImage(image, QStringLiteral("piece")); // x 930..989, held on every frame
+        const doc::CelId cel = controller.currentCel();
+        controller.setCelKey(cel, 0, doc::CelPose{});
+        controller.setCelKey(cel, 10, [] { doc::CelPose p; p.x = 300; return p; }());
+        controller.setCelKeyEasing(cel, 0, doc::Easing::linear());
+        ui::AutoplayWindow window(&controller);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        window.setLoopRange(0, 10);
+        auto *slider = window.findChild<QSlider *>();
+        QVERIFY(slider);
+        slider->setValue(0);
+        QCOMPARE(window.image().pixelColor(960, 540), QColor(Qt::red));
+        slider->setValue(10); // 300 pixels on: the piece is at x 1230..1289
+        QCOMPARE(window.frame(), 10);
+        QCOMPARE(window.image().pixelColor(960, 540), QColor(Qt::white));
+        QCOMPARE(window.image().pixelColor(1260, 540), QColor(Qt::red));
+        slider->setValue(5); // halfway
+        QCOMPARE(window.image().pixelColor(1110, 540), QColor(Qt::red));
     }
 
     // Position, rotation, scale and opacity are keyed on their own: a channel with no key stays as drawn, one with keys goes

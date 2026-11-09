@@ -288,6 +288,7 @@ AutoplayWindow::AutoplayWindow(document::DocumentController *document, audio::Au
     using document::DocumentController;
     connect(m_document, &DocumentController::pixelsChanged, this, &AutoplayWindow::documentChanged);
     connect(m_document, &DocumentController::cameraChanged, this, &AutoplayWindow::documentChanged);
+    connect(m_document, &DocumentController::motionChanged, this, &AutoplayWindow::documentChanged);
     connect(m_document, &DocumentController::structureChanged, this, &AutoplayWindow::documentChanged);
     connect(m_document, &DocumentController::documentReplaced, this, &AutoplayWindow::documentChanged);
 
@@ -451,6 +452,15 @@ std::vector<doc::DrawingId> AutoplayWindow::exposedAt(int frame) const
     return shown;
 }
 
+std::vector<doc::CelPose> AutoplayWindow::posesAt(int frame) const
+{
+    const doc::Document &d = m_document->document();
+    std::vector<doc::CelPose> poses;
+    for (int i = 0; i < d.celCount(); ++i)
+        poses.push_back(d.celAt(i).motion().isEmpty() ? doc::CelPose{} : d.celAt(i).motion().poseAt(frame));
+    return poses;
+}
+
 void AutoplayWindow::showFrame(int frame)
 {
     m_frame = std::clamp(frame, 0, m_frameCount - 1);
@@ -460,9 +470,12 @@ void AutoplayWindow::showFrame(int frame)
     }
     m_position->setText(QStringLiteral("%1 / %2").arg(m_frame + 1).arg(m_frameCount));
     std::vector<doc::DrawingId> shown = exposedAt(m_frame);
-    if (m_stale || shown != m_shown) {
+    // A drawing held over frames is not drawn again, unless its cel is moved differently on this one (its keys).
+    std::vector<doc::CelPose> poses = posesAt(m_frame);
+    if (m_stale || shown != m_shown || poses != m_shownPoses) {
         m_renderer.renderAll(m_document->document(), m_frame);
         m_shown = std::move(shown);
+        m_shownPoses = std::move(poses);
         m_stale = false;
     }
     // Through the camera, if the project has one that is on; else the whole sheet, as it is.
