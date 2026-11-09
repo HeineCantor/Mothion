@@ -33,6 +33,8 @@ protected:
 
 private:
     void place();
+    // A command of the document that may fail, run; why it did not, in the status bar.
+    void runWithReason(bool (document::DocumentController::*command)(QString *));
 
     canvas::CanvasView *m_canvas;
     document::DocumentController *m_document;

@@ -50,29 +50,22 @@ SelectionBar::SelectionBar(canvas::CanvasView *canvas, document::DocumentControl
         return button;
     };
     // Those that may fail say why in the status bar.
-    auto withReason = [this](bool (Controller::*command)(QString *)) {
-        return [this, command] {
-            QString reason;
-            if (!(m_document->*command)(&reason))
-                emit statusMessage(reason);
-        };
-    };
     add(IconId::Deselect, tr("Deselect"), [this] { m_document->clearSelection(); })
         ->setObjectName(QStringLiteral("deselect"));
     add(IconId::InvertSelection, tr("Invert selection"), [this] { m_document->invertSelection(); })
         ->setObjectName(QStringLiteral("invert"));
-    add(IconId::EraseSelection, tr("Erase the selected pixels"), withReason(&Controller::eraseSelection))
+    add(IconId::EraseSelection, tr("Erase the selected pixels"), [this] { runWithReason(&Controller::eraseSelection); })
         ->setObjectName(QStringLiteral("erase"));
-    add(IconId::CutToLayer, tr("Cut to a new layer"), withReason(&Controller::cutSelectionToLayer))
+    add(IconId::CutToLayer, tr("Cut to a new layer"), [this] { runWithReason(&Controller::cutSelectionToLayer); })
         ->setObjectName(QStringLiteral("cut"));
-    add(IconId::CopyToLayer, tr("Copy to a new layer"), withReason(&Controller::copySelectionToLayer))
+    add(IconId::CopyToLayer, tr("Copy to a new layer"), [this] { runWithReason(&Controller::copySelectionToLayer); })
         ->setObjectName(QStringLiteral("copy"));
     add(IconId::Transform, tr("Transform (Ctrl+T)"),
         [toolState] { toolState->setActiveTool(tools::ToolId::Transform); })
         ->setObjectName(QStringLiteral("transform"));
-    add(IconId::FlipHorizontal, tr("Flip horizontally"), withReason(&Controller::flipSelectionHorizontally))
+    add(IconId::FlipHorizontal, tr("Flip horizontally"), [this] { runWithReason(&Controller::flipSelectionHorizontally); })
         ->setObjectName(QStringLiteral("flipHorizontal"));
-    add(IconId::FlipVertical, tr("Flip vertically"), withReason(&Controller::flipSelectionVertically))
+    add(IconId::FlipVertical, tr("Flip vertically"), [this] { runWithReason(&Controller::flipSelectionVertically); })
         ->setObjectName(QStringLiteral("flipVertical"));
 
     connect(m_document, &Controller::selectionChanged, this, &SelectionBar::place);
@@ -89,6 +82,13 @@ bool SelectionBar::eventFilter(QObject *watched, QEvent *event)
     if (watched == m_canvas && event->type() == QEvent::Resize)
         place();
     return QFrame::eventFilter(watched, event);
+}
+
+void SelectionBar::runWithReason(bool (document::DocumentController::*command)(QString *))
+{
+    QString reason;
+    if (!(m_document->*command)(&reason))
+        emit statusMessage(reason);
 }
 
 void SelectionBar::place()
