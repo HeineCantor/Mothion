@@ -82,6 +82,7 @@ enum class CommandKind {
     EditMarkers,
     Flip,
     EditMotion,
+    EditBlenderLink,
 };
 
 // An undoable change to a Document.

@@ -31,6 +31,7 @@ void BlenderImportJob::start(const QString &blendFile, const QString &blender, i
         return;
     }
     m_name = QFileInfo(blendFile).completeBaseName();
+    m_link = doc::BlenderLink{QFileInfo(blendFile).absoluteFilePath().toStdString(), std::max(0, startFrame), percent, lineArt};
     m_startFrame = std::max(0, startFrame);
     m_first = m_count = m_done = 0;
     m_sequence.reset();
@@ -55,7 +56,7 @@ void BlenderImportJob::onRange(int first, int last)
 {
     m_first = first;
     m_count = last - first + 1;
-    m_sequence = m_document->beginSequenceCel(m_name, m_startFrame, m_count);
+    m_sequence = m_document->beginSequenceCel(m_name, m_startFrame, m_count, &m_link);
     if (!m_sequence) {
         m_stopped = true;
         m_render.cancel();

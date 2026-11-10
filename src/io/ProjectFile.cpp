@@ -67,6 +67,9 @@ const char *const kSchema[] = {
     "create table markers (frame integer primary key, name text not null)",
     // Format 11: the motion of the cels (the keys of their pose), as JSON.
     "create table cel_motion (cel integer primary key references cels(id), data text not null)",
+    // Format 12: where a cel rendered from a Blender scene comes from.
+    "create table blender_links (cel integer primary key references cels(id), path text not null,"
+    " start integer not null, percent integer not null, lineart integer not null)",
 };
 
 // Stored by name, so reordering the enum cannot change old files.
@@ -633,6 +636,22 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
             return false;
         }
     }
+    for (int i = 0; i < d.celCount(); ++i) {
+        const doc::Cel &cel = d.celAt(i);
+        if (!cel.blenderLink())
+            continue;
+        QSqlQuery link(db);
+        link.prepare(QStringLiteral("insert into blender_links values (?, ?, ?, ?, ?)"));
+        link.addBindValue(qint64(cel.id()));
+        link.addBindValue(QString::fromStdString(cel.blenderLink()->path));
+        link.addBindValue(cel.blenderLink()->startFrame);
+        link.addBindValue(cel.blenderLink()->percent);
+        link.addBindValue(cel.blenderLink()->lineArt ? 1 : 0);
+        if (!link.exec()) {
+            failure = sqlError(link);
+            return false;
+        }
+    }
     for (const auto &[frame, name] : d.markers()) {
         QSqlQuery marker(db);
         marker.prepare(QStringLiteral("insert into markers values (?, ?)"));
@@ -883,6 +902,13 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
         while (q.next())
             if (doc::Cel *cel = d->cel(doc::CelId(q.value(0).toLongLong())))
                 cel->setMotion(motionFromJson(q.value(1).toString()));
+    }
+
+    if (version >= 12 && q.exec(QStringLiteral("select cel, path, start, percent, lineart from blender_links"))) {
+        while (q.next())
+            if (doc::Cel *cel = d->cel(doc::CelId(q.value(0).toLongLong())))
+                cel->setBlenderLink(doc::BlenderLink{q.value(1).toString().toStdString(), q.value(2).toInt(),
+                                                     std::clamp(q.value(3).toInt(), 1, 100), q.value(4).toInt() != 0});
     }
 
     if (version >= 10 && q.exec(QStringLiteral("select frame, name from markers"))) {

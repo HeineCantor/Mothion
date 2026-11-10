@@ -1,7 +1,9 @@
 #include "document/DocumentController.h"
 #include "io/BlenderRender.h"
+#include "io/FileSaveWatcher.h"
 #include "ui/MainWindow.h"
 
+#include <QDir>
 #include <QFile>
 #include <QProcess>
 #include <QSignalSpy>
@@ -177,6 +179,90 @@ private slots:
         QCOMPARE(order, (QList<int>{2, 3, 1}));
     }
 
+    // The watcher hears of a file written over, once, after things have been quiet.
+    void theWatcherHearsAFileWrittenOver()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString path = dir.filePath(QStringLiteral("scene.blend"));
+        auto write = [&](const QByteArray &bytes) {
+            QFile file(path);
+            QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            file.write(bytes);
+        };
+        write("one");
+        io::FileSaveWatcher watcher(nullptr, 200);
+        watcher.setPaths({path});
+        QSignalSpy saved(&watcher, &io::FileSaveWatcher::saved);
+        QTest::qWait(50);
+        write("two, longer");
+        write("three, longer still"); // a burst of writes is one save
+        QTRY_COMPARE_WITH_TIMEOUT(saved.size(), 1, 5000);
+        QCOMPARE(saved.first().at(0).toString(), path);
+        QTest::qWait(600);
+        QCOMPARE(saved.size(), 1);
+    }
+
+    // Blender saves a copy and renames it over the file: the file under the watch is a new one, and the next save is heard too.
+    void theWatcherHearsAFileReplacedByARename()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString path = dir.filePath(QStringLiteral("scene.blend"));
+        auto replace = [&](const QByteArray &bytes) {
+            QFile copy(path + QLatin1Char('@'));
+            QVERIFY(copy.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            copy.write(bytes);
+            copy.close();
+            QFile::remove(path);
+            QVERIFY(QFile::rename(path + QLatin1Char('@'), path));
+        };
+        replace("first");
+        io::FileSaveWatcher watcher(nullptr, 200);
+        watcher.setPaths({path});
+        QSignalSpy saved(&watcher, &io::FileSaveWatcher::saved);
+        QTest::qWait(50);
+        replace("the second one");
+        QTRY_COMPARE_WITH_TIMEOUT(saved.size(), 1, 5000);
+        QTest::qWait(100);
+        replace("and a third, longer one"); // the new file was watched again
+        QTRY_COMPARE_WITH_TIMEOUT(saved.size(), 2, 5000);
+        // A file that goes away is not a save; when it comes back changed, it is.
+        QFile::remove(path);
+        QTest::qWait(500);
+        QCOMPARE(saved.size(), 2);
+        replace("it is back, and different");
+        QTRY_COMPARE_WITH_TIMEOUT(saved.size(), 3, 5000);
+        // Files not watched say nothing.
+        QFile other(dir.filePath(QStringLiteral("other.blend")));
+        QVERIFY(other.open(QIODevice::WriteOnly));
+        other.write("x");
+        other.close();
+        QTest::qWait(600);
+        QCOMPARE(saved.size(), 3);
+    }
+
+    // The real thing: Blender opens the scene and saves it again.
+    void theWatcherHearsBlenderSaving()
+    {
+        const QString blender = io::findBlender();
+        if (blender.isEmpty())
+            QSKIP("Blender is not installed here");
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString scene = makeScene(blender, dir.filePath(QStringLiteral("scene.blend")), true);
+        QVERIFY2(!scene.isEmpty(), "the test scene could not be made");
+        io::FileSaveWatcher watcher;
+        watcher.setPaths({scene});
+        QSignalSpy saved(&watcher, &io::FileSaveWatcher::saved);
+        QProcess process;
+        process.start(blender, {QStringLiteral("-b"), scene, QStringLiteral("--python-expr"),
+                                QStringLiteral("import bpy; bpy.context.scene.frame_end = 5; bpy.ops.wm.save_mainfile()")});
+        QVERIFY(process.waitForFinished(120000));
+        QTRY_VERIFY_WITH_TIMEOUT(saved.size() >= 1, 5000);
+        QCOMPARE(saved.first().at(0).toString(), scene);
+    }
+
     // A scene with no camera says so, and nothing is rendered.
     void aSceneWithoutACameraSaysSo()
     {
@@ -225,6 +311,14 @@ private slots:
         QCOMPARE(controller->currentCel(), cel.id());
         QTRY_VERIFY_WITH_TIMEOUT(!window.blenderImportRunning(), 120000);
         QCOMPARE(controller->document().celCount(), cels + 1);
+        // The cel knows where it comes from.
+        const auto links = controller->blenderLinks();
+        QCOMPARE(links.size(), size_t(1));
+        QCOMPARE(links.front().first, cel.id());
+        QCOMPARE(QString::fromStdString(links.front().second.path), QFileInfo(scene).absoluteFilePath());
+        QCOMPARE(links.front().second.startFrame, 4);
+        QCOMPARE(links.front().second.percent, 50);
+        QVERIFY(!links.front().second.lineArt);
         // The draft was rendered small and made as big as the page: the cube is at its middle, the corner is clear.
         const doc::Drawing *drawing = cel.drawingAt(4);
         QVERIFY(drawing);
@@ -240,6 +334,9 @@ private slots:
         QCOMPARE(qAlpha(controller->document().celAt(cels).drawingAt(4)->layers.front().image.pixel(controller->document().width() / 2 - int(controller->document().width() * 0.2), controller->document().height() / 2)), 0);
         controller->undo();
         QCOMPARE(controller->document().celCount(), cels);
+        QVERIFY(controller->blenderLinks().empty());
+        controller->redo(); // and back, with its link
+        QCOMPARE(controller->blenderLinks().size(), size_t(1));
     }
 };
 

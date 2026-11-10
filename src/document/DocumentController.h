@@ -238,7 +238,11 @@ public:
         std::vector<doc::DrawingId> drawings;
         std::vector<doc::LayerId> layers;
     };
-    std::optional<PendingSequence> beginSequenceCel(const QString &name, int startFrame, int count);
+    // `link`, if given, is recorded on the cel (see doc::BlenderLink) in the same step.
+    std::optional<PendingSequence> beginSequenceCel(const QString &name, int startFrame, int count,
+                                                    const doc::BlenderLink *link = nullptr);
+    // The cels that came from a Blender scene, with where from.
+    std::vector<std::pair<doc::CelId, doc::BlenderLink>> blenderLinks() const;
     // False if the cel (or that drawing) is gone: it was undone, say.
     bool fillSequenceFrame(const PendingSequence &sequence, int index, const QImage &image);
     void finishSequence(const PendingSequence &sequence);

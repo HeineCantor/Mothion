@@ -4,6 +4,7 @@
 
 #include <QElapsedTimer>
 #include "io/BlenderRender.h"
+#include "io/FileSaveWatcher.h"
 
 #include <QMainWindow>
 #include <QPointer>
@@ -137,6 +138,8 @@ private:
     QPointer<AutoplayWindow> m_autoplay; // one at a time, made when first asked for
     BlenderImportJob *m_blenderJob = nullptr; // a Blender scene being made into a cel (a child of the window)
     QPushButton *m_blenderCancel = nullptr;  // in the status bar while it is
+    io::FileSaveWatcher *m_blenderFiles = nullptr; // the .blend files the cels come from: told when one is saved
+    void watchBlenderFiles();
     QPointer<CompositingWindow> m_compositing; // the node editor, made when first asked for
     QList<QAction *> m_fileActions;
     QList<QAction *> m_editActions;

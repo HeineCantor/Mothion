@@ -41,6 +41,7 @@ private:
     io::BlenderRender m_render;
     QTemporaryDir m_pictures;
     QString m_name;
+    doc::BlenderLink m_link; // recorded on the cel
     int m_startFrame = 0;
     int m_first = 0;
     int m_count = 0;

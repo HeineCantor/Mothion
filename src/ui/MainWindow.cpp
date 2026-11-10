@@ -208,6 +208,19 @@ MainWindow::MainWindow(QWidget *parent)
     auto *discord = new DiscordPresence(m_document, DiscordPresence::defaultApplicationId(), this);
     connect(&tools::Preferences::instance(), &tools::Preferences::changed, discord,
             [discord] { discord->setEnabled(tools::Preferences::instance().discordEnabled()); });
+    // The Blender scenes the cels come from: told when one is saved (to be made again, see BlenderImportJob).
+    m_blenderFiles = new io::FileSaveWatcher(this);
+    connect(m_document, &document::DocumentController::structureChanged, this, &MainWindow::watchBlenderFiles);
+    connect(m_document, &document::DocumentController::documentReplaced, this, &MainWindow::watchBlenderFiles);
+    connect(m_blenderFiles, &io::FileSaveWatcher::saved, this, [this](const QString &path) {
+        QStringList names;
+        for (const auto &[cel, link] : m_document->blenderLinks())
+            if (QFileInfo(QString::fromStdString(link.path)).absoluteFilePath() == path)
+                if (const doc::Cel *c = m_document->document().cel(cel))
+                    names << QString::fromStdString(c->properties().name);
+        statusBar()->showMessage(tr("The Blender scene “%1” was saved: %2").arg(QFileInfo(path).completeBaseName(), names.join(QStringLiteral(", "))), 6000);
+    });
+    watchBlenderFiles();
     auto *viewInfo = new QLabel(this);
     statusBar()->addPermanentWidget(viewInfo);
     connect(m_canvas, &canvas::CanvasView::viewChanged, viewInfo, [viewInfo](double zoom, double rot) {
@@ -686,6 +699,17 @@ int MainWindow::importSequenceFiles(QStringList files, const QString &name, int 
     if (imported > 0 && unreadable.isEmpty())
         statusBar()->showMessage(tr("%n image(s) imported", nullptr, imported), 4000);
     return imported;
+}
+
+void MainWindow::watchBlenderFiles()
+{
+    QStringList paths;
+    for (const auto &[cel, link] : m_document->blenderLinks()) {
+        const QString path = QFileInfo(QString::fromStdString(link.path)).absoluteFilePath();
+        if (!paths.contains(path))
+            paths << path;
+    }
+    m_blenderFiles->setPaths(paths);
 }
 
 bool MainWindow::blenderImportRunning() const

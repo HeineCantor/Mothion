@@ -51,6 +51,7 @@ add_library(mothion_core STATIC
     core/document/commands/CameraCommands.h core/document/commands/CameraCommands.cpp
     core/document/commands/MarkerCommands.h core/document/commands/MarkerCommands.cpp
     core/document/commands/MotionCommands.h core/document/commands/MotionCommands.cpp
+    core/document/commands/BlenderLinkCommands.h core/document/commands/BlenderLinkCommands.cpp
     core/document/CelMotion.h core/document/CelMotion.cpp
     core/document/Compositing.h
 )
@@ -75,6 +76,7 @@ qt_add_library(mothion_gui STATIC
     io/FrameExport.h io/FrameExport.cpp
     io/VideoExport.h io/VideoExport.cpp
     io/BlenderRender.h io/BlenderRender.cpp
+    io/FileSaveWatcher.h io/FileSaveWatcher.cpp
 
     tools/ToolState.h tools/ToolState.cpp
     tools/Preferences.h tools/Preferences.cpp

@@ -10,6 +10,7 @@
 #include "core/document/commands/AudioCommands.h"
 #include "core/document/commands/CameraCommands.h"
 #include "core/document/commands/MarkerCommands.h"
+#include "core/document/commands/BlenderLinkCommands.h"
 #include "core/document/commands/MotionCommands.h"
 #include "core/document/commands/CompositingCommands.h"
 #include "core/document/commands/CelCommands.h"
@@ -1226,8 +1227,18 @@ void DocumentController::setAudioDuration(double seconds)
     emit structureChanged(); // not an undo step: the length of the block is a fact about the file
 }
 
+std::vector<std::pair<doc::CelId, doc::BlenderLink>> DocumentController::blenderLinks() const
+{
+    std::vector<std::pair<doc::CelId, doc::BlenderLink>> links;
+    for (int i = 0; i < m_document->celCount(); ++i)
+        if (const auto &link = m_document->celAt(i).blenderLink())
+            links.emplace_back(m_document->celAt(i).id(), *link);
+    return links;
+}
+
 std::optional<DocumentController::PendingSequence> DocumentController::beginSequenceCel(const QString &name, int startFrame,
-                                                                                         int count)
+                                                                                         int count,
+                                                                                         const doc::BlenderLink *link)
 {
     if (count <= 0)
         return std::nullopt;
@@ -1240,6 +1251,11 @@ std::optional<DocumentController::PendingSequence> DocumentController::beginSequ
     sequence.cel = cel->celId();
     doc::ChangeSet changes = cel->apply(d);
     steps.push_back(std::move(cel));
+    if (link) { // where the cel comes from, as part of the same step
+        auto linking = std::make_unique<doc::SetBlenderLinkCommand>(sequence.cel, *link);
+        changes.merge(linking->apply(d));
+        steps.push_back(std::move(linking));
+    }
     for (int i = 0; i < count; ++i) {
         doc::NewDrawing drawing = doc::makeNewDrawing(d, sequence.cel, startFrame + i, 1, tr("Layer 1").toStdString());
         changes.merge(drawing.command->apply(d));
@@ -1753,6 +1769,7 @@ QString DocumentController::commandName(doc::CommandKind kind)
     case doc::CommandKind::EditMarkers: return tr("markers");
     case doc::CommandKind::Flip: return tr("flip");
     case doc::CommandKind::EditMotion: return tr("keyframes");
+    case doc::CommandKind::EditBlenderLink: return tr("Blender link");
     case doc::CommandKind::ChangeMask: return tr("mask");
     case doc::CommandKind::ClearLayer: return tr("clear");
     case doc::CommandKind::Move: return tr("move");
