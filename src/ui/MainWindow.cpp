@@ -17,6 +17,8 @@
 #include "tools/Preferences.h"
 #include "core/Parallel.h"
 #include "ui/DiscordPresence.h"
+#include "ui/BlenderImportDialog.h"
+#include "ui/BlenderImportJob.h"
 #include "ui/ImportSequenceDialog.h"
 #include "ui/BackupDialog.h"
 #include "ui/NewProjectDialog.h"
@@ -58,6 +60,8 @@
 #include <QDataStream>
 #include <QDialogButtonBox>
 #include <QDir>
+#include <QEventLoop>
+#include <QTemporaryDir>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QImageReader>
@@ -362,6 +366,7 @@ void MainWindow::createMenus()
     file->addSeparator();
     file->addAction(tr("Import image…"), this, &MainWindow::importImage);
     file->addAction(tr("Import image sequence…"), this, &MainWindow::chooseSequence);
+    file->addAction(tr("Import Blender scene…"), this, &MainWindow::chooseBlenderScene);
     file->addAction(tr("Import audio…"), this, &MainWindow::importAudio);
     file->addAction(tr("Import brush (.sut)…"), this, &MainWindow::importBrush);
     file->addSeparator();
@@ -616,7 +621,7 @@ bool naturalLess(const QString &a, const QString &b)
 
 } // namespace
 
-int MainWindow::importSequenceFiles(QStringList files, const QString &name, int startFrame, int hold)
+int MainWindow::importSequenceFiles(QStringList files, const QString &name, int startFrame, int hold, bool scaleUp)
 {
     // In name order, numbers as numbers (frame2 before frame10).
     std::stable_sort(files.begin(), files.end(), [](const QString &a, const QString &b) {
@@ -643,7 +648,8 @@ int MainWindow::importSequenceFiles(QStringList files, const QString &name, int 
             QImage image = reader.read();
             if (!image.isNull()) {
                 image = image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
-                if (image.width() > fitWidth || image.height() > fitHeight)
+                if (image.width() > fitWidth || image.height() > fitHeight
+                    || (scaleUp && image.width() < fitWidth && image.height() < fitHeight))
                     image = image.scaled(fitWidth, fitHeight, Qt::KeepAspectRatio, Qt::SmoothTransformation);
             }
             loaded[std::size_t(i)] = std::move(image);
@@ -680,6 +686,64 @@ int MainWindow::importSequenceFiles(QStringList files, const QString &name, int 
     if (imported > 0 && unreadable.isEmpty())
         statusBar()->showMessage(tr("%n image(s) imported", nullptr, imported), 4000);
     return imported;
+}
+
+bool MainWindow::blenderImportRunning() const
+{
+    return m_blenderJob && m_blenderJob->isRunning();
+}
+
+bool MainWindow::startBlenderImport(const QString &blendFile, const QString &blender, int startFrame, int percent, bool lineArt)
+{
+    if (blenderImportRunning()) {
+        statusBar()->showMessage(tr("A Blender scene is already being imported"), 4000);
+        return false;
+    }
+    if (!m_blenderJob) {
+        m_blenderJob = new BlenderImportJob(m_document, this);
+        m_blenderCancel = new QPushButton(tr("Stop Blender import"), this);
+        m_blenderCancel->setFlat(true);
+        m_blenderCancel->setFocusPolicy(Qt::NoFocus);
+        m_blenderCancel->hide();
+        statusBar()->addPermanentWidget(m_blenderCancel);
+        connect(m_blenderCancel, &QPushButton::clicked, m_blenderJob, &BlenderImportJob::cancel);
+        connect(m_blenderJob, &BlenderImportJob::status, this,
+                [this](const QString &text) { statusBar()->showMessage(text); }); // stays until another message comes
+        connect(m_blenderJob, &BlenderImportJob::finished, this, [this](bool ok, const QString &error, int frames) {
+            m_blenderCancel->hide();
+            if (ok)
+                statusBar()->showMessage(tr("Blender scene imported: %n frame(s)", nullptr, frames), 6000);
+            else if (error.isEmpty())
+                statusBar()->showMessage(tr("Blender import stopped (%n frame(s) made)", nullptr, frames), 6000);
+            else
+                QMessageBox::warning(this, tr("Import Blender scene"), error);
+        });
+    }
+    m_blenderCancel->show();
+    m_blenderJob->start(blendFile, blender, startFrame, m_document->currentFrame(), percent, lineArt);
+    return true;
+}
+
+void MainWindow::chooseBlenderScene()
+{
+    QSettings settings;
+    QString blender = io::findBlender(settings.value(QStringLiteral("blender/path")).toString());
+    if (blender.isEmpty()) {
+        QMessageBox::information(this, tr("Import Blender scene"),
+                                 tr("Blender was not found. Choose its program (blender, or blender.exe) to render the scene."));
+        blender = QFileDialog::getOpenFileName(this, tr("Where is Blender?"));
+        if (blender.isEmpty() || io::findBlender(blender).isEmpty())
+            return;
+        settings.setValue(QStringLiteral("blender/path"), blender);
+    }
+    const QString file = QFileDialog::getOpenFileName(this, tr("Import Blender scene"), QString(),
+                                                      tr("Blender scenes (*.blend)"));
+    if (file.isEmpty())
+        return;
+    BlenderImportDialog dialog(QFileInfo(file).completeBaseName(), m_document->currentFrame(), this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    startBlenderImport(file, blender, dialog.startFrame());
 }
 
 void MainWindow::importSequence(QStringList files, const QString &name)

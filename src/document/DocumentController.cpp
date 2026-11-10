@@ -1226,6 +1226,73 @@ void DocumentController::setAudioDuration(double seconds)
     emit structureChanged(); // not an undo step: the length of the block is a fact about the file
 }
 
+std::optional<DocumentController::PendingSequence> DocumentController::beginSequenceCel(const QString &name, int startFrame,
+                                                                                         int count)
+{
+    if (count <= 0)
+        return std::nullopt;
+    interruptStroke();
+    doc::Document &d = *m_document;
+    startFrame = std::max(0, startFrame);
+    std::vector<std::unique_ptr<doc::Command>> steps;
+    auto cel = std::make_unique<doc::AddCelCommand>(d, d.indexOf(m_currentCel) + 1, doc::CelProperties{name.toStdString()});
+    PendingSequence sequence;
+    sequence.cel = cel->celId();
+    doc::ChangeSet changes = cel->apply(d);
+    steps.push_back(std::move(cel));
+    for (int i = 0; i < count; ++i) {
+        doc::NewDrawing drawing = doc::makeNewDrawing(d, sequence.cel, startFrame + i, 1, tr("Layer 1").toStdString());
+        changes.merge(drawing.command->apply(d));
+        steps.push_back(std::move(drawing.command));
+        sequence.drawings.push_back(drawing.id);
+        sequence.layers.push_back(drawing.layer);
+    }
+    if (startFrame + count > d.frameCount())
+        d.setFrameCount(startFrame + count);
+    m_history.pushApplied(std::make_unique<doc::GroupCommand>(doc::CommandKind::ImportSequence, std::move(steps)));
+    publish(changes);
+    emit historyChanged();
+    setCurrentCel(sequence.cel);
+    setCurrentFrame(startFrame);
+    return sequence;
+}
+
+bool DocumentController::fillSequenceFrame(const PendingSequence &sequence, int index, const QImage &image)
+{
+    if (index < 0 || index >= int(sequence.drawings.size()) || image.isNull())
+        return false;
+    doc::Document &d = *m_document;
+    doc::Layer *layer = d.layer(sequence.cel, sequence.drawings[std::size_t(index)], sequence.layers[std::size_t(index)]);
+    if (!layer)
+        return false;
+    QImage pixels = image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    if (pixels.width() != d.width() || pixels.height() != d.height())
+        pixels = pixels.scaled(d.width(), d.height(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    const QPoint at((d.width() - pixels.width()) / 2, (d.height() - pixels.height()) / 2);
+    layer->image.write(at.x(), at.y(), pixels.width(), pixels.height(),
+                       reinterpret_cast<const doc::Pixel *>(pixels.constBits()), pixels.bytesPerLine() / 4);
+    emit pixelsChanged(sequence.cel, sequence.drawings[std::size_t(index)], QRect(at, pixels.size()));
+    return true;
+}
+
+void DocumentController::finishSequence(const PendingSequence &sequence)
+{
+    doc::Document &d = *m_document;
+    std::vector<std::unique_ptr<doc::Command>> steps;
+    for (std::size_t i = 0; i < sequence.drawings.size(); ++i) {
+        const doc::Layer *layer = d.layer(sequence.cel, sequence.drawings[i], sequence.layers[i]);
+        if (!layer)
+            continue;
+        if (auto paint = doc::PaintCommand::capture(sequence.cel, sequence.drawings[i], sequence.layers[i], doc::TiledImage(),
+                                                    layer->image))
+            steps.push_back(std::move(paint));
+    }
+    if (steps.empty())
+        return;
+    m_history.pushApplied(std::make_unique<doc::GroupCommand>(doc::CommandKind::ImportSequence, std::move(steps)));
+    emit historyChanged();
+}
+
 int DocumentController::importImageSequence(const QList<QImage> &images, const QString &name, int startFrame,
                                             int hold, const std::function<void(int)> &progress)
 {

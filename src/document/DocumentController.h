@@ -228,6 +228,21 @@ public:
     // startFrame + i * hold (the scene gets longer if it needs). Images that are null are skipped; returns how
     // many were imported. One undo step.
     // `progress`, if given, is told how many are done after each one (the views refresh once, at the end).
+    // A cel that fills in as the pictures come (a render in the background): made at once with an empty drawing for each of
+    // `count` frames from `startFrame` (one undo step), then `fillSequenceFrame` puts a picture in the drawing of frame
+    // `index`, scaled to fit the page (made bigger too if it is smaller: a draft is rendered small), centered; it is not an
+    // undo step and no view refreshes but the canvas's. `finishSequence` records the pictures as one more step.
+    struct PendingSequence
+    {
+        doc::CelId cel = doc::kNoId;
+        std::vector<doc::DrawingId> drawings;
+        std::vector<doc::LayerId> layers;
+    };
+    std::optional<PendingSequence> beginSequenceCel(const QString &name, int startFrame, int count);
+    // False if the cel (or that drawing) is gone: it was undone, say.
+    bool fillSequenceFrame(const PendingSequence &sequence, int index, const QImage &image);
+    void finishSequence(const PendingSequence &sequence);
+
     int importImageSequence(const QList<QImage> &images, const QString &name, int startFrame, int hold,
                             const std::function<void(int)> &progress = {});
 

@@ -3,10 +3,13 @@
 #include "io/Autosave.h"
 
 #include <QElapsedTimer>
+#include "io/BlenderRender.h"
+
 #include <QMainWindow>
 #include <QPointer>
 
 class QMenu;
+class QPushButton;
 
 namespace mothion::canvas {
 class CanvasView;
@@ -29,6 +32,7 @@ class AudioPlayer;
 namespace mothion::ui {
 
 class AutoplayWindow;
+class BlenderImportJob;
 class CompositingWindow;
 class DockLayout;
 
@@ -92,12 +96,20 @@ private:
     // An image sequence: one dialog to choose the images (several of them, or "Use this folder" for all of
     // the folder's), then asks where it starts and the frames per image, and imports it.
     void chooseSequence();
+    void chooseBlenderScene();
     void importSequence(QStringList files, const QString &name);
 
 public:
     // The images of `files`, in name order (numbers as numbers: 2 before 10), one new cel with a frame for each,
     // from `startFrame`, `hold` frames each. How many were read and imported.
-    int importSequenceFiles(QStringList files, const QString &name, int startFrame, int hold);
+    // `scaleUp`: images smaller than the page are made as big as it (a draft rendered small).
+    int importSequenceFiles(QStringList files, const QString &name, int startFrame, int hold, bool scaleUp = false);
+    // A Blender scene as a new cel, made in the background (see BlenderImportJob): the cel is there once Blender has read the
+    // scene, and fills in frame by frame, the one the timeline is on first, while the status bar tells how far it is. False if
+    // one is already being made. `percent` of the size of the page is rendered, `lineArt` keeps the Line Art of the scene.
+    bool startBlenderImport(const QString &blendFile, const QString &blender, int startFrame, int percent = 50,
+                            bool lineArt = false);
+    bool blenderImportRunning() const;
     // The image files directly in `folder`, with their paths.
     static QStringList imageFilesIn(const QString &folder);
 
@@ -123,6 +135,8 @@ private:
     QMenu *m_viewMenu = nullptr;
     audio::AudioPlayer *m_audioPlayer = nullptr; // the audio track, heard with the frames and as they are stepped
     QPointer<AutoplayWindow> m_autoplay; // one at a time, made when first asked for
+    BlenderImportJob *m_blenderJob = nullptr; // a Blender scene being made into a cel (a child of the window)
+    QPushButton *m_blenderCancel = nullptr;  // in the status bar while it is
     QPointer<CompositingWindow> m_compositing; // the node editor, made when first asked for
     QList<QAction *> m_fileActions;
     QList<QAction *> m_editActions;
