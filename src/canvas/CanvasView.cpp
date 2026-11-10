@@ -181,7 +181,7 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
     m_eyedropperTool =
         std::make_unique<EyedropperTool>(m_toolState, [this](const QPointF &docPos) { return colorAt(docPos); });
     m_fillTool = std::make_unique<FillTool>(
-        m_document, m_toolState, [this]() -> const QImage & { return m_frame.image(); },
+        m_document, m_toolState, [this]() -> const QImage & { return frameInCel(); },
         [this](const QString &text) { emit statusMessage(text); });
     m_blendTool = std::make_unique<BlendTool>(m_document, m_toolState,
                                               [this](const QString &text) { emit statusMessage(text); });
@@ -556,6 +556,22 @@ doc::Matrix2x3 CanvasView::celPose() const
     if (!cel || cel->motion().isEmpty())
         return {};
     return m_document->celPoseAt(cel->id(), m_document->currentFrame()).matrix(cel->motion().pivotX, cel->motion().pivotY);
+}
+
+const QImage &CanvasView::frameInCel()
+{
+    // What is shown, seen from the cel's own pixels (where the fill looks for the area to fill, and the pen works): the
+    // frame is as it is on the page, the cel is moved on it.
+    if (!celIsPosed())
+        return m_frame.image();
+    const doc::Matrix2x3 back = celPose().inverted();
+    m_frameInCel = QImage(m_frame.image().size(), QImage::Format_ARGB32_Premultiplied);
+    m_frameInCel.fill(Qt::transparent);
+    QPainter p(&m_frameInCel);
+    p.setRenderHint(QPainter::SmoothPixmapTransform);
+    p.setWorldTransform(QTransform(back.a, back.b, back.c, back.d, back.e, back.f));
+    p.drawImage(QPointF(0, 0), m_frame.image());
+    return m_frameInCel;
 }
 
 bool CanvasView::celIsPosed() const

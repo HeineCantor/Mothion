@@ -198,6 +198,8 @@ private:
     doc::Matrix2x3 celPose() const;
     bool celIsPosed() const;
     QPointF toCel(const QPointF &page) const;
+    // The frame as the current cel's own pixels lie on it (the frame itself if the cel is not moved).
+    const QImage &frameInCel();
     // The tool that takes the pen in the cel's own place (the Transform and Move tools of a posed cel, and the dropper, take it
     // as it is shown).
     bool toolWorksInCel(const CanvasTool *tool) const;
@@ -232,6 +234,7 @@ private:
     };
     std::optional<Flip> m_flip;
     FrameRenderer m_frame;
+    QImage m_frameInCel; // (see frameInCel())
     std::optional<StrokeSession> m_stroke; // set while a stroke is in progress
     std::unique_ptr<CanvasTool> m_moveTool;
     std::unique_ptr<CanvasTool> m_rectSelectTool;

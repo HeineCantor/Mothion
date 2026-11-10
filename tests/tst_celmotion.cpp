@@ -14,6 +14,8 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QPainter>
+#include <QPen>
 #include <QPushButton>
 #include <QSignalSpy>
 #include <QToolButton>
@@ -506,6 +508,40 @@ private slots:
         QCOMPARE(qRed(pixels.pixel(980, 525)), 255);
         QTest::mouseClick(&canvas, Qt::LeftButton, {}, at(975, 560));
         QVERIFY(qBlue(pixels.pixel(980, 525)) > 200 && qRed(pixels.pixel(980, 525)) < 80);
+    }
+
+    // Fill looking at the other layers on a moved cel: the area is found in what is shown, and filled where it is in the
+    // cel's own pixels (it used to find it in the page's pixels and fill the cel's: a stain on the background).
+    void aFillReferringToWhatIsShownFillsInsideTheMovedDrawing()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        controller.setSceneLength(30);
+        QImage ring(120, 80, QImage::Format_ARGB32_Premultiplied);
+        ring.fill(Qt::transparent);
+        {
+            QPainter p(&ring);
+            p.setPen(QPen(Qt::black, 4));
+            p.drawRect(2, 2, 115, 75); // a box drawn with a line, empty inside
+        }
+        controller.importImage(ring, QStringLiteral("box")); // x 900..1019, y 500..579
+        const doc::CelId cel = controller.currentCel();
+        controller.setCelKey(cel, 0, [] { doc::CelPose p; p.x = 300; p.y = 100; return p; }()); // shown at x 1200.., y 600..
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(900, 520);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        tools::FillSettings fill = state.fillSettings();
+        fill.allLayers = true;
+        state.setFillSettings(fill);
+        state.setActiveTool(tools::ToolId::Fill);
+        state.setColor(QColor(0, 0, 255));
+        const QTransform toView = canvas.view().documentToView();
+        QTest::mouseClick(&canvas, Qt::LeftButton, {}, toView.map(QPointF(1260, 640)).toPoint()); // inside the box as it is shown
+        const doc::TiledImage &pixels = controller.document().cel(cel)->drawingAt(0)->layers.front().image;
+        QVERIFY(qAlpha(pixels.pixel(960, 540)) > 200 && qBlue(pixels.pixel(960, 540)) > 200); // inside, in the cel's own pixels
+        QCOMPARE(qAlpha(pixels.pixel(300, 300)), 0);   // nothing on the background
+        QCOMPARE(qAlpha(pixels.pixel(1260, 640)), 0);  // nor where the page's pixel of the click is
     }
 
     // The autoplay shows a cel moved by its keys frame by frame, though its drawing is held over all of them (it used to
