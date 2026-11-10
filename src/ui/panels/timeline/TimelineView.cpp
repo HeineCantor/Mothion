@@ -1713,6 +1713,23 @@ void TimelineView::contextMenuEvent(QContextMenuEvent *event)
         m_document->execute(doc::makeSplitDrawing(m_document->documentForCommands(), celId, frame).command);
     });
     split->setEnabled(hold && hold->start < frame);
+    // The whole hold cut at regular intervals from where it starts.
+    QMenu *every = menu.addMenu(tr("Split frame every"));
+    auto splitEvery = [this, celId, frame](int step) {
+        if (auto command = doc::makeSplitEvery(m_document->documentForCommands(), celId, frame, step))
+            m_document->execute(std::move(command));
+    };
+    for (int step : {1, 2, 3, 4})
+        every->addAction(tr("%n frame(s)", nullptr, step), this, [splitEvery, step] { splitEvery(step); });
+    const int holdLength = hold ? hold->length : 0;
+    every->addAction(tr("Other…"), this, [this, holdLength, splitEvery] {
+        bool ok = false;
+        const int step = QInputDialog::getInt(this, tr("Split frame"), tr("Cut every (frames):"), 2, 1,
+                                              std::max(1, holdLength - 1), 1, &ok);
+        if (ok)
+            splitEvery(step);
+    });
+    every->setEnabled(hold && hold->length > 1);
     menu.addAction(tr("Insert inbetween"), this, [this, celId, frame] { m_document->insertFrame(celId, frame, true); });
     menu.addSeparator();
     menu.addAction(tr("Insert empty frame"), this, [this, celId, frame] {

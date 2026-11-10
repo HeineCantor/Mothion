@@ -362,6 +362,45 @@ private slots:
     }
 
 
+    // Split frame every N cuts the whole hold at regular intervals from its start, whichever frame of it is asked.
+    void splitFrameEvery()
+    {
+        document::DocumentController controller;
+        doc::Document &d = controller.documentForCommands();
+        const doc::CelId cel = controller.currentCel();
+        doc::NewDrawing a = doc::makeNewDrawing(d, cel, 2, 7, "Line"); // the hold is frames 2-8
+        controller.execute(std::move(a.command));
+        d.layer(cel, a.id, a.layer)->image.setPixel(3, 3, 0xff000000);
+        const doc::Timing &t = d.cel(cel)->timing();
+
+        QVERIFY(!doc::makeSplitEvery(d, cel, 0, 3));  // nothing there
+        QVERIFY(!doc::makeSplitEvery(d, cel, 4, 7));  // not longer than the interval
+        QVERIFY(!doc::makeSplitEvery(d, cel, 4, 0));
+        controller.execute(doc::makeSplitEvery(d, cel, 6, 3)); // (from a frame in the middle: counted from the start)
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo split frame"));
+        QCOMPARE(t.exposureAt(2)->drawing, a.id);
+        QCOMPARE(t.exposureAt(2)->length, 3);
+        const doc::DrawingId second = t.drawingAt(5), third = t.drawingAt(8);
+        QVERIFY(second != a.id && third != a.id && second != third);
+        QCOMPARE(t.exposureAt(5)->start, 5);
+        QCOMPARE(t.exposureAt(5)->length, 3);
+        QCOMPARE(t.exposureAt(8)->length, 1); // the last piece is what is left
+        QCOMPARE(d.cel(cel)->drawing(second)->name, std::string("2"));
+        QCOMPARE(d.cel(cel)->drawing(third)->name, std::string("3"));
+        QCOMPARE(d.cel(cel)->drawing(second)->layers[0].image.pixel(3, 3), doc::Pixel(0xff000000));
+        d.layer(cel, second, d.cel(cel)->drawing(second)->layers[0].id)->image.setPixel(3, 3, 0); // independent
+        QCOMPARE(d.layer(cel, a.id, a.layer)->image.pixel(3, 3), doc::Pixel(0xff000000));
+
+        controller.undo(); // one step for all the pieces
+        QCOMPARE(t.exposureAt(2)->length, 7);
+        QCOMPARE(d.cel(cel)->drawings().size(), std::size_t(1));
+
+        controller.execute(doc::makeSplitEvery(d, cel, 2, 1)); // every frame its own
+        for (int f = 2; f <= 8; ++f)
+            QCOMPARE(t.exposureAt(f)->length, 1);
+        QCOMPARE(d.cel(cel)->drawings().size(), std::size_t(7));
+    }
+
     // Split frame cuts a hold in two independent frames; new frame and
     // insert inbetween move the cel's frames from a point one place on and
     // put a new one there.

@@ -62,6 +62,11 @@ NewDrawing makeNewDrawing(Document &doc, CelId cel, int frame, int length = 1, s
 // side is painted). No command when `frame` is empty or starts its hold.
 NewDrawing makeSplitDrawing(Document &doc, CelId cel, int frame);
 
+// "Split frame every N": the hold showing a drawing at `frame` is cut every `step` frames, counted from the start of the
+// hold; each piece after the first shows a copy of the drawing of its own (as above). The last piece is shorter when the
+// hold is not a multiple of `step`. No command when `frame` is empty or the hold is not longer than `step`.
+std::unique_ptr<Command> makeSplitEvery(Document &doc, CelId cel, int frame, int step);
+
 // A frame copied from the timeline: a drawing of a cel, shown for `length`
 // frames from `start`, counted from the first copied one.
 struct ExposureCopy

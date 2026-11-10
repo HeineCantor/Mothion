@@ -4,6 +4,7 @@
 #include "core/document/commands/GroupCommand.h"
 #include "core/document/commands/TimingCommands.h"
 
+#include <algorithm>
 #include <map>
 #include <set>
 #include <vector>
@@ -145,6 +146,30 @@ NewDrawing makeSplitDrawing(Document &doc, CelId celId, int frame)
     steps.push_back(std::make_unique<AddDrawingCommand>(celId, std::move(copy)));
     steps.push_back(std::make_unique<SetTimingCommand>(celId, cel->timing(), std::move(after)));
     return {std::make_unique<GroupCommand>(CommandKind::SplitFrame, std::move(steps)), id, top};
+}
+
+std::unique_ptr<Command> makeSplitEvery(Document &doc, CelId celId, int frame, int step)
+{
+    const Cel *cel = doc.cel(celId);
+    const Exposure *hold = cel ? cel->timing().exposureAt(frame) : nullptr;
+    if (!hold || step < 1 || hold->length <= step)
+        return nullptr;
+    const Drawing *source = cel->drawing(hold->drawing);
+    if (!source)
+        return nullptr;
+    const int start = hold->start, end = hold->end();
+    Timing after = cel->timing();
+    std::vector<std::unique_ptr<Command>> steps;
+    std::set<std::string> names;
+    for (int from = start + step; from < end; from += step) {
+        const std::string name = freeName(*cel, names);
+        names.insert(name);
+        Drawing copy = cloneDrawing(doc, *source, name);
+        after.setExposure(from, std::min(step, end - from), copy.id);
+        steps.push_back(std::make_unique<AddDrawingCommand>(celId, std::move(copy)));
+    }
+    steps.push_back(std::make_unique<SetTimingCommand>(celId, cel->timing(), std::move(after)));
+    return std::make_unique<GroupCommand>(CommandKind::SplitFrame, std::move(steps));
 }
 
 std::unique_ptr<Command> makePasteExposures(Document &doc, const std::vector<ExposureCopy> &copies, int frame,
