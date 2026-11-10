@@ -51,6 +51,7 @@ add_library(mothion_core STATIC
     core/document/commands/CameraCommands.h core/document/commands/CameraCommands.cpp
     core/document/commands/MarkerCommands.h core/document/commands/MarkerCommands.cpp
     core/document/commands/MotionCommands.h core/document/commands/MotionCommands.cpp
+    core/document/commands/BlenderLinkCommands.h core/document/commands/BlenderLinkCommands.cpp
     core/document/CelMotion.h core/document/CelMotion.cpp
     core/document/Compositing.h
 )
@@ -74,6 +75,9 @@ qt_add_library(mothion_gui STATIC
     io/Autosave.h io/Autosave.cpp
     io/FrameExport.h io/FrameExport.cpp
     io/VideoExport.h io/VideoExport.cpp
+    io/BlenderLinkServer.h io/BlenderLinkServer.cpp
+    io/BlenderFrameCache.h io/BlenderFrameCache.cpp
+    io/BlenderAddOn.h io/BlenderAddOn.cpp
 
     tools/ToolState.h tools/ToolState.cpp
     tools/Preferences.h tools/Preferences.cpp
@@ -116,6 +120,8 @@ qt_add_library(mothion_gui STATIC
     ui/DockLayout.h ui/DockLayout.cpp
     ui/ExportDialog.h ui/ExportDialog.cpp
     ui/VideoExportDialog.h ui/VideoExportDialog.cpp
+    ui/BlenderLiveLink.h ui/BlenderLiveLink.cpp
+    ui/BlenderSessionDialog.h ui/BlenderSessionDialog.cpp
     ui/TweenDialog.h ui/TweenDialog.cpp
     ui/PanelDock.h ui/PanelDock.cpp
     ui/SplashScreen.h ui/SplashScreen.cpp
@@ -190,6 +196,19 @@ qt_add_resources(mothion_gui "mothion_resources"
         "${PROJECT_SOURCE_DIR}/resources/icon/mothion.png"
         "${PROJECT_SOURCE_DIR}/resources/fonts/Montserrat-Bold.ttf"
 )
+# The Blender add-on (blender/mothion_link) is zipped here and kept in the program, to be installed from it.
+file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/blender")
+file(ARCHIVE_CREATE OUTPUT "${PROJECT_BINARY_DIR}/blender/mothion_link.zip"
+     PATHS blender_manifest.toml __init__.py
+     WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}/blender/mothion_link"
+     FORMAT zip)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${PROJECT_SOURCE_DIR}/blender/mothion_link/blender_manifest.toml" "${PROJECT_SOURCE_DIR}/blender/mothion_link/__init__.py")
+qt_add_resources(mothion_gui "mothion_addon"
+    PREFIX "/"
+    BASE "${PROJECT_BINARY_DIR}"
+    FILES "${PROJECT_BINARY_DIR}/blender/mothion_link.zip"
+)
 # Tablet backend selection: Wintab needs Qt's private GUI API, Windows only.
 if(WIN32 AND MOTHION_ENABLE_WINTAB)
     find_package(Qt6 REQUIRED COMPONENTS GuiPrivate)
@@ -202,7 +221,7 @@ endif()
 target_include_directories(mothion_gui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 find_package(Qt6 REQUIRED COMPONENTS Sql) # .sut brushes and .moth projects are SQLite databases
 find_package(Qt6 REQUIRED COMPONENTS Network) # the local socket of Discord's Rich Presence
-target_link_libraries(mothion_gui PUBLIC mothion_core Qt6::Widgets PRIVATE Qt6::Sql Qt6::Network Qt6::Multimedia)
+target_link_libraries(mothion_gui PUBLIC mothion_core Qt6::Widgets Qt6::Network PRIVATE Qt6::Sql Qt6::Multimedia) # (Network is public: the link server is in a header the tests use)
 mothion_set_warnings(mothion_gui)
 
 # ---------------------------------------------------------------------------

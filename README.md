@@ -172,6 +172,9 @@ build\RelWithDebInfo\mothion.exe
 
 ## Architecture
 
+For a detailed, guided explanation of the modules, data model, rendering and
+development workflows, see the [Mothion project guide](docs/project-guide.md).
+
 The project is split into a Qt-independent core library, a Qt-based GUI library and the application executable.
 
 ```text

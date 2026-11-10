@@ -3,10 +3,15 @@
 #include "io/Autosave.h"
 
 #include <QElapsedTimer>
+#include "io/BlenderFrameCache.h"
+#include "io/BlenderLinkServer.h"
+
 #include <QMainWindow>
 #include <QPointer>
 
 class QMenu;
+class QLabel;
+class QPushButton;
 
 namespace mothion::canvas {
 class CanvasView;
@@ -29,6 +34,7 @@ class AudioPlayer;
 namespace mothion::ui {
 
 class AutoplayWindow;
+class BlenderLiveLink;
 class CompositingWindow;
 class DockLayout;
 
@@ -92,12 +98,23 @@ private:
     // An image sequence: one dialog to choose the images (several of them, or "Use this folder" for all of
     // the folder's), then asks where it starts and the frames per image, and imports it.
     void chooseSequence();
+    void chooseBlenderScene();
     void importSequence(QStringList files, const QString &name);
 
 public:
     // The images of `files`, in name order (numbers as numbers: 2 before 10), one new cel with a frame for each,
     // from `startFrame`, `hold` frames each. How many were read and imported.
-    int importSequenceFiles(QStringList files, const QString &name, int startFrame, int hold);
+    // `scaleUp`: images smaller than the page are made as big as it (a draft rendered small).
+    int importSequenceFiles(QStringList files, const QString &name, int startFrame, int hold, bool scaleUp = false);
+    // A scene of a connected Blender as a new cel, made in the background (see BlenderLiveLink): the cel is there at once and
+    // fills in frame by frame, the one the timeline is on first, while the status bar tells how far it is. False if that
+    // Blender is not connected or one is already being made.
+    bool startBlenderImport(int sessionId, int startFrame);
+    bool blenderImportRunning() const;
+    // Brings the current cel up to date from its Blender scene, if it has one and its Blender is connected.
+    void refreshFromBlender();
+    io::BlenderLinkServer *blenderServer() const { return m_blenderServer; }
+    BlenderLiveLink *blenderLive() const { return m_blenderLive; }
     // The image files directly in `folder`, with their paths.
     static QStringList imageFilesIn(const QString &folder);
 
@@ -123,6 +140,11 @@ private:
     QMenu *m_viewMenu = nullptr;
     audio::AudioPlayer *m_audioPlayer = nullptr; // the audio track, heard with the frames and as they are stepped
     QPointer<AutoplayWindow> m_autoplay; // one at a time, made when first asked for
+    io::BlenderLinkServer *m_blenderServer = nullptr; // the Blenders connected through the add-on (a child of the window)
+    io::BlenderFrameCache m_blenderCache;             // the frames got from them
+    BlenderLiveLink *m_blenderLive = nullptr;         // what brings their scenes in and keeps them up to date
+    QPushButton *m_blenderCancel = nullptr;           // in the status bar while it works
+    QLabel *m_blenderState = nullptr;                 // in the status bar: the Blenders connected
     QPointer<CompositingWindow> m_compositing; // the node editor, made when first asked for
     QList<QAction *> m_fileActions;
     QList<QAction *> m_editActions;

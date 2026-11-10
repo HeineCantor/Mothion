@@ -1,0 +1,11 @@
+schema_version = "1.0.0"
+
+id = "mothion_link"
+version = "0.1.0"
+name = "Mothion Link"
+tagline = "Shows the scene in Mothion, live"
+maintainer = "Mothion"
+type = "add-on"
+
+blender_version_min = "5.1.0"
+license = ["SPDX:GPL-3.0-or-later"]

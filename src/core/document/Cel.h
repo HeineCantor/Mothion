@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/document/BlenderLink.h"
 #include "core/document/CelMotion.h"
 #include "core/document/Drawing.h"
 #include "core/document/Timing.h"
@@ -49,6 +50,9 @@ public:
     // What the animation does to the cel as a whole: its pivot and the keys of its pose (see CelMotion). Empty: still.
     const CelMotion &motion() const { return m_motion; }
     void setMotion(CelMotion motion) { m_motion = std::move(motion); }
+    // The Blender scene the cel was rendered from, if it was (see BlenderLink).
+    const std::optional<BlenderLink> &blenderLink() const { return m_blenderLink; }
+    void setBlenderLink(std::optional<BlenderLink> link) { m_blenderLink = std::move(link); }
 
     // Smallest positive number not already used as a name: "1", "2", ...
     std::string nextDrawingName() const;
@@ -59,6 +63,7 @@ private:
     std::map<DrawingId, Drawing> m_drawings;
     Timing m_timing;
     CelMotion m_motion;
+    std::optional<BlenderLink> m_blenderLink;
 };
 
 } // namespace mothion::doc

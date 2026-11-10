@@ -228,6 +228,41 @@ public:
     // startFrame + i * hold (the scene gets longer if it needs). Images that are null are skipped; returns how
     // many were imported. One undo step.
     // `progress`, if given, is told how many are done after each one (the views refresh once, at the end).
+    // A cel that fills in as the pictures come (a render in the background): made at once with an empty drawing for each of
+    // `count` frames from `startFrame` (one undo step), then `fillSequenceFrame` puts a picture in the drawing of frame
+    // `index`, scaled to fit the page (made bigger too if it is smaller: a draft is rendered small), centered; it is not an
+    // undo step and no view refreshes but the canvas's. `finishSequence` records the pictures as one more step.
+    struct PendingSequence
+    {
+        doc::CelId cel = doc::kNoId;
+        std::vector<doc::DrawingId> drawings;
+        std::vector<doc::LayerId> layers;
+    };
+    // `link`, if given, is recorded on the cel (see doc::BlenderLink) in the same step.
+    std::optional<PendingSequence> beginSequenceCel(const QString &name, int startFrame, int count,
+                                                    const doc::BlenderLink *link = nullptr);
+    // The cels that came from a Blender scene, with where from.
+    std::vector<std::pair<doc::CelId, doc::BlenderLink>> blenderLinks() const;
+    // False if the cel (or that drawing) is gone: it was undone, say.
+    bool fillSequenceFrame(const PendingSequence &sequence, int index, const QImage &image);
+    void finishSequence(const PendingSequence &sequence);
+
+    // The pictures of a cel that was made from a sequence (a Blender scene, saved again) replacing the old ones, frame by
+    // frame as they come: picture `index` goes in the first layer of the drawing at frame `startFrame + index` (a frame the
+    // cel does not reach yet gets a drawing of its own; the other layers of a drawing, the person's, are left alone). Nothing
+    // is an undo step until `finishSequenceUpdate`, which records all that was done as one, from the pictures as they were.
+    struct SequenceUpdate
+    {
+        doc::CelId cel = doc::kNoId;
+        int startFrame = 0;
+        std::map<std::pair<doc::DrawingId, doc::LayerId>, doc::TiledImage> before; // the layers touched, as they were
+        std::vector<std::unique_ptr<doc::Command>> steps;                          // the drawings made
+    };
+    std::unique_ptr<SequenceUpdate> beginSequenceUpdate(doc::CelId cel, int startFrame);
+    // False if the cel is gone.
+    bool applySequenceFrames(SequenceUpdate &update, const std::map<int, QImage> &frames);
+    void finishSequenceUpdate(SequenceUpdate &update);
+
     int importImageSequence(const QList<QImage> &images, const QString &name, int startFrame, int hold,
                             const std::function<void(int)> &progress = {});
 

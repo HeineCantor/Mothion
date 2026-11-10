@@ -103,6 +103,7 @@ std::unique_ptr<doc::Document> sampleDocument()
     for (doc::Channel c : doc::kChannels)
         motion.setKey(c, 40, first, doc::Easing::linear());
     d->celAt(1).setMotion(motion);
+    d->celAt(1).setBlenderLink(doc::BlenderLink{"/home/me/scenes/walk cycle ✓.blend", "Scene ✓", 12, 25}); // a cel rendered from Blender
     doc::GraphData graph;
     graph.nodes.push_back({1, "frame", -330.5, 12, {}});
     graph.nodes.push_back({4, "blur", 20, -7.25, {{"radius", 17}}});
@@ -151,6 +152,7 @@ void compareDocuments(const doc::Document &x, const doc::Document &y)
         QCOMPARE(lx.id(), ly.id());
         QVERIFY(lx.properties() == ly.properties());
         QVERIFY(lx.motion() == ly.motion());
+        QVERIFY(lx.blenderLink() == ly.blenderLink());
         QVERIFY(lx.timing() == ly.timing());
         QCOMPARE(lx.drawings().size(), ly.drawings().size());
         for (const auto &[id, dx] : lx.drawings()) {
@@ -238,6 +240,8 @@ private slots:
         original->setMarkers({}); // and the markers with format 10
         for (int i = 0; i < original->celCount(); ++i) // and the motion of the cels with format 11
             original->celAt(i).setMotion({});
+        for (int i = 0; i < original->celCount(); ++i) // and the Blender links with format 12
+            original->celAt(i).setBlenderLink(std::nullopt);
         for (int i = 0; i < original->celCount(); ++i) // and the masks with format 9
             for (const auto &[id, drawing] : original->celAt(i).drawings())
                 for (doc::Layer &layer : original->celAt(i).drawing(id)->layers)

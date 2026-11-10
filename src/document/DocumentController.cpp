@@ -10,6 +10,7 @@
 #include "core/document/commands/AudioCommands.h"
 #include "core/document/commands/CameraCommands.h"
 #include "core/document/commands/MarkerCommands.h"
+#include "core/document/commands/BlenderLinkCommands.h"
 #include "core/document/commands/MotionCommands.h"
 #include "core/document/commands/CompositingCommands.h"
 #include "core/document/commands/CelCommands.h"
@@ -1226,6 +1227,164 @@ void DocumentController::setAudioDuration(double seconds)
     emit structureChanged(); // not an undo step: the length of the block is a fact about the file
 }
 
+std::vector<std::pair<doc::CelId, doc::BlenderLink>> DocumentController::blenderLinks() const
+{
+    std::vector<std::pair<doc::CelId, doc::BlenderLink>> links;
+    for (int i = 0; i < m_document->celCount(); ++i)
+        if (const auto &link = m_document->celAt(i).blenderLink())
+            links.emplace_back(m_document->celAt(i).id(), *link);
+    return links;
+}
+
+std::optional<DocumentController::PendingSequence> DocumentController::beginSequenceCel(const QString &name, int startFrame,
+                                                                                         int count,
+                                                                                         const doc::BlenderLink *link)
+{
+    if (count <= 0)
+        return std::nullopt;
+    interruptStroke();
+    doc::Document &d = *m_document;
+    startFrame = std::max(0, startFrame);
+    std::vector<std::unique_ptr<doc::Command>> steps;
+    auto cel = std::make_unique<doc::AddCelCommand>(d, d.indexOf(m_currentCel) + 1, doc::CelProperties{name.toStdString()});
+    PendingSequence sequence;
+    sequence.cel = cel->celId();
+    doc::ChangeSet changes = cel->apply(d);
+    steps.push_back(std::move(cel));
+    if (link) { // where the cel comes from, as part of the same step
+        auto linking = std::make_unique<doc::SetBlenderLinkCommand>(sequence.cel, *link);
+        changes.merge(linking->apply(d));
+        steps.push_back(std::move(linking));
+    }
+    for (int i = 0; i < count; ++i) {
+        doc::NewDrawing drawing = doc::makeNewDrawing(d, sequence.cel, startFrame + i, 1, tr("Layer 1").toStdString());
+        changes.merge(drawing.command->apply(d));
+        steps.push_back(std::move(drawing.command));
+        sequence.drawings.push_back(drawing.id);
+        sequence.layers.push_back(drawing.layer);
+    }
+    if (startFrame + count > d.frameCount())
+        d.setFrameCount(startFrame + count);
+    m_history.pushApplied(std::make_unique<doc::GroupCommand>(doc::CommandKind::ImportSequence, std::move(steps)));
+    publish(changes);
+    emit historyChanged();
+    setCurrentCel(sequence.cel);
+    setCurrentFrame(startFrame);
+    return sequence;
+}
+
+bool DocumentController::fillSequenceFrame(const PendingSequence &sequence, int index, const QImage &image)
+{
+    if (index < 0 || index >= int(sequence.drawings.size()) || image.isNull())
+        return false;
+    doc::Document &d = *m_document;
+    doc::Layer *layer = d.layer(sequence.cel, sequence.drawings[std::size_t(index)], sequence.layers[std::size_t(index)]);
+    if (!layer)
+        return false;
+    QImage pixels = image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    if (pixels.width() != d.width() || pixels.height() != d.height())
+        pixels = pixels.scaled(d.width(), d.height(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    const QPoint at((d.width() - pixels.width()) / 2, (d.height() - pixels.height()) / 2);
+    layer->image.write(at.x(), at.y(), pixels.width(), pixels.height(),
+                       reinterpret_cast<const doc::Pixel *>(pixels.constBits()), pixels.bytesPerLine() / 4);
+    emit pixelsChanged(sequence.cel, sequence.drawings[std::size_t(index)], QRect(at, pixels.size()));
+    return true;
+}
+
+std::unique_ptr<DocumentController::SequenceUpdate> DocumentController::beginSequenceUpdate(doc::CelId cel, int startFrame)
+{
+    if (!m_document->cel(cel))
+        return nullptr;
+    auto update = std::make_unique<SequenceUpdate>();
+    update->cel = cel;
+    update->startFrame = std::max(0, startFrame);
+    return update;
+}
+
+bool DocumentController::applySequenceFrames(SequenceUpdate &update, const std::map<int, QImage> &frames)
+{
+    doc::Document &d = *m_document;
+    doc::Cel *cel = d.cel(update.cel);
+    if (!cel)
+        return false;
+    doc::ChangeSet changes;
+    std::vector<std::pair<doc::DrawingId, QRect>> painted;
+    for (const auto &[index, image] : frames) {
+        if (image.isNull())
+            continue;
+        const int frame = update.startFrame + index;
+        doc::DrawingId drawingId = cel->timing().drawingAt(frame);
+        doc::LayerId layerId = doc::kNoId;
+        const bool isNew = drawingId == doc::kNoId || !cel->drawing(drawingId);
+        if (isNew) { // the scene got longer: the frames after the last one are new
+            doc::NewDrawing drawing = doc::makeNewDrawing(d, update.cel, frame, 1, tr("Layer 1").toStdString());
+            changes.merge(drawing.command->apply(d));
+            update.steps.push_back(std::move(drawing.command));
+            drawingId = drawing.id;
+            layerId = drawing.layer;
+            if (frame + 1 > d.frameCount())
+                d.setFrameCount(frame + 1);
+        } else if (!cel->drawing(drawingId)->layers.empty()) {
+            layerId = cel->drawing(drawingId)->layers.front().id; // the render is the first layer; others are the person's
+        }
+        doc::Layer *layer = layerId == doc::kNoId ? nullptr : d.layer(update.cel, drawingId, layerId);
+        if (!layer)
+            continue;
+        const std::pair<doc::DrawingId, doc::LayerId> key{drawingId, layerId};
+        if (!update.before.count(key))
+            update.before.emplace(key, isNew ? doc::TiledImage() : layer->image); // as it was, for the undo
+        QImage pixels = image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+        if (pixels.width() != d.width() || pixels.height() != d.height())
+            pixels = pixels.scaled(d.width(), d.height(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        const QPoint at((d.width() - pixels.width()) / 2, (d.height() - pixels.height()) / 2);
+        layer->image = doc::TiledImage(); // the new picture replaces the old one, all of it
+        layer->image.write(at.x(), at.y(), pixels.width(), pixels.height(),
+                           reinterpret_cast<const doc::Pixel *>(pixels.constBits()), pixels.bytesPerLine() / 4);
+        painted.emplace_back(drawingId, QRect(0, 0, d.width(), d.height()));
+    }
+    publish(changes);
+    for (const auto &[drawingId, area] : painted)
+        emit pixelsChanged(update.cel, drawingId, area);
+    return true;
+}
+
+void DocumentController::finishSequenceUpdate(SequenceUpdate &update)
+{
+    doc::Document &d = *m_document;
+    std::vector<std::unique_ptr<doc::Command>> steps = std::move(update.steps);
+    update.steps.clear();
+    for (const auto &[key, before] : update.before) {
+        const doc::Layer *layer = d.layer(update.cel, key.first, key.second);
+        if (!layer)
+            continue;
+        if (auto paint = doc::PaintCommand::capture(update.cel, key.first, key.second, before, layer->image))
+            steps.push_back(std::move(paint));
+    }
+    update.before.clear();
+    if (steps.empty())
+        return;
+    m_history.pushApplied(std::make_unique<doc::GroupCommand>(doc::CommandKind::UpdateSequence, std::move(steps)));
+    emit historyChanged();
+}
+
+void DocumentController::finishSequence(const PendingSequence &sequence)
+{
+    doc::Document &d = *m_document;
+    std::vector<std::unique_ptr<doc::Command>> steps;
+    for (std::size_t i = 0; i < sequence.drawings.size(); ++i) {
+        const doc::Layer *layer = d.layer(sequence.cel, sequence.drawings[i], sequence.layers[i]);
+        if (!layer)
+            continue;
+        if (auto paint = doc::PaintCommand::capture(sequence.cel, sequence.drawings[i], sequence.layers[i], doc::TiledImage(),
+                                                    layer->image))
+            steps.push_back(std::move(paint));
+    }
+    if (steps.empty())
+        return;
+    m_history.pushApplied(std::make_unique<doc::GroupCommand>(doc::CommandKind::ImportSequence, std::move(steps)));
+    emit historyChanged();
+}
+
 int DocumentController::importImageSequence(const QList<QImage> &images, const QString &name, int startFrame,
                                             int hold, const std::function<void(int)> &progress)
 {
@@ -1739,6 +1898,7 @@ QString DocumentController::commandName(doc::CommandKind kind)
     case doc::CommandKind::ChangeLayerProperties: return tr("layer properties");
     case doc::CommandKind::ImportImage: return tr("import image");
     case doc::CommandKind::ImportSequence: return tr("import image sequence");
+    case doc::CommandKind::UpdateSequence: return tr("update of the Blender scene");
     case doc::CommandKind::SetAudio: return tr("audio");
     case doc::CommandKind::ChangeAudio: return tr("audio change");
     case doc::CommandKind::EditCompositing: return tr("compositing");
@@ -1748,6 +1908,7 @@ QString DocumentController::commandName(doc::CommandKind kind)
     case doc::CommandKind::EditMarkers: return tr("markers");
     case doc::CommandKind::Flip: return tr("flip");
     case doc::CommandKind::EditMotion: return tr("keyframes");
+    case doc::CommandKind::EditBlenderLink: return tr("Blender link");
     case doc::CommandKind::ChangeMask: return tr("mask");
     case doc::CommandKind::ClearLayer: return tr("clear");
     case doc::CommandKind::Move: return tr("move");

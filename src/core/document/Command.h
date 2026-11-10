@@ -55,6 +55,7 @@ enum class CommandKind {
     ChangeLayerProperties,
     ImportImage,
     ImportSequence,
+    UpdateSequence,
     ClearLayer,
     Move,
     Select,
@@ -82,6 +83,7 @@ enum class CommandKind {
     EditMarkers,
     Flip,
     EditMotion,
+    EditBlenderLink,
 };
 
 // An undoable change to a Document.

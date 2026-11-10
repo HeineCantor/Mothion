@@ -17,6 +17,9 @@
 #include "tools/Preferences.h"
 #include "core/Parallel.h"
 #include "ui/DiscordPresence.h"
+#include "io/BlenderAddOn.h"
+#include "ui/BlenderLiveLink.h"
+#include "ui/BlenderSessionDialog.h"
 #include "ui/ImportSequenceDialog.h"
 #include "ui/BackupDialog.h"
 #include "ui/NewProjectDialog.h"
@@ -58,6 +61,8 @@
 #include <QDataStream>
 #include <QDialogButtonBox>
 #include <QDir>
+#include <QEventLoop>
+#include <QTemporaryDir>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QImageReader>
@@ -204,6 +209,54 @@ MainWindow::MainWindow(QWidget *parent)
     auto *discord = new DiscordPresence(m_document, DiscordPresence::defaultApplicationId(), this);
     connect(&tools::Preferences::instance(), &tools::Preferences::changed, discord,
             [discord] { discord->setEnabled(tools::Preferences::instance().discordEnabled()); });
+    // Blender, live: the Blenders that connect through the add-on, and the cels made from their scenes (see BlenderLiveLink).
+    m_blenderServer = new io::BlenderLinkServer(this);
+    m_blenderServer->listen();
+    m_blenderLive = new BlenderLiveLink(m_document, m_blenderServer, &m_blenderCache, this);
+    m_blenderCancel = new QPushButton(tr("Stop Blender"), this);
+    m_blenderCancel->setFlat(true);
+    m_blenderCancel->setFocusPolicy(Qt::NoFocus);
+    m_blenderCancel->hide();
+    statusBar()->addPermanentWidget(m_blenderCancel);
+    m_blenderState = new QLabel(this);
+    statusBar()->addPermanentWidget(m_blenderState);
+    connect(m_blenderCancel, &QPushButton::clicked, m_blenderLive, &BlenderLiveLink::cancel);
+    // The animation playing, on the timeline or in the autoplay window: what plays is not changed under it (see the link).
+    m_blenderLive->setPlayingProbe([this] {
+        const auto *timeline = findChild<TimelinePanel *>();
+        return (timeline && timeline->player() && timeline->player()->isPlaying()) || (m_autoplay && m_autoplay->isPlaying());
+    });
+    auto showBlenders = [this] {
+        const QList<io::BlenderSession> sessions = m_blenderServer->sessions();
+        m_blenderState->setText(sessions.isEmpty() ? QString()
+                                                    : tr("Blender: %1").arg(sessions.size() == 1 ? sessions.first().scene
+                                                                                                 : tr("%n scene(s)", nullptr, int(sessions.size()))));
+        QStringList files;
+        for (const io::BlenderSession &s : sessions)
+            files << QStringLiteral("%1 (%2)").arg(s.file.isEmpty() ? tr("not saved") : s.file, s.scene);
+        m_blenderState->setToolTip(files.join(QLatin1Char('\n')));
+    };
+    for (auto signal : {&io::BlenderLinkServer::sessionConnected, &io::BlenderLinkServer::sessionUpdated,
+                        &io::BlenderLinkServer::sessionClosed})
+        connect(m_blenderServer, signal, this, showBlenders);
+    connect(m_blenderLive, &BlenderLiveLink::status, this, [this](const QString &text) {
+        m_blenderCancel->show();
+        statusBar()->showMessage(text); // stays until another message comes
+    });
+    connect(m_blenderLive, &BlenderLiveLink::finished, this, [this](bool ok, const QString &error, int frames, bool update) {
+        if (!m_blenderLive->isBusy())
+            m_blenderCancel->hide();
+        if (ok)
+            statusBar()->showMessage(update ? tr("Blender scene updated: %n frame(s)", nullptr, frames)
+                                            : tr("Blender scene imported: %n frame(s)", nullptr, frames),
+                                     6000);
+        else if (error.isEmpty())
+            statusBar()->showMessage(tr("Blender stopped (%n frame(s) made)", nullptr, frames), 6000);
+        else if (update) // an update nobody asked for just now: no window in the way
+            statusBar()->showMessage(tr("Blender scene not updated: %1").arg(error.section(QLatin1Char('\n'), 0, 0)), 10000);
+        else
+            QMessageBox::warning(this, tr("Import from Blender"), error);
+    });
     auto *viewInfo = new QLabel(this);
     statusBar()->addPermanentWidget(viewInfo);
     connect(m_canvas, &canvas::CanvasView::viewChanged, viewInfo, [viewInfo](double zoom, double rot) {
@@ -362,6 +415,8 @@ void MainWindow::createMenus()
     file->addSeparator();
     file->addAction(tr("Import image…"), this, &MainWindow::importImage);
     file->addAction(tr("Import image sequence…"), this, &MainWindow::chooseSequence);
+    file->addAction(tr("Import from Blender…"), this, &MainWindow::chooseBlenderScene);
+    file->addAction(tr("Refresh from Blender"), this, &MainWindow::refreshFromBlender);
     file->addAction(tr("Import audio…"), this, &MainWindow::importAudio);
     file->addAction(tr("Import brush (.sut)…"), this, &MainWindow::importBrush);
     file->addSeparator();
@@ -616,7 +671,7 @@ bool naturalLess(const QString &a, const QString &b)
 
 } // namespace
 
-int MainWindow::importSequenceFiles(QStringList files, const QString &name, int startFrame, int hold)
+int MainWindow::importSequenceFiles(QStringList files, const QString &name, int startFrame, int hold, bool scaleUp)
 {
     // In name order, numbers as numbers (frame2 before frame10).
     std::stable_sort(files.begin(), files.end(), [](const QString &a, const QString &b) {
@@ -643,7 +698,8 @@ int MainWindow::importSequenceFiles(QStringList files, const QString &name, int 
             QImage image = reader.read();
             if (!image.isNull()) {
                 image = image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
-                if (image.width() > fitWidth || image.height() > fitHeight)
+                if (image.width() > fitWidth || image.height() > fitHeight
+                    || (scaleUp && image.width() < fitWidth && image.height() < fitHeight))
                     image = image.scaled(fitWidth, fitHeight, Qt::KeepAspectRatio, Qt::SmoothTransformation);
             }
             loaded[std::size_t(i)] = std::move(image);
@@ -680,6 +736,44 @@ int MainWindow::importSequenceFiles(QStringList files, const QString &name, int 
     if (imported > 0 && unreadable.isEmpty())
         statusBar()->showMessage(tr("%n image(s) imported", nullptr, imported), 4000);
     return imported;
+}
+
+bool MainWindow::blenderImportRunning() const
+{
+    return m_blenderLive && m_blenderLive->isBusy();
+}
+
+bool MainWindow::startBlenderImport(int sessionId, int startFrame)
+{
+    if (blenderImportRunning()) {
+        statusBar()->showMessage(tr("A Blender scene is already being brought in"), 4000);
+        return false;
+    }
+    m_blenderCancel->show();
+    const bool started = m_blenderLive->import(sessionId, startFrame, m_document->currentFrame());
+    if (!m_blenderLive->isBusy())
+        m_blenderCancel->hide();
+    return started;
+}
+
+void MainWindow::chooseBlenderScene()
+{
+    BlenderSessionDialog dialog(m_blenderServer, m_document->currentFrame(), this);
+    if (dialog.exec() != QDialog::Accepted || dialog.sessionId() == 0)
+        return;
+    startBlenderImport(dialog.sessionId(), dialog.startFrame());
+}
+
+void MainWindow::refreshFromBlender()
+{
+    const doc::CelId cel = m_document->currentCel();
+    const doc::Cel *c = m_document->document().cel(cel);
+    if (!c || !c->blenderLink()) {
+        statusBar()->showMessage(tr("The current cel does not come from a Blender scene"), 5000);
+        return;
+    }
+    if (!m_blenderLive->update(cel))
+        statusBar()->showMessage(tr("The Blender that has this scene open is not connected"), 6000);
 }
 
 void MainWindow::importSequence(QStringList files, const QString &name)
