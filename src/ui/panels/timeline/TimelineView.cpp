@@ -1747,6 +1747,10 @@ void TimelineView::contextMenuEvent(QContextMenuEvent *event)
                        });
     }
     menu.addSeparator();
+    // What the cel shows, keys and all, as plain pictures in a new cel.
+    QAction *raster = menu.addAction(tr("Raster into new Cel"), this, [this, celId] { m_document->rasterCel(celId); });
+    raster->setEnabled(!cel.timing().exposures().empty());
+    menu.addSeparator();
     QAction *copy = menu.addAction(tr("Copy frames"), this, &TimelineView::copyFrames);
     copy->setShortcut(Shortcuts::instance().key(QStringLiteral("edit.copy")));
     copy->setEnabled(!m_selected.empty());

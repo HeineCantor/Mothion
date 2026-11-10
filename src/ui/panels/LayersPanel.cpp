@@ -1478,6 +1478,14 @@ void LayersPanel::showContextMenu(const QPoint &at)
     // As the double click: the row under the pointer, whichever kind it is.
     menu.addAction(tr("Rename…"), this, [this, item] { rename(item); });
     menu.addSeparator();
+    if (kindOf(item) == Row::Cel) {
+        // What the cel shows, keys and all, as plain pictures in a new cel.
+        const doc::CelId celId = celOf(item);
+        const doc::Cel *cel = m_document->document().cel(celId);
+        QAction *raster = menu.addAction(tr("Raster into new Cel"), this, [this, celId] { m_document->rasterCel(celId); });
+        raster->setEnabled(cel && !cel->timing().exposures().empty());
+        menu.addSeparator();
+    }
     if (kindOf(item) == Row::Layer) {
         QAction *merge = menu.addAction(icon(IconId::MergeLayers), tr("Merge layers"), this, &LayersPanel::mergeSelected);
         merge->setEnabled(m_merge->isEnabled());

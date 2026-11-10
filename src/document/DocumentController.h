@@ -231,6 +231,11 @@ public:
     int importImageSequence(const QList<QImage> &images, const QString &name, int startFrame, int hold,
                             const std::function<void(int)> &progress = {});
 
+    // What the cel shows, moved by its keys and all, drawn as pictures in a new cel above it without any keys: where the
+    // cel has a drawing, a frame is a picture; a stretch of frames that look the same stays one picture held. Only what
+    // is within the page is kept. One undo step. The new cel's id, or kNoId (with `reason` saying why).
+    doc::CelId rasterCel(doc::CelId cel, QString *reason = nullptr);
+
     // Erases every pixel of the current layer, as one undo step. Returns
     // false, with `reason` saying why, when there is nothing to clear or the
     // layer (or its cel) is hidden or locked.
@@ -435,6 +440,10 @@ signals:
     void documentReplaced();
 
 private:
+    // A new cel above `above` of pictures: picture i is a drawing shown for runs[i].second frames from runs[i].first
+    // (in order, apart). One undo step; the pictures are asked for one at a time, as they are put in.
+    doc::CelId importRuns(const std::vector<std::pair<int, int>> &runs, const std::function<QImage(int)> &picture,
+                          const QString &name, doc::CelId above, const std::function<void(int)> &progress);
     void interruptStroke();
     // The current layer, if it can be worked on, or nullptr with `reason`
     // set: no cel, it or the layer hidden (or locked, if `changesIt`), or

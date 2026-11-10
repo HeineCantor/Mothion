@@ -51,6 +51,8 @@ public:
     // This cel is drawn as it is, without its motion: to draw on it where its pixels are (kNoId: none).
     void setCelAsDrawn(doc::CelId cel) { m_asDrawn = cel; }
     doc::CelId celAsDrawn() const { return m_asDrawn; }
+    // Only this cel is drawn (kNoId: all of them), to see what one cel makes of the frame by itself.
+    void setOnlyCel(doc::CelId cel) { m_only = cel; }
 
     // Whole frame (frame changed, cels changed, document resized...).
     void renderAll(const doc::Document &doc, int frame);
@@ -63,6 +65,7 @@ private:
     bool m_guides = true;
     ResampleFilter m_filter = ResampleFilter::Bilinear;
     doc::CelId m_asDrawn = doc::kNoId;
+    doc::CelId m_only = doc::kNoId;
 };
 
 } // namespace mothion::canvas

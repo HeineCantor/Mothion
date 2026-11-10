@@ -278,6 +278,8 @@ void FrameRenderer::render(const doc::Document &doc, int frame, const QRect &rec
     const std::vector<doc::TileCoord> tiles = tilesIn(area);
     for (int i = 0; i < doc.celCount(); ++i) {
         const doc::Cel &cel = doc.celAt(i);
+        if (m_only != doc::kNoId && cel.id() != m_only)
+            continue;
         const doc::CelProperties &props = cel.properties();
         const doc::Drawing *drawing = cel.drawingAt(frame);
         // What the animation does to the cel on this frame (nothing for a cel with no keys, or one shown as drawn).

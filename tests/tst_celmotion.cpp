@@ -799,6 +799,47 @@ private slots:
         QVERIFY(!bluish(960));
     }
 
+    // Raster into new Cel: what the keys make of the cel is drawn as pictures in a new cel above it, without keys; a stretch
+    // that looks the same stays one held picture; one undo step.
+    void rasterCelBakesTheKeys()
+    {
+        document::DocumentController controller;
+        controller.setSceneLength(30);
+        QImage image(60, 40, QImage::Format_ARGB32);
+        image.fill(Qt::red);
+        controller.importImage(image, QStringLiteral("piece")); // x 930..989, y 520..559, one drawing for the scene
+        const doc::CelId cel = controller.currentCel();
+        doc::CelPose far;
+        far.x = 100; // key 0 at the drawn place, key 10 a hundred pixels on, then it stays
+        controller.setCelKey(cel, 0, doc::CelPose{});
+        controller.setCelKey(cel, 10, far);
+        controller.setCelKeyEasing(cel, 0, doc::Easing::linear());
+        const int cels = controller.document().celCount();
+
+        QString why;
+        const doc::CelId raster = controller.rasterCel(cel, &why);
+        QVERIFY2(raster != doc::kNoId, qPrintable(why));
+        QCOMPARE(controller.document().celCount(), cels + 1);
+        QCOMPARE(controller.document().indexOf(raster), controller.document().indexOf(cel) + 1); // above the cel
+        const doc::Cel *made = controller.document().cel(raster);
+        QVERIFY(made->motion().isEmpty()); // no keys
+        QCOMPARE(made->timing().exposures().size(), size_t(11)); // frames 0-9 each, 10-29 the same one held
+        QCOMPARE(made->timing().exposureAt(12)->start, 10);
+        QCOMPARE(made->timing().exposureAt(12)->length, 20);
+        auto covered = [&](int frame, int x) {
+            const doc::Drawing *drawing = made->drawingAt(frame);
+            return drawing && (controller.document().layer(raster, drawing->id, drawing->layers[0].id)->image.pixel(x, 540) >> 24) != 0;
+        };
+        QVERIFY(covered(0, 960) && !covered(0, 1040));   // as drawn
+        QVERIFY(covered(5, 1010) && !covered(5, 940));    // half way (x 50): 980..1039
+        QVERIFY(covered(15, 1070) && !covered(15, 950));  // after the last key (x 100)
+        QVERIFY(controller.document().cel(cel)->motion().keyFrames().size() == 2); // the original is as it was
+
+        controller.undo(); // all of it, one step
+        QCOMPARE(controller.document().celCount(), cels);
+        QVERIFY(controller.rasterCel(doc::kNoId, &why) == doc::kNoId);
+    }
+
     // The options of Transform and Move, in keyframe mode, hold the pose of the current cel on the current frame; editing a field makes a key.
     void theKeyframeOptionsShowAndEditThePose()
     {

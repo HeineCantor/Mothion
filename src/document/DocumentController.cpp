@@ -1235,30 +1235,43 @@ int DocumentController::importImageSequence(const QList<QImage> &images, const Q
             usable << image;
     if (usable.isEmpty())
         return 0;
-    interruptStroke();
-    doc::Document &d = *m_document;
     startFrame = std::max(0, startFrame);
     hold = std::max(1, hold);
+    std::vector<std::pair<int, int>> runs;
+    for (int i = 0; i < usable.size(); ++i)
+        runs.emplace_back(startFrame + i * hold, hold);
+    importRuns(runs, [&usable](int i) { return usable[i]; }, name, m_currentCel, progress);
+    return int(usable.size());
+}
 
-    // One new cel above the current one; each image a drawing of its own, shown for `hold` frames from the
-    // one after the last. Applied now, recorded together.
+doc::CelId DocumentController::importRuns(const std::vector<std::pair<int, int>> &runs,
+                                          const std::function<QImage(int)> &picture, const QString &name,
+                                          doc::CelId above, const std::function<void(int)> &progress)
+{
+    if (runs.empty())
+        return doc::kNoId;
+    interruptStroke();
+    doc::Document &d = *m_document;
+
+    // One new cel above `above`; each picture a drawing of its own. Applied now, recorded together.
     std::vector<std::unique_ptr<doc::Command>> steps;
-    auto cel = std::make_unique<doc::AddCelCommand>(d, d.indexOf(m_currentCel) + 1,
-                                                    doc::CelProperties{name.toStdString()});
+    auto cel = std::make_unique<doc::AddCelCommand>(d, d.indexOf(above) + 1, doc::CelProperties{name.toStdString()});
     const doc::CelId celId = cel->celId();
     // The views hear of it once, when all is in: one refresh, not one for each of the frames.
     doc::ChangeSet changes = cel->apply(d);
     steps.push_back(std::move(cel));
     std::vector<std::pair<doc::DrawingId, QRect>> painted;
+    int end = 0;
 
-    for (int i = 0; i < usable.size(); ++i) {
+    for (int i = 0; i < int(runs.size()); ++i) {
         // Scaled down to fit the document if larger, centered, as a single imported image is.
-        QImage pixels = usable[i].convertToFormat(QImage::Format_ARGB32_Premultiplied);
+        QImage pixels = picture(i).convertToFormat(QImage::Format_ARGB32_Premultiplied);
         if (pixels.width() > d.width() || pixels.height() > d.height())
             pixels = pixels.scaled(d.width(), d.height(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
         const QPoint at((d.width() - pixels.width()) / 2, (d.height() - pixels.height()) / 2);
 
-        doc::NewDrawing drawing = doc::makeNewDrawing(d, celId, startFrame + i * hold, hold, tr("Layer 1").toStdString());
+        doc::NewDrawing drawing =
+            doc::makeNewDrawing(d, celId, runs[std::size_t(i)].first, runs[std::size_t(i)].second, tr("Layer 1").toStdString());
         changes.merge(drawing.command->apply(d));
         steps.push_back(std::move(drawing.command));
         doc::TiledImage &target = d.layer(celId, drawing.id, drawing.layer)->image;
@@ -1268,11 +1281,11 @@ int DocumentController::importImageSequence(const QList<QImage> &images, const Q
         if (auto paint = doc::PaintCommand::capture(celId, drawing.id, drawing.layer, before, target))
             steps.push_back(std::move(paint));
         painted.emplace_back(drawing.id, QRect(at, pixels.size()));
+        end = std::max(end, runs[std::size_t(i)].first + runs[std::size_t(i)].second);
         if (progress)
             progress(i + 1);
     }
-    // The scene is as long as the sequence needs (this is not one of the undo steps).
-    const int end = startFrame + int(usable.size()) * hold;
+    // The scene is as long as the pictures need (this is not one of the undo steps).
     if (end > d.frameCount())
         d.setFrameCount(end);
 
@@ -1282,8 +1295,57 @@ int DocumentController::importImageSequence(const QList<QImage> &images, const Q
         emit pixelsChanged(celId, drawingId, area);
     emit historyChanged();
     setCurrentCel(celId);
-    setCurrentFrame(startFrame);
-    return int(usable.size());
+    setCurrentFrame(runs.front().first);
+    return celId;
+}
+
+doc::CelId DocumentController::rasterCel(doc::CelId celId, QString *reason)
+{
+    const doc::Cel *cel = m_document->cel(celId);
+    auto fail = [reason](const QString &why) {
+        if (reason)
+            *reason = why;
+        return doc::kNoId;
+    };
+    if (!cel)
+        return fail(tr("There is no cel."));
+    int first = -1, last = -1;
+    for (const doc::Exposure &e : cel->timing().exposures()) {
+        first = first < 0 ? e.start : std::min(first, e.start);
+        last = std::max(last, e.end());
+    }
+    if (first < 0)
+        return fail(tr("The cel has no drawings."));
+
+    // The frames with a drawing, in stretches that look the same: the same drawing under the same pose.
+    std::vector<std::pair<int, int>> runs;
+    auto poseAt = [cel](int frame) { return cel->motion().isEmpty() ? doc::CelPose{} : cel->motion().poseAt(frame); };
+    for (int f = first; f < last; ++f) {
+        if (!cel->drawingAt(f))
+            continue;
+        if (!runs.empty() && runs.back().first + runs.back().second == f && cel->drawingAt(f - 1) == cel->drawingAt(f) &&
+            poseAt(f - 1) == poseAt(f))
+            ++runs.back().second;
+        else
+            runs.emplace_back(f, 1);
+    }
+    if (runs.empty())
+        return fail(tr("The cel shows nothing."));
+
+    const doc::Document &d = *m_document;
+    const QString name = tr("%1 (raster)").arg(QString::fromStdString(cel->properties().name));
+    return importRuns(
+        runs,
+        [&d, celId, &runs](int i) {
+            canvas::FrameRenderer renderer;
+            renderer.setPaperVisible(false);
+            renderer.setGuidesVisible(false);
+            renderer.setResampleFilter(canvas::ResampleFilter::Bicubic); // moved by its keys: read with care
+            renderer.setOnlyCel(celId);
+            renderer.renderAll(d, runs[std::size_t(i)].first);
+            return renderer.image();
+        },
+        name, celId, {});
 }
 
 std::optional<DocumentController::PerspectiveLayerInfo> DocumentController::perspectiveLayerById(doc::LayerId id) const
