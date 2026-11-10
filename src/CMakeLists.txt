@@ -75,8 +75,6 @@ qt_add_library(mothion_gui STATIC
     io/Autosave.h io/Autosave.cpp
     io/FrameExport.h io/FrameExport.cpp
     io/VideoExport.h io/VideoExport.cpp
-    io/BlenderRender.h io/BlenderRender.cpp
-    io/FileSaveWatcher.h io/FileSaveWatcher.cpp
     io/BlenderLinkServer.h io/BlenderLinkServer.cpp
     io/BlenderFrameCache.h io/BlenderFrameCache.cpp
     io/BlenderAddOn.h io/BlenderAddOn.cpp
@@ -122,8 +120,8 @@ qt_add_library(mothion_gui STATIC
     ui/DockLayout.h ui/DockLayout.cpp
     ui/ExportDialog.h ui/ExportDialog.cpp
     ui/VideoExportDialog.h ui/VideoExportDialog.cpp
-    ui/BlenderImportDialog.h ui/BlenderImportDialog.cpp
-    ui/BlenderImportJob.h ui/BlenderImportJob.cpp
+    ui/BlenderLiveLink.h ui/BlenderLiveLink.cpp
+    ui/BlenderSessionDialog.h ui/BlenderSessionDialog.cpp
     ui/TweenDialog.h ui/TweenDialog.cpp
     ui/PanelDock.h ui/PanelDock.cpp
     ui/SplashScreen.h ui/SplashScreen.cpp

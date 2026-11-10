@@ -103,7 +103,7 @@ std::unique_ptr<doc::Document> sampleDocument()
     for (doc::Channel c : doc::kChannels)
         motion.setKey(c, 40, first, doc::Easing::linear());
     d->celAt(1).setMotion(motion);
-    d->celAt(1).setBlenderLink(doc::BlenderLink{"/home/me/scenes/walk cycle ✓.blend", 12, 25, true}); // a cel rendered from Blender
+    d->celAt(1).setBlenderLink(doc::BlenderLink{"/home/me/scenes/walk cycle ✓.blend", "Scene ✓", 12, 25}); // a cel rendered from Blender
     doc::GraphData graph;
     graph.nodes.push_back({1, "frame", -330.5, 12, {}});
     graph.nodes.push_back({4, "blur", 20, -7.25, {{"radius", 17}}});

@@ -1291,6 +1291,82 @@ bool DocumentController::fillSequenceFrame(const PendingSequence &sequence, int 
     return true;
 }
 
+std::unique_ptr<DocumentController::SequenceUpdate> DocumentController::beginSequenceUpdate(doc::CelId cel, int startFrame)
+{
+    if (!m_document->cel(cel))
+        return nullptr;
+    auto update = std::make_unique<SequenceUpdate>();
+    update->cel = cel;
+    update->startFrame = std::max(0, startFrame);
+    return update;
+}
+
+bool DocumentController::applySequenceFrames(SequenceUpdate &update, const std::map<int, QImage> &frames)
+{
+    doc::Document &d = *m_document;
+    doc::Cel *cel = d.cel(update.cel);
+    if (!cel)
+        return false;
+    doc::ChangeSet changes;
+    std::vector<std::pair<doc::DrawingId, QRect>> painted;
+    for (const auto &[index, image] : frames) {
+        if (image.isNull())
+            continue;
+        const int frame = update.startFrame + index;
+        doc::DrawingId drawingId = cel->timing().drawingAt(frame);
+        doc::LayerId layerId = doc::kNoId;
+        const bool isNew = drawingId == doc::kNoId || !cel->drawing(drawingId);
+        if (isNew) { // the scene got longer: the frames after the last one are new
+            doc::NewDrawing drawing = doc::makeNewDrawing(d, update.cel, frame, 1, tr("Layer 1").toStdString());
+            changes.merge(drawing.command->apply(d));
+            update.steps.push_back(std::move(drawing.command));
+            drawingId = drawing.id;
+            layerId = drawing.layer;
+            if (frame + 1 > d.frameCount())
+                d.setFrameCount(frame + 1);
+        } else if (!cel->drawing(drawingId)->layers.empty()) {
+            layerId = cel->drawing(drawingId)->layers.front().id; // the render is the first layer; others are the person's
+        }
+        doc::Layer *layer = layerId == doc::kNoId ? nullptr : d.layer(update.cel, drawingId, layerId);
+        if (!layer)
+            continue;
+        const std::pair<doc::DrawingId, doc::LayerId> key{drawingId, layerId};
+        if (!update.before.count(key))
+            update.before.emplace(key, isNew ? doc::TiledImage() : layer->image); // as it was, for the undo
+        QImage pixels = image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+        if (pixels.width() != d.width() || pixels.height() != d.height())
+            pixels = pixels.scaled(d.width(), d.height(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        const QPoint at((d.width() - pixels.width()) / 2, (d.height() - pixels.height()) / 2);
+        layer->image = doc::TiledImage(); // the new picture replaces the old one, all of it
+        layer->image.write(at.x(), at.y(), pixels.width(), pixels.height(),
+                           reinterpret_cast<const doc::Pixel *>(pixels.constBits()), pixels.bytesPerLine() / 4);
+        painted.emplace_back(drawingId, QRect(0, 0, d.width(), d.height()));
+    }
+    publish(changes);
+    for (const auto &[drawingId, area] : painted)
+        emit pixelsChanged(update.cel, drawingId, area);
+    return true;
+}
+
+void DocumentController::finishSequenceUpdate(SequenceUpdate &update)
+{
+    doc::Document &d = *m_document;
+    std::vector<std::unique_ptr<doc::Command>> steps = std::move(update.steps);
+    update.steps.clear();
+    for (const auto &[key, before] : update.before) {
+        const doc::Layer *layer = d.layer(update.cel, key.first, key.second);
+        if (!layer)
+            continue;
+        if (auto paint = doc::PaintCommand::capture(update.cel, key.first, key.second, before, layer->image))
+            steps.push_back(std::move(paint));
+    }
+    update.before.clear();
+    if (steps.empty())
+        return;
+    m_history.pushApplied(std::make_unique<doc::GroupCommand>(doc::CommandKind::UpdateSequence, std::move(steps)));
+    emit historyChanged();
+}
+
 void DocumentController::finishSequence(const PendingSequence &sequence)
 {
     doc::Document &d = *m_document;
@@ -1760,6 +1836,7 @@ QString DocumentController::commandName(doc::CommandKind kind)
     case doc::CommandKind::ChangeLayerProperties: return tr("layer properties");
     case doc::CommandKind::ImportImage: return tr("import image");
     case doc::CommandKind::ImportSequence: return tr("import image sequence");
+    case doc::CommandKind::UpdateSequence: return tr("update of the Blender scene");
     case doc::CommandKind::SetAudio: return tr("audio");
     case doc::CommandKind::ChangeAudio: return tr("audio change");
     case doc::CommandKind::EditCompositing: return tr("compositing");

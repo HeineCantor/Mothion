@@ -247,6 +247,22 @@ public:
     bool fillSequenceFrame(const PendingSequence &sequence, int index, const QImage &image);
     void finishSequence(const PendingSequence &sequence);
 
+    // The pictures of a cel that was made from a sequence (a Blender scene, saved again) replacing the old ones, frame by
+    // frame as they come: picture `index` goes in the first layer of the drawing at frame `startFrame + index` (a frame the
+    // cel does not reach yet gets a drawing of its own; the other layers of a drawing, the person's, are left alone). Nothing
+    // is an undo step until `finishSequenceUpdate`, which records all that was done as one, from the pictures as they were.
+    struct SequenceUpdate
+    {
+        doc::CelId cel = doc::kNoId;
+        int startFrame = 0;
+        std::map<std::pair<doc::DrawingId, doc::LayerId>, doc::TiledImage> before; // the layers touched, as they were
+        std::vector<std::unique_ptr<doc::Command>> steps;                          // the drawings made
+    };
+    std::unique_ptr<SequenceUpdate> beginSequenceUpdate(doc::CelId cel, int startFrame);
+    // False if the cel is gone.
+    bool applySequenceFrames(SequenceUpdate &update, const std::map<int, QImage> &frames);
+    void finishSequenceUpdate(SequenceUpdate &update);
+
     int importImageSequence(const QList<QImage> &images, const QString &name, int startFrame, int hold,
                             const std::function<void(int)> &progress = {});
 
