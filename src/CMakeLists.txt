@@ -77,6 +77,8 @@ qt_add_library(mothion_gui STATIC
     io/VideoExport.h io/VideoExport.cpp
     io/BlenderRender.h io/BlenderRender.cpp
     io/FileSaveWatcher.h io/FileSaveWatcher.cpp
+    io/BlenderLinkServer.h io/BlenderLinkServer.cpp
+    io/BlenderFrameCache.h io/BlenderFrameCache.cpp
     io/BlenderAddOn.h io/BlenderAddOn.cpp
 
     tools/ToolState.h tools/ToolState.cpp
@@ -221,7 +223,7 @@ endif()
 target_include_directories(mothion_gui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 find_package(Qt6 REQUIRED COMPONENTS Sql) # .sut brushes and .moth projects are SQLite databases
 find_package(Qt6 REQUIRED COMPONENTS Network) # the local socket of Discord's Rich Presence
-target_link_libraries(mothion_gui PUBLIC mothion_core Qt6::Widgets PRIVATE Qt6::Sql Qt6::Network Qt6::Multimedia)
+target_link_libraries(mothion_gui PUBLIC mothion_core Qt6::Widgets Qt6::Network PRIVATE Qt6::Sql Qt6::Multimedia) # (Network is public: the link server is in a header the tests use)
 mothion_set_warnings(mothion_gui)
 
 # ---------------------------------------------------------------------------
