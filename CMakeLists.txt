@@ -10,6 +10,12 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Linking the many test programs, each with the debug information, all at once can fill the memory: two at a time.
+if(CMAKE_GENERATOR MATCHES "Ninja")
+    set_property(GLOBAL APPEND PROPERTY JOB_POOLS mothion_link=2)
+    set(CMAKE_JOB_POOL_LINK mothion_link)
+endif()
+
 option(MOTHION_BUILD_TESTS "Build unit tests" ON)
 option(MOTHION_BUILD_DEVTOOLS "Build developer tools (brush test sheet)" OFF)
 # Wintab on Windows needs a *private* Qt API (QNativeInterface::Private::QWindowsApplication).

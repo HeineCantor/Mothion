@@ -135,7 +135,19 @@ install a recent Qt (e.g. with aqtinstall or the Qt Online Installer, with the M
 with --qt-dir."
 fi
 step "Building ($config)"
-cmake --build "$build_dir" --parallel || fail 'Building failed.'
+# One job per core, but no more than the free memory carries (a compile peaks near 1 GB, with -g): all the cores of a
+# large machine at once could fill the memory and freeze it. MOTHION_JOBS says another number.
+jobs="${MOTHION_JOBS:-}"
+if [[ -z "$jobs" ]]; then
+    jobs="$(nproc 2>/dev/null || echo 4)"
+    avail_kb="$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo 2>/dev/null || true)"
+    if [[ -n "$avail_kb" ]]; then
+        by_memory=$(( avail_kb / 2097152 )) # 2 GB for each job, with room for what else is open
+        (( by_memory < 1 )) && by_memory=1
+        (( by_memory < jobs )) && jobs=$by_memory
+    fi
+fi
+cmake --build "$build_dir" --parallel "$jobs" || fail 'Building failed.'
 
 if [[ $skip_tests -eq 0 ]]; then
     step 'Running the tests'
