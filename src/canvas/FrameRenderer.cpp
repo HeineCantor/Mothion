@@ -347,6 +347,8 @@ void FrameRenderer::render(const doc::Document &doc, int frame, const QRect &rec
         // What the animation does to the cel on this frame (nothing for a cel with no keys, or one shown as drawn).
         const bool animated = !cel.motion().isEmpty() && cel.id() != m_asDrawn;
         const doc::CelPose pose = animated ? cel.motion().poseAt(frame) : doc::CelPose{};
+        // On top of its own pose, what the trajectory it follows does (shown as drawn, it is not moved by it either).
+        const doc::Matrix2x3 follow = cel.id() != m_asDrawn ? doc.followMatrix(cel, frame) : doc::Matrix2x3{};
         const float opacity = props.opacity * float(pose.opacity);
         if (!props.visible || opacity <= 0.0f || !drawing)
             continue;
@@ -359,9 +361,9 @@ void FrameRenderer::render(const doc::Document &doc, int frame, const QRect &rec
             }
         if (shown == 0)
             continue;
-        if (animated && !pose.movesNothing()) {
+        if ((animated && !pose.movesNothing()) || !follow.isIdentity()) {
             // Moved as one piece: what its layers show together, read through the pose into this area.
-            const doc::Matrix2x3 m = pose.matrix(cel.motion().pivotX, cel.motion().pivotY);
+            const doc::Matrix2x3 m = pose.matrix(cel.motion().pivotX, cel.motion().pivotY).then(follow);
             const QTransform forward(m.a, m.b, m.c, m.d, m.e, m.f);
             bool invertible = false;
             const QTransform back = forward.inverted(&invertible);

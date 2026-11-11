@@ -39,6 +39,7 @@ struct Matrix2x3
     Matrix2x3 inverted() const;
     // `then` after this one.
     Matrix2x3 then(const Matrix2x3 &next) const;
+    bool isIdentity() const { return a == 1 && b == 0 && c == 0 && d == 1 && e == 0 && f == 0; }
 };
 
 // Where the camera looks, in pixels of the sheet.

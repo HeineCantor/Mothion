@@ -113,6 +113,7 @@ std::optional<AnimateTool::Shape> AnimateTool::shape() const
         s.pose = cel->motion().poseAt(m_document->currentFrame());
     }
     s.matrix = s.pose.matrix(s.pivot.x(), s.pivot.y());
+    s.follow = d.followMatrix(*cel, frame);
     return s;
 }
 
@@ -120,6 +121,21 @@ QPointF AnimateTool::mapped(const Shape &s, const QPointF &local) const
 {
     double x = 0, y = 0;
     s.matrix.map(local.x(), local.y(), x, y);
+    return {x, y};
+}
+
+QPointF AnimateTool::onPage(const Shape &s, const QPointF &local) const
+{
+    const QPointF own = mapped(s, local);
+    double x = 0, y = 0;
+    s.follow.map(own.x(), own.y(), x, y);
+    return {x, y};
+}
+
+QPointF AnimateTool::beforeFollow(const Shape &s, const QPointF &page) const
+{
+    double x = 0, y = 0;
+    s.follow.inverted().map(page.x(), page.y(), x, y);
     return {x, y};
 }
 
@@ -166,13 +182,14 @@ bool AnimateTool::showsBox() const
     return !m_moveOnly || m_pending.has_value();
 }
 
-void AnimateTool::press(const QPointF &docPos, Qt::KeyboardModifiers)
+void AnimateTool::press(const QPointF &pagePos, Qt::KeyboardModifiers)
 {
     const std::optional<Shape> s = shape();
     if (!s) {
         m_status(QObject::tr("The cel shows nothing on this frame: there is nothing to move"));
         return;
     }
+    const QPointF docPos = beforeFollow(*s, pagePos);
     const doc::Cel *cel = m_document->document().cel(m_document->currentCel());
     if (cel && cel->properties().locked) {
         m_status(QObject::tr("The cel is locked"));
@@ -229,12 +246,13 @@ void AnimateTool::press(const QPointF &docPos, Qt::KeyboardModifiers)
     m_drag = d;
 }
 
-void AnimateTool::move(const QPointF &docPos, Qt::KeyboardModifiers modifiers)
+void AnimateTool::move(const QPointF &pagePos, Qt::KeyboardModifiers modifiers)
 {
     if (!m_drag)
         return;
     Drag &d = *m_drag;
     const Shape &start = d.start;
+    const QPointF docPos = beforeFollow(start, pagePos);
     doc::CelPose pose = start.pose;
     // The turn and the scale are around the pivot; the point that stays put (the box's middle, the anchor) is then brought
     // back to where it was by the move.
@@ -392,14 +410,14 @@ QRectF AnimateTool::shownBounds() const
         return {};
     QPolygonF frame;
     for (int i = 0; i < 4; ++i)
-        frame << mapped(*s, handlePoint(*s, i));
+        frame << onPage(*s, handlePoint(*s, i));
     return frame.boundingRect();
 }
 
-bool AnimateTool::hover(const QPointF &docPos)
+bool AnimateTool::hover(const QPointF &pagePos)
 {
     const std::optional<Shape> s = shape();
-    const Pick now = s ? pick(docPos, *s) : Pick{};
+    const Pick now = s ? pick(beforeFollow(*s, pagePos), *s) : Pick{};
     if (now.grip == m_hover.grip && now.handle == m_hover.handle)
         return false;
     m_hover = now;
@@ -414,7 +432,7 @@ QCursor AnimateTool::cursor() const
     case Grip::Corner:
     case Grip::Side:
         if (const std::optional<Shape> s = shape())
-            return resizeCursor(mapped(*s, s->box.center()), mapped(*s, handlePoint(*s, m_hover.handle)));
+            return resizeCursor(onPage(*s, s->box.center()), onPage(*s, handlePoint(*s, m_hover.handle)));
         break;
     case Grip::None: break;
     }
@@ -437,7 +455,9 @@ void AnimateTool::paintOverlay(QPainter &painter, const ViewTransform &view) con
         const std::vector<int> keyFrames = motion.keyFrames();
         for (int f = keyFrames.front(); f <= keyFrames.back(); ++f) {
             const doc::CelPose q = motion.poseAt(f);
-            const QPointF at = toView.map(QPointF(motion.pivotX + q.x, motion.pivotY + q.y));
+            double px = 0, py = 0;
+            m_document->document().followMatrix(*cel, f).map(motion.pivotX + q.x, motion.pivotY + q.y, px, py);
+            const QPointF at = toView.map(QPointF(px, py));
             const bool isKey = motion.keyAt(doc::Channel::Position, f) != nullptr; // the dots are the path of the position
             painter.setPen(Qt::NoPen);
             painter.setBrush(isKey ? accent : QColor(accent.red(), accent.green(), accent.blue(), 150));
@@ -450,7 +470,7 @@ void AnimateTool::paintOverlay(QPainter &painter, const ViewTransform &view) con
         return;
     QPolygonF frame;
     for (int i = 0; i < 4; ++i)
-        frame << toView.map(mapped(*s, handlePoint(*s, i)));
+        frame << toView.map(onPage(*s, handlePoint(*s, i)));
     painter.setPen(QPen(Qt::white, 3));
     painter.drawPolygon(frame);
     painter.setPen(QPen(QColor(40, 110, 230), 1));
@@ -459,7 +479,7 @@ void AnimateTool::paintOverlay(QPainter &painter, const ViewTransform &view) con
         return; // the box alone: a drag anywhere moves it
     painter.setBrush(Qt::white);
     for (int i = 0; i < 8; ++i) {
-        const QPointF at = toView.map(mapped(*s, handlePoint(*s, i)));
+        const QPointF at = toView.map(onPage(*s, handlePoint(*s, i)));
         painter.drawRect(QRectF(at.x() - kHandleSize / 2, at.y() - kHandleSize / 2, kHandleSize, kHandleSize));
     }
 }

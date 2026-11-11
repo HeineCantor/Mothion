@@ -120,7 +120,7 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
                     // A cel moved by its keys shows these pixels somewhere else: where the pose puts them.
                     if (cel->id() == m_document->currentCel())
                         renderDocumentRect(posedRect(rect));
-                    else if (!cel->motion().isEmpty())
+                    else if (!cel->motion().isEmpty() || m_document->document().followedTrajectory(*cel))
                         renderWholeFrame();
                     else
                         renderDocumentRect(rect);
@@ -345,9 +345,12 @@ void CanvasView::paintOnionSkin(QPainter &p)
         // A ghost is the cel as it is on its own frame: posed by its keys, unless the cel is shown as drawn (to line pixels up).
         const bool posed = !cel->motion().isEmpty() && m_frame.celAsDrawn() != cel->id();
         const doc::CelPose pose = posed ? cel->motion().poseAt(m_document->currentFrame() + distance) : doc::CelPose{};
+        const doc::Matrix2x3 follow = m_frame.celAsDrawn() != cel->id()
+                                          ? m_document->document().followMatrix(*cel, m_document->currentFrame() + distance)
+                                          : doc::Matrix2x3{};
         p.setOpacity(s.opacity * fade * pose.opacity);
-        if (posed && !pose.movesNothing()) {
-            const doc::Matrix2x3 m = pose.matrix(cel->motion().pivotX, cel->motion().pivotY);
+        if ((posed && !pose.movesNothing()) || !follow.isIdentity()) {
+            const doc::Matrix2x3 m = pose.matrix(cel->motion().pivotX, cel->motion().pivotY).then(follow);
             p.save();
             p.setWorldTransform(QTransform(m.a, m.b, m.c, m.d, m.e, m.f) * p.worldTransform());
             p.drawImage(ghost.origin, ghost.tinted);
@@ -556,9 +559,13 @@ void CanvasView::syncCelAsDrawn()
 doc::Matrix2x3 CanvasView::celPose() const
 {
     const doc::Cel *cel = m_document->document().cel(m_document->currentCel());
-    if (!cel || cel->motion().isEmpty())
+    if (!cel)
         return {};
-    return m_document->celPoseAt(cel->id(), m_document->currentFrame()).matrix(cel->motion().pivotX, cel->motion().pivotY);
+    // Its own pose, then what the trajectory it follows does.
+    const doc::Matrix2x3 follow = m_document->document().followMatrix(*cel, m_document->currentFrame());
+    if (cel->motion().isEmpty())
+        return follow;
+    return m_document->celPoseAt(cel->id(), m_document->currentFrame()).matrix(cel->motion().pivotX, cel->motion().pivotY).then(follow);
 }
 
 const QImage &CanvasView::frameInCel()
@@ -580,7 +587,11 @@ const QImage &CanvasView::frameInCel()
 bool CanvasView::celIsPosed() const
 {
     const doc::Cel *cel = m_document->document().cel(m_document->currentCel());
-    return cel && !cel->motion().isEmpty() && !m_document->celPoseAt(cel->id(), m_document->currentFrame()).movesNothing();
+    if (!cel)
+        return false;
+    if (!m_document->document().followMatrix(*cel, m_document->currentFrame()).isIdentity())
+        return true;
+    return !cel->motion().isEmpty() && !m_document->celPoseAt(cel->id(), m_document->currentFrame()).movesNothing();
 }
 
 QPointF CanvasView::toCel(const QPointF &page) const

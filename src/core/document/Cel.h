@@ -21,8 +21,8 @@ struct CelProperties
     // A trajectory: a cel with no drawings that is never drawn, only moved, turned and scaled by its keys (what the cels
     // that follow it will do, see CelMotion). Fixed when it is made.
     bool trajectory = false;
-    // For a trajectory: the trajectory it follows (kNoId: none, or one that is not there any more). Its own keys come on top of
-    // what the parent does. For a trajectory `visible` is "active": an inactive one does nothing of its own.
+    // The trajectory it follows (kNoId: none, or one that is not there any more; a cel that is no trajectory can follow one
+    // too). Its own keys come on top of what the trajectory does. For a trajectory `visible` is "active": an inactive one does nothing of its own.
     CelId parent = kNoId;
 
     bool operator==(const CelProperties &) const = default;

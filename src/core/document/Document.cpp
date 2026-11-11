@@ -65,8 +65,10 @@ const Cel *Document::trajectoryParent(const Cel &cel) const
 bool Document::trajectoryLoop(CelId child, CelId parent) const
 {
     const Cel *c = cel(child), *p = cel(parent);
-    if (!c || !p || !c->properties().trajectory || !p->properties().trajectory)
+    if (!c || !p || !p->properties().trajectory)
         return true;
+    if (!c->properties().trajectory)
+        return false; // a cel that follows one: nothing follows it, so there is no way back
     // Up from the parent: meeting the child is a loop.
     for (int depth = 0; p && depth <= celCount(); ++depth) {
         if (p->id() == child)
@@ -74,6 +76,38 @@ bool Document::trajectoryLoop(CelId child, CelId parent) const
         p = trajectoryParent(*p);
     }
     return false;
+}
+
+const Cel *Document::followedTrajectory(const Cel &cel) const
+{
+    if (cel.properties().trajectory || cel.properties().parent == kNoId)
+        return nullptr;
+    const Cel *parent = this->cel(cel.properties().parent);
+    return parent && parent->properties().trajectory ? parent : nullptr;
+}
+
+int Document::trajectoryStartFrame(CelId trajectory) const
+{
+    // The earliest key of the trajectory or of the ones it follows (an inactive one does nothing: it has none that count).
+    int first = -1;
+    int depth = 0;
+    for (const Cel *c = cel(trajectory); c && depth <= celCount(); c = trajectoryParent(*c), ++depth) {
+        if (!c->properties().visible || c->motion().isEmpty())
+            continue;
+        const int own = c->motion().keyFrames().front();
+        first = first < 0 ? own : std::min(first, own);
+    }
+    return first;
+}
+
+Matrix2x3 Document::followMatrix(const Cel &cel, int frame) const
+{
+    const Cel *trajectory = followedTrajectory(cel);
+    const int start = trajectory ? trajectoryStartFrame(trajectory->id()) : -1;
+    if (start < 0)
+        return {};
+    // Relative: what the trajectory has done since its first key, so the cel is where it is drawn until then.
+    return trajectoryMatrix(trajectory->id(), start).inverted().then(trajectoryMatrix(trajectory->id(), frame));
 }
 
 Matrix2x3 Document::trajectoryParentMatrix(CelId trajectory, int frame) const

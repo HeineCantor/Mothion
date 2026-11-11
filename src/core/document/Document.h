@@ -73,7 +73,16 @@ public:
     // Trajectories (see CelProperties::trajectory) that follow one another. `cel`'s parent if it has one that is a trajectory
     // there, other than itself; nullptr otherwise.
     const Cel *trajectoryParent(const Cel &cel) const;
-    // Whether making `parent` the parent of `child` would be a loop (or one of them is no trajectory).
+    // The trajectory a cel that is no trajectory follows (its parent, if that is one); nullptr for none.
+    const Cel *followedTrajectory(const Cel &cel) const;
+    // What the trajectory a cel follows does to it on `frame` (identity for a cel that follows none): on top of the cel's own
+    // pose, and relative: only what the trajectory has done since its first key (see trajectoryStartFrame()), so the cel is
+    // where it is drawn at that frame and before it.
+    Matrix2x3 followMatrix(const Cel &cel, int frame) const;
+    // The frame of the first key of a trajectory or of the ones it follows; -1 if none has a key.
+    int trajectoryStartFrame(CelId trajectory) const;
+    // Whether making `parent` the parent of `child` would be a loop (or the parent is no trajectory, or a trajectory's
+    // child is not one).
     bool trajectoryLoop(CelId child, CelId parent) const;
     // What a trajectory does on `frame` to what follows it: its parent's way, then its own pose (an inactive one has none)
     // on top of that (the parent's matrix after its own: a child turns round its parent as the parent turns).

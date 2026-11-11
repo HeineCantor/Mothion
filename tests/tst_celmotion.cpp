@@ -187,6 +187,72 @@ private slots:
         QVERIFY(!controller.setCelKey(doc::CelId(9999), 0, at(1, 1))); // no such cel
     }
 
+    // A cel that follows a trajectory is drawn where the trajectory takes it, on top of its own keys; and only a trajectory
+    // can be followed. One undo step; a trajectory that goes lets the cel go.
+    void aCelFollowsATrajectory()
+    {
+        document::DocumentController controller;
+        controller.setSceneLength(30);
+        const doc::Document &d = controller.document();
+        const doc::CelId piece = d.celAt(0).id();
+        controller.addTrajectory();
+        const doc::CelId path = controller.currentCel();
+        controller.addCel();
+        const doc::CelId plain = controller.currentCel();
+        QVERIFY(!controller.setTrajectoryParent(piece, plain)); // not a trajectory
+        QVERIFY(controller.setTrajectoryParent(piece, path));
+        QVERIFY(!controller.setTrajectoryParent(piece, path)); // nothing changes
+        QCOMPARE(d.followedTrajectory(*d.cel(piece))->id(), path);
+        QVERIFY(d.followMatrix(*d.cel(piece), 0).isIdentity()); // the trajectory does nothing yet
+        QVERIFY(d.trajectoryParent(*d.cel(piece)) == nullptr); // (it is not a trajectory's child)
+
+        // Relative to the trajectory's first key: there (and before) the cel stays, then it goes as far as the trajectory did.
+        doc::CelPose slide;
+        slide.x = 100;
+        controller.setCelKey(path, 5, doc::CelPose{});
+        controller.setCelKey(path, 15, slide);
+        double x = 0, y = 0;
+        d.followMatrix(*d.cel(piece), 5).map(10, 20, x, y);
+        QCOMPARE(QPointF(x, y), QPointF(10, 20));
+        d.followMatrix(*d.cel(piece), 0).map(10, 20, x, y);
+        QCOMPARE(QPointF(x, y), QPointF(10, 20));
+        d.followMatrix(*d.cel(piece), 15).map(10, 20, x, y);
+        QCOMPARE(QPointF(x, y), QPointF(110, 20));
+        QCOMPARE(d.trajectoryStartFrame(path), 5);
+        // Drawn there.
+        doc::Document document(200, 120);
+        document.setFrameCount(30);
+        document.setPaperColor(0xffffffff);
+        const doc::CelId square = addSquare(document, 40, 40, 20, 0);
+        doc::CelProperties line{"Path"};
+        line.trajectory = true;
+        doc::Cel &trajectory = document.insertCel(1, std::make_unique<doc::Cel>(document.allocateCelId(), line));
+        doc::CelMotion motion;
+        motion.setKey(doc::Channel::Position, 0, doc::CelPose{0, 0});
+        motion.setKey(doc::Channel::Position, 10, doc::CelPose{100, 0});
+        trajectory.setMotion(motion);
+        canvas::FrameRenderer renderer;
+        renderer.renderAll(document, 0);
+        QCOMPARE(renderer.image().pixelColor(50, 50), QColor(Qt::red)); // not following yet
+        doc::CelProperties follower = document.cel(square)->properties();
+        follower.parent = trajectory.id();
+        document.cel(square)->setProperties(follower);
+        renderer.renderAll(document, 0);
+        QCOMPARE(renderer.image().pixelColor(50, 50), QColor(Qt::red)); // at the first key: where it is drawn
+        renderer.renderAll(document, 10);
+        QCOMPARE(renderer.image().pixelColor(150, 50), QColor(Qt::red));
+        QCOMPARE(renderer.image().pixelColor(50, 50), QColor(Qt::white));
+        controller.undo(); // the trajectory's two keys
+        controller.undo();
+        controller.undo(); // the link
+        QVERIFY(d.followedTrajectory(*d.cel(piece)) == nullptr);
+        controller.redo();
+        controller.redo();
+        controller.redo();
+        QVERIFY(controller.setTrajectoryParent(piece, doc::kNoId)); // let go
+        QVERIFY(d.followedTrajectory(*d.cel(piece)) == nullptr);
+    }
+
     void aMovedCelIsDrawnAtItsPose()
     {
         doc::Document document(200, 120);

@@ -332,6 +332,7 @@ private slots:
         child.visible = false; // (inactive)
         child.parent = path_cel.id();
         original->insertCel(1, std::make_unique<doc::Cel>(original->allocateCelId(), child));
+        original->celAt(2).setProperties([&] { auto p = original->celAt(2).properties(); p.parent = path_cel.id(); return p; }());
         QString error;
         QVERIFY2(io::saveProject(*original, path, &error), qPrintable(error));
         const auto loaded = io::loadProject(path, &error);
@@ -342,6 +343,7 @@ private slots:
         QCOMPARE(loaded->celAt(1).properties().parent, loaded->celAt(0).id()); // format 15
         QVERIFY(!loaded->celAt(1).properties().visible);
         QVERIFY(!loaded->celAt(2).properties().trajectory);
+        QCOMPARE(loaded->celAt(2).properties().parent, loaded->celAt(0).id()); // a plain cel that follows the path
         QVERIFY(loaded->celAt(0).motion().hasKeyAt(3));
     }
 

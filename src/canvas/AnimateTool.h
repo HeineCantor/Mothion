@@ -73,6 +73,9 @@ private:
         QPointF pivot;
         doc::CelPose pose;
         doc::Matrix2x3 matrix;
+        // What the trajectory the cel follows does to it, on top of its pose: the tool works in the space before it (the pen is
+        // taken back through it), the box and the handles are shown after it.
+        doc::Matrix2x3 follow;
     };
     // The cels moved together, when several are chosen and show something here: the chosen ones that are free, on view, and
     // have pixels on the current frame. Fewer than two: the current cel alone.
@@ -81,6 +84,8 @@ private:
     QRect boundsOf(const doc::Cel &cel, const doc::Drawing &drawing) const;
     std::optional<Shape> shape() const;
     QPointF mapped(const Shape &s, const QPointF &local) const;
+    QPointF onPage(const Shape &s, const QPointF &local) const;      // mapped(), then what the trajectory does
+    QPointF beforeFollow(const Shape &s, const QPointF &page) const; // the way back from a point of the page
     QPointF handlePoint(const Shape &s, int index) const; // in the cel's own coordinates: corners 0..3, then side middles
     struct Pick
     {

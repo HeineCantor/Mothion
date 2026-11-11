@@ -577,7 +577,7 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
             return false;
         if (p.trajectory && !exec(trajectory, {idValue(l.id())}))
             return false;
-        if (p.trajectory && p.parent != doc::kNoId && !exec(trajectoryParent, {idValue(l.id()), idValue(p.parent)}))
+        if (p.parent != doc::kNoId && !exec(trajectoryParent, {idValue(l.id()), idValue(p.parent)}))
             return false;
         for (const auto &[id, dr] : l.drawings()) {
             if (!exec(drawing, {idValue(id), idValue(l.id()), QString::fromStdString(dr.name)}))
