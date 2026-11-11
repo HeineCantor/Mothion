@@ -124,6 +124,30 @@ bool TimelineView::hasFollowers(int celIndex) const
     return false;
 }
 
+bool TimelineView::followsTrajectory(int celIndex) const
+{
+    const doc::Document &d = m_document->document();
+    return d.followedTrajectory(d.celAt(celIndex)) != nullptr;
+}
+
+std::vector<int> TimelineView::linkChain(int celIndex) const
+{
+    const doc::Document &d = m_document->document();
+    const doc::Cel &cel = d.celAt(celIndex);
+    std::vector<int> chain;
+    if (m_foldedCel.count(cel.id()))
+        return chain;
+    int guard = 0;
+    for (const doc::Cel *t = d.followedTrajectory(cel); t && guard <= d.celCount(); t = d.trajectoryParent(*t), ++guard)
+        chain.push_back(d.indexOf(t->id()));
+    return chain;
+}
+
+bool TimelineView::isLinkRow(int row) const
+{
+    return rowRef(row).link >= 0;
+}
+
 std::vector<TimelineView::Placed> TimelineView::celOrder() const
 {
     // Top first; a trajectory that follows another is shown inside it (under its own rows, indented) unless that one is folded.
@@ -172,7 +196,9 @@ QRect TimelineView::foldRect(int row) const
     const RowRef ref = rowRef(row);
     if (ref.motion && ref.channel >= 0)
         return {};
-    if (!ref.motion && !hasKeys(ref.celIndex) && !hasFollowers(ref.celIndex))
+    if (ref.link >= 0)
+        return {};
+    if (!ref.motion && !hasKeys(ref.celIndex) && !hasFollowers(ref.celIndex) && !followsTrajectory(ref.celIndex))
         return {};
     const QRect r(0, m_metrics.rowY(row), m_metrics.headerWidth - 1, m_metrics.rowHeight);
     return QRect(r.right() - 18, r.top() + (r.height() - 14) / 2, 14, 14);
@@ -193,6 +219,7 @@ int TimelineView::rowCount() const
     int rows = 0;
     for (const Placed &p : celOrder()) {
         ++rows;
+        rows += int(linkChain(p.celIndex).size());
         if (keyframesRowShown(p.celIndex))
             rows += 1 + (channelRowsShown(p.celIndex) ? channelRowCount(p.celIndex) : 0); // the row of its keys, and one for each channel
     }
@@ -207,6 +234,10 @@ TimelineView::RowRef TimelineView::rowRef(int row) const
         const int i = placed.celIndex;
         if (at++ == row)
             return {i, false};
+        const std::vector<int> chain = linkChain(i);
+        for (std::size_t k = 0; k < chain.size(); ++k)
+            if (at++ == row)
+                return {i, true, -1, chain[k], int(k)};
         if (!keyframesRowShown(i))
             continue;
         if (at++ == row)
@@ -499,6 +530,8 @@ void TimelineView::paintCells(QPainter &p) const
     // Exposures.
     for (int row = 0; row < rowCount(); ++row) {
         const int celIndex = celIndexForRow(row);
+        if (isLinkRow(row))
+            continue; // a reference only: nothing in the cells
         if (isMotionRow(row)) {
             paintMotionRow(p, celIndex, row);
             continue;
@@ -586,7 +619,7 @@ QColor motionColor() { return QColor(240, 178, 61); }
 
 int TimelineView::motionKeyAt(const QPoint &pos, int row) const
 {
-    if (!isMotionRow(row) || pos.x() < m_metrics.headerWidth)
+    if (!isMotionRow(row) || isLinkRow(row) || pos.x() < m_metrics.headerWidth)
         return -1;
     const doc::CelMotion &motion = m_document->document().celAt(celIndexForRow(row)).motion();
     std::vector<int> frames;
@@ -605,6 +638,30 @@ int TimelineView::motionKeyAt(const QPoint &pos, int row) const
         }
     }
     return best;
+}
+
+void TimelineView::paintLinkHeader(QPainter &p, int row) const
+{
+    const TimelineMetrics &m = m_metrics;
+    const RowRef ref = rowRef(row);
+    const doc::Cel &trajectory = m_document->document().celAt(ref.link);
+    const QRect r(0, m.rowY(row), m.headerWidth - 1, m.rowHeight);
+    p.fillRect(r, palette().window());
+    const int indent = (ref.depth + 1) * kIndent;
+    p.fillRect(QRect(r.left() + 4 + indent, r.top() + 6, 4, r.height() - 12), colorForCel(colorSlot(trajectory.id())));
+    icon(IconId::Trajectory, IconTone::Plain)
+        .paint(&p, QRect(r.left() + 12 + indent, r.top() + (r.height() - 14) / 2, 14, 14));
+    QFont small = font();
+    small.setPointSizeF(std::max(6.0, small.pointSizeF() - 1.0));
+    small.setItalic(true);
+    p.setFont(small);
+    p.setPen(trajectory.properties().visible ? palette().placeholderText().color()
+                                             : palette().color(QPalette::Disabled, QPalette::Text));
+    p.drawText(r.adjusted(30 + indent, 0, -4, 0), Qt::AlignVCenter | Qt::AlignLeft,
+               QString::fromStdString(trajectory.properties().name));
+    p.setFont(font());
+    p.setPen(palette().mid().color());
+    p.drawLine(r.bottomLeft(), r.bottomRight());
 }
 
 void TimelineView::paintMotionHeader(QPainter &p, int celIndex, int row) const
@@ -1215,6 +1272,10 @@ void TimelineView::paintHeaders(QPainter &p) const
     p.fillRect(QRect(0, m.rulerHeight, m.headerWidth, viewport()->height()), palette().window());
     for (int row = 0; row < rowCount(); ++row) {
         const int celIndex = celIndexForRow(row);
+        if (isLinkRow(row)) {
+            paintLinkHeader(p, row);
+            continue;
+        }
         if (isMotionRow(row)) {
             paintMotionHeader(p, celIndex, row);
             continue;
@@ -1242,7 +1303,7 @@ void TimelineView::paintHeaders(QPainter &p) const
             icon(IconId::Lock, tone).paint(&p, lockRect(row).adjusted(1, 1, -1, -1));
         p.setPen(cel.properties().visible ? ink
                                           : palette().color(QPalette::Disabled, QPalette::Text));
-        const bool keyed = hasKeys(celIndex) || hasFollowers(celIndex);
+        const bool keyed = hasKeys(celIndex) || hasFollowers(celIndex) || followsTrajectory(celIndex);
         p.drawText(r.adjusted(lockRect(row).right() + 6, 0, keyed ? -22 : -4, 0), Qt::AlignVCenter | Qt::AlignLeft,
                    QString::fromStdString(cel.properties().name));
         if (keyed)
@@ -1342,6 +1403,10 @@ void TimelineView::mousePressEvent(QMouseEvent *event)
         const QPoint pos = event->position().toPoint();
         if (foldRect(row).contains(pos)) { // the arrow: fold or unfold the keys and the trajectories inside
             toggleFold(cel.id(), isMotionRow(row));
+            return;
+        }
+        if (isLinkRow(row)) { // a trajectory the cel follows: it is chosen (its circle is what moves it)
+            m_document->chooseCel(m_document->document().celAt(rowRef(row).link).id());
             return;
         }
         if (isMotionRow(row)) { // the keys' row: its cel is chosen, and no toggles are there
@@ -1746,7 +1811,7 @@ void TimelineView::mouseDoubleClickEvent(QMouseEvent *event)
             m_document->setCameraKey(frame, m_document->camera()->poseAt(frame));
         return;
     }
-    if (event->button() == Qt::LeftButton && row >= 0 && isMotionRow(row)) {
+    if (event->button() == Qt::LeftButton && row >= 0 && isMotionRow(row) && !isLinkRow(row)) {
         // On the keys' row: a key here, at the pose the cel has. (In its header: nothing.)
         if (pos.x() >= m_metrics.headerWidth) {
             const doc::CelId cel = m_document->document().celAt(celIndexForRow(row)).id();
@@ -1979,6 +2044,8 @@ void TimelineView::contextMenuEvent(QContextMenuEvent *event)
     if (row < 0 || event->pos().x() < m_metrics.headerWidth)
         return;
     const int frame = frameAt(event->pos().x());
+    if (isLinkRow(row))
+        return; // a reference only
     if (isMotionRow(row)) {
         const doc::CelId cel = m_document->document().celAt(celIndexForRow(row)).id();
         m_document->setCurrentCel(cel);

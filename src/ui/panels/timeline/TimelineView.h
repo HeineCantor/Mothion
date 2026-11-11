@@ -126,6 +126,8 @@ private:
         int celIndex = 0;
         bool motion = false;
         int channel = -1; // of a row of motion: the channel it shows, or -1 for the one with the keys of all of them
+        int link = -1;    // of a row (a motion one, with no keys) that names a trajectory its cel follows: that one's index
+        int depth = 0;    // of such a row: how far down the chain of trajectories it is (0: the one followed)
     };
     // The row of keys of a cel folds away under it (an arrow in its header, and at the left of the keys' own header): it is
     // there for a cel that has keys unless it is folded. Only the view: the keys are as they were.
@@ -138,6 +140,12 @@ private:
     };
     std::vector<Placed> celOrder() const;
     bool hasFollowers(int celIndex) const;
+    // The trajectories a cel that is no trajectory follows, shown inside it (under its own row, unless it is folded): the
+    // one it follows, then those that one follows. Only a reference: the cel stays where it is in the stack.
+    std::vector<int> linkChain(int celIndex) const;
+    bool followsTrajectory(int celIndex) const;
+    bool isLinkRow(int row) const;
+    void paintLinkHeader(QPainter &p, int row) const;
     int depthOf(int celIndex) const;
     int indentOf(int row) const; // how far in the header of a row starts, for a trajectory inside another
     static constexpr int kIndent = 10;

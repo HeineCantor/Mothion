@@ -889,6 +889,39 @@ private slots:
         QCOMPARE(d.cel(a)->properties().parent, doc::kNoId);
     }
 
+    // A cel that follows a trajectory shows it inside, under its own row (with the ones that trajectory follows, a step further
+    // in each); a click on one of those rows chooses that trajectory; the cel's arrow folds them away.
+    void aCelShowsTheTrajectoriesItFollows()
+    {
+        document::DocumentController controller;
+        const doc::CelId piece = controller.currentCel();
+        controller.addTrajectory();
+        const doc::CelId a = controller.currentCel();
+        controller.addTrajectory();
+        const doc::CelId b = controller.currentCel();
+        QVERIFY(controller.setTrajectoryParent(b, a));
+        QVERIFY(controller.setTrajectoryParent(piece, b));
+        ui::TimelineView view(&controller);
+        view.resize(800, 300);
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        ui::TimelineMetrics m;
+        auto *vp = view.viewport();
+        auto name = [&](int row) { return QPoint(60, m.rowY(row) + m.rowHeight / 2); };
+        // Rows: a, b (inside a), the cel, then what the cel follows: b, a.
+        controller.setCurrentCel(piece);
+        QTest::mouseClick(vp, Qt::LeftButton, {}, name(4));
+        QCOMPARE(controller.currentCel(), a);
+        QTest::mouseClick(vp, Qt::LeftButton, {}, name(3));
+        QCOMPARE(controller.currentCel(), b);
+        // Folded, they are gone: the same place is nothing now (a click there leaves the current cel as it is).
+        QTest::mouseClick(vp, Qt::LeftButton, {}, name(2));
+        QCOMPARE(controller.currentCel(), piece);
+        QTest::mouseClick(vp, Qt::LeftButton, {}, QPoint(118, m.rowY(2) + m.rowHeight / 2)); // the arrow
+        QTest::mouseClick(vp, Qt::LeftButton, {}, name(4));
+        QCOMPARE(controller.currentCel(), piece);
+    }
+
     // The arrow next to the cel bar's plus offers a trajectory cel; the arrows move all the cels chosen together.
     void timelineCelBarMakesTrajectoriesAndMovesTheChosen()
     {
