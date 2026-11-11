@@ -129,6 +129,17 @@ private:
     // The row of keys of a cel folds away under it (an arrow in its header, and at the left of the keys' own header): it is
     // there for a cel that has keys unless it is folded. Only the view: the keys are as they were.
     bool hasKeys(int celIndex) const;
+    // The trajectories shown inside others: a cel and how deep it is (0: not inside any). The arrow of a cel folds them away too.
+    struct Placed
+    {
+        int celIndex;
+        int depth;
+    };
+    std::vector<Placed> celOrder() const;
+    bool hasFollowers(int celIndex) const;
+    int depthOf(int celIndex) const;
+    int indentOf(int row) const; // how far in the header of a row starts, for a trajectory inside another
+    static constexpr int kIndent = 10;
     QRect foldRect(int row) const;
     // Under the "Keyframes" row, a row for each channel (position, rotation, scale, opacity) that has keys, with its own.
     std::optional<doc::Channel> channelOfRow(int row) const;

@@ -855,7 +855,19 @@ private slots:
         QVERIFY(QTest::qWaitForWindowExposed(&view));
         ui::TimelineMetrics m;
         auto *vp = view.viewport();
-        auto name = [&](doc::CelId id) { return QPoint(60, m.rowY(d.celCount() - 1 - d.indexOf(id)) + m.rowHeight / 2); };
+        // The rows, top first: a trajectory is shown under the one it follows.
+        auto name = [&](doc::CelId id) {
+            std::vector<doc::CelId> rows;
+            for (int i = d.celCount() - 1; i >= 0; --i) { // (two levels are all this test makes)
+                if (d.trajectoryParent(d.celAt(i)))
+                    continue;
+                rows.push_back(d.celAt(i).id());
+                for (int j = d.celCount() - 1; j >= 0; --j)
+                    if (const doc::Cel *parent = d.trajectoryParent(d.celAt(j)); parent && parent->id() == d.celAt(i).id())
+                        rows.push_back(d.celAt(j).id());
+            }
+            return QPoint(60, m.rowY(int(std::find(rows.begin(), rows.end(), id) - rows.begin())) + m.rowHeight / 2);
+        };
         auto drag = [&](doc::CelId from, QPoint to) {
             QTest::mouseClick(vp, Qt::LeftButton, {}, name(from));
             QTest::mousePress(vp, Qt::LeftButton, {}, name(from));

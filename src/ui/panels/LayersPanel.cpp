@@ -265,18 +265,15 @@ QString propertiesText(float opacity, doc::BlendMode blend, const std::string &n
         .arg(blendModeName(blend), QString::fromStdString(name));
 }
 
-// What a cel's row says: its opacity and blend over its name; for a trajectory, its name and the trajectory it follows.
+// What a cel's row says: its opacity and blend over its name; for a trajectory, its name (under the one it follows).
 QString celRowText(const doc::Document &document, const doc::Cel &cel)
 {
     const doc::CelProperties &props = cel.properties();
     if (!props.trajectory) {
         return propertiesText(props.opacity, props.blend, props.name);
     }
-    const doc::Cel *parent = document.trajectoryParent(cel);
-    return parent ? QStringLiteral("%1\n%2 → %3")
-                        .arg(QObject::tr("Trajectory"), QString::fromStdString(props.name),
-                             QString::fromStdString(parent->properties().name))
-                  : QStringLiteral("%1\n%2").arg(QObject::tr("Trajectory"), QString::fromStdString(props.name));
+    Q_UNUSED(document); // the trajectory it follows is the one it is inside
+    return QStringLiteral("%1\n%2").arg(QObject::tr("Trajectory"), QString::fromStdString(props.name));
 }
 
 constexpr double kDragPreviewOpacity = 0.75; // the rows following the pen
@@ -822,7 +819,24 @@ void LayersPanel::rebuildTree()
     m_cameraRowState = cameraRowState(*m_document);
 
     const QPixmap blank = thumbnail(nullptr, nullptr, docSize, nullptr);
-    for (int i = d.celCount() - 1; i >= 0; --i) { // top cel first
+    // Top cel first; a trajectory that follows another comes right under it, a step in (the stack is as it was).
+    std::vector<std::pair<int, int>> order; // cel index, depth
+    {
+        std::vector<bool> seen(d.celCount(), false);
+        auto visit = [&](auto &&self, int i, int depth) -> void {
+            seen[i] = true;
+            order.push_back({i, depth});
+            for (int j = d.celCount() - 1; j >= 0; --j) {
+                const doc::Cel *parent = d.trajectoryParent(d.celAt(j));
+                if (!seen[j] && parent && parent->id() == d.celAt(i).id())
+                    self(self, j, depth + 1);
+            }
+        };
+        for (int i = d.celCount() - 1; i >= 0; --i)
+            if (!seen[i] && !d.trajectoryParent(d.celAt(i)))
+                visit(visit, i, 0);
+    }
+    for (const auto &[i, depth] : order) {
         const doc::Cel &cel = d.celAt(i);
         const doc::CelId celId = cel.id();
         const doc::CelProperties &props = cel.properties();
@@ -830,6 +844,7 @@ void LayersPanel::rebuildTree()
 
         // The cel: a folder, with what it shows now.
         auto [row, h] = rowWidget();
+        h->setContentsMargins(2 + depth * 16, 2, 2, 2);
         // A trajectory is not shown or hidden: it is active or not (what it does is on, or off).
         auto *eye = props.trajectory
                         ? toggleButton(IconId::Trajectory, tr("Activate / deactivate the trajectory"), props.visible, row)
@@ -1813,7 +1828,7 @@ bool LayersPanel::dropAt(const QPoint &pos)
         QTreeWidgetItem *top = target;
         while (top->parent())
             top = top->parent();
-        row = m_tree->indexOfTopLevelItem(top) + (lowerHalf || top != target ? 1 : 0);
+        row = (n - 1 - d.indexOf(celOf(top))) + (lowerHalf || top != target ? 1 : 0);
     }
     // The chosen cels together, above the cel of the row before `row` (rows are top first, the stack bottom up).
     m_document->moveChosenCels(n - row);

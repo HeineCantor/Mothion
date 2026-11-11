@@ -1013,8 +1013,12 @@ private slots:
             eye = eye || button->toolTip() == QStringLiteral("Show / hide the cel");
         }
         QVERIFY(activation && !eye);
-        auto *text = row->findChild<QLabel *>(QStringLiteral("rowText"));
-        QVERIFY(text && text->text().contains(QStringLiteral("→")));
+        // It is shown inside the one it follows: right under it, a step in.
+        auto *tree = panel.findChild<QTreeWidget *>();
+        QCOMPARE(tree->indexOfTopLevelItem(panel.celItem(controller.currentCel())),
+                 tree->indexOfTopLevelItem(panel.celItem(first)) + 1);
+        QVERIFY(row->layout()->contentsMargins().left()
+                > tree->itemWidget(panel.celItem(first), 0)->layout()->contentsMargins().left());
     }
 
     // The clip button (in the row of the mask ones): a raster layer with another below it is clipped to it, and let go of
