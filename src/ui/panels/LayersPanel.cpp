@@ -246,13 +246,14 @@ QString looksOf(const doc::Drawing &drawing)
     QString key;
     for (const doc::Layer &layer : drawing.layers) {
         const doc::LayerProperties &p = layer.properties;
-        key += QStringLiteral("%1,%2,%3,%4,%5,%6;")
+        key += QStringLiteral("%1,%2,%3,%4,%5,%6,%7;")
                    .arg(layer.id)
                    .arg(p.visible)
                    .arg(p.locked)
                    .arg(double(p.opacity))
                    .arg(int(p.blend))
-                   .arg(QString::fromStdString(p.name));
+                   .arg(QString::fromStdString(p.name))
+                   .arg(p.clipped);
     }
     return key;
 }
@@ -274,12 +275,15 @@ class LayerTree : public QTreeWidget
 public:
     // `strip`: the color of the narrow column at the left of a row (that of its cel, whole when the cel is the chosen
     // one), none for rows that belong to no cel.
+    // `clipped`: whether the row is a layer clipped to the one below (a narrow bar, at the left of it).
     LayerTree(std::function<QList<QTreeWidgetItem *>()> moving, std::function<QPixmap()> preview,
-              std::function<QColor(QTreeWidgetItem *)> strip, QWidget *parent)
+              std::function<QColor(QTreeWidgetItem *)> strip, std::function<bool(QTreeWidgetItem *)> clipped,
+              QWidget *parent)
         : QTreeWidget(parent)
         , m_moving(std::move(moving))
         , m_preview(std::move(preview))
         , m_strip(std::move(strip))
+        , m_clipped(std::move(clipped))
     {
     }
 
@@ -306,6 +310,10 @@ protected:
             const QRect column(0, item.top(), contentLeft, item.height());
             painter->fillRect(column, strip);
             drawBranches(painter, QRect(0, item.top(), item.left(), item.height()), index); // the arrows, over it
+        }
+        if (m_clipped(itemFromIndex(index))) {
+            painter->fillRect(QRect(item.left() - 7, item.top() + 2, 4, item.height() - 4),
+                              QApplication::palette().color(QPalette::Highlight));
         }
         if (!selected)
             return;
@@ -359,6 +367,7 @@ private:
     std::function<QList<QTreeWidgetItem *>()> m_moving;
     std::function<QPixmap()> m_preview;
     std::function<QColor(QTreeWidgetItem *)> m_strip;
+    std::function<bool(QTreeWidgetItem *)> m_clipped;
 };
 
 } // namespace
@@ -378,6 +387,7 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     , m_down(actionButton(IconId::ArrowDown, tr("Move down"), this))
     , m_snapTo(actionButton(IconId::Crosshair,
                             tr("Snap to: make the selected perspective layer the one strokes snap to"), this))
+    , m_clip(actionButton(IconId::ClipLayer, tr("Clip to layer below: only what lies over the layer below shows"), this))
     , m_maskAdd(actionButton(IconId::MaskAdd, tr("Create a mask layer: draw in black and white what the layer shows"),
                              this))
     , m_maskDelete(actionButton(IconId::MaskDelete, tr("Remove the mask layer: the layer shows whole again"), this))
@@ -403,6 +413,14 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
                 return QColor();
             const bool chosen = celOf(item) == m_document->currentCel() && !m_document->cameraSelected();
             return chosen ? TimelineView::colorForCel(index) : celRowColor(index, QApplication::palette());
+        },
+        [this](QTreeWidgetItem *item) {
+            if (kindOf(item) != Row::Layer)
+                return false;
+            const doc::Cel *cel = m_document->document().cel(celOf(item));
+            const doc::Drawing *drawing = cel ? cel->drawing(drawingOf(item)) : nullptr;
+            const doc::Layer *layer = drawing ? drawing->layer(layerOf(item)) : nullptr;
+            return layer && layer->properties.clipped;
         },
         this);
 
@@ -452,6 +470,10 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     auto *layerActions = new QHBoxLayout;
     layerActions->setSpacing(0);
     layerActions->addStretch(1); // these start from the right
+    m_clip->setObjectName(QStringLiteral("clipLayer"));
+    m_clip->setCheckable(true);
+    m_clip->setEnabled(false);
+    layerActions->addWidget(m_clip);
     m_maskAdd->setObjectName(QStringLiteral("maskAdd"));
     m_maskDelete->setObjectName(QStringLiteral("maskDelete"));
     m_maskAdd->setEnabled(false);
@@ -499,6 +521,7 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     connect(m_merge, &QToolButton::clicked, this, &LayersPanel::mergeSelected);
     connect(m_mergeDown, &QToolButton::clicked, this, &LayersPanel::mergeSelectedDown);
     connect(m_snapTo, &QToolButton::clicked, this, &LayersPanel::snapToClicked);
+    connect(m_clip, &QToolButton::clicked, this, [this] { toggleClip(); });
     connect(m_maskAdd, &QToolButton::clicked, this, [this] { m_document->createLayerMask(); });
     connect(m_maskDelete, &QToolButton::clicked, this, [this] { m_document->deleteLayerMask(); });
     connect(m_document, &DocumentController::maskEditingChanged, this, &LayersPanel::updateMaskFrames);
@@ -996,6 +1019,7 @@ void LayersPanel::updateLooks()
     if (thumbnails && !m_thumbnailTimer.isActive())
         m_thumbnailTimer.start();
     syncHeader();
+    m_tree->viewport()->update(); // (the bars of the clipped layers)
 }
 
 void LayersPanel::updateMaskFrames()
@@ -1267,6 +1291,35 @@ QColor LayersPanel::celRowColor(int celIndex, const QPalette &palette)
 
 // --- edits -----------------------------------------------------------------------------
 
+void LayersPanel::toggleClip()
+{
+    const doc::Drawing *drawing = m_document->currentDrawing();
+    if (!drawing)
+        return;
+    std::vector<doc::LayerId> targets; // the raster layers that have something below them
+    bool all = true;
+    for (doc::LayerId id : selectedLayers()) {
+        const doc::Layer *layer = drawing->layer(id);
+        if (!layer || layer->kind != doc::LayerKind::Raster || drawing->indexOf(id) < 1)
+            continue;
+        targets.push_back(id);
+        all = all && layer->properties.clipped;
+    }
+    const bool on = !all;
+    std::vector<std::unique_ptr<doc::Command>> steps;
+    for (doc::LayerId id : targets) {
+        doc::LayerProperties props = drawing->layer(id)->properties;
+        props.clipped = on;
+        if (auto step = doc::makeSetLayerProperties(m_document->document(), m_document->currentCel(), drawing->id, id, props))
+            steps.push_back(std::move(step));
+    }
+    if (steps.size() == 1)
+        m_document->execute(std::move(steps.front()));
+    else if (!steps.empty())
+        m_document->execute(
+            std::make_unique<doc::GroupCommand>(doc::CommandKind::ChangeLayerProperties, std::move(steps)));
+}
+
 template<typename Edit>
 void LayersPanel::editSelectedLayers(Edit edit)
 {
@@ -1491,6 +1544,10 @@ void LayersPanel::showContextMenu(const QPoint &at)
         merge->setEnabled(m_merge->isEnabled());
         QAction *down = menu.addAction(icon(IconId::MergeDown), tr("Merge with layer below"), this, &LayersPanel::mergeSelectedDown);
         down->setEnabled(m_mergeDown->isEnabled());
+        QAction *clip = menu.addAction(icon(IconId::ClipLayer), tr("Clip to layer below"), this, &LayersPanel::toggleClip);
+        clip->setCheckable(true);
+        clip->setChecked(m_clip->isChecked());
+        clip->setEnabled(m_clip->isEnabled());
     }
     if (kindOf(item) == Row::Layer) {
         menu.addAction(tr("Cut layers"), this, &LayersPanel::cutLayers);
@@ -1853,6 +1910,22 @@ void LayersPanel::syncHeader()
         const QSignalBlocker block(m_snapTo);
         m_snapTo->setEnabled(snappable);
         m_snapTo->setChecked(snappable && isSnapReference(layer->id));
+    }
+    // Clip to layer below: for raster layers with something below them; pressed when all the chosen ones are clipped.
+    {
+        bool any = false, all = true;
+        if (m_focus == Focus::Layer && drawing)
+            for (doc::LayerId id : selectedLayers()) {
+                const int index = drawing->indexOf(id);
+                const doc::Layer *chosen = drawing->layer(id);
+                if (!chosen || chosen->kind != doc::LayerKind::Raster || index < 1)
+                    continue;
+                any = true;
+                all = all && chosen->properties.clipped;
+            }
+        const QSignalBlocker block(m_clip);
+        m_clip->setEnabled(any);
+        m_clip->setChecked(any && all);
     }
     // The mask: made for a raster layer that has none, taken away from one that has; one layer at a time.
     const bool maskable = m_focus == Focus::Layer && layer && layer->kind == doc::LayerKind::Raster

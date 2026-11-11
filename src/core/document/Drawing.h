@@ -24,6 +24,9 @@ struct LayerProperties
     bool locked = false;
     float opacity = 1.0f; // 0..1
     BlendMode blend = BlendMode::Normal;
+    // Clipped to the layer below: only what lies over the pixels of the first layer below that is not clipped shows (that
+    // layer is the mask; nothing is erased). With no such layer, or when it is hidden, there is nothing to clip to / it hides.
+    bool clipped = false;
     perspective::Grid perspective = {}; // what a perspective layer shows
 
     bool operator==(const LayerProperties &) const = default;

@@ -371,6 +371,55 @@ private slots:
         QCOMPARE(renderer.image().pixelColor(50, 20), QColor(Qt::white));
     }
 
+    // A layer clipped to the one below shows only over that layer's pixels; the layers stacked on it are clipped to the
+    // same first one that is not clipped; nothing is erased, so letting go brings it all back.
+    void aClippedLayerShowsOnlyOverTheLayerBelow()
+    {
+        doc::Drawing drawing;
+        auto layer = [&](doc::LayerId id, const char *name, int x0, int x1, doc::Pixel color) {
+            drawing.layers.push_back({id, {name}, {}});
+            for (int x = x0; x < x1; ++x)
+                drawing.layers.back().image.setPixel(x, 5, color);
+            return &drawing.layers.back();
+        };
+        layer(1, "base", 0, 10, 0xff0000ff);   // blue over x 0..9
+        layer(2, "red", 0, 20, 0xffff0000);    // red over x 0..19
+        layer(3, "green", 0, 20, 0xff00ff00);  // green over x 0..19
+        const QRect area(0, 0, 20, 10);
+        auto at = [&](int x) { return canvas::composeDrawing(drawing, area).pixelColor(x, 5); };
+        QCOMPARE(at(15), QColor(Qt::green)); // nothing clipped: the top one everywhere
+        drawing.layers[1].properties.clipped = true;
+        QCOMPARE(at(5), QColor(Qt::green));
+        QCOMPARE(at(15), QColor(Qt::green));         // the green one is not clipped
+        drawing.layers[2].properties.clipped = true; // both clipped to the base
+        QCOMPARE(at(5), QColor(Qt::green));
+        QCOMPARE(at(15).alpha(), 0);                 // outside the base nothing of either shows
+        drawing.layers[2].properties.visible = false;
+        QCOMPARE(at(5), QColor(Qt::red));            // the red one alone, over the base
+        QCOMPARE(at(15).alpha(), 0);
+        // Its opacity is its own; the base's does not reach it.
+        drawing.layers[1].properties.opacity = 0.5f;
+        drawing.layers[0].properties.opacity = 0.2f;
+        QVERIFY(at(5).alpha() > 140 && at(5).alpha() < 165); // 0.5 of its own over the base's 0.2 (not 0.1 over it)
+        drawing.layers[0].properties.opacity = 1.0f;
+        drawing.layers[1].properties.opacity = 1.0f;
+        // A hidden base hides what is clipped to it.
+        drawing.layers[0].properties.visible = false;
+        QCOMPARE(at(5).alpha(), 0);
+        drawing.layers[0].properties.visible = true;
+        // The mask is the pixels of the base: half of a pixel's opacity lets half through.
+        drawing.layers[0].image.setPixel(7, 5, 0x800000ff); // premultiplied: half blue
+        QVERIFY(at(7).alpha() > 180 && at(7).alpha() < 200); // half of the red over the half of blue: 0.5 + 0.5 * 0.5
+        // With nothing below it a clipped layer shows as any other.
+        drawing.layers[0].properties.clipped = true;
+        QCOMPARE(at(15), QColor(Qt::red)); // no layer to clip the red one to now: it shows whole
+        // Not clipped any more: all there again.
+        for (doc::Layer &l : drawing.layers)
+            l.properties.clipped = false;
+        drawing.layers[2].properties.visible = true;
+        QCOMPARE(at(15), QColor(Qt::green));
+    }
+
     // The layers of a drawing are composed apart, like a folder, then the
     // result goes over the cels below with the cel's opacity and blend.
     void drawingLayersComposeLikeAFolder()

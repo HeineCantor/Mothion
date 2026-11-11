@@ -49,10 +49,12 @@ namespace mothion::io {
 //
 // Format 12 adds the Blender link of a cel rendered from a scene: the table "blender_links". Older files have none.
 //
+// Format 13 adds the layers clipped to the one below: the table "clipped_layers". Older files have none.
+//
 // A save writes a new file next to the target and renames it over the old
 // one at the end, so a failed save never damages the previous file.
 
-inline constexpr int kProjectFormatVersion = 12;
+inline constexpr int kProjectFormatVersion = 13;
 inline constexpr char kProjectSuffix[] = "moth";
 inline constexpr char kOldProjectSuffix[] = "mothion"; // what projects were named before; they still open
 

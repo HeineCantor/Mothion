@@ -81,12 +81,63 @@ void blendImage(QImage &target, const QPoint &at, const QRect &limit, const QIma
     }
 }
 
-// Draws the layer (its tiles among `tiles`, or its grid) with its opacity
-// and blend mode. The painter paints on `target`, whose pixel (0, 0) is the
+// The layer a clipped layer is clipped to: the first raster layer below it that is not clipped itself. -1 if the layer is
+// not clipped or there is none (it then shows as any other).
+int clipBase(const doc::Drawing &drawing, std::size_t index)
+{
+    if (!drawing.layers[index].properties.clipped)
+        return -1;
+    for (std::size_t below = index; below-- > 0;) {
+        const doc::Layer &layer = drawing.layers[below];
+        if (layer.kind == doc::LayerKind::Raster && !layer.properties.clipped)
+            return int(below);
+    }
+    return -1;
+}
+
+// The layer as it shows over the tiles (its pixels through its mask), alone on transparency, in `bounds`.
+QImage layerImage(const doc::Layer &layer, const QRect &bounds, const std::vector<doc::TileCoord> &tiles)
+{
+    QImage image(bounds.size(), QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+    QPainter p(&image);
+    p.translate(-bounds.topLeft());
+    for (const doc::TileCoord &c : tiles)
+        if (const doc::TilePtr tile = layer.image.tile(c))
+            p.drawImage(tileRect(c).topLeft(), layerTile(layer, c, *tile));
+    return image;
+}
+
+// Draws the layer (its tiles among `tiles`, or its grid) with its opacity and blend mode (clipped to `clipTo` when
+// there is one). The painter paints on `target`, whose pixel (0, 0) is the
 // document's `origin`; only `limit` (in target pixels) may change.
 void drawLayer(QPainter &p, QImage &target, const QPoint &origin, const QRect &limit, const doc::Layer &layer,
-               const std::vector<doc::TileCoord> &tiles, double opacity, doc::BlendMode blend)
+               const std::vector<doc::TileCoord> &tiles, double opacity, doc::BlendMode blend,
+               const doc::Layer *clipTo = nullptr)
 {
+    if (clipTo && layer.kind == doc::LayerKind::Raster) {
+        // Clipped: what the layer has over the pixels of the layer it is clipped to (their opacity), nothing else; then
+        // that goes over the others with the layer's own opacity and blend mode.
+        QRect bounds;
+        for (const doc::TileCoord &c : tiles)
+            bounds |= tileRect(c);
+        if (bounds.isEmpty())
+            return;
+        QImage clipped = layerImage(layer, bounds, tiles);
+        const QImage mask = layerImage(*clipTo, bounds, tiles);
+        QPainter cp(&clipped);
+        cp.setCompositionMode(QPainter::CompositionMode_DestinationIn);
+        cp.drawImage(0, 0, mask);
+        cp.end();
+        if (doc::needsSoftwareBlend(blend)) {
+            blendImage(target, bounds.topLeft() - origin, limit, clipped, opacity, blend);
+        } else {
+            p.setOpacity(opacity);
+            p.setCompositionMode(compositionFor(blend));
+            p.drawImage(bounds.topLeft(), clipped);
+        }
+        return;
+    }
     if (layer.kind == doc::LayerKind::Raster && doc::needsSoftwareBlend(blend)) {
         blendLayer(target, origin, limit, layer, tiles, opacity, blend);
         return;
@@ -228,10 +279,19 @@ QImage composeDrawing(const doc::Drawing &drawing, const QRect &area, bool guide
     QPainter p(&image);
     p.translate(-area.topLeft());
     const std::vector<doc::TileCoord> tiles = tilesIn(area);
-    for (const doc::Layer &layer : drawing.layers)
-        if (shows(layer, guides))
-            drawLayer(p, image, area.topLeft(), image.rect(), layer, tiles, layer.properties.opacity,
-                      layer.properties.blend);
+    for (std::size_t i = 0; i < drawing.layers.size(); ++i) {
+        const doc::Layer &layer = drawing.layers[i];
+        if (!shows(layer, guides))
+            continue;
+        const doc::Layer *base = nullptr; // what it is clipped to
+        if (const int b = clipBase(drawing, i); b >= 0) {
+            base = &drawing.layers[std::size_t(b)];
+            if (!base->properties.visible)
+                continue; // a hidden layer hides what is clipped to it
+        }
+        drawLayer(p, image, area.topLeft(), image.rect(), layer, tiles, layer.properties.opacity, layer.properties.blend,
+                  base);
+    }
     return image;
 }
 
@@ -332,7 +392,7 @@ void FrameRenderer::render(const doc::Document &doc, int frame, const QRect &rec
             }
             continue;
         }
-        if (shown == 1 && only->properties.blend == doc::BlendMode::Normal) {
+        if (shown == 1 && only->properties.blend == doc::BlendMode::Normal && !only->properties.clipped) {
             // A lone normal layer over transparency is itself: no folder needed.
             drawLayer(p, m_image, QPoint(0, 0), area, *only, tiles, opacity * only->properties.opacity, props.blend);
             continue;

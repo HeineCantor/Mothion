@@ -70,6 +70,8 @@ const char *const kSchema[] = {
     // Format 12: where a cel rendered from a Blender scene comes from.
     "create table blender_links (cel integer primary key references cels(id), path text not null,"
     " scene text not null, start integer not null, percent integer not null)",
+    // Format 13: the layers clipped to the one below.
+    "create table clipped_layers (layer integer primary key references layers(id))",
 };
 
 // Stored by name, so reordering the enum cannot change old files.
@@ -543,7 +545,7 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
         return false;
     }
 
-    QSqlQuery cel(db), drawing(db), layer(db), exposure(db), tile(db), mask(db), maskTile(db);
+    QSqlQuery cel(db), drawing(db), layer(db), exposure(db), tile(db), mask(db), maskTile(db), clipped(db);
     cel.prepare(QStringLiteral("insert into cels values (?, ?, ?, ?, ?, ?, ?)"));
     drawing.prepare(QStringLiteral("insert into drawings values (?, ?, ?)"));
     layer.prepare(QStringLiteral("insert into layers values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
@@ -551,6 +553,7 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
     tile.prepare(QStringLiteral("insert into tiles values (?, ?, ?, ?)"));
     mask.prepare(QStringLiteral("insert into masks values (?)"));
     maskTile.prepare(QStringLiteral("insert into masktiles values (?, ?, ?, ?)"));
+    clipped.prepare(QStringLiteral("insert into clipped_layers values (?)"));
     auto exec = [&](QSqlQuery &query, std::initializer_list<QVariant> values) {
         for (const QVariant &v : values)
             query.addBindValue(v);
@@ -593,6 +596,8 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
                 for (std::size_t n = 0; n < coords.size(); ++n)
                     if (tiles[n] && !exec(tile, {idValue(ly.id), coords[n].x, coords[n].y, packed[n]}))
                         return false;
+                if (lp.clipped && !exec(clipped, {idValue(ly.id)}))
+                    return false;
                 if (ly.mask) { // its mask, the same way
                     if (!exec(mask, {idValue(ly.id)}))
                         return false;
@@ -841,6 +846,12 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
     }
     if (!flush())
         return nullptr;
+
+    if (version >= 13 && q.exec(QStringLiteral("select layer from clipped_layers"))) {
+        while (q.next())
+            if (const auto it = layers.find(idFrom(q.value(0))); it != layers.end())
+                it->second->properties.clipped = true;
+    }
 
     if (version >= 9) { // the masks
         if (!q.exec(QStringLiteral("select layer from masks"))) {

@@ -900,6 +900,49 @@ private slots:
     }
 
 
+    // The clip button (in the row of the mask ones): a raster layer with another below it is clipped to it, and let go of
+    // again; the button shows the state; one undo step; nothing for the bottom layer.
+    void aLayerCanBeClippedToTheOneBelow()
+    {
+        document::DocumentController controller;
+        ui::LayersPanel panel(&controller);
+        panel.resize(320, 600);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        QImage red(20, 20, QImage::Format_ARGB32);
+        red.fill(Qt::red);
+        controller.importImage(red, QStringLiteral("x"));
+        QVERIFY(controller.addLayer(true)); // a second layer, on top
+        QCoreApplication::processEvents();
+        auto *tree = panel.findChild<QTreeWidget *>();
+        auto *clip = panel.findChild<QToolButton *>(QStringLiteral("clipLayer"));
+        QVERIFY(clip && clip->isCheckable());
+        const doc::Drawing *drawing = controller.currentDrawing();
+        QCOMPARE(drawing->layers.size(), std::size_t(2));
+        const doc::LayerId bottom = drawing->layers[0].id, top = drawing->layers[1].id;
+
+        tree->setCurrentItem(panel.celItem(controller.currentCel()));
+        QVERIFY(!clip->isEnabled()); // a cel is not a layer
+        tree->setCurrentItem(panel.layerItem(bottom));
+        QVERIFY(!clip->isEnabled()); // nothing below the bottom one
+        tree->setCurrentItem(panel.layerItem(top));
+        QVERIFY(clip->isEnabled() && !clip->isChecked());
+
+        QTest::mouseClick(clip, Qt::LeftButton);
+        QCoreApplication::processEvents();
+        QVERIFY(controller.currentDrawing()->layer(top)->properties.clipped);
+        QVERIFY(!controller.currentDrawing()->layer(bottom)->properties.clipped);
+        QVERIFY(clip->isChecked());
+        QTest::mouseClick(clip, Qt::LeftButton); // let go
+        QCoreApplication::processEvents();
+        QVERIFY(!controller.currentDrawing()->layer(top)->properties.clipped);
+        QVERIFY(!clip->isChecked());
+        controller.undo(); // one step each way
+        QCoreApplication::processEvents();
+        QVERIFY(controller.currentDrawing()->layer(top)->properties.clipped);
+        QVERIFY(clip->isChecked());
+    }
+
     // The mask buttons (next to the snap one): create a mask for the current layer, which then gets a thumbnail of its
     // own and is what the pen draws on (in black and white); remove it.
     void aLayerCanHaveAMask()

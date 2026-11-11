@@ -147,6 +147,8 @@ private:
     bool copySelected(); // to the layer clipboard; false (and a message) if none
     void showContextMenu(const QPoint &at);
     void snapToClicked(bool on);
+    // Clips the chosen raster layers to the layer below them, or lets go of it when all of them are.
+    void toggleClip();
     // Shows the sight on the perspective layer(s) strokes snap to.
     void refreshSnapMarks();
     void updateMaskFrames(); // which of a layer's thumbnails, itself or its mask, is outlined: the one drawn on
@@ -172,6 +174,7 @@ private:
     QToolButton *m_up;
     QToolButton *m_down;
     QToolButton *m_snapTo;  // the layer actions' second row
+    QToolButton *m_clip;       // clip the chosen layers to the one below (first of the row of layer actions)
     QToolButton *m_maskAdd;    // make / take away the current layer's mask (left of the snap button)
     QToolButton *m_maskDelete;
     tools::ToolState *m_toolState = nullptr;

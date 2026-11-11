@@ -481,6 +481,15 @@ void drawGlyph(QPainter &p, IconId id)
         }
         break;
     }
+    case IconId::ClipLayer: // a layer over another, with a bent arrow down into it
+        path.addRect(QRectF(3.5, 12.5, 17, 8));
+        path.addRect(QRectF(8.5, 3.5, 12, 6));
+        path.moveTo(5, 4);
+        path.lineTo(5, 9.5);
+        path.moveTo(3, 7.5);
+        path.lineTo(5, 9.5);
+        path.lineTo(7, 7.5);
+        break;
     case IconId::Frame: // a frame of film: the picture between sprocket holes
         path.addRect(QRectF(4.5, 3.5, 15, 17));
         path.addRect(QRectF(8, 7, 8, 10));

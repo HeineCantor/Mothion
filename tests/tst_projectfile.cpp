@@ -293,6 +293,26 @@ private slots:
         compareDocuments(*original, *loaded);
     }
 
+    // Format 13: the layers clipped to the one below, and only those.
+    void clippedLayersSurviveTheFile()
+    {
+        QTemporaryDir dir;
+        const QString path = dir.filePath(QStringLiteral("clipped.moth"));
+        const auto original = sampleDocument();
+        doc::Cel &cel = original->celAt(1);
+        doc::Drawing &drawing = *cel.drawing(cel.drawings().begin()->first);
+        QVERIFY(drawing.layers.size() >= 2);
+        drawing.layers[1].properties.clipped = true;
+        QString error;
+        QVERIFY2(io::saveProject(*original, path, &error), qPrintable(error));
+        const auto loaded = io::loadProject(path, &error);
+        QVERIFY2(loaded, qPrintable(error));
+        compareDocuments(*original, *loaded);
+        const doc::Drawing &back = loaded->celAt(1).drawings().begin()->second;
+        QVERIFY(!back.layers[0].properties.clipped);
+        QVERIFY(back.layers[1].properties.clipped);
+    }
+
     void everyBlendModeSurvivesTheFile()
     {
         QTemporaryDir dir;

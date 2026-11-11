@@ -218,6 +218,12 @@ bpy.ops.wm.save_as_mainfile(filepath=r'%1')
     return QFile::exists(path) ? path : QString();
 }
 
+// Starting a real Blender is slow and noisy (a window, the GPU): only when asked for.
+bool realBlenderWanted()
+{
+    return qEnvironmentVariableIntValue("MOTHION_TEST_BLENDER") != 0;
+}
+
 } // namespace
 
 class TestBlenderLink : public QObject
@@ -723,6 +729,8 @@ private slots:
         QFile zip(QStringLiteral(":/blender/mothion_link.zip"));
         QVERIFY(zip.exists());
         QVERIFY(zip.size() > 1000);
+        if (!realBlenderWanted())
+            QSKIP("The tests with a real Blender are off: set MOTHION_TEST_BLENDER=1 to run them");
         const QString blender = io::findBlender();
         if (blender.isEmpty())
             QSKIP("Blender is not installed here");
@@ -749,6 +757,8 @@ private slots:
     // frames of a scene.
     void theAddOnInBlenderServesFrames()
     {
+        if (!realBlenderWanted())
+            QSKIP("The tests with a real Blender are off: set MOTHION_TEST_BLENDER=1 to run them");
         const QString blender = QStandardPaths::findExecutable(QStringLiteral("blender"));
         const QString xvfb = QStandardPaths::findExecutable(QStringLiteral("xvfb-run"));
         if (blender.isEmpty() || xvfb.isEmpty())
