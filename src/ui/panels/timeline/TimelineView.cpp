@@ -1171,6 +1171,10 @@ void TimelineView::paintHeaders(QPainter &p) const
         const bool keyed = hasKeys(celIndex);
         p.drawText(r.adjusted(lockRect(row).right() + 6, 0, keyed ? -22 : -4, 0), Qt::AlignVCenter | Qt::AlignLeft,
                    QString::fromStdString(cel.properties().name));
+        if (cel.properties().trajectory) { // a trajectory: not drawn, only moved
+            const int right = r.right() - (keyed ? 24 : 4);
+            icon(IconId::Trajectory, tone).paint(&p, QRect(right - 14, r.top() + (r.height() - 14) / 2, 14, 14));
+        }
         if (keyed)
             paintFoldArrow(p, foldRect(row), !keyframesRowShown(celIndex));
         p.setPen(palette().mid().color());
@@ -1774,6 +1778,15 @@ void TimelineView::contextMenuEvent(QContextMenuEvent *event)
     const doc::CelId celId = cel.id();
     m_document->setCurrentCel(celId);
     m_document->setCurrentFrame(frame);
+    if (cel.properties().trajectory) { // no frames to work on: only its keys
+        QMenu menu(this);
+        QAction *key = menu.addAction(tr("Add keyframe here"), this, [this, celId, frame] {
+            m_document->setCelKey(celId, frame, m_document->celPoseAt(celId, frame));
+        });
+        key->setEnabled(!m_document->celMotion(celId)->hasKeyAt(frame));
+        menu.exec(event->globalPos());
+        return;
+    }
     // A block not selected yet: it alone, as the menu's copy acts on it.
     if (const doc::Exposure *e = cel.timing().exposureAt(frame); e && !isSelected(celId, e->start)) {
         m_selected = {{celId, e->start}};

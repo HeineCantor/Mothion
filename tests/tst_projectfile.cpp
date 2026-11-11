@@ -313,6 +313,30 @@ private slots:
         QVERIFY(back.layers[1].properties.clipped);
     }
 
+    // Format 14: the cels that are trajectories (and no others).
+    void trajectoryCelsSurviveTheFile()
+    {
+        QTemporaryDir dir;
+        const QString path = dir.filePath(QStringLiteral("trajectory.moth"));
+        const auto original = sampleDocument();
+        doc::CelProperties properties{"Path"};
+        properties.trajectory = true;
+        doc::Cel &path_cel = original->insertCel(0, std::make_unique<doc::Cel>(original->allocateCelId(), properties));
+        doc::CelMotion motion;
+        motion.pivotX = 160;
+        motion.pivotY = 120;
+        motion.setKey(doc::Channel::Position, 3, doc::CelPose{12, -4});
+        path_cel.setMotion(motion);
+        QString error;
+        QVERIFY2(io::saveProject(*original, path, &error), qPrintable(error));
+        const auto loaded = io::loadProject(path, &error);
+        QVERIFY2(loaded, qPrintable(error));
+        compareDocuments(*original, *loaded);
+        QVERIFY(loaded->celAt(0).properties().trajectory);
+        QVERIFY(!loaded->celAt(1).properties().trajectory);
+        QVERIFY(loaded->celAt(0).motion().hasKeyAt(3));
+    }
+
     void everyBlendModeSurvivesTheFile()
     {
         QTemporaryDir dir;

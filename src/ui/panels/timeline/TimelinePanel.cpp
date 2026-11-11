@@ -357,16 +357,17 @@ QLayout *TimelinePanel::celBar()
         m_document->execute(doc::makeSetCelProperties(m_document->document(), cel->id(), p));
     };
     connect(add, &QToolButton::clicked, m_document, &DocumentController::addCel);
+    // The arrow next to the plus: a standard cel or a trajectory cel.
+    auto *kinds = new QMenu(add);
+    kinds->addAction(tr("Cel"), m_document, &DocumentController::addCel);
+    kinds->addAction(tr("Trajectory Cel"), m_document, &DocumentController::addTrajectory);
+    add->setMenu(kinds);
+    add->setPopupMode(QToolButton::MenuButtonPopup);
     connect(remove, &QToolButton::clicked, this, [this] {
         if (m_document->document().celCount() > 1) // keep at least one
             m_document->execute(std::make_unique<doc::RemoveCelCommand>(m_document->currentCel()));
     });
-    auto move = [this](int direction) {
-        const doc::Document &d = m_document->document();
-        const int to = d.indexOf(m_document->currentCel()) + direction;
-        if (to >= 0 && to < d.celCount())
-            m_document->execute(std::make_unique<doc::MoveCelCommand>(m_document->currentCel(), to));
-    };
+    auto move = [this](int direction) { m_document->shiftChosenCels(direction > 0); }; // all the cels chosen together
     connect(up, &QToolButton::clicked, this, [move] { move(+1); });
     connect(down, &QToolButton::clicked, this, [move] { move(-1); });
     connect(blend, &QComboBox::activated, this,
@@ -393,10 +394,14 @@ QLayout *TimelinePanel::celBar()
     auto sync = [=, this] {
         const doc::Document &d = m_document->document();
         const doc::Cel *cel = d.cel(m_document->currentCel());
-        const int index = cel ? d.indexOf(cel->id()) : -1;
+        int lowest = cel ? d.indexOf(cel->id()) : -1, highest = lowest; // of the cels chosen together
+        for (doc::CelId id : m_document->celSelection()) {
+            lowest = std::min(lowest, d.indexOf(id));
+            highest = std::max(highest, d.indexOf(id));
+        }
         remove->setEnabled(cel && d.celCount() > 1);
-        up->setEnabled(cel && index + 1 < d.celCount());
-        down->setEnabled(cel && index > 0);
+        up->setEnabled(cel && highest + 1 < d.celCount());
+        down->setEnabled(cel && lowest > 0);
         for (QWidget *w : std::initializer_list<QWidget *>{blend, opacity, opacityValue})
             w->setEnabled(cel != nullptr);
         if (!cel)
@@ -407,6 +412,7 @@ QLayout *TimelinePanel::celBar()
         opacityValue->setValue(opacity->value());
     };
     connect(m_document, &DocumentController::currentCelChanged, this, sync);
+    connect(m_document, &DocumentController::celSelectionChanged, this, sync);
     connect(m_document, &DocumentController::structureChanged, this, sync);
     sync();
     return row;

@@ -519,6 +519,10 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     m_addMenu = new QMenu(m_add);
     m_addMenu->addAction(tr("Layer"), this, [this] { addClicked(doc::LayerKind::Raster); });
     m_addMenu->addAction(tr("Perspective Layer"), this, [this] { addClicked(doc::LayerKind::Perspective); });
+    // With a cel's row chosen the arrow offers the kinds of cel.
+    m_addCelMenu = new QMenu(m_add);
+    m_addCelMenu->addAction(tr("Cel"), this, [this] { m_document->addCel(); });
+    m_addCelMenu->addAction(tr("Trajectory Cel"), this, [this] { m_document->addTrajectory(); });
     connect(m_remove, &QToolButton::clicked, this, &LayersPanel::removeSelected);
     connect(m_merge, &QToolButton::clicked, this, &LayersPanel::mergeSelected);
     connect(m_mergeDown, &QToolButton::clicked, this, &LayersPanel::mergeSelectedDown);
@@ -815,8 +819,11 @@ void LayersPanel::rebuildTree()
         thumb->setPixmap(thumbnail(nullptr, shown, docSize, nullptr));
         h->addWidget(eye);
         h->addWidget(lock);
-        h->addWidget(iconLabel(IconId::Folder, row));
-        h->addWidget(thumb);
+        h->addWidget(iconLabel(props.trajectory ? IconId::Trajectory : IconId::Folder, row));
+        if (props.trajectory)
+            thumb->hide(); // nothing is drawn on it: no picture
+        else
+            h->addWidget(thumb);
         auto *celText = new QLabel(propertiesText(props.opacity, props.blend, props.name), row);
         celText->setObjectName(QStringLiteral("rowText"));
         h->addWidget(celText, 1);
@@ -1938,8 +1945,8 @@ void LayersPanel::syncHeader()
         w->setEnabled(header);
     m_add->setEnabled(canAdd);
     // The kinds of layer to add, unless + adds a cel.
-    m_add->setMenu(m_focus == Focus::Cel ? nullptr : m_addMenu);
-    m_add->setPopupMode(m_focus == Focus::Cel ? QToolButton::DelayedPopup : QToolButton::MenuButtonPopup);
+    m_add->setMenu(m_focus == Focus::Cel ? m_addCelMenu : m_addMenu);
+    m_add->setPopupMode(QToolButton::MenuButtonPopup);
     m_remove->setEnabled(canRemove);
     m_merge->setEnabled(canMerge);
     m_mergeDown->setEnabled(canMergeDown);

@@ -95,6 +95,7 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
     , m_document(document)
     , m_gizmo(document)
     , m_cameraGizmo(document)
+    , m_trajectoryGizmo(document)
     , m_overlay(new DebugOverlay(this))
 {
     setFocusPolicy(Qt::StrongFocus);
@@ -506,6 +507,7 @@ void CanvasView::paintEvent(QPaintEvent *)
     }
     m_gizmo.paint(p, m_view);
     m_cameraGizmo.paint(p, m_view);
+    m_trajectoryGizmo.paint(p, m_view);
     paintSnapGuide(p);
     paintStraightLinePreview(p);
 
@@ -752,7 +754,7 @@ void CanvasView::handleSample(const PenSample &sample)
     updateBrushOutline(QPointF(sample.x, sample.y));
 
     const bool busy = m_gesture.isActive() || m_stroke.has_value() || m_editTool || m_gizmo.isDragging()
-                      || m_cameraGizmo.isDragging() || m_flip.has_value();
+                      || m_cameraGizmo.isDragging() || m_trajectoryGizmo.isDragging() || m_flip.has_value();
     const QPointF docPos = m_view.mapToDocument(QPointF(sample.x, sample.y));
     const QPointF celPos = toCel(docPos);
     // The place a tool is given: the cel's own, but for the tools that work on what is shown.
@@ -766,6 +768,8 @@ void CanvasView::handleSample(const PenSample &sample)
             m_gesture.begin(mode, QPointF(sample.x, sample.y), m_view);
         } else if (sample.tipDown() && m_cameraGizmo.press(docPos, m_view)) {
             update(); // the camera selected: its frame or a handle, whatever the tool
+        } else if (sample.tipDown() && m_trajectoryGizmo.press(docPos, m_view)) {
+            update(); // the circle of the trajectory cel selected: its middle, its arrow or its edge, whatever the tool
         } else if (sample.tipDown() && m_gizmo.press(docPos, m_view)) {
             update(); // a handle of the perspective layer, whatever the tool
         } else if (picksColor() && sample.tipDown() && sample.tool != InputTool::Eraser) {
@@ -805,6 +809,9 @@ void CanvasView::handleSample(const PenSample &sample)
         } else if (m_cameraGizmo.isDragging()) {
             m_cameraGizmo.move(docPos);
             update();
+        } else if (m_trajectoryGizmo.isDragging()) {
+            m_trajectoryGizmo.move(docPos, modifiers);
+            update();
         } else if (m_gizmo.isDragging()) {
             m_gizmo.move(docPos, m_view);
             update();
@@ -835,6 +842,11 @@ void CanvasView::handleSample(const PenSample &sample)
             update();
             updateGizmoCursor();
         }
+        if (m_trajectoryGizmo.isDragging()) {
+            m_trajectoryGizmo.release(docPos);
+            update();
+            updateGizmoCursor();
+        }
         if (m_gizmo.isDragging()) {
             const bool menu = m_gizmo.release(docPos);
             update();
@@ -856,6 +868,10 @@ void CanvasView::handleSample(const PenSample &sample)
         break;
     case SamplePhase::Hover:
         if (!busy && m_cameraGizmo.hover(docPos, m_view)) {
+            updateGizmoCursor();
+            update();
+        }
+        if (!busy && m_trajectoryGizmo.hover(docPos, m_view)) {
             updateGizmoCursor();
             update();
         }
@@ -1273,6 +1289,7 @@ void CanvasView::cancelStroke()
 {
     m_gizmo.cancel();
     m_cameraGizmo.cancel();
+    m_trajectoryGizmo.cancel();
     if (m_editTool) {
         // A drag cut short is dropped, unless it belongs to a longer edit.
         CanvasTool *tool = m_editTool;
@@ -1513,7 +1530,11 @@ void CanvasView::focusOutEvent(QFocusEvent *event)
 
 void CanvasView::updateGizmoCursor()
 {
-    if ((m_gizmo.hovered() != PerspectiveGizmo::Handle::None || m_cameraGizmo.hovered() != CameraGizmo::Handle::None)
+    if (m_trajectoryGizmo.hovered() != TrajectoryGizmo::Handle::None && !panKeyHeld())
+        setCursor(m_trajectoryGizmo.hovered() == TrajectoryGizmo::Handle::Move ? Qt::SizeAllCursor
+                  : m_trajectoryGizmo.hovered() == TrajectoryGizmo::Handle::Rotate ? turnCursor()
+                                                                                    : Qt::SizeFDiagCursor);
+    else if ((m_gizmo.hovered() != PerspectiveGizmo::Handle::None || m_cameraGizmo.hovered() != CameraGizmo::Handle::None)
         && !panKeyHeld())
         setCursor(Qt::PointingHandCursor);
     else

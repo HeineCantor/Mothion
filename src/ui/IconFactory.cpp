@@ -481,6 +481,14 @@ void drawGlyph(QPainter &p, IconId id)
         }
         break;
     }
+    case IconId::Trajectory: // a circle with a line from its middle to an arrow at its edge
+        path.addEllipse(QPointF(11.5, 12.5), 7.5, 7.5);
+        path.moveTo(11.5, 12.5);
+        path.lineTo(20.5, 4.5);
+        path.moveTo(15.5, 4.5);
+        path.lineTo(20.5, 4.5);
+        path.lineTo(20.5, 9.5);
+        break;
     case IconId::ClipLayer: // a layer over another, with a bent arrow down into it
         path.addRect(QRectF(3.5, 12.5, 17, 8));
         path.addRect(QRectF(8.5, 3.5, 12, 6));

@@ -168,6 +168,7 @@ private:
     QTreeWidget *m_tree;
     QToolButton *m_add;
     QMenu *m_addMenu = nullptr; // the kinds of layer, from the arrow next to +
+    QMenu *m_addCelMenu = nullptr; // and, with a cel chosen, the kinds of cel
     QToolButton *m_merge;
     QToolButton *m_mergeDown;
     QToolButton *m_remove;

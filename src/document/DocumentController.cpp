@@ -221,6 +221,32 @@ void DocumentController::addCel()
     setCurrentCel(id);
 }
 
+void DocumentController::addTrajectory()
+{
+    doc::Document &d = *m_document;
+    QString name; // the first free number
+    for (int n = 1;; ++n) {
+        name = tr("Trajectory %1").arg(n);
+        bool used = false;
+        for (int i = 0; i < d.celCount() && !used; ++i)
+            used = d.celAt(i).properties().name == name.toStdString();
+        if (!used)
+            break;
+    }
+    doc::CelProperties properties{name.toStdString()};
+    properties.trajectory = true;
+    auto add = std::make_unique<doc::AddCelCommand>(d, d.indexOf(m_currentCel) + 1, std::move(properties));
+    const doc::CelId id = add->celId();
+    doc::CelMotion motion; // no keys yet; the pivot is where the circle is drawn
+    motion.pivotX = d.width() / 2.0;
+    motion.pivotY = d.height() / 2.0;
+    std::vector<std::unique_ptr<doc::Command>> steps;
+    steps.push_back(std::move(add));
+    steps.push_back(std::make_unique<doc::SetCelMotionCommand>(id, std::move(motion)));
+    execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::AddCel, std::move(steps)));
+    chooseCel(id);
+}
+
 bool DocumentController::addLayer(bool onTop, doc::LayerKind kind)
 {
     const doc::Drawing *drawing = currentDrawing();
@@ -1029,6 +1055,22 @@ void DocumentController::finishCelPose(doc::CelId id, const doc::CelMotion &befo
         return;
     m_history.pushApplied(std::make_unique<doc::SetCelMotionCommand>(id, before, cel->motion()));
     emit historyChanged();
+}
+
+void DocumentController::beginFirstKey(doc::CelId id, int frame)
+{
+    doc::Cel *cel = m_document->cel(id);
+    if (!cel || frame < 0 || !cel->motion().isEmpty())
+        return;
+    clearTemporaryPose();
+    doc::CelMotion motion = cel->motion();
+    startMotion(motion, *cel, frame);
+    for (doc::Channel c : {doc::Channel::Position, doc::Channel::Rotation, doc::Channel::Scale})
+        motion.setKey(c, frame, doc::CelPose{});
+    cel->setMotion(std::move(motion));
+    doc::ChangeSet changes;
+    changes.motion = true;
+    publish(changes);
 }
 
 void DocumentController::cancelCelPose(doc::CelId id, const doc::CelMotion &before)
@@ -2107,6 +2149,8 @@ std::optional<DocumentController::PaintTarget> DocumentController::beginPaint(bo
     doc::Cel *cel = m_document->cel(m_currentCel);
     if (!cel)
         return fail(tr("No cel selected"));
+    if (cel->properties().trajectory)
+        return fail(tr("“%1” is a trajectory: nothing is drawn on it").arg(QString::fromStdString(cel->properties().name)));
     if (!cel->properties().visible)
         return fail(tr("Cel “%1” is hidden").arg(QString::fromStdString(cel->properties().name)));
     if (cel->properties().locked)

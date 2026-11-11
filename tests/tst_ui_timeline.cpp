@@ -839,6 +839,41 @@ private slots:
     }
 
 
+    // The arrow next to the cel bar's plus offers a trajectory cel; the arrows move all the cels chosen together.
+    void timelineCelBarMakesTrajectoriesAndMovesTheChosen()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        ui::TimelinePanel panel(&controller, &state);
+        panel.resize(800, 300);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        auto *add = panel.findChild<QToolButton *>(QStringLiteral("celAdd"));
+        auto *up = panel.findChild<QToolButton *>(QStringLiteral("celUp"));
+        auto *down = panel.findChild<QToolButton *>(QStringLiteral("celDown"));
+        QVERIFY(add && up && down && add->menu());
+        QAction *trajectory = nullptr;
+        for (QAction *action : add->menu()->actions())
+            if (action->text() == QStringLiteral("Trajectory Cel"))
+                trajectory = action;
+        QVERIFY(trajectory);
+        const doc::Document &d = controller.document();
+        trajectory->trigger();
+        QVERIFY(d.cel(controller.currentCel())->properties().trajectory);
+        QCOMPARE(d.celCount(), 2);
+        controller.addCel();
+        controller.addCel(); // four: standard, trajectory, standard, standard
+        const doc::CelId a = d.celAt(0).id(), b = d.celAt(1).id(), c = d.celAt(2).id(), e = d.celAt(3).id();
+        controller.setCelSelection({a, c}, c);
+        QVERIFY(up->isEnabled() && down->isEnabled() == false);
+        QTest::mouseClick(up, Qt::LeftButton); // both go up one place; the cel on top stays below the second
+        QCOMPARE(d.celAt(0).id(), b);
+        QCOMPARE(d.celAt(1).id(), a);
+        QCOMPARE(d.celAt(2).id(), e);
+        QCOMPARE(d.celAt(3).id(), c);
+        QVERIFY(!up->isEnabled()); // one of them is on top now
+    }
+
     // The cel bar adds, moves and deletes cels and sets the current one's
     // blend and opacity; the row headers show, hide and lock them.
     void timelineCelControls()

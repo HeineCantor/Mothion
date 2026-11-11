@@ -99,6 +99,7 @@ qt_add_library(mothion_gui STATIC
     canvas/FrameRenderer.h canvas/FrameRenderer.cpp
     canvas/PerspectiveGizmo.h canvas/PerspectiveGizmo.cpp
     canvas/CameraGizmo.h canvas/CameraGizmo.cpp
+    canvas/TrajectoryGizmo.h canvas/TrajectoryGizmo.cpp
     canvas/ViewTransform.h canvas/ViewTransform.cpp
     canvas/NavigationGesture.h canvas/NavigationGesture.cpp
     canvas/CanvasTool.h

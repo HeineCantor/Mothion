@@ -968,6 +968,40 @@ private slots:
         QCOMPARE(controller.celSelection(), std::vector<doc::CelId>{id[4]});
     }
 
+    // The arrow next to the plus offers, with a cel chosen, a standard cel or a trajectory cel; a trajectory has its own icon
+    // row and no picture.
+    void thePlusOffersATrajectoryCel()
+    {
+        document::DocumentController controller;
+        ui::LayersPanel panel(&controller);
+        panel.resize(320, 600);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        QCoreApplication::processEvents();
+        controller.chooseCel(controller.currentCel()); // the cel's row, as chosen in the timeline
+        QCoreApplication::processEvents();
+        QToolButton *plus = nullptr;
+        for (auto *button : panel.findChildren<QToolButton *>())
+            if (button->menu() && button->toolTip().contains(QStringLiteral("cel"), Qt::CaseInsensitive))
+                plus = button;
+        QVERIFY(plus);
+        QStringList kinds;
+        QAction *trajectory = nullptr;
+        for (QAction *action : plus->menu()->actions()) {
+            kinds << action->text();
+            if (action->text() == QStringLiteral("Trajectory Cel"))
+                trajectory = action;
+        }
+        QVERIFY2(trajectory, qPrintable(kinds.join(", ")));
+        QVERIFY(kinds.contains(QStringLiteral("Cel")));
+        const int cels = controller.document().celCount();
+        trajectory->trigger();
+        QCoreApplication::processEvents();
+        QCOMPARE(controller.document().celCount(), cels + 1);
+        QVERIFY(controller.document().cel(controller.currentCel())->properties().trajectory);
+        QVERIFY(panel.celItem(controller.currentCel())); // its row
+    }
+
     // The clip button (in the row of the mask ones): a raster layer with another below it is clipped to it, and let go of
     // again; the button shows the state; one undo step; nothing for the bottom layer.
     void aLayerCanBeClippedToTheOneBelow()

@@ -77,6 +77,9 @@ public:
     // Adds an empty cel above the current one, named "Cel N" with the first
     // free N; it becomes current. One undo step.
     void addCel();
+    // A trajectory cel above the current one (see doc::CelProperties::trajectory): no drawings, its pivot at the middle of the
+    // page, which is where its circle stands. One undo step.
+    void addTrajectory();
     // Adds an empty layer of `kind` to the current drawing, above the current
     // layer (on top if `onTop`), named "Layer N" (or "Perspective N") with the
     // first free N; it becomes current. A perspective layer starts with a grid
@@ -171,6 +174,9 @@ public:
     // is not moved this way.
     void setCelPose(doc::CelId cel, int frame, const doc::CelPose &pose, doc::Channel channel);
     void finishCelPose(doc::CelId cel, const doc::CelMotion &before);
+    // For a cel with no key: its first one on `frame` (position, rotation and scale, as it is drawn, the pivot as the first key
+    // puts it) with no undo step, as previewCelPose() changes it; finishCelPose() from the motion it had then records both.
+    void beginFirstKey(doc::CelId cel, int frame);
     void cancelCelPose(doc::CelId cel, const doc::CelMotion &before);
     // Takes all the keys of the cel away (it stands still, as drawn).
     bool clearCelMotion(doc::CelId cel);

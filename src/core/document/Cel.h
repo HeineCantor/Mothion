@@ -18,6 +18,9 @@ struct CelProperties
     bool locked = false;
     float opacity = 1.0f; // 0..1
     BlendMode blend = BlendMode::Normal;
+    // A trajectory: a cel with no drawings that is never drawn, only moved, turned and scaled by its keys (what the cels
+    // that follow it will do, see CelMotion). Fixed when it is made.
+    bool trajectory = false;
 
     bool operator==(const CelProperties &) const = default;
 };

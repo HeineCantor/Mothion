@@ -510,6 +510,85 @@ private slots:
         QVERIFY(qBlue(pixels.pixel(980, 525)) > 200 && qRed(pixels.pixel(980, 525)) < 80);
     }
 
+    // A trajectory cel: made from the arrow next to the new cel button's plus (here, directly), it has no drawings and is not drawn;
+    // selected, it shows a circle (its middle moves it, its arrow turns it, its edge scales it) whatever the tool, and what is
+    // dragged becomes its keys, in one undo step; nothing can be drawn on it.
+    void aTrajectoryCelIsMovedByItsCircle()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        controller.setSceneLength(30);
+        const int cels = controller.document().celCount();
+        controller.addTrajectory();
+        QCOMPARE(controller.document().celCount(), cels + 1);
+        const doc::CelId id = controller.currentCel();
+        const doc::Cel *cel = controller.document().cel(id);
+        QVERIFY(cel->properties().trajectory);
+        QVERIFY(cel->drawings().empty());
+        QVERIFY(cel->motion().isEmpty());
+        QCOMPARE(cel->motion().pivotX, controller.document().width() / 2.0); // its circle is at the middle of the page
+        controller.undo(); // one step: made, with its pivot
+        QCOMPARE(controller.document().celCount(), cels);
+        controller.redo();
+        controller.chooseCel(id); // (a redo does not choose it again)
+
+        QString why;
+        QVERIFY(!controller.beginPaint(true, &why)); // nothing is drawn on it
+        QVERIFY(!why.isEmpty());
+
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(900, 520);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        state.setActiveTool(tools::ToolId::Brush); // whatever the tool
+        const canvas::TrajectoryGizmo &gizmo = canvas.trajectoryGizmo();
+        QVERIFY(gizmo.editable());
+        const canvas::ViewTransform &view = canvas.view();
+        const QTransform toView = view.documentToView();
+        auto at = [&](const QPointF &docPoint) { return toView.map(docPoint).toPoint(); };
+        const auto middle = gizmo.handlePoint(canvas::TrajectoryGizmo::Handle::Move, view);
+        QVERIFY(middle && qAbs(middle->x() - 960) < 1 && qAbs(middle->y() - 540) < 1);
+        QCOMPARE(gizmo.handleAt(*middle, view), canvas::TrajectoryGizmo::Handle::Move);
+        QCOMPARE(gizmo.handleAt(QPointF(100, 100), view), canvas::TrajectoryGizmo::Handle::None);
+
+        // The middle moved: the first key, at the pose the drag ends in, as one step.
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, at(*middle));
+        QTest::mouseMove(&canvas, at(*middle + QPointF(40, 10)));
+        QTest::mouseMove(&canvas, at(*middle + QPointF(80, 30)));
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, at(*middle + QPointF(80, 30)));
+        QVERIFY(controller.celMotion(id)->hasKeyAt(0));
+        QVERIFY(qAbs(controller.celPoseAt(id, 0).x - 80) < 1.5 && qAbs(controller.celPoseAt(id, 0).y - 30) < 1.5);
+        controller.undo(); // the first key and the drag are one step
+        QVERIFY(controller.celMotion(id)->isEmpty());
+        controller.redo();
+        QVERIFY(controller.celMotion(id)->hasKeyAt(0));
+        const auto moved = gizmo.handlePoint(canvas::TrajectoryGizmo::Handle::Move, view);
+        QVERIFY(moved && qAbs(moved->x() - 1040) < 1.5); // the circle followed
+
+        // The arrow turned a quarter: its tip goes from the right of the circle to below it (clockwise).
+        const auto tip = gizmo.handlePoint(canvas::TrajectoryGizmo::Handle::Rotate, view);
+        QVERIFY(tip && tip->x() > moved->x());
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, at(*tip));
+        for (int a = 15; a <= 90; a += 15) {
+            const double r = std::hypot(tip->x() - moved->x(), tip->y() - moved->y());
+            QTest::mouseMove(&canvas, at(*moved + QPointF(r * std::cos(a * M_PI / 180), r * std::sin(a * M_PI / 180))));
+        }
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, at(*moved + QPointF(0, std::hypot(tip->x() - moved->x(), tip->y() - moved->y()))));
+        QVERIFY2(qAbs(controller.celPoseAt(id, 0).rotation - 90) < 3, qPrintable(QString::number(controller.celPoseAt(id, 0).rotation)));
+
+        // The edge dragged out to twice the radius doubles the scale (and the circle).
+        const auto edge = gizmo.handlePoint(canvas::TrajectoryGizmo::Handle::Scale, view);
+        QVERIFY(edge);
+        const QPointF center = *gizmo.handlePoint(canvas::TrajectoryGizmo::Handle::Move, view);
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, at(*edge));
+        QTest::mouseMove(&canvas, at(center + (*edge - center) * 1.5));
+        QTest::mouseMove(&canvas, at(center + (*edge - center) * 2.0));
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, at(center + (*edge - center) * 2.0));
+        QVERIFY2(qAbs(controller.celPoseAt(id, 0).scaleX - 2.0) < 0.1, qPrintable(QString::number(controller.celPoseAt(id, 0).scaleX)));
+        controller.undo(); // each drag one step
+        QVERIFY(qAbs(controller.celPoseAt(id, 0).scaleX - 1.0) < 0.01);
+    }
+
     // Fill looking at the other layers on a moved cel: the area is found in what is shown, and filled where it is in the
     // cel's own pixels (it used to find it in the page's pixels and fill the cel's: a stain on the background).
     void aFillReferringToWhatIsShownFillsInsideTheMovedDrawing()

@@ -72,6 +72,8 @@ const char *const kSchema[] = {
     " scene text not null, start integer not null, percent integer not null)",
     // Format 13: the layers clipped to the one below.
     "create table clipped_layers (layer integer primary key references layers(id))",
+    // Format 14: the cels that are trajectories.
+    "create table trajectory_cels (cel integer primary key references cels(id))",
 };
 
 // Stored by name, so reordering the enum cannot change old files.
@@ -545,7 +547,7 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
         return false;
     }
 
-    QSqlQuery cel(db), drawing(db), layer(db), exposure(db), tile(db), mask(db), maskTile(db), clipped(db);
+    QSqlQuery cel(db), drawing(db), layer(db), exposure(db), tile(db), mask(db), maskTile(db), clipped(db), trajectory(db);
     cel.prepare(QStringLiteral("insert into cels values (?, ?, ?, ?, ?, ?, ?)"));
     drawing.prepare(QStringLiteral("insert into drawings values (?, ?, ?)"));
     layer.prepare(QStringLiteral("insert into layers values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
@@ -554,6 +556,7 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
     mask.prepare(QStringLiteral("insert into masks values (?)"));
     maskTile.prepare(QStringLiteral("insert into masktiles values (?, ?, ?, ?)"));
     clipped.prepare(QStringLiteral("insert into clipped_layers values (?)"));
+    trajectory.prepare(QStringLiteral("insert into trajectory_cels values (?)"));
     auto exec = [&](QSqlQuery &query, std::initializer_list<QVariant> values) {
         for (const QVariant &v : values)
             query.addBindValue(v);
@@ -568,6 +571,8 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
         const doc::CelProperties &p = l.properties();
         if (!exec(cel, {idValue(l.id()), i, QString::fromStdString(p.name), p.visible, p.locked,
                           double(p.opacity), blendName(p.blend)}))
+            return false;
+        if (p.trajectory && !exec(trajectory, {idValue(l.id())}))
             return false;
         for (const auto &[id, dr] : l.drawings()) {
             if (!exec(drawing, {idValue(id), idValue(l.id()), QString::fromStdString(dr.name)}))
@@ -846,6 +851,15 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
     }
     if (!flush())
         return nullptr;
+
+    if (version >= 14 && q.exec(QStringLiteral("select cel from trajectory_cels"))) {
+        while (q.next())
+            if (doc::Cel *cel = d->cel(doc::CelId(q.value(0).toLongLong()))) {
+                doc::CelProperties properties = cel->properties();
+                properties.trajectory = true;
+                cel->setProperties(std::move(properties));
+            }
+    }
 
     if (version >= 13 && q.exec(QStringLiteral("select layer from clipped_layers"))) {
         while (q.next())
