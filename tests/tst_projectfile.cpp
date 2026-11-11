@@ -327,13 +327,21 @@ private slots:
         motion.pivotY = 120;
         motion.setKey(doc::Channel::Position, 3, doc::CelPose{12, -4});
         path_cel.setMotion(motion);
+        doc::CelProperties child{"Child"};
+        child.trajectory = true;
+        child.visible = false; // (inactive)
+        child.parent = path_cel.id();
+        original->insertCel(1, std::make_unique<doc::Cel>(original->allocateCelId(), child));
         QString error;
         QVERIFY2(io::saveProject(*original, path, &error), qPrintable(error));
         const auto loaded = io::loadProject(path, &error);
         QVERIFY2(loaded, qPrintable(error));
         compareDocuments(*original, *loaded);
         QVERIFY(loaded->celAt(0).properties().trajectory);
-        QVERIFY(!loaded->celAt(1).properties().trajectory);
+        QVERIFY(loaded->celAt(1).properties().trajectory);
+        QCOMPARE(loaded->celAt(1).properties().parent, loaded->celAt(0).id()); // format 15
+        QVERIFY(!loaded->celAt(1).properties().visible);
+        QVERIFY(!loaded->celAt(2).properties().trajectory);
         QVERIFY(loaded->celAt(0).motion().hasKeyAt(3));
     }
 

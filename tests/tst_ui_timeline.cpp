@@ -839,6 +839,44 @@ private slots:
     }
 
 
+    // A trajectory dragged onto the middle of another one's name follows it; onto itself, it lets go; near the edge of a row it is a
+    // place in the stack as for any cel.
+    void aTrajectoryIsDraggedOntoAnotherToFollowIt()
+    {
+        document::DocumentController controller;
+        controller.addTrajectory();
+        const doc::CelId a = controller.currentCel();
+        controller.addTrajectory();
+        const doc::CelId b = controller.currentCel(); // above a
+        const doc::Document &d = controller.document();
+        ui::TimelineView view(&controller);
+        view.resize(800, 300);
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        ui::TimelineMetrics m;
+        auto *vp = view.viewport();
+        auto name = [&](doc::CelId id) { return QPoint(60, m.rowY(d.celCount() - 1 - d.indexOf(id)) + m.rowHeight / 2); };
+        auto drag = [&](doc::CelId from, QPoint to) {
+            QTest::mouseClick(vp, Qt::LeftButton, {}, name(from));
+            QTest::mousePress(vp, Qt::LeftButton, {}, name(from));
+            QTest::mouseMove(vp, QPoint(60, name(from).y() + 10));
+            QTest::mouseMove(vp, to);
+            QTest::mouseRelease(vp, Qt::LeftButton, {}, to);
+        };
+        drag(b, name(a)); // onto the middle of a
+        QCOMPARE(d.cel(b)->properties().parent, a);
+        QCOMPARE(d.celAt(1).id(), a); // not moved in the stack (the project's first cel is under both)
+        QCOMPARE(d.celAt(2).id(), b);
+        drag(b, name(b)); // onto itself
+        QCOMPARE(d.cel(b)->properties().parent, doc::kNoId);
+        drag(a, name(b)); // a over b
+        QCOMPARE(d.cel(a)->properties().parent, b);
+        drag(b, name(a)); // the other way would be a loop: refused
+        QCOMPARE(d.cel(b)->properties().parent, doc::kNoId);
+        controller.undo(); // a no longer follows b
+        QCOMPARE(d.cel(a)->properties().parent, doc::kNoId);
+    }
+
     // The arrow next to the cel bar's plus offers a trajectory cel; the arrows move all the cels chosen together.
     void timelineCelBarMakesTrajectoriesAndMovesTheChosen()
     {

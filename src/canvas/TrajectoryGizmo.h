@@ -23,6 +23,9 @@ class ViewTransform;
 //  - the edge of the circle scales it (the circle grows and shrinks with the scale).
 //
 // The middle is where the pivot is moved by the pose; the arrow points the way the rotation says (0 degrees to the right).
+// A trajectory that follows another is drawn where it is, moved by its parents; what is dragged changes its own pose, which
+// is on top of what the parents do (a faint line runs to the parent's middle). An inactive trajectory is drawn faint and
+// cannot be dragged: its own pose does nothing.
 // What a drag changes goes by the rules of the cel's keys (CelMotion): into the key of the channel on the current frame, or,
 // on a frame without one, as a pose that goes with the frame until it is made a key; a trajectory with no key at all gets its
 // first one from the first drag. The drag is one undo step.
@@ -33,7 +36,7 @@ public:
 
     explicit TrajectoryGizmo(document::DocumentController *document);
 
-    // The current cel is a trajectory, it is not locked, and the camera is not the selected row.
+    // The current cel is a trajectory, it is active and not locked, and the camera is not the selected row.
     bool editable() const;
     // It shows (as editable() but a locked trajectory is shown too).
     bool shown() const;
@@ -68,7 +71,9 @@ private:
         double radius = 0; // px
         QPointF tip;       // view coordinates
         QPointF direction; // the arrow's way on screen, a unit vector
-        doc::CelPose pose;
+        doc::CelPose pose; // its own (none if it is inactive)
+        doc::Matrix2x3 parents; // what its parents do
+        std::optional<QPointF> parentCenter; // view coordinates, of the parent's circle, if it follows one
     };
     std::optional<Shape> shape(const ViewTransform &view) const;
 
@@ -84,6 +89,9 @@ private:
         QPointF press;         // document coordinates
         QPointF centerDoc;
         QTransform toView;     // as at the press
+        doc::Matrix2x3 parents;        // what the parents did then
+        doc::Matrix2x3 parentsBack;    // and the way back
+        double turnWay = 1;            // -1 when the parents turn the picture over
         double pressDistance = 1; // the pen's screen distance from the middle at the press
         double lastAngle = 0;     // radians, of the pen around the middle
         double turned = 0;        // degrees so far

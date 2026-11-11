@@ -589,6 +589,113 @@ private slots:
         QVERIFY(qAbs(controller.celPoseAt(id, 0).scaleX - 1.0) < 0.01);
     }
 
+    // Trajectories that follow one another: a child goes where its parent takes it, its own pose on top; an inactive one does
+    // nothing of its own; no loops; a parent that goes leaves its children free (and back, with the undo).
+    void trajectoriesFollowTheirParents()
+    {
+        document::DocumentController controller;
+        controller.setSceneLength(30);
+        controller.addTrajectory();
+        const doc::CelId parent = controller.currentCel();
+        controller.addTrajectory();
+        const doc::CelId child = controller.currentCel();
+        controller.addTrajectory();
+        const doc::CelId grandchild = controller.currentCel();
+        const doc::Document &d = controller.document();
+        QVERIFY(controller.setTrajectoryParent(child, parent));
+        QVERIFY(controller.setTrajectoryParent(grandchild, child));
+        QVERIFY(!controller.setTrajectoryParent(parent, grandchild)); // a loop
+        QVERIFY(!controller.setTrajectoryParent(parent, parent));
+        QVERIFY(!controller.setTrajectoryParent(child, parent)); // nothing changes
+        controller.undo();
+        controller.undo(); // the grandchild's, then the child's
+        QVERIFY(d.trajectoryParent(*d.cel(child)) == nullptr);
+        controller.redo();
+        controller.redo();
+        QCOMPARE(d.trajectoryParent(*d.cel(grandchild))->id(), child);
+
+        auto at = [&](doc::CelId id, int frame) { // where the circle of a trajectory is: its pivot through its matrix
+            double x = 0, y = 0;
+            d.trajectoryMatrix(id, frame).map(d.cel(id)->motion().pivotX, d.cel(id)->motion().pivotY, x, y);
+            return QPointF(x, y);
+        };
+        QCOMPARE(at(grandchild, 0), QPointF(960, 540)); // nothing moves yet
+
+        doc::CelPose slide;
+        slide.x = 100;
+        controller.setCelKey(parent, 0, slide);
+        QCOMPARE(at(parent, 0), QPointF(1060, 540));
+        QCOMPARE(at(child, 0), QPointF(1060, 540)); // the child goes along
+        QCOMPARE(at(grandchild, 0), QPointF(1060, 540));
+        doc::CelPose own;
+        own.y = 50;
+        controller.setCelKey(child, 0, own); // its own movement, on top
+        QCOMPARE(at(child, 0), QPointF(1060, 590));
+        QCOMPARE(at(grandchild, 0), QPointF(1060, 590));
+
+        // The parent turned a quarter (clockwise, round its own pivot): the child, which stands 100 to the right of it
+        // (it was moved there), goes round it: below it.
+        controller.removeCelKey(parent, 0);
+        doc::CelPose turn;
+        turn.rotation = 90;
+        controller.setCelKey(parent, 0, turn);
+        controller.setCelKey(child, 0, [] { doc::CelPose p; p.x = 100; return p; }());
+        const QPointF below = at(child, 0); // (960 + 100, 540) turned a quarter round (960, 540): (960, 640)
+        QVERIFY(qAbs(below.x() - 960) < 0.01 && qAbs(below.y() - 640) < 0.01);
+
+        // Inactive: the parent's own pose does nothing (the child is then moved only by its own).
+        doc::CelProperties off = d.cel(parent)->properties();
+        off.visible = false;
+        controller.execute(doc::makeSetCelProperties(d, parent, off));
+        QVERIFY(qAbs(at(child, 0).x() - 1060) < 0.01 && qAbs(at(child, 0).y() - 540) < 0.01);
+
+        // The parent removed: the child stands alone, and follows again if that is undone.
+        controller.execute(std::make_unique<doc::RemoveCelCommand>(parent));
+        QVERIFY(d.trajectoryParent(*d.cel(child)) == nullptr);
+        controller.undo();
+        QVERIFY(d.trajectoryParent(*d.cel(child)) != nullptr);
+    }
+
+    // The circle of a trajectory that follows another is where the parent puts it, and dragging it changes only its own pose.
+    void theCircleOfAChildIsDraggedInItsOwnPose()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        controller.setSceneLength(30);
+        controller.addTrajectory();
+        const doc::CelId parent = controller.currentCel();
+        controller.addTrajectory();
+        const doc::CelId child = controller.currentCel();
+        QVERIFY(controller.setTrajectoryParent(child, parent));
+        doc::CelPose slide;
+        slide.x = 200;
+        controller.setCelKey(parent, 0, slide); // the parent stands 200 to the right
+        controller.chooseCel(child);
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(900, 520);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        const canvas::TrajectoryGizmo &gizmo = canvas.trajectoryGizmo();
+        const canvas::ViewTransform &view = canvas.view();
+        const QTransform toView = view.documentToView();
+        auto at = [&](const QPointF &docPoint) { return toView.map(docPoint).toPoint(); };
+        const auto middle = gizmo.handlePoint(canvas::TrajectoryGizmo::Handle::Move, view);
+        QVERIFY(middle && qAbs(middle->x() - 1160) < 1 && qAbs(middle->y() - 540) < 1); // where the parent takes it
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, at(*middle));
+        QTest::mouseMove(&canvas, at(*middle + QPointF(30, 20)));
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, at(*middle + QPointF(60, 40)));
+        // Its own pose is the move, the parent's is untouched, and the circle went where the pen took it.
+        QVERIFY(qAbs(controller.celPoseAt(child, 0).x - 60) < 1.5 && qAbs(controller.celPoseAt(child, 0).y - 40) < 1.5);
+        QCOMPARE(controller.celPoseAt(parent, 0).x, 200.0);
+        const auto now = gizmo.handlePoint(canvas::TrajectoryGizmo::Handle::Move, view);
+        QVERIFY(now && qAbs(now->x() - 1220) < 1.5 && qAbs(now->y() - 580) < 1.5);
+        // An inactive trajectory is shown but not taken.
+        doc::CelProperties off = controller.document().cel(child)->properties();
+        off.visible = false;
+        controller.execute(doc::makeSetCelProperties(controller.document(), child, off));
+        QVERIFY(!gizmo.editable());
+    }
+
     // Fill looking at the other layers on a moved cel: the area is found in what is shown, and filled where it is in the
     // cel's own pixels (it used to find it in the page's pixels and fill the cel's: a stain on the background).
     void aFillReferringToWhatIsShownFillsInsideTheMovedDrawing()

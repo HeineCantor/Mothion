@@ -74,6 +74,8 @@ const char *const kSchema[] = {
     "create table clipped_layers (layer integer primary key references layers(id))",
     // Format 14: the cels that are trajectories.
     "create table trajectory_cels (cel integer primary key references cels(id))",
+    // Format 15: the trajectory a trajectory follows.
+    "create table trajectory_parents (cel integer primary key references cels(id), parent integer not null)",
 };
 
 // Stored by name, so reordering the enum cannot change old files.
@@ -547,7 +549,7 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
         return false;
     }
 
-    QSqlQuery cel(db), drawing(db), layer(db), exposure(db), tile(db), mask(db), maskTile(db), clipped(db), trajectory(db);
+    QSqlQuery cel(db), drawing(db), layer(db), exposure(db), tile(db), mask(db), maskTile(db), clipped(db), trajectory(db), trajectoryParent(db);
     cel.prepare(QStringLiteral("insert into cels values (?, ?, ?, ?, ?, ?, ?)"));
     drawing.prepare(QStringLiteral("insert into drawings values (?, ?, ?)"));
     layer.prepare(QStringLiteral("insert into layers values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
@@ -557,6 +559,7 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
     maskTile.prepare(QStringLiteral("insert into masktiles values (?, ?, ?, ?)"));
     clipped.prepare(QStringLiteral("insert into clipped_layers values (?)"));
     trajectory.prepare(QStringLiteral("insert into trajectory_cels values (?)"));
+    trajectoryParent.prepare(QStringLiteral("insert into trajectory_parents values (?, ?)"));
     auto exec = [&](QSqlQuery &query, std::initializer_list<QVariant> values) {
         for (const QVariant &v : values)
             query.addBindValue(v);
@@ -573,6 +576,8 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
                           double(p.opacity), blendName(p.blend)}))
             return false;
         if (p.trajectory && !exec(trajectory, {idValue(l.id())}))
+            return false;
+        if (p.trajectory && p.parent != doc::kNoId && !exec(trajectoryParent, {idValue(l.id()), idValue(p.parent)}))
             return false;
         for (const auto &[id, dr] : l.drawings()) {
             if (!exec(drawing, {idValue(id), idValue(l.id()), QString::fromStdString(dr.name)}))
@@ -851,6 +856,15 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
     }
     if (!flush())
         return nullptr;
+
+    if (version >= 15 && q.exec(QStringLiteral("select cel, parent from trajectory_parents"))) {
+        while (q.next())
+            if (doc::Cel *cel = d->cel(idFrom(q.value(0)))) {
+                doc::CelProperties properties = cel->properties();
+                properties.parent = idFrom(q.value(1));
+                cel->setProperties(std::move(properties));
+            }
+    }
 
     if (version >= 14 && q.exec(QStringLiteral("select cel from trajectory_cels"))) {
         while (q.next())

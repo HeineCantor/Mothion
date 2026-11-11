@@ -398,7 +398,13 @@ void TimelineView::paintSelection(QPainter &p) const
         if (!isMotionRow(row) && !m_document->cameraSelected()
             && std::find(chosen.begin(), chosen.end(), d.celAt(celIndexForRow(row)).id()) != chosen.end())
             outline(m.rowY(row));
-    if (m_celDrag && m_celDrag->moving) { // where the chosen cels would go
+    if (m_celDrag && m_celDrag->moving && m_celDrag->parentTarget != doc::kNoId) { // a trajectory to follow
+        for (int row = 0; row < rowCount(); ++row)
+            if (!isMotionRow(row) && d.celAt(celIndexForRow(row)).id() == m_celDrag->parentTarget) {
+                p.setPen(QPen(kCursorColor, 3.0));
+                p.drawRect(QRect(1, m.rowY(row) + 1, viewport()->width() - 3, m.rowHeight - 2));
+            }
+    } else if (m_celDrag && m_celDrag->moving) { // where the chosen cels would go
         const int y = celDropY(m_celDrag->insertAt);
         p.setPen(QPen(kCursorColor, 3.0));
         p.drawLine(0, y, viewport()->width(), y);
@@ -1162,8 +1168,10 @@ void TimelineView::paintHeaders(QPainter &p) const
         p.setPen(palette().placeholderText().color());
         for (const QRect &slot : {eyeRect(row), lockRect(row)})
             p.drawRect(slot.adjusted(0, 0, -1, -1));
+        // A trajectory is not shown or hidden: its slot says it is active.
         if (cel.properties().visible)
-            icon(IconId::Eye, tone).paint(&p, eyeRect(row).adjusted(1, 1, -1, -1));
+            icon(cel.properties().trajectory ? IconId::Trajectory : IconId::Eye, tone)
+                .paint(&p, eyeRect(row).adjusted(1, 1, -1, -1));
         if (cel.properties().locked)
             icon(IconId::Lock, tone).paint(&p, lockRect(row).adjusted(1, 1, -1, -1));
         p.setPen(cel.properties().visible ? ink
@@ -1171,9 +1179,15 @@ void TimelineView::paintHeaders(QPainter &p) const
         const bool keyed = hasKeys(celIndex);
         p.drawText(r.adjusted(lockRect(row).right() + 6, 0, keyed ? -22 : -4, 0), Qt::AlignVCenter | Qt::AlignLeft,
                    QString::fromStdString(cel.properties().name));
-        if (cel.properties().trajectory) { // a trajectory: not drawn, only moved
-            const int right = r.right() - (keyed ? 24 : 4);
-            icon(IconId::Trajectory, tone).paint(&p, QRect(right - 14, r.top() + (r.height() - 14) / 2, 14, 14));
+        if (const doc::Cel *parent = d.trajectoryParent(cel)) { // the one it follows, small, at the right
+            p.save();
+            QFont small = p.font();
+            small.setPointSizeF(small.pointSizeF() * 0.8);
+            p.setFont(small);
+            p.setPen(palette().placeholderText().color());
+            p.drawText(r.adjusted(0, 0, keyed ? -24 : -6, 0), Qt::AlignVCenter | Qt::AlignRight,
+                       QStringLiteral("→ %1").arg(QString::fromStdString(parent->properties().name)));
+            p.restore();
         }
         if (keyed)
             paintFoldArrow(p, foldRect(row), !keyframesRowShown(celIndex));
@@ -1494,6 +1508,18 @@ void TimelineView::mouseMoveEvent(QMouseEvent *event)
             m_celDrag->moving = true;
         if (m_celDrag->moving) {
             m_celDrag->insertAt = celDropPosition(pos.y());
+            // A lone trajectory over the middle of another one's row: that is following it, not a place in the stack.
+            m_celDrag->parentTarget = doc::kNoId;
+            const doc::Document &d = m_document->document();
+            const doc::Cel *dragged = d.cel(m_celDrag->cel);
+            const int row = rowAt(pos.y());
+            if (dragged && dragged->properties().trajectory && m_document->celSelection().size() == 1 && row >= 0
+                && !isMotionRow(row)) {
+                const doc::Cel &over = d.celAt(celIndexForRow(row));
+                const int inRow = pos.y() - m_metrics.rowY(row);
+                if (over.properties().trajectory && inRow >= m_metrics.rowHeight / 4 && inRow < m_metrics.rowHeight * 3 / 4)
+                    m_celDrag->parentTarget = over.id();
+            }
             viewport()->update();
         }
         return;
@@ -1568,10 +1594,16 @@ void TimelineView::mouseReleaseEvent(QMouseEvent *)
     if (m_celDrag) {
         const CelDrag drag = *m_celDrag;
         m_celDrag.reset();
-        if (drag.moving)
+        if (drag.moving && drag.parentTarget != doc::kNoId) {
+            if (drag.parentTarget == drag.cel)
+                m_document->setTrajectoryParent(drag.cel, doc::kNoId); // on itself: it lets go
+            else
+                m_document->setTrajectoryParent(drag.cel, drag.parentTarget);
+        } else if (drag.moving) {
             m_document->moveChosenCels(drag.insertAt);
-        else if (m_document->celSelection().size() > 1)
+        } else if (m_document->celSelection().size() > 1) {
             m_document->chooseCel(drag.cel); // pressed and let go: that cel alone
+        }
         viewport()->update();
         return;
     }

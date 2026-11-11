@@ -54,10 +54,12 @@ namespace mothion::io {
 // Format 14 adds the trajectory cels (cels that are not drawn, only moved by their keys): the table "trajectory_cels".
 // Older files have none.
 //
+// Format 15 adds the parent of a trajectory cel: the table "trajectory_parents". Older files have none.
+//
 // A save writes a new file next to the target and renames it over the old
 // one at the end, so a failed save never damages the previous file.
 
-inline constexpr int kProjectFormatVersion = 14;
+inline constexpr int kProjectFormatVersion = 15;
 inline constexpr char kProjectSuffix[] = "moth";
 inline constexpr char kOldProjectSuffix[] = "mothion"; // what projects were named before; they still open
 

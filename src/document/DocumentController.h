@@ -80,6 +80,9 @@ public:
     // A trajectory cel above the current one (see doc::CelProperties::trajectory): no drawings, its pivot at the middle of the
     // page, which is where its circle stands. One undo step.
     void addTrajectory();
+    // `child` follows `parent` (both trajectories; kNoId lets it go); its own keys then come on top of the parent's way. One
+    // undo step. False if that would be a loop, or either is no trajectory, or nothing changes.
+    bool setTrajectoryParent(doc::CelId child, doc::CelId parent);
     // Adds an empty layer of `kind` to the current drawing, above the current
     // layer (on top if `onTop`), named "Layer N" (or "Perspective N") with the
     // first free N; it becomes current. A perspective layer starts with a grid

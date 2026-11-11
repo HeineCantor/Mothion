@@ -265,6 +265,20 @@ QString propertiesText(float opacity, doc::BlendMode blend, const std::string &n
         .arg(blendModeName(blend), QString::fromStdString(name));
 }
 
+// What a cel's row says: its opacity and blend over its name; for a trajectory, its name and the trajectory it follows.
+QString celRowText(const doc::Document &document, const doc::Cel &cel)
+{
+    const doc::CelProperties &props = cel.properties();
+    if (!props.trajectory) {
+        return propertiesText(props.opacity, props.blend, props.name);
+    }
+    const doc::Cel *parent = document.trajectoryParent(cel);
+    return parent ? QStringLiteral("%1\n%2 → %3")
+                        .arg(QObject::tr("Trajectory"), QString::fromStdString(props.name),
+                             QString::fromStdString(parent->properties().name))
+                  : QStringLiteral("%1\n%2").arg(QObject::tr("Trajectory"), QString::fromStdString(props.name));
+}
+
 constexpr double kDragPreviewOpacity = 0.75; // the rows following the pen
 constexpr double kDraggedRowOpacity = 0.4;   // the rows left in the tree meanwhile
 
@@ -286,6 +300,10 @@ public:
         , m_clipped(std::move(clipped))
     {
     }
+
+public:
+    // The drop under the pen is on a row (its middle) and not between two.
+    bool droppingOnRow() const { return dropIndicatorPosition() == QAbstractItemView::OnItem; }
 
 protected:
     // The column at the left (under the expand arrows) is in the color of the row's cel; the selected rows are
@@ -812,19 +830,23 @@ void LayersPanel::rebuildTree()
 
         // The cel: a folder, with what it shows now.
         auto [row, h] = rowWidget();
-        auto *eye = toggleButton(IconId::Eye, tr("Show / hide the cel"), props.visible, row);
+        // A trajectory is not shown or hidden: it is active or not (what it does is on, or off).
+        auto *eye = props.trajectory
+                        ? toggleButton(IconId::Trajectory, tr("Activate / deactivate the trajectory"), props.visible, row)
+                        : toggleButton(IconId::Eye, tr("Show / hide the cel"), props.visible, row);
         auto *lock = toggleButton(IconId::Lock, tr("Lock / unlock the cel"), props.locked, row);
         auto *thumb = new QLabel(row);
         thumb->setObjectName(QStringLiteral("thumbnail"));
         thumb->setPixmap(thumbnail(nullptr, shown, docSize, nullptr));
         h->addWidget(eye);
         h->addWidget(lock);
-        h->addWidget(iconLabel(props.trajectory ? IconId::Trajectory : IconId::Folder, row));
-        if (props.trajectory)
-            thumb->hide(); // nothing is drawn on it: no picture
-        else
+        if (props.trajectory) {
+            thumb->hide(); // nothing is drawn on it: no picture, and no folder
+        } else {
+            h->addWidget(iconLabel(IconId::Folder, row));
             h->addWidget(thumb);
-        auto *celText = new QLabel(propertiesText(props.opacity, props.blend, props.name), row);
+        }
+        auto *celText = new QLabel(celRowText(d, cel), row);
         celText->setObjectName(QStringLiteral("rowText"));
         h->addWidget(celText, 1);
         auto toggleCel = [this, celId](auto change) {
@@ -1038,7 +1060,7 @@ void LayersPanel::updateLooks()
     for (int i = 0; i < d.celCount(); ++i) {
         const doc::Cel &cel = d.celAt(i);
         const doc::CelProperties &props = cel.properties();
-        setRow(celItem(cel.id()), props.visible, props.locked, propertiesText(props.opacity, props.blend, props.name));
+        setRow(celItem(cel.id()), props.visible, props.locked, celRowText(d, cel));
         for (const auto &[id, drawing] : cel.drawings()) {
             const QString looks = looksOf(drawing);
             QString &before = m_looks[id];
@@ -1768,6 +1790,20 @@ bool LayersPanel::dropAt(const QPoint &pos)
     if (m_focus != Focus::Cel)
         return false;
 
+    // A trajectory dropped on the middle of another one follows it; on itself, it lets go of its parent.
+    if (kind == Row::Cel && static_cast<LayerTree *>(m_tree)->droppingOnRow()) {
+        const std::vector<doc::CelId> chosen = m_document->celSelection();
+        const doc::Cel *dragged = chosen.size() == 1 ? m_document->document().cel(chosen.front()) : nullptr;
+        const doc::Cel *onto = m_document->document().cel(celOf(target));
+        if (dragged && onto && dragged->properties().trajectory && onto->properties().trajectory) {
+            if (dragged->id() == onto->id()) {
+                m_document->setTrajectoryParent(dragged->id(), doc::kNoId);
+            } else if (!m_document->setTrajectoryParent(dragged->id(), onto->id())) {
+                emit statusMessage(tr("A trajectory cannot follow one that follows it"));
+            }
+            return true;
+        }
+    }
     // A cel among the cels: before the cel under the pen (after it in the
     // lower half of its row, or anywhere in its folder), to the bottom on the paper.
     const doc::Document &d = m_document->document();

@@ -1000,6 +1000,21 @@ private slots:
         QCOMPARE(controller.document().celCount(), cels + 1);
         QVERIFY(controller.document().cel(controller.currentCel())->properties().trajectory);
         QVERIFY(panel.celItem(controller.currentCel())); // its row
+        // Its row: a box for active or not in place of the eye, and it says which trajectory it follows.
+        const doc::CelId first = controller.currentCel();
+        controller.addTrajectory();
+        QVERIFY(controller.setTrajectoryParent(controller.currentCel(), first));
+        QCoreApplication::processEvents();
+        QWidget *row = panel.findChild<QTreeWidget *>()->itemWidget(panel.celItem(controller.currentCel()), 0);
+        QVERIFY(row);
+        bool activation = false, eye = false;
+        for (auto *button : row->findChildren<QToolButton *>()) {
+            activation = activation || button->toolTip() == QStringLiteral("Activate / deactivate the trajectory");
+            eye = eye || button->toolTip() == QStringLiteral("Show / hide the cel");
+        }
+        QVERIFY(activation && !eye);
+        auto *text = row->findChild<QLabel *>(QStringLiteral("rowText"));
+        QVERIFY(text && text->text().contains(QStringLiteral("→")));
     }
 
     // The clip button (in the row of the mask ones): a raster layer with another below it is clipped to it, and let go of

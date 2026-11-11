@@ -264,6 +264,8 @@ private:
         bool moving = false;
         int insertAt = 0;
         doc::CelId cel = doc::kNoId; // the one taken
+        // A trajectory over the middle of another one: it would follow it (over itself: let go of its parent).
+        doc::CelId parentTarget = doc::kNoId;
     };
     std::optional<CelDrag> m_celDrag;
     int celDropPosition(int y) const; // the position of the stack the pointer is at

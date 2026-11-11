@@ -247,6 +247,19 @@ void DocumentController::addTrajectory()
     chooseCel(id);
 }
 
+bool DocumentController::setTrajectoryParent(doc::CelId childId, doc::CelId parentId)
+{
+    const doc::Cel *child = m_document->cel(childId);
+    if (!child || !child->properties().trajectory || child->properties().parent == parentId)
+        return false;
+    if (parentId != doc::kNoId && m_document->trajectoryLoop(childId, parentId))
+        return false;
+    doc::CelProperties properties = child->properties();
+    properties.parent = parentId;
+    execute(doc::makeSetCelProperties(*m_document, childId, std::move(properties)));
+    return true;
+}
+
 bool DocumentController::addLayer(bool onTop, doc::LayerKind kind)
 {
     const doc::Drawing *drawing = currentDrawing();

@@ -70,6 +70,17 @@ public:
     Cel *cel(CelId id);
     const Cel *cel(CelId id) const;
 
+    // Trajectories (see CelProperties::trajectory) that follow one another. `cel`'s parent if it has one that is a trajectory
+    // there, other than itself; nullptr otherwise.
+    const Cel *trajectoryParent(const Cel &cel) const;
+    // Whether making `parent` the parent of `child` would be a loop (or one of them is no trajectory).
+    bool trajectoryLoop(CelId child, CelId parent) const;
+    // What a trajectory does on `frame` to what follows it: its parent's way, then its own pose (an inactive one has none)
+    // on top of that (the parent's matrix after its own: a child turns round its parent as the parent turns).
+    Matrix2x3 trajectoryMatrix(CelId trajectory, int frame) const;
+    // Only what its parents do: where the trajectory's own pose is applied.
+    Matrix2x3 trajectoryParentMatrix(CelId trajectory, int frame) const;
+
     // Cels are heap objects, so Cel references stay valid across reordering.
     Cel &insertCel(int index, std::unique_ptr<Cel> cel);
     std::unique_ptr<Cel> takeCel(CelId id);
