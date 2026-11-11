@@ -568,6 +568,7 @@ void TimelineView::paintExposure(QPainter &p, const doc::Exposure &e, const QStr
     p.fillRect(block, fill);
     p.fillRect(QRect(block.left(), block.top(), 3, block.height()), color); // exposure start mark
     p.setPen(selected ? palette().highlightedText().color() : color.darker(120));
+    p.setBrush(Qt::NoBrush); // an outline only
     p.drawRect(block.adjusted(0, 0, -1, -1));
 
     // Drawing name at the start of the block; the rest of the hold shows a line. In the color that reads on the
@@ -732,6 +733,7 @@ void TimelineView::paintMotionRow(QPainter &p, int celIndex, int row) const
         frames = cel.motion().keyFrames();
     }
     const int current = m_document->currentFrame();
+    p.save(); // (the diamonds' brush must not stay on the painter: the rows drawn after this one would be filled with it)
     p.setRenderHint(QPainter::Antialiasing);
     for (const int keyFrame : frames) {
         int frame = keyFrame;
@@ -750,7 +752,7 @@ void TimelineView::paintMotionRow(QPainter &p, int celIndex, int row) const
         p.setBrush(dragged ? ink.lighter(130) : ink);
         p.drawPolygon(diamond);
     }
-    p.setRenderHint(QPainter::Antialiasing, false);
+    p.restore();
 }
 
 void TimelineView::showMotionMenu(const QPoint &globalPos, int celIndex, int frame, std::optional<doc::Channel> channel)

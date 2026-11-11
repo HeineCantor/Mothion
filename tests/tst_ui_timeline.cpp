@@ -889,6 +889,32 @@ private slots:
         QCOMPARE(d.cel(a)->properties().parent, doc::kNoId);
     }
 
+    // The yellow of the keyframes' diamonds stays in their own rows: the blocks of the cels under a cel with keys keep their color.
+    void blocksUnderAKeyedCelAreNotYellow()
+    {
+        document::DocumentController controller;
+        controller.setSceneLength(20);
+        const doc::CelId lower = controller.currentCel();
+        controller.execute(doc::makeNewDrawing(controller.documentForCommands(), lower, 0, 12, "Line").command);
+        controller.addCel();
+        const doc::CelId upper = controller.currentCel();
+        controller.execute(doc::makeNewDrawing(controller.documentForCommands(), upper, 0, 12, "Line").command);
+        controller.setCelKey(upper, 3, doc::CelPose{});
+        ui::TimelineView view(&controller);
+        view.resize(800, 300);
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        ui::TimelineMetrics m;
+        const doc::Document &d = controller.document();
+        // Rows: the upper cel, its keyframes and channels, then the lower cel (on top of the stack first).
+        const int lowerRow = 5; // the cel, "Keyframes", position, rotation, scale
+        QVERIFY(d.indexOf(lower) == 0);
+        const QImage image = view.viewport()->grab().toImage();
+        const QColor inside = image.pixelColor(m.frameX(8), m.rowY(lowerRow) + m.rowHeight / 2);
+        QVERIFY2(!(qAbs(inside.red() - 240) < 25 && qAbs(inside.green() - 178) < 25 && qAbs(inside.blue() - 61) < 25),
+                 qPrintable(inside.name()));
+    }
+
     // A cel that follows a trajectory shows it inside, under its own row (with the ones that trajectory follows, a step further
     // in each); a click on one of those rows chooses that trajectory; the cel's arrow folds them away.
     void aCelShowsTheTrajectoriesItFollows()
