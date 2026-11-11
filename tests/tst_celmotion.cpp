@@ -909,8 +909,11 @@ private slots:
         auto at = [&](double x, double y) { return toView.map(QPointF(x, y)).toPoint(); };
 
         // Inside the box: all of them move by as much as the pen did, in one step.
+        QSignalSpy motion(&controller, &document::DocumentController::motionChanged);
         QTest::mousePress(&canvas, Qt::LeftButton, {}, at(960, 540));
+        motion.clear();
         QTest::mouseMove(&canvas, at(1000, 560));
+        QCOMPARE(motion.size(), 1); // all the cels are told at once: the frame is drawn once for a move, not once per cel
         QTest::mouseRelease(&canvas, Qt::LeftButton, {}, at(1010, 570));
         for (doc::CelId id : {a, b, c}) {
             const doc::CelPose pose = controller.celPoseAt(id, 0);

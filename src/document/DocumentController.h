@@ -169,6 +169,15 @@ public:
     // Only the `channels` of `pose` are the drag's: a key of a channel there is changed, with none its value goes with the
     // frame.
     void previewCelPose(doc::CelId cel, int frame, const doc::CelPose &pose, const std::vector<doc::Channel> &channels);
+    // The same for several cels at once (cels moved together): the views are told once, so the frame is drawn once.
+    struct CelPoseChange
+    {
+        doc::CelId cel = doc::kNoId;
+        int frame = 0;
+        doc::CelPose pose;
+        std::vector<doc::Channel> channels;
+    };
+    void previewCelPoses(const std::vector<CelPoseChange> &changes);
     // The cel's pose on `frame` set by hand (the options' fields): changes the key there, or, with none, leaves a pose
     // that goes with the frame (see CelMotion::setTemporary) until the Cel key button makes it a key. A cel with no keys
     // is not moved this way.
@@ -511,6 +520,8 @@ private:
     doc::CelId m_tempPoseCel = doc::kNoId; // the cel that has a pose that is not a key (one at a time)
     void startMotion(doc::CelMotion &motion, const doc::Cel &cel, int frame) const;
     // The motion the cel would have with a key on `frame` from `pose` (set in `out`); false if that changes nothing.
+    // Changes the cel's motion as previewCelPose() does, without telling the views; false if there is no such cel.
+    bool applyCelPose(doc::CelId cel, int frame, const doc::CelPose &pose, const std::vector<doc::Channel> &channels);
     bool celKeyMotion(const doc::Cel &cel, int frame, const doc::CelPose &pose, doc::CelMotion &out) const;
     // Sets the selection as is, recording nothing.
     void assignSelection(const QPainterPath &area);

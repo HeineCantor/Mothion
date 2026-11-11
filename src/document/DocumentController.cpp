@@ -1025,12 +1025,12 @@ void DocumentController::toggleChosenCelKeys()
         execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::EditMotion, std::move(steps)));
 }
 
-void DocumentController::previewCelPose(doc::CelId id, int frame, const doc::CelPose &pose,
-                                        const std::vector<doc::Channel> &channels)
+bool DocumentController::applyCelPose(doc::CelId id, int frame, const doc::CelPose &pose,
+                                      const std::vector<doc::Channel> &channels)
 {
     doc::Cel *cel = m_document->cel(id);
     if (!cel || frame < 0)
-        return;
+        return false;
     doc::CelMotion motion = cel->motion();
     for (doc::Channel channel : channels) {
         if (motion.keyAt(channel, frame)) {
@@ -1044,9 +1044,30 @@ void DocumentController::previewCelPose(doc::CelId id, int frame, const doc::Cel
         }
     }
     cel->setMotion(std::move(motion));
+    return true;
+}
+
+void DocumentController::previewCelPose(doc::CelId id, int frame, const doc::CelPose &pose,
+                                        const std::vector<doc::Channel> &channels)
+{
+    if (!applyCelPose(id, frame, pose, channels))
+        return;
     doc::ChangeSet changes;
     changes.motion = true;
     publish(changes);
+}
+
+void DocumentController::previewCelPoses(const std::vector<CelPoseChange> &changes)
+{
+    // All of them, then the views hear of it once: the frame is drawn again once, not for each cel.
+    bool any = false;
+    for (const CelPoseChange &c : changes)
+        any = applyCelPose(c.cel, c.frame, c.pose, c.channels) || any;
+    if (!any)
+        return;
+    doc::ChangeSet published;
+    published.motion = true;
+    publish(published);
 }
 
 void DocumentController::setCelPose(doc::CelId id, int frame, const doc::CelPose &pose, doc::Channel channel)

@@ -291,6 +291,7 @@ void AnimateTool::move(const QPointF &docPos, Qt::KeyboardModifiers modifiers)
     // Several cels: what the drag did to the box (`pose`, about its middle) is done to each of them, about their own pivots.
     if (d.members.size() > 1) {
         const doc::Matrix2x3 g = pose.matrix(start.pivot.x(), start.pivot.y());
+        std::vector<document::DocumentController::CelPoseChange> all; // told at once: one drawing of the frame for them all
         for (const Member &m : d.members) {
             doc::CelPose own = m.pose;
             const doc::Matrix2x3 moved = m.pose.matrix(m.pivot.x(), m.pivot.y()).then(g);
@@ -306,8 +307,9 @@ void AnimateTool::move(const QPointF &docPos, Qt::KeyboardModifiers modifiers)
                 if (doc::channelsDiffer(c, m.pose, own))
                     changed.push_back(c);
             if (!changed.empty())
-                m_document->previewCelPose(m.cel, d.frame, own, changed);
+                all.push_back({m.cel, d.frame, own, changed});
         }
+        m_document->previewCelPoses(all);
         m_repaint();
         return;
     }
