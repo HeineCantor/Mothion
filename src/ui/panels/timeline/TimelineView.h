@@ -266,7 +266,7 @@ private:
         bool collapse = false; // pressed on one of several chosen keys without moving it: let go, it alone stays chosen
     };
     std::optional<MotionDrag> m_motionDrag;
-    std::set<doc::CelId> m_folded;      // the cels whose channel rows are folded away under "Keyframes"
+    std::set<doc::CelId> m_channelsOpen; // the cels whose channel rows are open under "Keyframes" (closed to begin with)
     std::set<doc::CelId> m_foldedCel;   // the cels that fold "Keyframes" (and so the channels) away under them
     std::optional<std::pair<doc::CelId, int>> m_selectedKey; // the key last clicked, by cel and frame
     std::optional<doc::Channel> m_selectedChannel; // of that key: its channel's alone, or (none) all the keys of the frame

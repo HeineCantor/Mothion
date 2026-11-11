@@ -490,6 +490,10 @@ private slots:
         ui::TimelineMetrics m;
         auto *vp = panel.view()->viewport();
         auto center = [&](int row, int frame) { return QPoint(m.frameX(frame) + m.frameWidth / 2, m.rowY(row) + m.rowHeight / 2); };
+        // The channels' rows are closed to begin with: the arrow of "Keyframes" opens them.
+        QVERIFY(!panel.view()->channelRowsShown(0));
+        QTest::mouseClick(vp, Qt::LeftButton, {}, QPoint(m.headerWidth - 12, m.rowY(1) + m.rowHeight / 2));
+        QVERIFY(panel.view()->channelRowsShown(0));
         // Rows: 0 the cel, 1 Keyframes, 2 Position, 3 Rotation, 4 Scale.
         QTest::mousePress(vp, Qt::LeftButton, {}, center(3, 4));
         QTest::mouseMove(vp, center(3, 7));
@@ -1358,14 +1362,16 @@ private slots:
         QTest::mouseClick(vp, Qt::LeftButton, {}, QPoint(60, motionY));
         QCOMPARE(controller.document().cel(cel)->properties().visible, visible);
         QCOMPARE(controller.currentCel(), cel);
-        // The arrow at the right of the "Keyframes" header folds the rows of the channels away under it (the keys stay, and
-        // so does the row itself); another click brings them back.
+        // The rows of the channels are closed to begin with; the arrow at the right of the "Keyframes" header opens them under
+        // it (the keys stay, and so does the row itself); another click closes them again.
+        QVERIFY(!view->channelRowsShown(0));
+        QTest::mouseClick(vp, Qt::LeftButton, {}, QPoint(m.headerWidth - 12, motionY));
         QVERIFY(view->channelRowsShown(0));
         QTest::mouseClick(vp, Qt::LeftButton, {}, QPoint(m.headerWidth - 12, motionY));
         QVERIFY(!view->channelRowsShown(0));
         QCOMPARE(controller.celMotion(cel)->keyFrames().size(), size_t(2));
         QTest::mouseClick(vp, Qt::LeftButton, {}, QPoint(m.headerWidth - 12, motionY));
-        QVERIFY(view->channelRowsShown(0)); // it is back
+        QVERIFY(view->channelRowsShown(0)); // open again
         // The arrow in the cel's own header folds "Keyframes" away, and the channels with it.
         QTest::mouseClick(vp, Qt::LeftButton, {}, QPoint(m.headerWidth - 12, m.rowY(0) + m.rowHeight / 2));
         QVERIFY(!view->keyframesRowShown(0) && !view->channelRowsShown(0));

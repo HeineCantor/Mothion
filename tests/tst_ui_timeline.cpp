@@ -906,8 +906,8 @@ private slots:
         QVERIFY(QTest::qWaitForWindowExposed(&view));
         ui::TimelineMetrics m;
         const doc::Document &d = controller.document();
-        // Rows: the upper cel, its keyframes and channels, then the lower cel (on top of the stack first).
-        const int lowerRow = 5; // the cel, "Keyframes", position, rotation, scale
+        // Rows: the upper cel, its keyframes, then the lower cel (on top of the stack first).
+        const int lowerRow = 2; // (the rows of the channels are closed) // the cel, "Keyframes", position, rotation, scale
         QVERIFY(d.indexOf(lower) == 0);
         const QImage image = view.viewport()->grab().toImage();
         const QColor inside = image.pixelColor(m.frameX(8), m.rowY(lowerRow) + m.rowHeight / 2);

@@ -186,7 +186,7 @@ bool TimelineView::keyframesRowShown(int celIndex) const
 
 bool TimelineView::channelRowsShown(int celIndex) const
 {
-    return keyframesRowShown(celIndex) && !m_folded.count(m_document->document().celAt(celIndex).id());
+    return keyframesRowShown(celIndex) && m_channelsOpen.count(m_document->document().celAt(celIndex).id()) > 0;
 }
 
 QRect TimelineView::foldRect(int row) const
@@ -206,7 +206,7 @@ QRect TimelineView::foldRect(int row) const
 
 void TimelineView::toggleFold(doc::CelId cel, bool keyframesRow)
 {
-    std::set<doc::CelId> &set = keyframesRow ? m_folded : m_foldedCel;
+    std::set<doc::CelId> &set = keyframesRow ? m_channelsOpen : m_foldedCel;
     if (!set.erase(cel))
         set.insert(cel);
     updateScrollBars();
