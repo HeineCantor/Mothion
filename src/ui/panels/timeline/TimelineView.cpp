@@ -49,7 +49,10 @@ TimelineView::TimelineView(DocumentController *document, QWidget *parent)
     setFocusPolicy(Qt::StrongFocus);
     viewport()->setMouseTracking(true); // resize cursor over block edges
 
-    connect(QGuiApplication::clipboard(), &QClipboard::dataChanged, this, [this] { m_blocksNewer = false; });
+    connect(QGuiApplication::clipboard(), &QClipboard::dataChanged, this, [this] {
+        m_blocksNewer = false;
+        m_keysNewer = false;
+    });
     connect(m_document, &DocumentController::structureChanged, this, &TimelineView::onStructureChanged);
     connect(m_document, &DocumentController::currentFrameChanged, this, [this](int frame) {
         ensureFrameVisible(frame);
@@ -675,14 +678,14 @@ void TimelineView::paintMotionRow(QPainter &p, int celIndex, int row) const
     p.setRenderHint(QPainter::Antialiasing);
     for (const int keyFrame : frames) {
         int frame = keyFrame;
-        const bool dragged = m_motionDrag && m_motionDrag->cel == cel.id() && m_motionDrag->from == frame
-                             && m_motionDrag->channel == channel;
+        const bool chosen = keyChosen(cel.id(), keyFrame, channel);
+        const bool dragged = m_motionDrag
+                             && ((m_motionDrag->cel == cel.id() && m_motionDrag->from == frame && m_motionDrag->channel == channel)
+                                 || (m_chosenKeys.size() > 1 && chosen));
         if (dragged)
-            frame = m_motionDrag->to;
+            frame += m_motionDrag->to - m_motionDrag->from; // the chosen ones go together
         // The key of a channel alone shows chosen on its channel's row and on the "Keyframes" one; a click on the latter
         // chooses the keys of the frame, on every row.
-        const bool chosen = m_selectedKey && m_selectedKey->first == cel.id() && m_selectedKey->second == keyFrame
-                            && (!channel || !m_selectedChannel || *m_selectedChannel == *channel);
         const int cx = m.frameX(frame) + m.frameWidth / 2;
         const int r = keyFrame == current || dragged || chosen ? 7 : 5;
         const QPolygon diamond({QPoint(cx, midY - r), QPoint(cx + r, midY), QPoint(cx, midY + r), QPoint(cx - r, midY)});
@@ -746,6 +749,13 @@ void TimelineView::showMotionMenu(const QPoint &globalPos, int celIndex, int fra
             });
         }
     }
+    menu.addSeparator();
+    QAction *copyAction = menu.addAction(tr("Copy keyframes"), this, &TimelineView::copyKeys);
+    copyAction->setShortcut(Shortcuts::instance().key(QStringLiteral("edit.copy")));
+    copyAction->setEnabled(!m_chosenKeys.empty());
+    QAction *pasteAction = menu.addAction(tr("Paste keyframes"), this, [this] { pasteKeys(); });
+    pasteAction->setShortcut(Shortcuts::instance().key(QStringLiteral("edit.paste")));
+    pasteAction->setEnabled(!m_copiedKeys.empty());
     menu.addSeparator();
     menu.addAction(tr("Delete all keyframes of the cel"), this, [this, id] { m_document->clearCelMotion(id); });
     menu.exec(globalPos);
@@ -1411,13 +1421,12 @@ void TimelineView::mousePressEvent(QMouseEvent *event)
         const doc::Cel &cel = m_document->document().celAt(celIndexForRow(row));
         m_document->setCurrentCel(cel.id());
         if (const int frame = motionKeyAt(pos, row); frame >= 0) {
-            m_motionDrag = MotionDrag{cel.id(), frame, frame, channelOfRow(row)};
-            m_selectedKey = std::make_pair(cel.id(), frame);
-            m_selectedChannel = channelOfRow(row);
-            m_document->setCurrentFrame(frame);
-            emit frameScrubbed(frame);
+            m_selected.clear(); // the keys now, not the blocks, are what is copied and deleted
+            pressKey(cel.id(), frame, channelOfRow(row), row, event->modifiers());
+        } else if (event->modifiers() & (Qt::ShiftModifier | Qt::ControlModifier)) {
+            // on nothing, with a key down: the choice stays as it is
         } else {
-            m_selectedKey.reset();
+            clearKeySelection();
             setScrubbing(true);
             scrubTo(pos, false);
         }
@@ -1439,7 +1448,7 @@ void TimelineView::mousePressEvent(QMouseEvent *event)
             return;
         }
         m_selected.clear(); // an empty cell
-        m_selectedKey.reset();
+        clearKeySelection();
         m_anchor.reset();
         viewport()->update();
     }
@@ -1449,7 +1458,7 @@ void TimelineView::mousePressEvent(QMouseEvent *event)
 
 void TimelineView::pressFrame(const doc::ExposureRef &ref, int frame, int x, Qt::KeyboardModifiers modifiers)
 {
-    m_selectedKey.reset(); // Delete is for the blocks now
+    clearKeySelection(); // Delete is for the blocks now
     FrameDrag drag;
     drag.pressX = x;
     drag.grabbed = ref;
@@ -1665,12 +1674,22 @@ void TimelineView::mouseReleaseEvent(QMouseEvent *)
     if (m_motionDrag) {
         const MotionDrag drag = *m_motionDrag;
         m_motionDrag.reset();
-        // A key goes where there is none (one on the way is not jumped: it is a place taken).
-        if (drag.to != drag.from && m_document->moveCelKey(drag.cel, drag.from, drag.to, drag.channel)) {
-            m_selectedKey = std::make_pair(drag.cel, drag.to);
-            m_selectedChannel = drag.channel;
-            m_document->setCurrentFrame(drag.to);
-            emit frameScrubbed(drag.to);
+        const int delta = drag.to - drag.from;
+        if (delta == 0 && drag.collapse) { // a click on one of several: it alone
+            m_chosenKeys = {{drag.cel, drag.from, drag.channel}};
+        } else if (delta != 0) {
+            // The chosen keys go where there is none (one on the way is not jumped: it is a place taken).
+            const bool moved = m_chosenKeys.size() > 1
+                                   ? m_document->moveCelKeys(chosenKeyRefs(), delta)
+                                   : m_document->moveCelKey(drag.cel, drag.from, drag.to, drag.channel);
+            if (moved) {
+                for (ChosenKey &k : m_chosenKeys)
+                    k.frame += delta;
+                m_selectedKey = std::make_pair(drag.cel, drag.to);
+                m_selectedChannel = drag.channel;
+                m_document->setCurrentFrame(drag.to);
+                emit frameScrubbed(drag.to);
+            }
         }
         viewport()->update();
         return;
@@ -1764,6 +1783,118 @@ void TimelineView::renameCel(int celIndex)
     m_document->execute(doc::makeSetCelProperties(m_document->document(), id, props));
 }
 
+bool TimelineView::keyChosen(doc::CelId cel, int frame, std::optional<doc::Channel> rowChannel) const
+{
+    for (const ChosenKey &k : m_chosenKeys)
+        if (k.cel == cel && k.frame == frame && (!rowChannel || !k.channel || *k.channel == *rowChannel))
+            return true;
+    return false;
+}
+
+std::vector<document::DocumentController::CelKeyRef> TimelineView::chosenKeyRefs() const
+{
+    std::vector<document::DocumentController::CelKeyRef> refs;
+    auto add = [&refs](const document::DocumentController::CelKeyRef &ref) {
+        if (std::find(refs.begin(), refs.end(), ref) == refs.end())
+            refs.push_back(ref);
+    };
+    for (const ChosenKey &k : m_chosenKeys) {
+        const doc::CelMotion *motion = m_document->celMotion(k.cel);
+        if (!motion)
+            continue;
+        for (doc::Channel c : doc::kChannels)
+            if ((!k.channel || *k.channel == c) && motion->keyAt(c, k.frame))
+                add({k.cel, k.frame, c});
+    }
+    return refs;
+}
+
+void TimelineView::clearKeySelection()
+{
+    m_chosenKeys.clear();
+    m_selectedKey.reset();
+    m_selectedChannel.reset();
+}
+
+void TimelineView::pressKey(doc::CelId cel, int frame, std::optional<doc::Channel> channel, int row,
+                            Qt::KeyboardModifiers modifiers)
+{
+    const ChosenKey key{cel, frame, channel};
+    if (modifiers & Qt::ShiftModifier) {
+        // The row's keys from the one last clicked to this one.
+        if (m_selectedKey && m_selectedKey->first == cel && m_selectedChannel == channel) {
+            const int from = std::min(m_selectedKey->second, frame), to = std::max(m_selectedKey->second, frame);
+            const doc::CelMotion &motion = m_document->document().celAt(celIndexForRow(row)).motion();
+            std::vector<int> frames;
+            if (channel) {
+                for (const doc::CelKey &k : motion.keys(*channel))
+                    frames.push_back(k.frame);
+            } else {
+                frames = motion.keyFrames();
+            }
+            for (int f : frames)
+                if (f >= from && f <= to && !keyChosen(cel, f, channel))
+                    m_chosenKeys.push_back({cel, f, channel});
+        } else if (!keyChosen(cel, frame, channel)) {
+            m_chosenKeys.push_back(key);
+            m_selectedKey = std::make_pair(cel, frame);
+            m_selectedChannel = channel;
+        }
+        return;
+    }
+    if (modifiers & Qt::ControlModifier) {
+        if (keyChosen(cel, frame, channel)) {
+            std::erase_if(m_chosenKeys, [&](const ChosenKey &k) {
+                return k.cel == cel && k.frame == frame && (!channel || !k.channel || *k.channel == *channel);
+            });
+            if (m_chosenKeys.empty())
+                clearKeySelection();
+        } else {
+            m_chosenKeys.push_back(key);
+            m_selectedKey = std::make_pair(cel, frame);
+            m_selectedChannel = channel;
+        }
+        return;
+    }
+    // A plain click: a key already among several chosen keeps them all for a drag (the click alone chooses it on release).
+    const bool among = m_chosenKeys.size() > 1 && keyChosen(cel, frame, channel);
+    if (!among)
+        m_chosenKeys = {key};
+    m_selectedKey = std::make_pair(cel, frame);
+    m_selectedChannel = channel;
+    m_motionDrag = MotionDrag{cel, frame, frame, channel, among};
+    m_document->setCurrentFrame(frame);
+    emit frameScrubbed(frame);
+}
+
+void TimelineView::copyKeys()
+{
+    auto copied = m_document->copyCelKeys(chosenKeyRefs());
+    if (copied.empty())
+        return;
+    m_copiedKeys = std::move(copied);
+    m_keysNewer = true;
+    m_blocksNewer = false;
+}
+
+bool TimelineView::pasteKeys()
+{
+    // From the current frame, on the current cel (on their own, for keys copied from several).
+    const int frame = m_document->currentFrame();
+    if (!m_document->pasteCelKeys(m_copiedKeys, frame, m_document->currentCel()))
+        return false;
+    bool oneCel = true;
+    for (const auto &c : m_copiedKeys)
+        oneCel = oneCel && c.cel == m_copiedKeys.front().cel;
+    m_chosenKeys.clear(); // the pasted ones
+    for (const auto &c : m_copiedKeys)
+        m_chosenKeys.push_back({oneCel ? m_document->currentCel() : c.cel, frame + c.offset, c.channel});
+    m_selectedKey = std::make_pair(m_chosenKeys.back().cel, m_chosenKeys.back().frame);
+    m_selectedChannel = m_chosenKeys.back().channel;
+    viewport()->update();
+    return true;
+}
+
 void TimelineView::copyFrames()
 {
     // Each selected block, from the first of them.
@@ -1781,6 +1912,7 @@ void TimelineView::copyFrames()
     if (!copied.empty()) {
         m_copied = std::move(copied);
         m_blocksNewer = true;
+        m_keysNewer = false;
     }
 }
 
@@ -1817,7 +1949,7 @@ bool TimelineView::event(QEvent *event)
                            || keymap.matches(QStringLiteral("timeline.pasteCopies"), key);
         // The timeline's own when it has blocks to copy, or blocks were copied last; else the window's copy and
         // paste (the pixels of the drawing) work from here too, as from the canvas.
-        if ((copy && !m_selected.empty()) || (paste && m_blocksNewer)) {
+        if ((copy && (!m_selected.empty() || !m_chosenKeys.empty())) || (paste && (m_blocksNewer || m_keysNewer))) {
             event->accept();
             return true;
         }
@@ -1848,7 +1980,15 @@ void TimelineView::contextMenuEvent(QContextMenuEvent *event)
         return;
     const int frame = frameAt(event->pos().x());
     if (isMotionRow(row)) {
-        m_document->setCurrentCel(m_document->document().celAt(celIndexForRow(row)).id());
+        const doc::CelId cel = m_document->document().celAt(celIndexForRow(row)).id();
+        m_document->setCurrentCel(cel);
+        if (const int keyFrame = motionKeyAt(event->pos(), row); keyFrame >= 0 && !keyChosen(cel, keyFrame, channelOfRow(row))) {
+            m_selected.clear(); // a key not chosen yet: it alone, as the menu's copy acts on the chosen ones
+            m_chosenKeys = {{cel, keyFrame, channelOfRow(row)}};
+            m_selectedKey = std::make_pair(cel, keyFrame);
+            m_selectedChannel = channelOfRow(row);
+            viewport()->update();
+        }
         showMotionMenu(event->globalPos(), celIndexForRow(row), frame, channelOfRow(row));
         return;
     }
@@ -1958,10 +2098,18 @@ void TimelineView::keyPressEvent(QKeyEvent *event)
     // Copy and paste of blocks: the window's keys for those commands (see event()).
     const Shortcuts &keymap = Shortcuts::instance();
     if (keymap.matches(QStringLiteral("edit.copy"), event)) {
-        copyFrames();
+        if (!m_chosenKeys.empty())
+            copyKeys();
+        else
+            copyFrames();
         return;
     }
     const bool paste = keymap.matches(QStringLiteral("edit.paste"), event);
+    if (paste && m_keysNewer) {
+        if (!pasteKeys())
+            QApplication::beep();
+        return;
+    }
     if (paste || keymap.matches(QStringLiteral("timeline.pasteCopies"), event)) {
         if (!pasteFrames(!paste))
             QApplication::beep(); // no room here
@@ -1974,13 +2122,11 @@ void TimelineView::keyPressEvent(QKeyEvent *event)
         && m_document->removeCameraKey(m_document->currentFrame()))
         return;
     // A key of motion chosen (its channel's, or those of the frame): Delete takes it away, one undo step.
-    if ((event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) && m_selectedKey) {
-        const auto [cel, keyFrame] = *m_selectedKey;
-        const std::optional<doc::Channel> channel = m_selectedChannel;
-        m_selectedKey.reset();
-        m_selectedChannel.reset();
+    if ((event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) && !m_chosenKeys.empty()) {
+        const auto keys = chosenKeyRefs();
+        clearKeySelection();
         viewport()->update();
-        if (m_document->removeCelKey(cel, keyFrame, channel))
+        if (m_document->removeCelKeys(keys))
             return;
     }
     const int celIndex = d.indexOf(m_document->currentCel());
@@ -2003,6 +2149,7 @@ void TimelineView::keyPressEvent(QKeyEvent *event)
             m_movePreview.clear();
         } else {
             m_selected.clear();
+            clearKeySelection();
         }
         viewport()->update();
         break;

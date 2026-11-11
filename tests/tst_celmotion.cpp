@@ -469,6 +469,69 @@ private slots:
         QVERIFY(!motion->keyAt(doc::Channel::Position, 4) && !motion->keyAt(doc::Channel::Scale, 4));
     }
 
+    // Keys of the "Keyframes" row chosen with Ctrl (one more, or one less) and Shift (a run of the row), moved together,
+    // deleted together, copied and pasted from the current frame (onto the current cel), each one undo step.
+    void keysAreChosenCopiedAndPasted()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        controller.setSceneLength(60);
+        const doc::CelId cel = controller.currentCel();
+        ui::TimelinePanel panel(&controller, &state);
+        panel.resize(900, 320);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        for (int frame : {2, 5, 8, 20}) {
+            controller.setCurrentFrame(frame);
+            controller.setCelKey(cel, frame, [frame] { doc::CelPose p; p.x = frame * 10; return p; }());
+        }
+        ui::TimelineMetrics m;
+        auto *vp = panel.view()->viewport();
+        auto at = [&](int frame) { return QPoint(m.frameX(frame) + m.frameWidth / 2, m.rowY(1) + m.rowHeight / 2); }; // "Keyframes"
+        const doc::CelMotion *motion = controller.celMotion(cel);
+        auto has = [&](int frame) { return motion->hasKeyAt(frame); };
+        // Shift: from the last clicked to this one; Ctrl: one less.
+        QTest::mouseClick(vp, Qt::LeftButton, {}, at(2));
+        QTest::mouseClick(vp, Qt::LeftButton, Qt::ShiftModifier, at(8));
+        QTest::mouseClick(vp, Qt::LeftButton, Qt::ControlModifier, at(5));
+        QTest::mouseClick(vp, Qt::LeftButton, Qt::ControlModifier, at(20));
+        // Chosen now: 2, 8 and 20. They go together by a drag of one of them, one undo step.
+        QTest::mousePress(vp, Qt::LeftButton, {}, at(8));
+        QTest::mouseMove(vp, at(10));
+        QTest::mouseMove(vp, at(12));
+        QTest::mouseRelease(vp, Qt::LeftButton, {}, at(12));
+        QVERIFY(has(6) && has(5) && has(12) && has(24) && !has(2) && !has(8) && !has(20));
+        controller.undo();
+        QVERIFY(has(2) && has(5) && has(8) && has(20) && !has(6));
+        controller.redo();
+        // A key in the way is a place taken: the whole move is refused.
+        QTest::mousePress(vp, Qt::LeftButton, {}, at(6));
+        QTest::mouseMove(vp, at(7));
+        QTest::mouseMove(vp, at(5)); // 6 -> 5: taken by a key that stays (the key on 5 is not chosen)
+        QTest::mouseRelease(vp, Qt::LeftButton, {}, at(5));
+        QVERIFY(has(6) && has(5) && has(12) && has(24));
+        // Copy the keys 5 and 6 (Shift from 5 to 6), paste them from frame 30.
+        QTest::mouseClick(vp, Qt::LeftButton, {}, at(5));
+        QTest::mouseClick(vp, Qt::LeftButton, Qt::ShiftModifier, at(6));
+        QTest::keyClick(panel.view(), Qt::Key_C, Qt::ControlModifier);
+        controller.setCurrentFrame(30);
+        QTest::keyClick(panel.view(), Qt::Key_V, Qt::ControlModifier);
+        QVERIFY(has(30) && has(31));
+        QCOMPARE(motion->poseAt(30).x, 50.0);
+        QCOMPARE(motion->poseAt(31).x, 20.0); // the key that came from frame 2
+        controller.undo(); // both, one step
+        QVERIFY(!has(30) && !has(31));
+        controller.redo();
+        // Pasted on a key: it is replaced.
+        controller.setCurrentFrame(12);
+        QTest::keyClick(panel.view(), Qt::Key_V, Qt::ControlModifier);
+        QCOMPARE(motion->poseAt(12).x, 50.0);
+        QVERIFY(has(13));
+        // The pasted ones are chosen: Delete takes both.
+        QTest::keyClick(panel.view(), Qt::Key_Delete);
+        QVERIFY(!has(12) && !has(13));
+    }
+
     // A cel moved by its keys is shown moved at rest too, whatever the tool, and the pen draws on it as it is shown: what is
     // drawn at the pen goes into the cel's pixels at their own place, and shows under the pen.
     void drawingOnAPosedCelPaintsWhereThePenIs()

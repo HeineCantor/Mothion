@@ -161,6 +161,30 @@ public:
     bool removeCelKey(doc::CelId cel, int frame, std::optional<doc::Channel> channel = {});
     // Moves the key on `from` to `to`: refused (false) if `to` has a key (of the same channel) or `from` has none.
     bool moveCelKey(doc::CelId cel, int frame, int to, std::optional<doc::Channel> channel = {});
+    // Several keys at once (each one of a channel of a cel on a frame), one undo step. False, and nothing done, if one would
+    // not work (see each).
+    struct CelKeyRef
+    {
+        doc::CelId cel = doc::kNoId;
+        int frame = 0;
+        doc::Channel channel = doc::Channel::Position;
+        bool operator==(const CelKeyRef &) const = default;
+    };
+    bool removeCelKeys(const std::vector<CelKeyRef> &keys);
+    // All of them `delta` frames on (or back): refused if one would go before the first frame or on a key that is not moved too.
+    bool moveCelKeys(const std::vector<CelKeyRef> &keys, int delta);
+    // What was copied: a key with its curve, where it was relative to the first copied (`offset`), and the cel it came from.
+    struct CelKeyCopy
+    {
+        doc::CelId cel = doc::kNoId;
+        int offset = 0;
+        doc::Channel channel = doc::Channel::Position;
+        doc::CelKey key;
+    };
+    std::vector<CelKeyCopy> copyCelKeys(const std::vector<CelKeyRef> &keys) const;
+    // The copied keys with the first on `frame`: on `onto` if they all came from one cel, else each on its own (one that is
+    // gone is left out). A key already there is replaced. False if nothing could be placed.
+    bool pasteCelKeys(const std::vector<CelKeyCopy> &copied, int frame, doc::CelId onto);
     // Where the cel turns and scales around, in pixels of the page. The pose on every key stays as it was, so the cel is
     // not moved on the frames with a key; between keys the piece goes round a different point.
     bool setCelPivot(doc::CelId cel, double x, double y);

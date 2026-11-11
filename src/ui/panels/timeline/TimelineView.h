@@ -5,6 +5,7 @@
 #include "core/document/commands/DrawingCommands.h"
 #include "core/document/commands/TimingCommands.h"
 #include "audio/AudioAnalyzer.h"
+#include "document/DocumentController.h"
 #include "ui/panels/timeline/TimelineMetrics.h"
 
 #include <QAbstractScrollArea>
@@ -254,12 +255,31 @@ private:
         int from = 0; // the key's frame
         int to = 0;   // where it would go
         std::optional<doc::Channel> channel; // the key of this channel, or the keys of every one on that frame
+        bool collapse = false; // pressed on one of several chosen keys without moving it: let go, it alone stays chosen
     };
     std::optional<MotionDrag> m_motionDrag;
     std::set<doc::CelId> m_folded;      // the cels whose channel rows are folded away under "Keyframes"
     std::set<doc::CelId> m_foldedCel;   // the cels that fold "Keyframes" (and so the channels) away under them
     std::optional<std::pair<doc::CelId, int>> m_selectedKey; // the key last clicked, by cel and frame
     std::optional<doc::Channel> m_selectedChannel; // of that key: its channel's alone, or (none) all the keys of the frame
+    // All the keys chosen (Ctrl adds or takes one away, Shift all of a row between the last and this one); the one last
+    // clicked is also m_selectedKey. A key with no channel stands for all the keys of its frame.
+    struct ChosenKey
+    {
+        doc::CelId cel = doc::kNoId;
+        int frame = 0;
+        std::optional<doc::Channel> channel;
+        bool operator==(const ChosenKey &) const = default;
+    };
+    std::vector<ChosenKey> m_chosenKeys;
+    bool keyChosen(doc::CelId cel, int frame, std::optional<doc::Channel> rowChannel) const;
+    std::vector<document::DocumentController::CelKeyRef> chosenKeyRefs() const; // each of a channel
+    void pressKey(doc::CelId cel, int frame, std::optional<doc::Channel> channel, int row, Qt::KeyboardModifiers modifiers);
+    void clearKeySelection();
+    std::vector<document::DocumentController::CelKeyCopy> m_copiedKeys;
+    bool m_keysNewer = false; // the keys copied are what Paste puts, not the blocks
+    void copyKeys();
+    bool pasteKeys();
     struct MarkerDrag
     {
         int from = 0; // the marker's frame

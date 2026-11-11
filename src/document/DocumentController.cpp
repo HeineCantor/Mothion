@@ -18,6 +18,8 @@
 #include "core/document/commands/PaintCommand.h"
 #include "core/document/commands/TimingCommands.h"
 
+#include <limits>
+#include <map>
 #include <QFile>
 #include <QFileInfo>
 
@@ -1221,6 +1223,116 @@ bool DocumentController::removeCelKey(doc::CelId id, int frame, std::optional<do
     if (!(channel ? motion.removeKey(*channel, frame) : motion.removeKeysAt(frame)))
         return false;
     execute(std::make_unique<doc::SetCelMotionCommand>(id, std::move(motion)));
+    return true;
+}
+
+namespace {
+
+// Applies a change made to copies of the motions of some cels as one undo step.
+std::unique_ptr<doc::Command> motionsCommand(const doc::Document &document, std::map<doc::CelId, doc::CelMotion> &motions)
+{
+    std::vector<std::unique_ptr<doc::Command>> steps;
+    for (auto &[id, motion] : motions) {
+        const doc::Cel *cel = document.cel(id);
+        if (cel && !(cel->motion() == motion))
+            steps.push_back(std::make_unique<doc::SetCelMotionCommand>(id, std::move(motion)));
+    }
+    if (steps.empty())
+        return nullptr;
+    if (steps.size() == 1)
+        return std::move(steps.front());
+    return std::make_unique<doc::GroupCommand>(doc::CommandKind::EditMotion, std::move(steps));
+}
+
+} // namespace
+
+bool DocumentController::removeCelKeys(const std::vector<CelKeyRef> &keys)
+{
+    clearTemporaryPose();
+    std::map<doc::CelId, doc::CelMotion> motions;
+    for (const CelKeyRef &k : keys) {
+        const doc::Cel *cel = m_document->cel(k.cel);
+        if (!cel)
+            continue;
+        auto it = motions.try_emplace(k.cel, cel->motion()).first;
+        it->second.removeKey(k.channel, k.frame);
+    }
+    auto command = motionsCommand(*m_document, motions);
+    if (!command)
+        return false;
+    execute(std::move(command));
+    return true;
+}
+
+bool DocumentController::moveCelKeys(const std::vector<CelKeyRef> &keys, int delta)
+{
+    if (delta == 0)
+        return false;
+    clearTemporaryPose();
+    std::map<doc::CelId, doc::CelMotion> motions;
+    std::vector<std::pair<CelKeyRef, doc::CelKey>> lifted; // taken out of their motions, to be put back `delta` on
+    for (const CelKeyRef &k : keys) {
+        const doc::Cel *cel = m_document->cel(k.cel);
+        const doc::CelKey *key = cel ? cel->motion().keyAt(k.channel, k.frame) : nullptr;
+        if (!key || k.frame + delta < 0)
+            return false;
+        motions.try_emplace(k.cel, cel->motion());
+        lifted.push_back({k, *key});
+    }
+    for (const auto &[k, key] : lifted)
+        motions.at(k.cel).removeKey(k.channel, k.frame);
+    for (const auto &[k, key] : lifted) {
+        doc::CelMotion &motion = motions.at(k.cel);
+        if (motion.keyAt(k.channel, k.frame + delta)) // a key that stays (or moved there already): a place taken
+            return false;
+        motion.setKey(k.channel, k.frame + delta, key.pose, key.easing);
+    }
+    auto command = motionsCommand(*m_document, motions);
+    if (!command)
+        return false;
+    execute(std::move(command));
+    return true;
+}
+
+std::vector<DocumentController::CelKeyCopy> DocumentController::copyCelKeys(const std::vector<CelKeyRef> &keys) const
+{
+    std::vector<CelKeyCopy> copied;
+    int first = std::numeric_limits<int>::max();
+    for (const CelKeyRef &k : keys) {
+        const doc::Cel *cel = m_document->cel(k.cel);
+        if (const doc::CelKey *key = cel ? cel->motion().keyAt(k.channel, k.frame) : nullptr) {
+            copied.push_back({k.cel, k.frame, k.channel, *key});
+            first = std::min(first, k.frame);
+        }
+    }
+    for (CelKeyCopy &c : copied)
+        c.offset -= first;
+    return copied;
+}
+
+bool DocumentController::pasteCelKeys(const std::vector<CelKeyCopy> &copied, int frame, doc::CelId onto)
+{
+    if (copied.empty() || frame < 0)
+        return false;
+    bool oneCel = true;
+    for (const CelKeyCopy &c : copied)
+        oneCel = oneCel && c.cel == copied.front().cel;
+    clearTemporaryPose();
+    std::map<doc::CelId, doc::CelMotion> motions;
+    for (const CelKeyCopy &c : copied) {
+        const doc::CelId target = oneCel ? onto : c.cel;
+        const doc::Cel *cel = m_document->cel(target);
+        if (!cel)
+            continue;
+        auto [it, fresh] = motions.try_emplace(target, cel->motion());
+        if (fresh && it->second.isEmpty())
+            startMotion(it->second, *cel, frame); // its first keys: it turns around the middle of what it shows
+        it->second.setKey(c.channel, frame + c.offset, c.key.pose, c.key.easing);
+    }
+    auto command = motionsCommand(*m_document, motions);
+    if (!command)
+        return false;
+    execute(std::move(command));
     return true;
 }
 
