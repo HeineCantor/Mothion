@@ -210,14 +210,14 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
     // button adds or takes it away. The cel's keys then have their own row in the timeline, and the Transform and Move
     // tools move the cel as a piece (its pose) instead of its pixels.
     auto *celKey = celButton(IconId::Keyframe, QStringLiteral("celKey"),
-                             tr("Keyframe of the current cel at this frame: add or remove it. The first one makes the cel a moving piece: "
+                             tr("Keyframe of the current cel (of all the cels chosen together) at this frame: add or remove it. The first one makes the cel a moving piece: "
                                 "Transform and Move then change the pose of the cel (the key, or, on a frame with none, "
                                 "a pose that goes when you leave the frame unless you press this button)."),
                              this);
     celKey->setText(tr("Cel key"));
     celKey->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     celKey->setCheckable(true);
-    connect(celKey, &QToolButton::clicked, m_document, [this] { m_document->toggleCelKey(m_document->currentCel()); });
+    connect(celKey, &QToolButton::clicked, m_document, [this] { m_document->toggleChosenCelKeys(); }); // all the chosen cels
     auto syncCelKey = [this, celKey] {
         const doc::CelMotion *motion = m_document->celMotion(m_document->currentCel());
         celKey->setChecked(motion && motion->hasKeyAt(m_document->currentFrame()));

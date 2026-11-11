@@ -912,6 +912,44 @@ private slots:
         QVERIFY(!up->isEnabled()); // one of them is on top now
     }
 
+    // Cel key with several cels chosen together: a key on this frame for every one of them (one undo step); pressed again, with the
+    // current one keyed, the keys go from all.
+    void theCelKeyButtonKeysAllTheChosenCels()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        controller.addCel();
+        controller.addCel();
+        const doc::Document &d = controller.document();
+        const doc::CelId a = d.celAt(0).id(), b = d.celAt(1).id(), c = d.celAt(2).id();
+        ui::TimelinePanel panel(&controller, &state);
+        panel.resize(800, 300);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        auto *key = panel.findChild<QToolButton *>(QStringLiteral("celKey"));
+        QVERIFY(key);
+        controller.setCurrentFrame(3);
+        controller.setCelSelection({a, b, c}, b);
+        QTest::mouseClick(key, Qt::LeftButton);
+        for (doc::CelId id : {a, b, c})
+            QVERIFY2(controller.celMotion(id)->hasKeyAt(3), qPrintable(QString::number(id)));
+        QVERIFY(key->isChecked());
+        controller.undo(); // all the keys, one step
+        for (doc::CelId id : {a, b, c})
+            QVERIFY(controller.celMotion(id)->isEmpty());
+        controller.redo();
+        // One of them already has a key here, another does not: the current one decides. Keyed: all lose theirs.
+        controller.undo();
+        controller.setCelKey(a, 3, doc::CelPose{});
+        controller.setCelSelection({a, b, c}, b); // b has none: the others that have none get one, a keeps its own
+        QTest::mouseClick(key, Qt::LeftButton);
+        for (doc::CelId id : {a, b, c})
+            QVERIFY(controller.celMotion(id)->hasKeyAt(3));
+        QTest::mouseClick(key, Qt::LeftButton); // b has one now: they all go
+        for (doc::CelId id : {a, b, c})
+            QVERIFY(!controller.celMotion(id)->hasKeyAt(3));
+    }
+
     // The cel bar adds, moves and deletes cels and sets the current one's
     // blend and opacity; the row headers show, hide and lock them.
     void timelineCelControls()

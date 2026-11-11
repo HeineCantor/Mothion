@@ -839,6 +839,14 @@ void DocumentController::setCelSelection(const std::vector<doc::CelId> &cels, do
     m_celSelection = kept;
     if (current != m_currentCel)
         setCurrentCel(current);
+    if (kept.size() > 1) { // the tools act on the layers of all of them (a pixel move, a transform)
+        std::vector<LayerRef> layers;
+        for (doc::CelId id : kept)
+            for (const auto &[drawingId, drawing] : m_document->cel(id)->drawings())
+                for (const doc::Layer &layer : drawing.layers)
+                    layers.push_back({id, drawingId, layer.id});
+        setLayerSelection(std::move(layers));
+    }
     if (celSelection() != before)
         emit celSelectionChanged();
 }
@@ -945,16 +953,12 @@ doc::CelPose DocumentController::celPoseAt(doc::CelId id, int frame) const
     return cel ? cel->motion().poseAt(frame) : doc::CelPose{};
 }
 
-bool DocumentController::setCelKey(doc::CelId id, int frame, const doc::CelPose &pose)
+bool DocumentController::celKeyMotion(const doc::Cel &cel, int frame, const doc::CelPose &pose, doc::CelMotion &out) const
 {
-    const doc::Cel *cel = m_document->cel(id);
-    if (!cel || frame < 0)
-        return false;
-    clearTemporaryPose(); // what is made a key now is the pose that was shown (the caller has it already)
-    doc::CelMotion motion = cel->motion();
+    doc::CelMotion motion = cel.motion();
     const bool first = motion.isEmpty();
     if (first)
-        startMotion(motion, *cel, frame);
+        startMotion(motion, cel, frame);
     const doc::CelPose now = motion.interpolatedAt(frame);
     bool changed = false;
     for (doc::Channel c : doc::kChannels) {
@@ -966,7 +970,19 @@ bool DocumentController::setCelKey(doc::CelId id, int frame, const doc::CelPose 
         motion.setKey(c, frame, pose);
         changed = true;
     }
-    if (!changed)
+    if (changed)
+        out = std::move(motion);
+    return changed;
+}
+
+bool DocumentController::setCelKey(doc::CelId id, int frame, const doc::CelPose &pose)
+{
+    const doc::Cel *cel = m_document->cel(id);
+    if (!cel || frame < 0)
+        return false;
+    clearTemporaryPose(); // what is made a key now is the pose that was shown (the caller has it already)
+    doc::CelMotion motion;
+    if (!celKeyMotion(*cel, frame, pose, motion))
         return false;
     execute(std::make_unique<doc::SetCelMotionCommand>(id, std::move(motion)));
     return true;
@@ -1009,12 +1025,51 @@ void DocumentController::toggleCelKey(doc::CelId id)
         setCelKey(id, m_currentFrame, celPoseAt(id, m_currentFrame)); // the pose left on the frame, or the one it has
 }
 
-void DocumentController::previewCelPose(doc::CelId id, int frame, const doc::CelPose &pose,
-                                        const std::vector<doc::Channel> &channels)
+void DocumentController::toggleChosenCelKeys()
+{
+    interruptStroke(); // a pose edit left open (Transform, Move) is applied first
+    const std::vector<doc::CelId> chosen = celSelection();
+    if (chosen.size() < 2) {
+        toggleCelKey(m_currentCel);
+        return;
+    }
+    // As for one cel: the current one decides. It has a key here: the keys on this frame go from all of them; it has none:
+    // every one that has none gets a key, at the pose it has (or the one left on the frame). One undo step.
+    const doc::CelMotion *current = celMotion(m_currentCel);
+    const bool remove = current && current->hasKeyAt(m_currentFrame);
+    std::vector<doc::CelPose> shown; // as they are shown now, before the pose left on the frame is cleared
+    for (doc::CelId id : chosen)
+        shown.push_back(celPoseAt(id, m_currentFrame));
+    clearTemporaryPose();
+    std::vector<std::unique_ptr<doc::Command>> steps;
+    for (std::size_t i = 0; i < chosen.size(); ++i) {
+        const doc::Cel *cel = m_document->cel(chosen[i]);
+        if (!cel)
+            continue;
+        doc::CelMotion motion;
+        if (remove) {
+            motion = cel->motion();
+            if (!motion.removeKeysAt(m_currentFrame))
+                continue;
+        } else if (cel->motion().hasKeyAt(m_currentFrame) || !celKeyMotion(*cel, m_currentFrame, shown[i], motion)) {
+            continue;
+        }
+        steps.push_back(std::make_unique<doc::SetCelMotionCommand>(chosen[i], std::move(motion)));
+    }
+    if (steps.empty())
+        return;
+    if (steps.size() == 1)
+        execute(std::move(steps.front()));
+    else
+        execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::EditMotion, std::move(steps)));
+}
+
+bool DocumentController::applyCelPose(doc::CelId id, int frame, const doc::CelPose &pose,
+                                      const std::vector<doc::Channel> &channels)
 {
     doc::Cel *cel = m_document->cel(id);
     if (!cel || frame < 0)
-        return;
+        return false;
     doc::CelMotion motion = cel->motion();
     for (doc::Channel channel : channels) {
         if (motion.keyAt(channel, frame)) {
@@ -1028,9 +1083,30 @@ void DocumentController::previewCelPose(doc::CelId id, int frame, const doc::Cel
         }
     }
     cel->setMotion(std::move(motion));
+    return true;
+}
+
+void DocumentController::previewCelPose(doc::CelId id, int frame, const doc::CelPose &pose,
+                                        const std::vector<doc::Channel> &channels)
+{
+    if (!applyCelPose(id, frame, pose, channels))
+        return;
     doc::ChangeSet changes;
     changes.motion = true;
     publish(changes);
+}
+
+void DocumentController::previewCelPoses(const std::vector<CelPoseChange> &changes)
+{
+    // All of them, then the views hear of it once: the frame is drawn again once, not for each cel.
+    bool any = false;
+    for (const CelPoseChange &c : changes)
+        any = applyCelPose(c.cel, c.frame, c.pose, c.channels) || any;
+    if (!any)
+        return;
+    doc::ChangeSet published;
+    published.motion = true;
+    publish(published);
 }
 
 void DocumentController::setCelPose(doc::CelId id, int frame, const doc::CelPose &pose, doc::Channel channel)
@@ -1067,6 +1143,23 @@ void DocumentController::finishCelPose(doc::CelId id, const doc::CelMotion &befo
     if (!cel || cel->motion() == before)
         return;
     m_history.pushApplied(std::make_unique<doc::SetCelMotionCommand>(id, before, cel->motion()));
+    emit historyChanged();
+}
+
+void DocumentController::finishCelPoses(const std::vector<std::pair<doc::CelId, doc::CelMotion>> &before)
+{
+    std::vector<std::unique_ptr<doc::Command>> steps;
+    for (const auto &[id, motion] : before) {
+        const doc::Cel *cel = m_document->cel(id);
+        if (cel && !(cel->motion() == motion))
+            steps.push_back(std::make_unique<doc::SetCelMotionCommand>(id, motion, cel->motion()));
+    }
+    if (steps.empty())
+        return;
+    if (steps.size() == 1)
+        m_history.pushApplied(std::move(steps.front()));
+    else
+        m_history.pushApplied(std::make_unique<doc::GroupCommand>(doc::CommandKind::EditMotion, std::move(steps)));
     emit historyChanged();
 }
 

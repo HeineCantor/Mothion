@@ -147,6 +147,7 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
     });
     connect(m_document, &DocumentController::currentFrameChanged, this, &CanvasView::renderWholeFrame);
     connect(m_document, &DocumentController::currentCelChanged, this, &CanvasView::syncPoseMode);
+    connect(m_document, &DocumentController::celSelectionChanged, this, &CanvasView::syncPoseMode);
     connect(m_document, &DocumentController::documentReplaced, this, &CanvasView::syncPoseMode);
     connect(m_document, &DocumentController::strokeInterrupted, this, &CanvasView::cancelStroke);
     connect(m_document, &DocumentController::poseEditClosing, this, [this] {
@@ -1576,8 +1577,12 @@ void CanvasView::updateCursor()
 void CanvasView::syncPoseMode()
 {
     // Transform and Move move the cel as a piece (not its pixels) once it has keys.
-    const doc::CelMotion *motion = m_document->celMotion(m_document->currentCel());
-    m_toolState->setKeyframeMode(motion && !motion->isEmpty());
+    bool keyed = false; // the current cel has keys, or one of the cels chosen with it (they are moved together)
+    for (doc::CelId id : m_document->celSelection()) {
+        const doc::CelMotion *motion = m_document->celMotion(id);
+        keyed = keyed || (motion && !motion->isEmpty());
+    }
+    m_toolState->setKeyframeMode(keyed);
 }
 
 } // namespace mothion::canvas

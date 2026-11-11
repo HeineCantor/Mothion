@@ -1,6 +1,7 @@
 #pragma once
 
 #include "canvas/CanvasTool.h"
+#include "core/document/Cel.h"
 #include "core/document/CelMotion.h"
 #include "core/document/Ids.h"
 
@@ -8,7 +9,9 @@
 #include <QString>
 
 #include <functional>
+#include <map>
 #include <optional>
+#include <vector>
 
 namespace mothion::document {
 class DocumentController;
@@ -28,6 +31,9 @@ namespace mothion::canvas {
 // What a drag changes goes into the keys of those channels (position, rotation, scale) on the frame: on a frame with a
 // key of a channel its key changes, on one with none the value goes when another frame is chosen, unless the Cel key
 // button makes it a key. The path of the pivot over the frames follows the keys.
+//
+// With several cels chosen together (Ctrl or Shift on their names) it moves them all as one piece: the box is round all of
+// what they show, and what the drag does to it is done to each of them (a cel with no keys gets its first one).
 //
 // It is not a tool of the palette: the Transform and the Move tools are this when the current cel has keys
 // (ToolState::keyframeMode()), and work on the pixels otherwise.
@@ -54,7 +60,7 @@ public:
     // Only moving: a drag anywhere moves the cel (the Move tool's way), with no handles to turn or scale it.
     void setMoveOnly(bool on) { m_moveOnly = on; }
     // What the cel shows changed (pixels, frames, another document): the box is measured again.
-    void invalidate() { m_boundsValid = false; }
+    void invalidate() { m_bounds.clear(); }
     void paintOverlay(QPainter &painter, const ViewTransform &view) const override;
     QCursor cursor() const override;
 
@@ -68,6 +74,11 @@ private:
         doc::CelPose pose;
         doc::Matrix2x3 matrix;
     };
+    // The cels moved together, when several are chosen and show something here: the chosen ones that are free, on view, and
+    // have pixels on the current frame. Fewer than two: the current cel alone.
+    std::vector<doc::CelId> group() const;
+    // The box round what a cel shows (measured once, until invalidate()), in its own coordinates; empty if nothing.
+    QRect boundsOf(const doc::Cel &cel, const doc::Drawing &drawing) const;
     std::optional<Shape> shape() const;
     QPointF mapped(const Shape &s, const QPointF &local) const;
     QPointF handlePoint(const Shape &s, int index) const; // in the cel's own coordinates: corners 0..3, then side middles
@@ -79,10 +90,19 @@ private:
     Pick pick(const QPointF &docPos, const Shape &s) const;
     bool showsBox() const; // the Transform tool's box is always there; the Move tool's only while an edit is open
 
+    // One of the cels a drag moves: its motion when the drag began, and its pose and pivot then.
+    struct Member
+    {
+        doc::CelId cel = doc::kNoId;
+        doc::CelMotion before;
+        doc::CelPose pose;
+        QPointF pivot;
+    };
     struct Drag
     {
         Grip grip = Grip::Move;
         doc::CelId cel = doc::kNoId;
+        std::vector<Member> members; // with several cels chosen: all of them (this one among them)
         int frame = 0;
         doc::CelMotion before; // the motion when the pen went down
         Shape start;           // the shape then
@@ -101,16 +121,13 @@ private:
     double m_zoom = 1.0;
     Pick m_hover;
     bool m_moveOnly = false;
-    // The box round a cel's drawing is measured once (it takes a pass over the pixels) until something invalidates it.
-    mutable bool m_boundsValid = false;
-    mutable doc::CelId m_boundsCel = doc::kNoId;
-    mutable doc::DrawingId m_boundsDrawing = doc::kNoId;
-    mutable QRect m_bounds;
+    // The box round a drawing is measured once (it takes a pass over the pixels) until something invalidates it.
+    mutable std::map<doc::DrawingId, QRect> m_bounds;
     std::optional<Drag> m_drag;
     struct Pending
     {
-        doc::CelId cel = doc::kNoId;
-        doc::CelMotion before; // the motion when the first drag of the edit began
+        doc::CelId cel = doc::kNoId; // the current cel when the edit began
+        std::vector<Member> members; // every cel the edit moves, as it was when the first drag began
     };
     std::optional<Pending> m_pending;
 };
