@@ -160,6 +160,9 @@ public:
     bool setCelPivot(doc::CelId cel, double x, double y);
     // A key on the current frame of the cel, or none if there is one: for a button and a key.
     void toggleCelKey(doc::CelId cel);
+    // The same for the cels chosen together: if the current one has a key on the frame, the keys there go from all of them,
+    // else each one without a key gets one, at the pose it has there. One undo step. (One cel chosen: toggleCelKey().)
+    void toggleChosenCelKeys();
     // While a tool drags the pose: the key of `cel` on `frame` is put at `pose` at once, with no undo step (the first key of
     // a cel is made, with its pivot). finishCelPose() then records the whole drag as one step, from `before` (the cel's
     // motion when the drag began); cancelCelPose() puts it back.
@@ -171,6 +174,11 @@ public:
     // is not moved this way.
     void setCelPose(doc::CelId cel, int frame, const doc::CelPose &pose, doc::Channel channel);
     void finishCelPose(doc::CelId cel, const doc::CelMotion &before);
+    // The same for several cels moved together: one undo step for all (each with the motion it had when the drag began).
+    void finishCelPoses(const std::vector<std::pair<doc::CelId, doc::CelMotion>> &before);
+    // For a cel with no key: its first one on `frame` (position, rotation and scale, as it is drawn, the pivot as the first key
+    // puts it) with no undo step, as previewCelPose() changes it; finishCelPose() from the motion it had then records both.
+    void beginFirstKey(doc::CelId cel, int frame);
     void cancelCelPose(doc::CelId cel, const doc::CelMotion &before);
     // Takes all the keys of the cel away (it stands still, as drawn).
     bool clearCelMotion(doc::CelId cel);
@@ -502,6 +510,8 @@ private:
     void clearTemporaryPose();
     doc::CelId m_tempPoseCel = doc::kNoId; // the cel that has a pose that is not a key (one at a time)
     void startMotion(doc::CelMotion &motion, const doc::Cel &cel, int frame) const;
+    // The motion the cel would have with a key on `frame` from `pose` (set in `out`); false if that changes nothing.
+    bool celKeyMotion(const doc::Cel &cel, int frame, const doc::CelPose &pose, doc::CelMotion &out) const;
     // Sets the selection as is, recording nothing.
     void assignSelection(const QPainterPath &area);
     void publish(const doc::ChangeSet &changes);

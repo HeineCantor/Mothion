@@ -39,23 +39,69 @@ AnimateTool::AnimateTool(document::DocumentController *document, tools::ToolStat
 {
 }
 
+QRect AnimateTool::boundsOf(const doc::Cel &, const doc::Drawing &drawing) const
+{
+    const auto it = m_bounds.find(drawing.id);
+    if (it != m_bounds.end())
+        return it->second;
+    return m_bounds[drawing.id] = visibleBounds(drawing);
+}
+
+std::vector<doc::CelId> AnimateTool::group() const
+{
+    std::vector<doc::CelId> cels;
+    const doc::Document &d = m_document->document();
+    const std::vector<doc::CelId> chosen = m_document->celSelection();
+    if (chosen.size() < 2)
+        return cels;
+    for (doc::CelId id : chosen) {
+        const doc::Cel *cel = d.cel(id);
+        const doc::Drawing *drawing = cel ? cel->drawingAt(m_document->currentFrame()) : nullptr;
+        if (cel && drawing && !cel->properties().locked && cel->properties().visible
+            && !boundsOf(*cel, *drawing).isEmpty())
+            cels.push_back(id);
+    }
+    if (cels.size() < 2)
+        cels.clear();
+    return cels;
+}
+
 std::optional<AnimateTool::Shape> AnimateTool::shape() const
 {
     if (m_document->cameraSelected())
         return std::nullopt;
-    const doc::Cel *cel = m_document->document().cel(m_document->currentCel());
+    const doc::Document &d = m_document->document();
+    const int frame = m_document->currentFrame();
+    // Several cels chosen together: one box round all of what they show, as they are posed, moved as it is.
+    if (const std::vector<doc::CelId> together = group(); !together.empty()) {
+        QRectF all;
+        for (doc::CelId id : together) {
+            const doc::Cel *cel = d.cel(id);
+            const QRect own = boundsOf(*cel, *cel->drawingAt(frame));
+            const doc::CelMotion &motion = cel->motion();
+            const doc::Matrix2x3 m = motion.isEmpty() ? doc::Matrix2x3{}
+                                                      : motion.poseAt(frame).matrix(motion.pivotX, motion.pivotY);
+            QPolygonF corners;
+            for (const QPointF &p : {QPointF(own.left(), own.top()), QPointF(own.right() + 1, own.top()),
+                                     QPointF(own.right() + 1, own.bottom() + 1), QPointF(own.left(), own.bottom() + 1)}) {
+                double x = 0, y = 0;
+                m.map(p.x(), p.y(), x, y);
+                corners << QPointF(x, y);
+            }
+            all |= corners.boundingRect();
+        }
+        Shape s;
+        s.box = all;
+        s.pivot = all.center();
+        return s; // as drawn: the pose that is its own is identity, and what a drag does is done to each cel
+    }
+    const doc::Cel *cel = d.cel(m_document->currentCel());
     if (!cel)
         return std::nullopt;
-    const doc::Drawing *drawing = cel->drawingAt(m_document->currentFrame());
+    const doc::Drawing *drawing = cel->drawingAt(frame);
     if (!drawing)
         return std::nullopt;
-    if (!m_boundsValid || m_boundsCel != cel->id() || m_boundsDrawing != drawing->id) {
-        m_bounds = visibleBounds(*drawing);
-        m_boundsCel = cel->id();
-        m_boundsDrawing = drawing->id;
-        m_boundsValid = true;
-    }
-    const QRect bounds = m_bounds;
+    const QRect bounds = boundsOf(*cel, *drawing);
     if (bounds.isEmpty())
         return std::nullopt;
     Shape s;
@@ -138,10 +184,37 @@ void AnimateTool::press(const QPointF &docPos, Qt::KeyboardModifiers)
     d.cel = m_document->currentCel();
     d.frame = m_document->currentFrame();
     d.before = cel->motion();
-    if (m_pending && m_pending->cel != d.cel)
-        commit(); // another cel: what was open is applied
-    if (!m_pending)
-        m_pending = Pending{d.cel, d.before};
+    // The cels this drag moves: the chosen ones together, or the current cel alone.
+    const std::vector<doc::CelId> together = group();
+    std::vector<Member> members;
+    for (doc::CelId id : together.empty() ? std::vector<doc::CelId>{d.cel} : together) {
+        const doc::Cel *c = m_document->document().cel(id);
+        Member m;
+        m.cel = id;
+        m.before = c->motion();
+        if (!together.empty() && c->motion().isEmpty())
+            m_document->beginFirstKey(id, d.frame); // a cel with no keys is moved as a piece too: its first key, with the drag
+        const doc::Cel *keyed = m_document->document().cel(id);
+        m.pivot = QPointF(keyed->motion().pivotX, keyed->motion().pivotY);
+        m.pose = keyed->motion().isEmpty() ? doc::CelPose{} : keyed->motion().poseAt(d.frame);
+        members.push_back(m);
+    }
+    auto sameCels = [&members](const Pending &p) {
+        if (p.members.size() != members.size())
+            return false;
+        for (std::size_t i = 0; i < members.size(); ++i)
+            if (p.members[i].cel != members[i].cel)
+                return false;
+        return true;
+    };
+    if (m_pending && !sameCels(*m_pending))
+        commit(); // other cels: what was open is applied
+    if (!m_pending) {
+        m_pending = Pending{d.cel, {}};
+        for (const Member &m : members)
+            m_pending->members.push_back(Member{m.cel, m.before, {}, {}});
+    }
+    d.members = members;
     d.start = *s;
     d.press = docPos;
     if (picked.handle >= 0) {
@@ -215,6 +288,29 @@ void AnimateTool::move(const QPointF &docPos, Qt::KeyboardModifiers modifiers)
     }
     case Grip::None: return;
     }
+    // Several cels: what the drag did to the box (`pose`, about its middle) is done to each of them, about their own pivots.
+    if (d.members.size() > 1) {
+        const doc::Matrix2x3 g = pose.matrix(start.pivot.x(), start.pivot.y());
+        for (const Member &m : d.members) {
+            doc::CelPose own = m.pose;
+            const doc::Matrix2x3 moved = m.pose.matrix(m.pivot.x(), m.pivot.y()).then(g);
+            double px = 0, py = 0;
+            moved.map(m.pivot.x(), m.pivot.y(), px, py); // where its pivot goes
+            own.x = px - m.pivot.x();
+            own.y = py - m.pivot.y();
+            own.rotation = m.pose.rotation + pose.rotation;
+            own.scaleX = m.pose.scaleX * pose.scaleX;
+            own.scaleY = m.pose.scaleY * pose.scaleY;
+            std::vector<doc::Channel> changed;
+            for (doc::Channel c : doc::kChannels)
+                if (doc::channelsDiffer(c, m.pose, own))
+                    changed.push_back(c);
+            if (!changed.empty())
+                m_document->previewCelPose(m.cel, d.frame, own, changed);
+        }
+        m_repaint();
+        return;
+    }
     // What changed: the keys of those channels (a turn or a scale moves the piece too, unless it goes round its middle).
     std::vector<doc::Channel> channels;
     for (doc::Channel c : doc::kChannels)
@@ -240,8 +336,9 @@ void AnimateTool::cancel()
         return;
     const Drag d = *m_drag;
     m_drag.reset();
-    m_document->cancelCelPose(d.cel, d.before);
-    if (m_pending && m_pending->before == d.before)
+    for (const Member &m : d.members)
+        m_document->cancelCelPose(m.cel, m.before);
+    if (m_pending && !m_pending->members.empty() && m_pending->members.front().before == d.members.front().before)
         m_pending.reset(); // the first drag of the edit: nothing is left open
     m_repaint();
 }
@@ -253,7 +350,10 @@ void AnimateTool::commit()
         return;
     const Pending pending = *m_pending;
     m_pending.reset();
-    m_document->finishCelPose(pending.cel, pending.before); // one undo step for what was done (nothing for a value that is no key)
+    std::vector<std::pair<doc::CelId, doc::CelMotion>> before;
+    for (const Member &m : pending.members)
+        before.emplace_back(m.cel, m.before);
+    m_document->finishCelPoses(before); // one undo step for what was done to all of them (nothing for a value that is no key)
     m_repaint();
 }
 
@@ -269,7 +369,8 @@ bool AnimateTool::keyPress(int key)
         if (m_pending) {
             const Pending pending = *m_pending;
             m_pending.reset();
-            m_document->cancelCelPose(pending.cel, pending.before);
+            for (const Member &m : pending.members)
+                m_document->cancelCelPose(m.cel, m.before);
         }
         m_repaint();
     } else {

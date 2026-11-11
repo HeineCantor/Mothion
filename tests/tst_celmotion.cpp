@@ -876,6 +876,67 @@ private slots:
         QVERIFY(controller.rasterCel(doc::kNoId, &why) == doc::kNoId);
     }
 
+    // Cels chosen together are moved by the Transform tool as one piece: a drag on the box does to each of them what it does to
+    // the box, in one undo step; a cel with no keys gets its first one.
+    void severalChosenCelsAreMovedTogether()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        controller.setSceneLength(30);
+        QImage red(60, 40, QImage::Format_ARGB32);
+        red.fill(Qt::red);
+        controller.importImage(red, QStringLiteral("a")); // x 930..989, y 520..559
+        const doc::CelId a = controller.currentCel();
+        QImage green(40, 40, QImage::Format_ARGB32);
+        green.fill(Qt::green);
+        controller.importImage(green, QStringLiteral("b")); // x 940..979, y 520..559
+        const doc::CelId b = controller.currentCel();
+        const doc::CelId c = [&] { // a third, with no keys at all
+            controller.importImage(green, QStringLiteral("c"));
+            return controller.currentCel();
+        }();
+        controller.setCelKey(a, 0, doc::CelPose{});
+        controller.setCelKey(b, 0, doc::CelPose{});
+        controller.setCelSelection({a, b, c}, b);
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(900, 520);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        state.setActiveTool(tools::ToolId::Transform);
+        QVERIFY(state.keyframeMode());
+        const QTransform toView = canvas.view().documentToView();
+        const double zoom = canvas.view().zoom();
+        auto at = [&](double x, double y) { return toView.map(QPointF(x, y)).toPoint(); };
+
+        // Inside the box: all of them move by as much as the pen did, in one step.
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, at(960, 540));
+        QTest::mouseMove(&canvas, at(1000, 560));
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, at(1010, 570));
+        for (doc::CelId id : {a, b, c}) {
+            const doc::CelPose pose = controller.celPoseAt(id, 0);
+            QVERIFY2(std::abs(pose.x - 50) < 1.5 / zoom + 0.6 && std::abs(pose.y - 30) < 1.5 / zoom + 0.6,
+                     qPrintable(QStringLiteral("cel %1 at %2, %3").arg(id).arg(pose.x).arg(pose.y)));
+        }
+        QVERIFY(controller.celMotion(c)->hasKeyAt(0)); // the one with no keys got its first
+        controller.undo(); // the whole drag, for all of them, is one step
+        for (doc::CelId id : {a, b})
+            QCOMPARE(controller.celPoseAt(id, 0).x, 0.0);
+        QVERIFY(controller.celMotion(c)->isEmpty());
+        controller.redo();
+        QCOMPARE(controller.celPoseAt(b, 0).x, controller.celPoseAt(a, 0).x);
+
+        // Outside the box: all of them turn, round the middle of the box.
+        const doc::CelPose before = controller.celPoseAt(a, 0);
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, at(1060 + 50, 570)); // to the right of the box (its middle is at 1010, 570)
+        for (int angle = 15; angle <= 90; angle += 15)
+            QTest::mouseMove(&canvas, at(1010 + 100 * std::cos(angle * M_PI / 180), 570 + 100 * std::sin(angle * M_PI / 180)));
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, at(1010, 670));
+        for (doc::CelId id : {a, b, c})
+            QVERIFY2(std::abs(controller.celPoseAt(id, 0).rotation - 90) < 3,
+                     qPrintable(QString::number(controller.celPoseAt(id, 0).rotation)));
+        QVERIFY(before.rotation == 0);
+    }
+
     // The options of Transform and Move, in keyframe mode, hold the pose of the current cel on the current frame; editing a field makes a key.
     void theKeyframeOptionsShowAndEditThePose()
     {

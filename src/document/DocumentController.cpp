@@ -800,6 +800,14 @@ void DocumentController::setCelSelection(const std::vector<doc::CelId> &cels, do
     m_celSelection = kept;
     if (current != m_currentCel)
         setCurrentCel(current);
+    if (kept.size() > 1) { // the tools act on the layers of all of them (a pixel move, a transform)
+        std::vector<LayerRef> layers;
+        for (doc::CelId id : kept)
+            for (const auto &[drawingId, drawing] : m_document->cel(id)->drawings())
+                for (const doc::Layer &layer : drawing.layers)
+                    layers.push_back({id, drawingId, layer.id});
+        setLayerSelection(std::move(layers));
+    }
     if (celSelection() != before)
         emit celSelectionChanged();
 }
@@ -906,16 +914,12 @@ doc::CelPose DocumentController::celPoseAt(doc::CelId id, int frame) const
     return cel ? cel->motion().poseAt(frame) : doc::CelPose{};
 }
 
-bool DocumentController::setCelKey(doc::CelId id, int frame, const doc::CelPose &pose)
+bool DocumentController::celKeyMotion(const doc::Cel &cel, int frame, const doc::CelPose &pose, doc::CelMotion &out) const
 {
-    const doc::Cel *cel = m_document->cel(id);
-    if (!cel || frame < 0)
-        return false;
-    clearTemporaryPose(); // what is made a key now is the pose that was shown (the caller has it already)
-    doc::CelMotion motion = cel->motion();
+    doc::CelMotion motion = cel.motion();
     const bool first = motion.isEmpty();
     if (first)
-        startMotion(motion, *cel, frame);
+        startMotion(motion, cel, frame);
     const doc::CelPose now = motion.interpolatedAt(frame);
     bool changed = false;
     for (doc::Channel c : doc::kChannels) {
@@ -927,7 +931,19 @@ bool DocumentController::setCelKey(doc::CelId id, int frame, const doc::CelPose 
         motion.setKey(c, frame, pose);
         changed = true;
     }
-    if (!changed)
+    if (changed)
+        out = std::move(motion);
+    return changed;
+}
+
+bool DocumentController::setCelKey(doc::CelId id, int frame, const doc::CelPose &pose)
+{
+    const doc::Cel *cel = m_document->cel(id);
+    if (!cel || frame < 0)
+        return false;
+    clearTemporaryPose(); // what is made a key now is the pose that was shown (the caller has it already)
+    doc::CelMotion motion;
+    if (!celKeyMotion(*cel, frame, pose, motion))
         return false;
     execute(std::make_unique<doc::SetCelMotionCommand>(id, std::move(motion)));
     return true;
@@ -968,6 +984,45 @@ void DocumentController::toggleCelKey(doc::CelId id)
         removeCelKey(id, m_currentFrame);
     else
         setCelKey(id, m_currentFrame, celPoseAt(id, m_currentFrame)); // the pose left on the frame, or the one it has
+}
+
+void DocumentController::toggleChosenCelKeys()
+{
+    interruptStroke(); // a pose edit left open (Transform, Move) is applied first
+    const std::vector<doc::CelId> chosen = celSelection();
+    if (chosen.size() < 2) {
+        toggleCelKey(m_currentCel);
+        return;
+    }
+    // As for one cel: the current one decides. It has a key here: the keys on this frame go from all of them; it has none:
+    // every one that has none gets a key, at the pose it has (or the one left on the frame). One undo step.
+    const doc::CelMotion *current = celMotion(m_currentCel);
+    const bool remove = current && current->hasKeyAt(m_currentFrame);
+    std::vector<doc::CelPose> shown; // as they are shown now, before the pose left on the frame is cleared
+    for (doc::CelId id : chosen)
+        shown.push_back(celPoseAt(id, m_currentFrame));
+    clearTemporaryPose();
+    std::vector<std::unique_ptr<doc::Command>> steps;
+    for (std::size_t i = 0; i < chosen.size(); ++i) {
+        const doc::Cel *cel = m_document->cel(chosen[i]);
+        if (!cel)
+            continue;
+        doc::CelMotion motion;
+        if (remove) {
+            motion = cel->motion();
+            if (!motion.removeKeysAt(m_currentFrame))
+                continue;
+        } else if (cel->motion().hasKeyAt(m_currentFrame) || !celKeyMotion(*cel, m_currentFrame, shown[i], motion)) {
+            continue;
+        }
+        steps.push_back(std::make_unique<doc::SetCelMotionCommand>(chosen[i], std::move(motion)));
+    }
+    if (steps.empty())
+        return;
+    if (steps.size() == 1)
+        execute(std::move(steps.front()));
+    else
+        execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::EditMotion, std::move(steps)));
 }
 
 void DocumentController::previewCelPose(doc::CelId id, int frame, const doc::CelPose &pose,
@@ -1029,6 +1084,39 @@ void DocumentController::finishCelPose(doc::CelId id, const doc::CelMotion &befo
         return;
     m_history.pushApplied(std::make_unique<doc::SetCelMotionCommand>(id, before, cel->motion()));
     emit historyChanged();
+}
+
+void DocumentController::finishCelPoses(const std::vector<std::pair<doc::CelId, doc::CelMotion>> &before)
+{
+    std::vector<std::unique_ptr<doc::Command>> steps;
+    for (const auto &[id, motion] : before) {
+        const doc::Cel *cel = m_document->cel(id);
+        if (cel && !(cel->motion() == motion))
+            steps.push_back(std::make_unique<doc::SetCelMotionCommand>(id, motion, cel->motion()));
+    }
+    if (steps.empty())
+        return;
+    if (steps.size() == 1)
+        m_history.pushApplied(std::move(steps.front()));
+    else
+        m_history.pushApplied(std::make_unique<doc::GroupCommand>(doc::CommandKind::EditMotion, std::move(steps)));
+    emit historyChanged();
+}
+
+void DocumentController::beginFirstKey(doc::CelId id, int frame)
+{
+    doc::Cel *cel = m_document->cel(id);
+    if (!cel || frame < 0 || !cel->motion().isEmpty())
+        return;
+    clearTemporaryPose();
+    doc::CelMotion motion = cel->motion();
+    startMotion(motion, *cel, frame);
+    for (doc::Channel c : {doc::Channel::Position, doc::Channel::Rotation, doc::Channel::Scale})
+        motion.setKey(c, frame, doc::CelPose{});
+    cel->setMotion(std::move(motion));
+    doc::ChangeSet changes;
+    changes.motion = true;
+    publish(changes);
 }
 
 void DocumentController::cancelCelPose(doc::CelId id, const doc::CelMotion &before)
