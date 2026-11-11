@@ -820,7 +820,7 @@ private slots:
                 QVERIFY(item);
                 QVERIFY(!item->isSelected());
                 const QColor fill = item->background(0).color();
-                QCOMPARE(fill, ui::LayersPanel::celRowColor(i, QApplication::palette()));
+                QCOMPARE(fill, ui::LayersPanel::celRowColor(ui::TimelineView::colorSlot(d.celAt(i).id()), QApplication::palette()));
                 QVERIFY2(qAbs(fill.lightness() - text.lightness()) > 120, light ? "light theme" : "dark theme");
             }
         }
@@ -899,6 +899,74 @@ private slots:
         QVERIFY(panel.layerItem(layer) != layerRow);
     }
 
+
+    // Cel rows chosen together (Ctrl and Shift on the rows): they are the cels chosen together everywhere, and the arrows move them
+    // all, keeping their order, in one step.
+    void celsChosenTogetherMoveTogether()
+    {
+        document::DocumentController controller;
+        for (int i = 0; i < 4; ++i)
+            controller.addCel(); // five cels, bottom up
+        ui::LayersPanel panel(&controller);
+        panel.resize(320, 600);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        QCoreApplication::processEvents();
+        const doc::Document &d = controller.document();
+        std::vector<doc::CelId> id;
+        for (int i = 0; i < 5; ++i)
+            id.push_back(d.celAt(i).id());
+        auto *tree = panel.findChild<QTreeWidget *>();
+        auto order = [&] {
+            std::vector<doc::CelId> now;
+            for (int i = 0; i < d.celCount(); ++i)
+                now.push_back(d.celAt(i).id());
+            return now;
+        };
+
+        // Rows 1 and 3 chosen (the second selected with Ctrl).
+        tree->setCurrentItem(panel.celItem(id[1]));
+        tree->selectionModel()->select(tree->model()->index(d.celCount() - 1 - 3, 0),
+                                       QItemSelectionModel::Select | QItemSelectionModel::Rows);
+        panel.celItem(id[3])->setSelected(true);
+        QCOMPARE(controller.celSelection(), (std::vector<doc::CelId>{id[1], id[3]}));
+        QToolButton *up = nullptr, *down = nullptr;
+        for (auto *button : panel.findChildren<QToolButton *>()) {
+            if (button->toolTip().startsWith(QStringLiteral("Move the cel")) && button->toolTip().endsWith(QStringLiteral("up")))
+                up = button;
+            if (button->toolTip().startsWith(QStringLiteral("Move the cel")) && button->toolTip().endsWith(QStringLiteral("down")))
+                down = button;
+        }
+        QVERIFY(up && down);
+        QVERIFY(up->isEnabled() && down->isEnabled());
+
+        const QColor colorOfSecond = panel.celItem(id[1])->background(0).color(); // a cel's color is its own
+        const QColor colorOfFirst = panel.celItem(id[0])->background(0).color();
+        QVERIFY(colorOfSecond != colorOfFirst);
+        QTest::mouseClick(up, Qt::LeftButton); // each past the cel above it
+        QCoreApplication::processEvents();
+        QCOMPARE(order(), (std::vector<doc::CelId>{id[0], id[2], id[1], id[4], id[3]}));
+        QCOMPARE(panel.celItem(id[1])->background(0).color(), colorOfSecond); // moved, and the color went with it
+        QCOMPARE(panel.celItem(id[0])->background(0).color(), colorOfFirst);
+        QCOMPARE(controller.celSelection(), (std::vector<doc::CelId>{id[1], id[3]})); // still chosen, in the rows too
+        QVERIFY(panel.celItem(id[1])->isSelected() && panel.celItem(id[3])->isSelected());
+        QVERIFY(!up->isEnabled()); // one of them is on top
+        controller.undo(); // all at once
+        QCOMPARE(order(), (std::vector<doc::CelId>{id[0], id[1], id[2], id[3], id[4]}));
+        QCoreApplication::processEvents();
+        QTest::mouseClick(down, Qt::LeftButton);
+        QCoreApplication::processEvents();
+        QCOMPARE(order(), (std::vector<doc::CelId>{id[1], id[0], id[3], id[2], id[4]}));
+
+        // Chosen in the timeline's way (Shift range): the rows follow.
+        controller.setCelSelection({id[0], id[1], id[2]}, id[2]);
+        QCoreApplication::processEvents();
+        QVERIFY(panel.celItem(id[0])->isSelected() && panel.celItem(id[1])->isSelected() && panel.celItem(id[2])->isSelected());
+        QVERIFY(!panel.celItem(id[3])->isSelected());
+        // A plain click on a row: that cel alone.
+        tree->setCurrentItem(panel.celItem(id[4]));
+        QCOMPARE(controller.celSelection(), std::vector<doc::CelId>{id[4]});
+    }
 
     // The clip button (in the row of the mask ones): a raster layer with another below it is clipped to it, and let go of
     // again; the button shows the state; one undo step; nothing for the bottom layer.

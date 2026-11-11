@@ -239,11 +239,11 @@ QRect TimelineView::lockRect(int row) const
     return eyeRect(row).translated(18, 0);
 }
 
-QColor TimelineView::colorForCel(int celIndex)
+QColor TimelineView::colorForCel(int slot)
 {
     static const QColor colors[] = {QColor(0x4f, 0x8c, 0xd6), QColor(0xd0, 0x8a, 0x4a), QColor(0x5a, 0x9a, 0x6a),
                                     QColor(0xb0, 0x6a, 0xd0), QColor(0xc8, 0x5a, 0x6a), QColor(0x4a, 0xa8, 0xa8)};
-    return colors[celIndex % int(std::size(colors))];
+    return colors[slot % int(std::size(colors))];
 }
 
 // --- scrolling --------------------------------------------------------------------
@@ -393,10 +393,16 @@ void TimelineView::paintSelection(QPainter &p) const
         const QRectF bar(0, top, viewport()->width() - 1, m.rowHeight - 1);
         p.drawRect(bar.adjusted(1, 1, -1, -1));
     };
+    const std::vector<doc::CelId> chosen = m_document->celSelection(); // the cels chosen together
     for (int row = 0; row < rowCount(); ++row)
-        if (!isMotionRow(row) && d.celAt(celIndexForRow(row)).id() == m_document->currentCel()
-            && !m_document->cameraSelected())
+        if (!isMotionRow(row) && !m_document->cameraSelected()
+            && std::find(chosen.begin(), chosen.end(), d.celAt(celIndexForRow(row)).id()) != chosen.end())
             outline(m.rowY(row));
+    if (m_celDrag && m_celDrag->moving) { // where the chosen cels would go
+        const int y = celDropY(m_celDrag->insertAt);
+        p.setPen(QPen(kCursorColor, 3.0));
+        p.drawLine(0, y, viewport()->width(), y);
+    }
     if (m_document->camera() && m_document->cameraSelected())
         outline(cameraTop());
 }
@@ -448,7 +454,7 @@ void TimelineView::paintCells(QPainter &p) const
             const doc::Drawing *drawing = cel.drawing(e.drawing);
             const QString name = drawing ? QString::fromStdString(drawing->name) : QStringLiteral("?");
             const bool selected = isSelected(cel.id(), e.start - shift);
-            paintExposure(p, e, name, colorForCel(celIndex), m.rowY(row), selected);
+            paintExposure(p, e, name, colorForCel(colorSlot(cel.id())), m.rowY(row), selected);
         }
         // A drop refused: the selected blocks still where they are, and
         // striped where the pen would put them.
@@ -1151,7 +1157,7 @@ void TimelineView::paintHeaders(QPainter &p) const
         const QRect r(0, m.rowY(row), m.headerWidth - 1, m.rowHeight);
         const QColor ink = palette().text().color();
         const IconTone tone = IconTone::Plain;
-        p.fillRect(QRect(r.left() + 4, r.top() + 6, 4, r.height() - 12), colorForCel(celIndex));
+        p.fillRect(QRect(r.left() + 4, r.top() + 6, 4, r.height() - 12), colorForCel(colorSlot(cel.id())));
         // The toggles: the icon when on, an empty slot when off.
         p.setPen(palette().placeholderText().color());
         for (const QRect &slot : {eyeRect(row), lockRect(row)})
@@ -1190,6 +1196,33 @@ void TimelineView::paintCursor(QPainter &p) const
 }
 
 // --- interaction ------------------------------------------------------------------
+
+int TimelineView::celDropPosition(int y) const
+{
+    const int n = m_document->document().celCount();
+    const int row = (y - m_metrics.rulerHeight + m_metrics.scrollY) / m_metrics.rowHeight;
+    if (y < m_metrics.rulerHeight || row < 0)
+        return n;
+    if (row >= rowCount())
+        return 0;
+    const int celIndex = celIndexForRow(row);
+    // Above the middle of the cel's own row: above the cel; anywhere lower (its keys' rows are its own): below it.
+    const bool upperHalf = !isMotionRow(row) && y < m_metrics.rowY(row) + m_metrics.rowHeight / 2;
+    return upperHalf ? celIndex + 1 : celIndex;
+}
+
+int TimelineView::celDropY(int position) const
+{
+    const int n = m_document->document().celCount();
+    if (position >= n)
+        return m_metrics.rowY(0);
+    // The rows are top first: the line is under the rows of the cels at or above the position, which is above the others.
+    int last = 0;
+    for (int row = 0; row < rowCount(); ++row)
+        if (celIndexForRow(row) >= position)
+            last = row + 1; // one past the rows of the cels at or above the position
+    return m_metrics.rowY(last);
+}
 
 void TimelineView::scrubTo(const QPoint &pos, bool selectCel)
 {
@@ -1246,8 +1279,37 @@ void TimelineView::mousePressEvent(QMouseEvent *event)
             p.visible = !p.visible;
         else if (lockRect(row).contains(pos))
             p.locked = !p.locked;
-        else
-            m_document->chooseCel(cel.id()); // the cel as a whole: all its frames (a transform moves them all)
+        else if (event->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier)) {
+            // Chosen together with the others: Ctrl adds it or takes it out, Shift all the cels from the current one.
+            const doc::Document &d = m_document->document();
+            std::vector<doc::CelId> cels = m_document->celSelection();
+            const auto at = std::find(cels.begin(), cels.end(), cel.id());
+            if (event->modifiers() & Qt::ShiftModifier) {
+                const int from = d.indexOf(m_document->currentCel()), to = d.indexOf(cel.id());
+                cels.clear();
+                for (int i = std::min(from, to); i <= std::max(from, to); ++i)
+                    cels.push_back(d.celAt(i).id());
+                m_document->setCelSelection(cels, cel.id());
+            } else if (at == cels.end()) {
+                cels.push_back(cel.id());
+                m_document->setCelSelection(cels, cel.id());
+            } else if (cels.size() > 1) { // taken out: another is the current one
+                cels.erase(at);
+                m_document->setCelSelection(cels, cels.back());
+            }
+            return;
+        } else {
+            // A cel chosen with others stays so (the press may begin a drag of all of them); alone, it is chosen whole:
+            // all its frames (a transform moves them all).
+            const std::vector<doc::CelId> cels = m_document->celSelection();
+            if (cels.size() > 1 && std::find(cels.begin(), cels.end(), cel.id()) != cels.end()) {
+                if (m_document->currentCel() != cel.id())
+                    m_document->setCelSelection(cels, cel.id());
+            } else {
+                m_document->chooseCel(cel.id());
+            }
+            m_celDrag = CelDrag{pos, false, 0, cel.id()};
+        }
         m_document->execute(doc::makeSetCelProperties(m_document->document(), cel.id(), p));
         return;
     }
@@ -1423,6 +1485,15 @@ void TimelineView::mouseMoveEvent(QMouseEvent *event)
         m_document->previewAudioVolume(audioVolumeAt(pos.x()));
         return;
     }
+    if (m_celDrag) {
+        if (!m_celDrag->moving && (pos - m_celDrag->pressed).manhattanLength() >= QApplication::startDragDistance())
+            m_celDrag->moving = true;
+        if (m_celDrag->moving) {
+            m_celDrag->insertAt = celDropPosition(pos.y());
+            viewport()->update();
+        }
+        return;
+    }
     if (m_markerDrag) {
         // By as many frames as the pointer has moved (it may have taken the flag by its pennant, past the pole).
         const int to = std::max(0, m_markerDrag->from + frameAt(pos.x()) - m_markerDrag->grabbed);
@@ -1487,6 +1558,16 @@ void TimelineView::mouseReleaseEvent(QMouseEvent *)
         const float before = *m_volumeBefore;
         m_volumeBefore.reset();
         m_document->commitAudioVolume(before);
+        viewport()->update();
+        return;
+    }
+    if (m_celDrag) {
+        const CelDrag drag = *m_celDrag;
+        m_celDrag.reset();
+        if (drag.moving)
+            m_document->moveChosenCels(drag.insertAt);
+        else if (m_document->celSelection().size() > 1)
+            m_document->chooseCel(drag.cel); // pressed and let go: that cel alone
         viewport()->update();
         return;
     }

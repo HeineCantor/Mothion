@@ -769,6 +769,59 @@ void DocumentController::removeCamera()
         execute(std::make_unique<doc::SetCameraCommand>(std::nullopt));
 }
 
+std::vector<doc::CelId> DocumentController::celSelection() const
+{
+    std::vector<doc::CelId> chosen;
+    bool hasCurrent = false;
+    for (int i = 0; i < m_document->celCount(); ++i) { // bottom up, those still there
+        const doc::CelId id = m_document->celAt(i).id();
+        if (std::find(m_celSelection.begin(), m_celSelection.end(), id) != m_celSelection.end()) {
+            chosen.push_back(id);
+            hasCurrent = hasCurrent || id == m_currentCel;
+        }
+    }
+    // Another cel became current some other way: it alone.
+    if (!hasCurrent)
+        return m_document->cel(m_currentCel) ? std::vector<doc::CelId>{m_currentCel} : std::vector<doc::CelId>{};
+    return chosen;
+}
+
+void DocumentController::setCelSelection(const std::vector<doc::CelId> &cels, doc::CelId current)
+{
+    if (!m_document->cel(current))
+        return;
+    std::vector<doc::CelId> kept;
+    for (doc::CelId id : cels)
+        if (m_document->cel(id) && std::find(kept.begin(), kept.end(), id) == kept.end())
+            kept.push_back(id);
+    if (std::find(kept.begin(), kept.end(), current) == kept.end())
+        kept.push_back(current);
+    const std::vector<doc::CelId> before = celSelection();
+    m_celSelection = kept;
+    if (current != m_currentCel)
+        setCurrentCel(current);
+    if (celSelection() != before)
+        emit celSelectionChanged();
+}
+
+bool DocumentController::moveChosenCels(int insertAt)
+{
+    auto step = doc::makeMoveCels(*m_document, celSelection(), insertAt);
+    if (!step)
+        return false;
+    execute(std::move(step));
+    return true;
+}
+
+bool DocumentController::shiftChosenCels(bool up)
+{
+    auto step = doc::makeShiftCels(*m_document, celSelection(), up);
+    if (!step)
+        return false;
+    execute(std::move(step));
+    return true;
+}
+
 void DocumentController::chooseCel(doc::CelId id)
 {
     const doc::Cel *cel = m_document->cel(id);
@@ -782,6 +835,10 @@ void DocumentController::chooseCel(doc::CelId id)
         for (const doc::Layer &layer : drawing.layers)
             layers.push_back({id, drawingId, layer.id});
     setLayerSelection(std::move(layers));
+    const std::vector<doc::CelId> before = celSelection();
+    m_celSelection = {id}; // chosen alone
+    if (celSelection() != before)
+        emit celSelectionChanged();
     emit celChosen(id);
 }
 

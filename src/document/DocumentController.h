@@ -424,6 +424,16 @@ public slots:
     // The cel as a whole is chosen (its name in the timeline, as its row in the Layers panel): it is current, no layer is, and
     // the layers of all its frames are the ones the tools act on together (a transform moves every frame of it).
     void chooseCel(doc::CelId cel);
+    // The cels chosen together (Ctrl and Shift in the timeline and the Layers panel), bottom up: always the current cel, and
+    // the others that were chosen with it and are still there. Only the current cel is acted on by the tools.
+    std::vector<doc::CelId> celSelection() const;
+    // Chooses `cels` together, `current` the one that is current (it is among them). One alone is chooseCel() without the
+    // layers being the tools' (the selection only).
+    void setCelSelection(const std::vector<doc::CelId> &cels, doc::CelId current);
+    // The chosen cels moved together: as a block where `insertAt` is (a position of the stack as it is, bottom up, 0 to the
+    // number of cels), or each one place up or down. One undo step. False when nothing moves.
+    bool moveChosenCels(int insertAt);
+    bool shiftChosenCels(bool up);
     // A layer of the current drawing.
     void setCurrentLayer(doc::LayerId layer);
     // Whether the Layers panel's selection is a layer (true) or a cel or a frame, which cannot be drawn on (see
@@ -460,6 +470,8 @@ signals:
     void layerSelectionChanged();
     // chooseCel() was called: the Layers panel shows the cel's row as chosen.
     void celChosen(doc::CelId cel);
+    // The cels chosen together (celSelection()) changed.
+    void celSelectionChanged();
     // Which layer's mask is being edited changed (see setMaskEditing()), or a mask was made or taken away.
     void maskEditingChanged();
     // Undo/redo availability or labels changed.
@@ -510,6 +522,7 @@ private:
     std::string m_currentLayerName; // looked for when the drawing changes
     QPainterPath m_selection;
     std::vector<LayerRef> m_layerSelection;
+    std::vector<doc::CelId> m_celSelection; // (see celSelection())
     std::vector<doc::Layer> m_copiedLayers; // bottom to top
     // The layer the chosen ones merge down into: the one under the lowest of them (kNoId if there is none).
     doc::LayerId layerBelow(const std::vector<doc::LayerId> &ids) const;

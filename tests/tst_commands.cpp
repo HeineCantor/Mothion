@@ -47,6 +47,59 @@ class TestCommands : public QObject
     Q_OBJECT
 
 private slots:
+    // Cels moved together: as a block where they are dropped, or a place up or down, in one step that undoes whole.
+    void severalCelsMoveTogether()
+    {
+        auto doc = std::make_unique<Document>(100, 100);
+        std::vector<CelId> id; // bottom up: A B C D E
+        for (int i = 0; i < 5; ++i) {
+            AddCelCommand add(*doc, i, {std::string(1, char('A' + i))});
+            add.apply(*doc);
+            id.push_back(add.celId());
+        }
+        auto names = [&] {
+            std::string out;
+            for (int i = 0; i < doc->celCount(); ++i)
+                out += doc->celAt(i).properties().name;
+            return out;
+        };
+        History history;
+        auto run = [&](std::unique_ptr<Command> command) {
+            QVERIFY(command);
+            history.execute(*doc, std::move(command));
+        };
+
+        // B and D dropped above E (the position 5 of A B C D E): they go on top, side by side, in their order.
+        run(makeMoveCels(*doc, {id[1], id[3]}, 5));
+        QCOMPARE(names(), std::string("ACEBD"));
+        history.undo(*doc);
+        QCOMPARE(names(), std::string("ABCDE"));
+        // To the bottom, and into the middle (before C: the position 2).
+        run(makeMoveCels(*doc, {id[3], id[4]}, 0));
+        QCOMPARE(names(), std::string("DEABC"));
+        history.undo(*doc);
+        run(makeMoveCels(*doc, {id[0], id[4]}, 2));
+        QCOMPARE(names(), std::string("BAECD"));
+        history.undo(*doc);
+        QVERIFY(!makeMoveCels(*doc, {id[1], id[2]}, 1)); // dropped where they are
+        QVERIFY(!makeMoveCels(*doc, {id[1], id[2]}, 3));
+        QVERIFY(!makeMoveCels(*doc, {}, 2));
+
+        // A place up: each past the one above; a block moves as a block; none moves when the end of the group is at the edge.
+        run(makeShiftCels(*doc, {id[0], id[2]}, true));
+        QCOMPARE(names(), std::string("BADCE"));
+        history.undo(*doc);
+        run(makeShiftCels(*doc, {id[1], id[2]}, true));
+        QCOMPARE(names(), std::string("ADBCE"));
+        history.undo(*doc);
+        QVERIFY(!makeShiftCels(*doc, {id[0], id[4]}, true)); // E is on top
+        run(makeShiftCels(*doc, {id[1], id[3]}, false));
+        QCOMPARE(names(), std::string("BADCE"));
+        history.undo(*doc);
+        QVERIFY(!makeShiftCels(*doc, {id[0], id[3]}, false)); // A is at the bottom
+        QCOMPARE(names(), std::string("ABCDE"));
+    }
+
     void paintCaptureUndoRedo()
     {
         auto [doc, celId] = docWithCel();

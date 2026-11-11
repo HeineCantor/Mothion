@@ -53,7 +53,10 @@ class TimelineView : public QAbstractScrollArea
 
 public:
     // The color of a cel's blocks in the timeline (the Layers panel colors the cel's row with it too).
-    static QColor colorForCel(int celIndex);
+    // The color of a cel belongs to the cel, not to its place among the others: it is taken from its id, so that moving the
+    // cels (or adding, or removing others) leaves every one in its color. `colorSlot()` is what is asked of colorForCel().
+    static int colorSlot(doc::CelId cel) { return int((cel - 1) % 1000000); }
+    static QColor colorForCel(int slot);
 
     explicit TimelineView(document::DocumentController *document, QWidget *parent = nullptr);
 
@@ -253,6 +256,18 @@ private:
         int grabbed = 0; // the frame under the pointer when the flag was taken
     };
     std::optional<MarkerDrag> m_markerDrag;
+    // A cel's name taken and moved up or down (with the cels chosen with it): where the pointer was pressed, and where the
+    // cels would go (a position of the stack, bottom up) once the pointer has moved enough for it to be a drag.
+    struct CelDrag
+    {
+        QPoint pressed;
+        bool moving = false;
+        int insertAt = 0;
+        doc::CelId cel = doc::kNoId; // the one taken
+    };
+    std::optional<CelDrag> m_celDrag;
+    int celDropPosition(int y) const; // the position of the stack the pointer is at
+    int celDropY(int position) const; // where the line of that position is drawn
     std::optional<float> m_volumeBefore; // the volume slider is being dragged: what it was when it began
     std::optional<Resize> m_resize;
     doc::Timing m_previewTiming; // the resized cel's timing during a drag

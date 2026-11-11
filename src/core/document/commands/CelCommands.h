@@ -4,6 +4,7 @@
 #include "core/document/Cel.h"
 
 #include <memory>
+#include <vector>
 
 namespace mothion::doc {
 
@@ -78,5 +79,13 @@ private:
 
 // nullptr if the properties are already `properties`.
 std::unique_ptr<Command> makeSetCelProperties(const Document &doc, CelId cel, CelProperties properties);
+
+// The cels `cels` moved together, as one step: they end up side by side, in the order they have now, where the
+// position `insertAt` is (0..celCount, bottom up, counted in the stack as it is now: just below the cel that is there).
+// nullptr if that changes nothing.
+std::unique_ptr<Command> makeMoveCels(const Document &doc, const std::vector<CelId> &cels, int insertAt);
+// The cels `cels` each one place up (`up`) or down, keeping their order; none moves if the one at the end of the group
+// that goes first is at the edge already. nullptr if nothing moves.
+std::unique_ptr<Command> makeShiftCels(const Document &doc, const std::vector<CelId> &cels, bool up);
 
 } // namespace mothion::doc

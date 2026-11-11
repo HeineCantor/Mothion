@@ -588,6 +588,65 @@ private slots:
     // Blocks on the timeline are selected with clicks (Ctrl adds, Shift a
     // range of the row) and dragged along the time together, in one step,
     // only onto free frames; copied, they are pasted as they are or as copies.
+    // Cels chosen together by their names (Ctrl adds, Shift takes the range), moved together by dragging a name.
+    void celsAreChosenTogetherAndDraggedTogether()
+    {
+        document::DocumentController controller;
+        for (int i = 0; i < 4; ++i)
+            controller.addCel(); // the project has one cel to begin with: five, bottom up
+        const doc::Document &d = controller.document();
+        QCOMPARE(d.celCount(), 5);
+        std::vector<doc::CelId> id;
+        for (int i = 0; i < 5; ++i)
+            id.push_back(d.celAt(i).id());
+        ui::TimelineView view(&controller);
+        view.resize(800, 300);
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        ui::TimelineMetrics m;
+        auto *vp = view.viewport();
+        // The name of the cel with this index (rows are top first).
+        auto name = [&](int celIndex) { return QPoint(60, m.rowY(d.celCount() - 1 - celIndex) + m.rowHeight / 2); };
+        auto chosen = [&] { return controller.celSelection(); };
+
+        QTest::mouseClick(vp, Qt::LeftButton, {}, name(1));
+        QCOMPARE(chosen(), std::vector<doc::CelId>{id[1]});
+        QTest::mouseClick(vp, Qt::LeftButton, Qt::ControlModifier, name(3)); // added
+        QCOMPARE(chosen(), (std::vector<doc::CelId>{id[1], id[3]}));
+        QCOMPARE(controller.currentCel(), id[3]);
+        QTest::mouseClick(vp, Qt::LeftButton, Qt::ControlModifier, name(1)); // taken out
+        QCOMPARE(chosen(), std::vector<doc::CelId>{id[3]});
+        QTest::mouseClick(vp, Qt::LeftButton, Qt::ShiftModifier, name(0)); // the range from the current one: 0 to 3
+        QCOMPARE(chosen(), (std::vector<doc::CelId>{id[0], id[1], id[2], id[3]}));
+        QTest::mouseClick(vp, Qt::LeftButton, {}, name(2)); // a plain click: that one alone
+        QCOMPARE(chosen(), std::vector<doc::CelId>{id[2]});
+
+        // Two of them, 0 and 2, dragged by the name of one to above the top cel (4): they land on top, side by side.
+        QTest::mouseClick(vp, Qt::LeftButton, {}, name(0));
+        QTest::mouseClick(vp, Qt::LeftButton, Qt::ControlModifier, name(2));
+        const QPoint top(60, m.rowY(0) + 2); // the upper half of the top row
+        QTest::mousePress(vp, Qt::LeftButton, {}, name(2));
+        QTest::mouseMove(vp, QPoint(60, name(2).y() - 30));
+        QTest::mouseMove(vp, top);
+        QTest::mouseRelease(vp, Qt::LeftButton, {}, top);
+        auto order = [&] {
+            std::vector<doc::CelId> now;
+            for (int i = 0; i < d.celCount(); ++i)
+                now.push_back(d.celAt(i).id());
+            return now;
+        };
+        QCOMPARE(order(), (std::vector<doc::CelId>{id[1], id[3], id[4], id[0], id[2]}));
+        QCOMPARE(controller.celSelection().size(), std::size_t(2)); // still chosen
+        controller.undo(); // one step
+        QCOMPARE(order(), (std::vector<doc::CelId>{id[0], id[1], id[2], id[3], id[4]}));
+
+        // A click on a name of the chosen ones, without moving, chooses it alone.
+        QTest::mouseClick(vp, Qt::LeftButton, {}, name(1));
+        QTest::mouseClick(vp, Qt::LeftButton, Qt::ControlModifier, name(2));
+        QTest::mouseClick(vp, Qt::LeftButton, {}, name(1));
+        QCOMPARE(chosen(), std::vector<doc::CelId>{id[1]});
+    }
+
     // The camera has a row under the cels: a diamond at each key, which can be clicked and dragged; a double click on
     // an empty cell makes a key; its eye and name in the header.
     void timelineHasACameraRowWithKeys()

@@ -66,7 +66,8 @@ public:
 
     // The background of a cel's row: the color of its blocks in the timeline, deep on a dark theme (under light
     // text) and the color itself, a little lightened, on a light one (under dark text).
-    static QColor celRowColor(int celIndex, const QPalette &palette);
+    // `slot`: the cel's color slot (TimelineView::colorSlot()).
+    static QColor celRowColor(int slot, const QPalette &palette);
 
     // The layer clipboard (Ctrl+C and Ctrl+V while the rows have the focus, and the
     // right click menu): copies the selected layers, of whichever frames; pastes them on
@@ -174,6 +175,7 @@ private:
     QToolButton *m_up;
     QToolButton *m_down;
     QToolButton *m_snapTo;  // the layer actions' second row
+    bool m_syncingCels = false; // (cel rows selected here and cels chosen together elsewhere follow each other)
     QToolButton *m_clip;       // clip the chosen layers to the one below (first of the row of layer actions)
     QToolButton *m_maskAdd;    // make / take away the current layer's mask (left of the snap button)
     QToolButton *m_maskDelete;

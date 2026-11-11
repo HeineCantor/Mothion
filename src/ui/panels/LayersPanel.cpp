@@ -395,8 +395,9 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     auto moving = [this] {
         QList<QTreeWidgetItem *> items;
         if (m_focus == Focus::Cel) {
-            if (QTreeWidgetItem *item = celItem(m_document->currentCel()))
-                items << item;
+            for (doc::CelId id : m_document->celSelection()) // all the cels chosen together
+                if (QTreeWidgetItem *item = celItem(id))
+                    items << item;
         } else if (m_focus == Focus::Layer) {
             for (doc::LayerId id : selectedLayers())
                 if (QTreeWidgetItem *item = layerItem(id))
@@ -412,7 +413,8 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
             if (index < 0)
                 return QColor();
             const bool chosen = celOf(item) == m_document->currentCel() && !m_document->cameraSelected();
-            return chosen ? TimelineView::colorForCel(index) : celRowColor(index, QApplication::palette());
+            const int slot = TimelineView::colorSlot(celOf(item)); // the cel's own color, wherever it stands
+            return chosen ? TimelineView::colorForCel(slot) : celRowColor(slot, QApplication::palette());
         },
         [this](QTreeWidgetItem *item) {
             if (kindOf(item) != Row::Layer)
@@ -570,6 +572,34 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
             }
             rowChosen(selected.last());
         }
+        // Cel rows selected together (Ctrl, Shift): the cels chosen together.
+        if (!m_syncingCels && current && kindOf(current) == Row::Cel) {
+            std::vector<doc::CelId> cels;
+            for (QTreeWidgetItem *item : selected)
+                if (kindOf(item) == Row::Cel)
+                    cels.push_back(celOf(item));
+            if (!cels.empty()) {
+                m_syncingCels = true;
+                m_document->setCelSelection(cels, current->isSelected() ? celOf(current) : cels.back());
+                m_syncingCels = false;
+            }
+        }
+        syncHeader();
+        paintRowColors();
+    });
+    // Chosen together elsewhere (the timeline): their rows selected here.
+    connect(m_document, &DocumentController::celSelectionChanged, this, [this] {
+        if (m_syncingCels)
+            return;
+        m_syncingCels = true;
+        const QSignalBlocker block(m_tree);
+        const std::vector<doc::CelId> cels = m_document->celSelection();
+        for (int i = 0; i < m_tree->topLevelItemCount(); ++i) {
+            QTreeWidgetItem *item = m_tree->topLevelItem(i);
+            if (kindOf(item) == Row::Cel)
+                item->setSelected(std::find(cels.begin(), cels.end(), celOf(item)) != cels.end());
+        }
+        m_syncingCels = false;
         syncHeader();
         paintRowColors();
     });
@@ -803,7 +833,7 @@ void LayersPanel::rebuildTree()
         connect(lock, &QToolButton::clicked, this,
                 [toggleCel](bool locked) { toggleCel([locked](doc::CelProperties &p) { p.locked = locked; }); });
         QTreeWidgetItem *celRow = addRow(nullptr, Row::Cel, celId, doc::kNoId, doc::kNoId, row);
-        celRow->setBackground(0, celRowColor(i, QApplication::palette())); // the cel's color, as in the timeline
+        celRow->setBackground(0, celRowColor(TimelineView::colorSlot(celId), QApplication::palette())); // the cel's color, as in the timeline
 
         // Its frames, in the order the timeline first shows them (the ones
         // not shown anywhere last).
@@ -927,7 +957,7 @@ void LayersPanel::paintRowColors()
     m_tree->setPalette(treePalette);
     std::function<void(QTreeWidgetItem *)> paint = [&](QTreeWidgetItem *item) {
         if (kindOf(item) == Row::Cel) // the cel's color follows the theme, pale on a light one
-            item->setBackground(0, celRowColor(m_document->document().indexOf(celOf(item)), app));
+            item->setBackground(0, celRowColor(TimelineView::colorSlot(celOf(item)), app));
         if (QWidget *row = m_tree->itemWidget(item, 0)) {
             const QPalette pal = app;
             row->setPalette(pal);
@@ -1224,6 +1254,10 @@ void LayersPanel::restoreSelection()
             kept << layerOf(target);
     }
     m_selected = kept;
+    if (m_focus == Focus::Cel) // the cels chosen together keep their rows selected
+        for (doc::CelId id : m_document->celSelection())
+            if (QTreeWidgetItem *item = celItem(id))
+                item->setSelected(true);
 }
 
 QList<doc::LayerId> LayersPanel::selectedLayers() const
@@ -1243,8 +1277,10 @@ QPixmap LayersPanel::dragPreview() const
     // The rows that move as shown, top first, stacked, on the selection color.
     QList<QTreeWidgetItem *> items;
     if (m_focus == Focus::Cel) {
-        if (QTreeWidgetItem *item = celItem(m_document->currentCel()))
-            items << item;
+        const std::vector<doc::CelId> cels = m_document->celSelection();
+        for (auto it = cels.rbegin(); it != cels.rend(); ++it) // top first
+            if (QTreeWidgetItem *item = celItem(*it))
+                items << item;
     } else {
         const QList<doc::LayerId> layers = selectedLayers();
         for (auto it = layers.rbegin(); it != layers.rend(); ++it) // top first
@@ -1278,9 +1314,9 @@ QPixmap LayersPanel::dragPreview() const
     return preview;
 }
 
-QColor LayersPanel::celRowColor(int celIndex, const QPalette &palette)
+QColor LayersPanel::celRowColor(int slot, const QPalette &palette)
 {
-    const QColor color = TimelineView::colorForCel(celIndex);
+    const QColor color = TimelineView::colorForCel(slot);
     if (palette.color(QPalette::Base).lightness() < 128)
         return color.darker(170); // on a dark theme, deep, under the light text
     // On a light one the color itself, a little lightened, under the dark text.
@@ -1619,7 +1655,7 @@ void LayersPanel::moveSelectedToRow(int row)
 void LayersPanel::moveSelected(int direction)
 {
     if (m_focus == Focus::Cel) {
-        moveCurrentCel(m_document->document().indexOf(m_document->currentCel()) + direction);
+        m_document->shiftChosenCels(direction > 0); // all the chosen cels, together
         return;
     }
     // The stack as it will be, step by step: a selected layer swaps with an
@@ -1736,9 +1772,8 @@ bool LayersPanel::dropAt(const QPoint &pos)
             top = top->parent();
         row = m_tree->indexOfTopLevelItem(top) + (lowerHalf || top != target ? 1 : 0);
     }
-    const int from = n - 1 - d.indexOf(m_document->currentCel()); // its row
-    const int to = row > from ? row - 1 : row;                     // counted without it
-    moveCurrentCel(n - 1 - std::clamp(to, 0, n - 1));
+    // The chosen cels together, above the cel of the row before `row` (rows are top first, the stack bottom up).
+    m_document->moveChosenCels(n - row);
     return true;
 }
 
@@ -1836,16 +1871,22 @@ void LayersPanel::syncHeader()
         const int index = cel ? d.indexOf(cel->id()) : -1;
         canAdd = cel != nullptr; // its blend mode and opacity are the timeline's to change
         canRemove = cel && d.celCount() > 1; // keep at least one cel
-        canUp = cel && index + 1 < d.celCount();
-        canDown = cel && index > 0;
+        int lowest = index, highest = index; // of the cels chosen together
+        for (doc::CelId id : m_document->celSelection()) {
+            lowest = std::min(lowest, d.indexOf(id));
+            highest = std::max(highest, d.indexOf(id));
+        }
+        canUp = cel && highest + 1 < d.celCount();
+        canDown = cel && lowest > 0;
         if (cel) {
             opacity = cel->properties().opacity;
             blend = cel->properties().blend;
         }
         m_add->setToolTip(tr("New cel"));
         m_remove->setToolTip(tr("Delete the cel"));
-        m_up->setToolTip(tr("Move the cel up"));
-        m_down->setToolTip(tr("Move the cel down"));
+        const bool several = m_document->celSelection().size() > 1;
+        m_up->setToolTip(several ? tr("Move the cels up") : tr("Move the cel up"));
+        m_down->setToolTip(several ? tr("Move the cels down") : tr("Move the cel down"));
         break;
     }
     case Focus::Camera:
