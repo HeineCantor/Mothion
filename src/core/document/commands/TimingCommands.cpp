@@ -150,4 +150,21 @@ ChangeSet SetFrameCountCommand::revert(Document &doc)
     return changes;
 }
 
+ChangeSet SetFrameRateCommand::apply(Document &doc)
+{
+    m_before = doc.frameRate();
+    doc.setFrameRate(m_after);
+    ChangeSet changes;
+    changes.structure = true;
+    return changes;
+}
+
+ChangeSet SetFrameRateCommand::revert(Document &doc)
+{
+    doc.setFrameRate(m_before);
+    ChangeSet changes;
+    changes.structure = true;
+    return changes;
+}
+
 } // namespace mothion::doc

@@ -48,7 +48,8 @@ public:
 
     int frame() const { return m_frame; }
     int frameCount() const { return m_frameCount; } // of the loop
-    // The frames looped, first and last (all of them unless narrowed).
+    // The frames looped, first and last: the document's play range (set on the Timeline), kept to the frames this
+    // window plays.
     int loopStart() const;
     int loopEnd() const;
     void setLoopRange(int first, int last);
@@ -88,7 +89,6 @@ private:
     QSlider *m_slider;
     QLabel *m_position;
     QWidget *m_loopBar;
-    QLabel *m_loopLabel;
     QPushButton *m_play; // checked while playing: then it offers Stop
     QPushButton *m_goTo;
     QPushButton *m_flip; // mirrors the picture
@@ -98,8 +98,6 @@ private:
     QTimer m_refresh; // edits come in bursts (a stroke): composed again once after them
     int m_frame = 0;
     int m_frameCount = 1;
-    int m_loopFirst = 0;
-    int m_loopLast = -1; // -1: to the end, whatever it becomes
     std::vector<doc::DrawingId> m_shown; // what the composed image shows
     std::vector<doc::CelPose> m_shownPoses; // and where the cels are moved to (a held drawing moves on its keys)
     bool m_stale = true;                 // the document changed since it was composed

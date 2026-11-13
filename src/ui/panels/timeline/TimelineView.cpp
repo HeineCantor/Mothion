@@ -31,6 +31,7 @@ using document::DocumentController;
 
 namespace {
 
+const QColor kRangeColor(0x3a, 0x9b, 0xdc);
 const QColor kCursorColor(0xe0, 0x4a, 0x4a);
 const QColor kSecondLine(0x60, 0x60, 0x68);
 
@@ -47,6 +48,7 @@ TimelineView::TimelineView(DocumentController *document, QWidget *parent)
     , m_document(document)
 {
     setFocusPolicy(Qt::StrongFocus);
+    connect(horizontalScrollBar(), &QScrollBar::sliderReleased, this, &TimelineView::updateScrollBars);
     viewport()->setMouseTracking(true); // resize cursor over block edges
 
     connect(QGuiApplication::clipboard(), &QClipboard::dataChanged, this, [this] {
@@ -331,6 +333,15 @@ QColor TimelineView::colorForCel(int slot)
 
 // --- scrolling --------------------------------------------------------------------
 
+void TimelineView::setPlayRange(int first, int last)
+{
+    if (first == m_playFirst && last == m_playLast)
+        return;
+    m_playFirst = first;
+    m_playLast = last;
+    viewport()->update();
+}
+
 void TimelineView::setFrameWidth(int width)
 {
     width = std::clamp(width, 6, 60);
@@ -385,7 +396,16 @@ void TimelineView::updateScrollBars()
     const int visibleW = std::max(0, vp.width() - m_metrics.headerWidth);
     const int visibleH = std::max(0, vp.height() - m_metrics.rulerHeight);
 
-    horizontalScrollBar()->setRange(0, std::max(0, contentW - visibleW));
+    // Free scrolling both ways with no end (before frame 1 too): the bar covers the animation, and a little more than
+    // the position it is at, so the wheel and the arrow keys go on past the ends a step at a time while the thumb
+    // stays easy to drag. The room is not changed while the thumb is held, and shrinks back when it lets go.
+    const int natural = std::max(0, contentW - visibleW);
+    if (!horizontalScrollBar()->isSliderDown()) {
+        const int value = horizontalScrollBar()->value(), margin = 6 * m_metrics.frameWidth;
+        m_roomLeft = std::max(margin, margin - value); // always a step past each end to go on with
+        m_roomRight = std::max(margin, value + margin - natural);
+    }
+    horizontalScrollBar()->setRange(-m_roomLeft, natural + m_roomRight);
     horizontalScrollBar()->setPageStep(visibleW);
     horizontalScrollBar()->setSingleStep(m_metrics.frameWidth);
     verticalScrollBar()->setRange(0, std::max(0, contentH - visibleH));
@@ -414,6 +434,8 @@ void TimelineView::resizeEvent(QResizeEvent *event)
 void TimelineView::scrollContentsBy(int, int)
 {
     m_metrics.scrollX = horizontalScrollBar()->value();
+    if (!horizontalScrollBar()->isSliderDown())
+        updateScrollBars();
     m_metrics.scrollY = verticalScrollBar()->value();
     viewport()->update();
 }
@@ -501,8 +523,7 @@ void TimelineView::paintCells(QPainter &p) const
     const TimelineMetrics &m = m_metrics;
     const doc::Document &d = m_document->document();
     const int bottom = viewport()->height();
-    const int frames = displayedFrames();
-    const int endX = m.frameX(frames);
+    const int endX = viewport()->width(); // the grid has no end to the right
     const int fps = std::max(1, int(std::lround(d.frameRate().fps())));
 
     // Row backgrounds (the current cel's row is outlined: paintSelection()).
@@ -512,19 +533,28 @@ void TimelineView::paintCells(QPainter &p) const
     }
     if (hasAudio()) // the audio row, under the cels
         p.fillRect(QRect(m.headerWidth, audioTop(), endX - m.headerWidth, kAudioRowHeight), palette().alternateBase());
-    // Past the scene length: dimmed.
+    // Before the first frame and past the scene length: dimmed.
     p.fillRect(QRect(m.frameX(d.frameCount()), m.rulerHeight, std::max(0, endX - m.frameX(d.frameCount())), bottom),
                QColor(0, 0, 0, 60));
+    p.fillRect(QRect(m.headerWidth, m.rulerHeight, std::max(0, m.frameX(0) - m.headerWidth), bottom), QColor(0, 0, 0, 60));
     // Current frame column.
     p.fillRect(QRect(m.frameX(m_document->currentFrame()), m.rulerHeight, m.frameWidth, bottom),
                QColor(kCursorColor.red(), kCursorColor.green(), kCursorColor.blue(), 40));
 
     // Frame grid: thin line per frame, strong line every second.
-    const int first = std::max(0, m.frameAt(m.headerWidth));
-    const int last = std::min(frames, m.frameAt(viewport()->width()) + 1);
+    const int first = m.frameAt(m.headerWidth);
+    const int last = m.frameAt(viewport()->width()) + 1;
     for (int f = first; f <= last; ++f) {
-        p.setPen(f % fps == 0 ? kSecondLine : palette().mid().color());
+        p.setPen((f - m_playFirst) % fps == 0 ? kSecondLine : palette().mid().color());
         p.drawLine(m.frameX(f), m.rulerHeight, m.frameX(f), bottom);
+    }
+
+    // The play range: its two edges down the cells.
+    if (m_playLast >= m_playFirst) {
+        p.setPen(QPen(kRangeColor, 2.0));
+        for (int x : {m.frameX(m_playFirst), m.frameX(m_playLast + 1)})
+            if (x >= m.headerWidth)
+                p.drawLine(x, m.rulerHeight, x, bottom);
     }
 
     // Exposures.
@@ -1138,8 +1168,18 @@ void TimelineView::paintRuler(QPainter &p) const
     const TimelineMetrics &m = m_metrics;
     p.fillRect(QRect(m.headerWidth, 0, viewport()->width(), m.rulerHeight), palette().window());
 
-    const int first = std::max(0, m.frameAt(m.headerWidth));
-    const int last = std::min(displayedFrames() - 1, m.frameAt(viewport()->width()));
+    // The play range, as a band along the foot of the ruler.
+    if (m_playLast >= m_playFirst) {
+        const int x0 = std::max(m.headerWidth, m.frameX(m_playFirst)), x1 = m.frameX(m_playLast + 1);
+        if (x1 > x0) {
+            QColor band = kRangeColor;
+            band.setAlpha(110);
+            p.fillRect(QRect(x0, m.rulerHeight - 6, x1 - x0, 6), band);
+            p.fillRect(QRect(x0, m.markerStrip, x1 - x0, m.rulerHeight - m.markerStrip - 6), QColor(band.red(), band.green(), band.blue(), 40));
+        }
+    }
+    const int first = m.frameAt(m.headerWidth);
+    const int last = m.frameAt(viewport()->width());
     // Label every frame if there is room, otherwise every 5 / 10.
     const int labelEvery = m.frameWidth >= 22 ? 1 : (m.frameWidth >= 10 ? 5 : 10);
     for (int f = first; f <= last; ++f) {

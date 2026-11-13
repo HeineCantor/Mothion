@@ -14,6 +14,8 @@ enum class IconId {
     Folder, Frame, PreviousFrame, NextFrame, Wrench, Play, Stop, Pause, Speaker, SpeakerOff, Camera, MaskAdd, MaskDelete, ClipLayer, Trajectory, Flag, PreviousMarker, NextMarker, Keyframe, AddLayer, AddPerspective, AddVector,
     // What a layer is, in its row (raster, vector, perspective), and the rasterize button.
     KindRaster, KindVector, KindPerspective, Rasterize,
+    // The timeline bar: a new frame (a frame with a plus) and the onion skin (an onion).
+    NewFrame, Onion,
 };
 
 // Provisional icons, drawn in code as simple line art on a 24x24 grid.

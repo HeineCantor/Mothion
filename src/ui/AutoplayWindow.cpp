@@ -180,7 +180,6 @@ AutoplayWindow::AutoplayWindow(document::DocumentController *document, audio::Au
     , m_slider(new QSlider(Qt::Horizontal, this))
     , m_position(new QLabel(this))
     , m_loopBar(new LoopBar(this))
-    , m_loopLabel(new QLabel(this))
     , m_play(new QPushButton(this))
     , m_goTo(new QPushButton(tr("Go to frame"), this))
     , m_flip(new QPushButton(icon(IconId::FlipHorizontal), tr("Flip"), this))
@@ -224,7 +223,6 @@ AutoplayWindow::AutoplayWindow(document::DocumentController *document, audio::Au
     controls->addWidget(m_goTo);
     controls->addWidget(m_flip);
     controls->addWidget(m_sound);
-    controls->addWidget(m_loopLabel);
     controls->addStretch(1);
     controls->addWidget(new QLabel(tr("Speed"), this));
     controls->addWidget(m_speed);
@@ -236,6 +234,7 @@ AutoplayWindow::AutoplayWindow(document::DocumentController *document, audio::Au
     auto *loopBar = static_cast<LoopBar *>(m_loopBar);
     loopBar->changed = [this](int first, int last) { setLoopRange(first, last); };
     loopBar->reset = [this] { setLoopRange(0, m_frameCount - 1); };
+    connect(m_document, &document::DocumentController::playRangeChanged, this, &AutoplayWindow::updateLoopBar);
     connect(&m_timer, &QTimer::timeout, this, &AutoplayWindow::advance);
     m_refresh.setSingleShot(true);
     m_refresh.setInterval(100);
@@ -395,28 +394,27 @@ void AutoplayWindow::updateRange()
 
 int AutoplayWindow::loopEnd() const
 {
-    return m_loopLast < 0 ? m_frameCount - 1 : std::min(m_loopLast, m_frameCount - 1);
+    return std::clamp(m_document->playRangeLast(), 0, m_frameCount - 1);
 }
 
 int AutoplayWindow::loopStart() const
 {
-    return std::min(m_loopFirst, loopEnd());
+    return std::clamp(m_document->playRangeFirst(), 0, loopEnd());
 }
 
 void AutoplayWindow::setLoopRange(int first, int last)
 {
     last = std::clamp(last, 0, m_frameCount - 1);
-    m_loopFirst = std::clamp(first, 0, last);
-    m_loopLast = last >= m_frameCount - 1 ? -1 : last; // at the end: follows it as it grows
-    updateLoopBar();
+    first = std::clamp(first, 0, last);
+    // At the end: it follows it as the scene grows.
+    m_document->setPlayRange(first, last >= m_frameCount - 1 ? document::DocumentController::kSceneEnd : last);
 }
 
 void AutoplayWindow::updateLoopBar()
 {
     static_cast<LoopBar *>(m_loopBar)
         ->setState(m_frameCount, loopStart(), loopEnd(), m_slider->style()->pixelMetric(QStyle::PM_SliderLength, nullptr, m_slider) / 2);
-    const bool narrowed = loopStart() > 0 || loopEnd() < m_frameCount - 1;
-    m_loopLabel->setText(narrowed ? tr("Loop %1–%2").arg(loopStart() + 1).arg(loopEnd() + 1) : QString());
+    m_position->setText(QStringLiteral("%1 / %2").arg(m_frame + 1).arg(loopEnd() + 1)); // of the Timeline's range
 }
 
 void AutoplayWindow::documentChanged()
@@ -468,7 +466,7 @@ void AutoplayWindow::showFrame(int frame)
         const QSignalBlocker block(m_slider);
         m_slider->setValue(m_frame);
     }
-    m_position->setText(QStringLiteral("%1 / %2").arg(m_frame + 1).arg(m_frameCount));
+    m_position->setText(QStringLiteral("%1 / %2").arg(m_frame + 1).arg(loopEnd() + 1)); // to where the Timeline's range ends
     std::vector<doc::DrawingId> shown = exposedAt(m_frame);
     // A drawing held over frames is not drawn again, unless its cel is moved differently on this one (its keys).
     std::vector<doc::CelPose> poses = posesAt(m_frame);

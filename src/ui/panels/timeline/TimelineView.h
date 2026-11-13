@@ -63,6 +63,9 @@ public:
 
     int frameWidth() const { return m_metrics.frameWidth; }
     void setFrameWidth(int width);
+    // The frames that play (0-based, both included): shown as a band on the ruler and an edge on each side down the
+    // cells, and the lines that mark the seconds count from the first of them.
+    void setPlayRange(int first, int last);
 
     // Frames shown: the scene length, extended past the last exposure.
     int displayedFrames() const;
@@ -109,6 +112,10 @@ protected:
     bool event(QEvent *event) override; // Ctrl+C / V here are the timeline's, for blocks
 
 private:
+    int m_roomLeft = 0; // pixels of scroll before frame 1 and past the last frame, grown as the scroll nears them
+    int m_roomRight = 0;
+    int m_playFirst = 0;
+    int m_playLast = -1; // -1: no range shown (the whole scene)
     // Hold-length drag in progress.
     struct Resize
     {

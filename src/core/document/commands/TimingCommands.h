@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/document/Command.h"
+#include "core/document/Document.h"
 #include "core/document/Timing.h"
 
 #include <memory>
@@ -39,6 +40,21 @@ public:
 private:
     int m_after;
     int m_before = 0;
+};
+
+// The frame rate, in frames per second.
+class SetFrameRateCommand : public Command
+{
+public:
+    explicit SetFrameRateCommand(FrameRate after) : m_after(after) {}
+
+    CommandKind kind() const override { return CommandKind::SceneLength; }
+    ChangeSet apply(Document &doc) override;
+    ChangeSet revert(Document &doc) override;
+
+private:
+    FrameRate m_after;
+    FrameRate m_before;
 };
 
 // Factories: compute the edited timing from the cel's current one.

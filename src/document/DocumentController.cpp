@@ -172,6 +172,9 @@ void DocumentController::replaceDocument(std::unique_ptr<doc::Document> document
     }
 
     m_tempPoseCel = doc::kNoId;
+    m_playFirst = 0;
+    m_playLast = kSceneEnd;
+    emit playRangeChanged();
     emit documentReplaced();
     if (cameraWasSelected)
         emit cameraSelectionChanged();
@@ -1498,6 +1501,31 @@ void DocumentController::setSceneLength(int frames)
     if (frames == m_document->frameCount())
         return;
     execute(std::make_unique<doc::SetFrameCountCommand>(frames));
+}
+
+void DocumentController::setFrameRate(int fps)
+{
+    const doc::FrameRate rate{std::max(fps, 1), 1};
+    if (rate == m_document->frameRate())
+        return;
+    execute(std::make_unique<doc::SetFrameRateCommand>(rate));
+}
+
+int DocumentController::playRangeLast() const
+{
+    const int end = m_playLast == kSceneEnd ? std::max(0, m_document->frameCount() - 1) : m_playLast;
+    return std::max(end, m_playFirst);
+}
+
+void DocumentController::setPlayRange(int first, int last)
+{
+    if (last != kSceneEnd)
+        last = std::max(last, first);
+    if (first == m_playFirst && last == m_playLast)
+        return;
+    m_playFirst = first;
+    m_playLast = last;
+    emit playRangeChanged();
 }
 
 int DocumentController::sceneLength() const { return m_document->frameCount(); }

@@ -20,6 +20,11 @@ TimelinePlayer::TimelinePlayer(document::DocumentController *document, audio::Au
             restartAt(frame);
     });
     connect(m_document, &document::DocumentController::documentReplaced, this, &TimelinePlayer::stop);
+    connect(m_document, &document::DocumentController::playRangeChanged, this, [this] {
+        if (isPlaying())
+            restartAt(m_document->currentFrame());
+        emit rangeChanged();
+    });
 }
 
 void TimelinePlayer::start()
@@ -32,7 +37,15 @@ void TimelinePlayer::start()
     m_timer.start();
     if (m_audio)
         m_audio->setRate(1.0);
-    restartAt(m_document->currentFrame());
+    // From where the frame is, or from the start of the range if it is out of it.
+    int frame = m_document->currentFrame();
+    if (frame < firstFrame() || frame > lastFrame()) {
+        frame = firstFrame();
+        m_driving = true;
+        m_document->setCurrentFrame(frame); // (held at 0 if the range starts before the scene)
+        m_driving = false;
+    }
+    restartAt(frame);
     emit playingChanged(true);
 }
 
@@ -49,32 +62,36 @@ void TimelinePlayer::stop()
 void TimelinePlayer::restartAt(int frame)
 {
     m_startFrame = frame;
+    m_shown = frame;
     m_clock.start();
     if (m_audio)
-        m_audio->play(frame);
+        m_audio->play(std::max(0, frame));
 }
 
 void TimelinePlayer::tick()
 {
-    const int length = std::max(1, m_document->document().frameCount());
+    const int first = firstFrame(), length = lastFrame() - first + 1;
     const double fps = std::max(1.0, m_document->document().frameRate().fps());
     // The frame the clock says: the start, plus the frames that have gone by, round the scene.
     const qint64 passed = qint64(double(m_clock.elapsed()) * fps / 1000.0);
-    const int frame = int((m_startFrame + passed) % length);
-    if (frame == m_document->currentFrame())
+    // Where the clock started, in the range (a start out of it, as a click on the ruler past its end, counts as its first).
+    const int offset = m_startFrame >= first && m_startFrame < first + length ? m_startFrame - first : 0;
+    const int frame = first + int((offset + passed) % length);
+    if (frame == m_shown)
         return;
-    const bool wrapped = frame < m_document->currentFrame();
+    const bool wrapped = frame < m_shown;
+    m_shown = frame;
     m_driving = true;
-    m_document->setCurrentFrame(frame);
+    m_document->setCurrentFrame(std::max(0, frame));
     m_driving = false;
     if (!m_audio)
         return;
     if (wrapped) { // round again: the sound from the start too
         m_startFrame = frame;
         m_clock.start();
-        m_audio->play(frame);
+        m_audio->play(std::max(0, frame));
     } else {
-        m_audio->resync(frame);
+        m_audio->resync(std::max(0, frame));
     }
 }
 

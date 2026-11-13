@@ -537,6 +537,33 @@ void drawGlyph(QPainter &p, IconId id)
         path.closeSubpath();
         break;
     }
+    case IconId::NewFrame: // a frame of film with a plus beside it
+        path.addRect(QRectF(3.5, 5.5, 12, 15));
+        path.addRect(QRectF(6.5, 9, 6, 8));
+        for (double y : {7.5, 13.0, 18.5})
+            path.addRect(QRectF(4.5, y - 1, 1, 2));
+        path.moveTo(19, 3.5);
+        path.lineTo(19, 9.5);
+        path.moveTo(16, 6.5);
+        path.lineTo(22, 6.5);
+        break;
+    case IconId::Onion: // a bulb with its layers and a sprout
+        path.moveTo(12, 6);
+        path.cubicTo(18, 8, 21, 12, 21, 15);
+        path.cubicTo(21, 19, 17, 21, 12, 21);
+        path.cubicTo(7, 21, 3, 19, 3, 15);
+        path.cubicTo(3, 12, 6, 8, 12, 6);
+        path.moveTo(12, 6);
+        path.cubicTo(9, 10, 8, 13, 8, 15);
+        path.cubicTo(8, 18, 10, 20, 12, 21);
+        path.moveTo(12, 6);
+        path.cubicTo(15, 10, 16, 13, 16, 15);
+        path.cubicTo(16, 18, 14, 20, 12, 21);
+        path.moveTo(12, 6);
+        path.lineTo(12, 3);
+        path.moveTo(12, 4.5);
+        path.cubicTo(13, 3, 15, 3, 16, 3.5);
+        break;
     case IconId::Add:
         path.moveTo(12, 5);
         path.lineTo(12, 19);

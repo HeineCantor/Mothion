@@ -26,6 +26,7 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 
+#include <algorithm>
 #include <cmath>
 
 namespace mothion::ui {
@@ -158,16 +159,16 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
                                 tr("Previous frame of the cel (Shift+,)"), this);
     auto *nextFrame = celButton(IconId::NextFrame, QStringLiteral("nextFrame"), tr("Next frame of the cel (Shift+.)"),
                                 this);
-    auto *frameLabel = new QLabel(this);
-    frameLabel->setMinimumWidth(150);
 
-    auto *newDrawing = new QPushButton(tr("New frame"), this);
+    auto *newDrawing = celButton(IconId::NewFrame, QStringLiteral("newFrame"), QString(), this);
     newDrawing->setToolTip(tr("Put an empty frame at this point of the current cel; the frames after it move one place on"));
 
     // Onion skin: the button turns it on, its arrow opens the settings.
     auto *onion = new QToolButton(this);
     onion->setObjectName(QStringLiteral("onionSkin"));
-    onion->setText(tr("Onion skin"));
+    onion->setIcon(icon(IconId::Onion));
+    onion->setIconSize(QSize(16, 16));
+    onion->setAutoRaise(true);
     onion->setToolTip(tr("Show the frames around this one (the arrow: settings)"));
     onion->setCheckable(true);
     onion->setChecked(toolState->onionSkin().enabled);
@@ -188,16 +189,12 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
     // The audio track: the same as File > Import audio (the window asks for the file).
     auto *importAudio = celButton(IconId::Speaker, QStringLiteral("importAudio"),
                                   tr("Import audio… (replaces the track already in the project)"), this);
-    importAudio->setText(tr("Audio"));
-    importAudio->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     connect(importAudio, &QToolButton::clicked, m_view, &TimelineView::audioImportRequested);
 
     // A keyframe of the camera at the current frame, at the pose the camera has there (the camera is made if there
     // is none: it then shows the whole sheet).
     auto *cameraKey = celButton(IconId::Camera, QStringLiteral("cameraKey"),
                                 tr("Camera keyframe at this frame (makes the camera if there is none)"), this);
-    cameraKey->setText(tr("Camera key"));
-    cameraKey->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     connect(cameraKey, &QToolButton::clicked, this, [this] {
         const int frame = m_document->currentFrame();
         const auto &camera = m_document->camera();
@@ -214,8 +211,6 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
                                 "Transform and Move then change the pose of the cel (the key, or, on a frame with none, "
                                 "a pose that goes when you leave the frame unless you press this button)."),
                              this);
-    celKey->setText(tr("Cel key"));
-    celKey->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     celKey->setCheckable(true);
     connect(celKey, &QToolButton::clicked, m_document, [this] { m_document->toggleChosenCelKeys(); }); // all the chosen cels
     auto syncCelKey = [this, celKey] {
@@ -234,8 +229,6 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
                                 "double click its flag to name it, drag it to move it, Alt+, and Alt+. go from one to "
                                 "the next."),
                              this);
-    marker->setText(tr("Marker"));
-    marker->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     marker->setCheckable(true);
     connect(marker, &QToolButton::clicked, m_document, &DocumentController::toggleMarker);
     // To the markers on either side of the current frame, as the arrows go to the frames (off when there is none).
@@ -255,6 +248,33 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
     connect(m_document, &DocumentController::documentReplaced, marker, syncMarker);
     syncMarker();
 
+    // The frames that play (from the first to the last, 1-based as the frame counter) and the speed. The range is not
+    // saved with the project: it is for the one playing it.
+    auto labelled = [this](const QString &text, QSpinBox *spin) {
+        auto *box = new QWidget(this);
+        auto *row = new QHBoxLayout(box);
+        row->setContentsMargins(0, 0, 0, 0);
+        row->setSpacing(3);
+        row->addWidget(new QLabel(text, box));
+        row->addWidget(spin);
+        return box;
+    };
+    auto *rangeFrom = new QSpinBox(this);
+    rangeFrom->setObjectName(QStringLiteral("rangeStart"));
+    rangeFrom->setToolTip(tr("First frame that plays"));
+    auto *rangeTo = new QSpinBox(this);
+    rangeTo->setObjectName(QStringLiteral("rangeEnd"));
+    rangeTo->setToolTip(tr("Last frame that plays"));
+    auto *fpsSpin = new QSpinBox(this);
+    fpsSpin->setObjectName(QStringLiteral("fpsSpin"));
+    fpsSpin->setToolTip(tr("Frames per second"));
+    fpsSpin->setRange(1, 100000);
+    // Any whole number for the range, negative too: the timeline is not bound to the scene.
+    for (QSpinBox *s : {rangeFrom, rangeTo})
+        s->setRange(-1000000, 1000000);
+    for (QSpinBox *s : {rangeFrom, rangeTo, fpsSpin})
+        s->setKeyboardTracking(false); // a number typed counts when entered
+
     auto *bar = new QHBoxLayout;
     bar->setContentsMargins(4, 2, 4, 2);
     bar->setSpacing(4);
@@ -263,7 +283,6 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
     bar->addWidget(prev);
     bar->addWidget(next);
     bar->addWidget(nextFrame);
-    bar->addWidget(frameLabel);
     bar->addWidget(newDrawing);
     bar->addWidget(onion);
     bar->addWidget(importAudio);
@@ -273,6 +292,9 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
     bar->addWidget(marker);
     bar->addWidget(nextMarker);
     bar->addStretch(1);
+    bar->addWidget(labelled(tr("From"), rangeFrom));
+    bar->addWidget(labelled(tr("To"), rangeTo));
+    bar->addWidget(labelled(tr("fps"), fpsSpin));
 
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -281,23 +303,36 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
     layout->addLayout(celBar());
     layout->addWidget(m_view, 1);
 
-    auto showFrame = [this, frameLabel] {
-        const doc::Document &d = m_document->document();
-        frameLabel->setText(tr("Frame %1 / %2  ·  %3 fps")
-                                .arg(m_document->currentFrame() + 1)
-                                .arg(d.frameCount())
-                                .arg(d.frameRate().fps(), 0, 'g', 5));
+    // The number boxes show the player's range and the document's rate; changing them changes those. The last frame
+    // stays "the end of the scene" until it is set, so a longer scene plays whole.
+    auto syncRange = [this, rangeFrom, rangeTo, fpsSpin] {
+        const QSignalBlocker b1(rangeFrom), b2(rangeTo), b3(fpsSpin);
+        rangeFrom->setValue(m_player->firstFrame() + 1);
+        rangeTo->setValue(m_player->lastFrame() + 1);
+        fpsSpin->setValue(int(std::lround(m_document->document().frameRate().fps())));
+        m_view->setPlayRange(m_player->firstFrame(), m_player->lastFrame());
     };
-    showFrame();
-    connect(m_document, &DocumentController::currentFrameChanged, this, showFrame);
-    connect(m_document, &DocumentController::structureChanged, this, showFrame);
+    syncRange();
+    connect(m_player, &TimelinePlayer::rangeChanged, this, syncRange);
+    connect(m_document, &DocumentController::structureChanged, this, syncRange);
+    connect(m_document, &DocumentController::documentReplaced, this, syncRange);
+    connect(rangeFrom, &QSpinBox::valueChanged, this, [this, rangeFrom] {
+        const int first = rangeFrom->value() - 1;
+        m_player->setRange(first, m_player->followsSceneEnd() ? TimelinePlayer::kSceneEnd : m_player->lastFrame()); // pushes the last on
+    });
+    connect(rangeTo, &QSpinBox::valueChanged, this, [this, rangeTo] {
+        const int last = rangeTo->value() - 1;
+        const int first = std::min(m_player->firstFrame(), last); // the first frame stays at or before it
+        m_player->setRange(first, last);
+    });
+    connect(fpsSpin, &QSpinBox::valueChanged, m_document, [this](int fps) { m_document->setFrameRate(fps); });
     connect(prev, &QToolButton::clicked, m_document,
             [this] { m_document->setCurrentFrame(m_document->currentFrame() - 1); });
     connect(next, &QToolButton::clicked, m_document,
             [this] { m_document->setCurrentFrame(m_document->currentFrame() + 1); });
     connect(prevFrame, &QToolButton::clicked, m_document, [this] { m_document->stepToFrame(-1); });
     connect(nextFrame, &QToolButton::clicked, m_document, [this] { m_document->stepToFrame(+1); });
-    connect(newDrawing, &QPushButton::clicked, m_document, [this] {
+    connect(newDrawing, &QToolButton::clicked, m_document, [this] {
         m_document->insertFrame(m_document->currentCel(), m_document->currentFrame(), false);
     });
 }

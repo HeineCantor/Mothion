@@ -190,14 +190,20 @@ CompositingWindow::CompositingWindow(document::DocumentController *document, QWi
         m_document->setCurrentFrame(frame); // the window shows it through currentFrameChanged
         updateLabels();
     });
+    // The range is the document's (the Timeline's boxes set it too): the handles write it, and show it.
     connect(m_range, &RangeSlider::rangeChanged, this, [this](int first, int last) {
-        if (m_playing) { // the new range: from the frame shown, or from its start if it is out
-            m_playFrom = std::clamp(m_document ? m_document->currentFrame() : first, first, last);
-            m_playClock.restart();
-            m_lastShown = -1;
-        }
-        updateLabels();
+        if (m_document)
+            m_document->setPlayRange(first, last >= m_range->maximum() ? document::DocumentController::kSceneEnd : last);
     });
+    if (m_document)
+        connect(m_document, &document::DocumentController::playRangeChanged, this, [this] {
+            syncBars();
+            if (m_playing) { // the new range: from the frame shown, or from its start if it is out
+                m_playFrom = std::clamp(m_document->currentFrame(), m_range->first(), m_range->last());
+                m_playClock.restart();
+                m_lastShown = -1;
+            }
+        });
     connect(m_preview, &ImagePreview::rectangleDrawn, this,
             [this](const QRectF &r) { addMaskShape(MaskShape::rectangle(r)); });
     connect(m_preview, &ImagePreview::lassoDrawn, this,
@@ -363,20 +369,18 @@ void CompositingWindow::syncBars()
     if (!m_document || !m_playbar)
         return;
     const int last = std::max(0, m_document->document().frameCount() - 1);
-    const bool fullRange = m_range->first() == 0 && m_range->last() == m_range->maximum();
     const QSignalBlocker blockPlaybar(m_playbar);
     m_playbar->setRange(0, last);
     m_playbar->setValue(std::clamp(m_document->currentFrame(), 0, last));
-    const int oldMaximum = m_range->maximum();
     m_range->setMaximum(last);
-    if (fullRange || oldMaximum == 0)
-        m_range->setRange(0, last); // a range nobody narrowed follows the scene's length
+    const int first = std::clamp(m_document->playRangeFirst(), 0, last);
+    m_range->setRange(first, std::clamp(m_document->playRangeLast(), first, last)); // the Timeline's range, kept to the scene
     updateLabels();
 }
 
 void CompositingWindow::updateLabels()
 {
-    m_frameLabel->setText(tr("%1 / %2").arg(m_playbar->value() + 1).arg(m_playbar->maximum() + 1));
+    m_frameLabel->setText(tr("%1 / %2").arg(m_playbar->value() + 1).arg(m_range->last() + 1)); // to where the range ends
     m_rangeLabel->setText(tr("%1 – %2").arg(m_range->first() + 1).arg(m_range->last() + 1));
 }
 

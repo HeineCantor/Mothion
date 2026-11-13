@@ -1237,6 +1237,95 @@ private slots:
     }
 
 
+    // The bar's buttons are icons, no words; two number boxes choose the frames that play, a third the speed.
+    void theBarHasIconsAndSlidersForRangeAndSpeed()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        ui::TimelinePanel panel(&controller, &state);
+        panel.show();
+        for (const char *name : {"newFrame", "onionSkin", "importAudio", "cameraKey", "celKey", "markerButton"}) {
+            auto *b = panel.findChild<QToolButton *>(QString::fromLatin1(name));
+            QVERIFY2(b, name);
+            QVERIFY2(b->text().isEmpty() && !b->icon().isNull(), name);
+        }
+        auto *from = panel.findChild<QSpinBox *>(QStringLiteral("rangeStart"));
+        auto *to = panel.findChild<QSpinBox *>(QStringLiteral("rangeEnd"));
+        auto *speed = panel.findChild<QSpinBox *>(QStringLiteral("fpsSpin"));
+        QVERIFY(from && to && speed);
+        const int count = controller.document().frameCount();
+        QCOMPARE(from->value(), 1);
+        QCOMPARE(to->value(), count); // the whole scene to begin with
+        QCOMPARE(speed->value(), 24);
+
+        // The speed is the document's rate, one undo step.
+        speed->setValue(12);
+        QCOMPARE(controller.document().frameRate().fps(), 12.0);
+        controller.undo();
+        QCOMPARE(controller.document().frameRate().fps(), 24.0);
+        QCOMPARE(speed->value(), 24);
+
+        // The range: the player goes round only through it, from the start of it if the frame is out.
+        from->setValue(5);
+        to->setValue(8);
+        QCOMPARE(panel.player()->firstFrame(), 4);
+        QCOMPARE(panel.player()->lastFrame(), 7);
+        from->setValue(10); // past the last: it pushes it on
+        QCOMPARE(panel.player()->lastFrame(), 9);
+        QCOMPARE(to->value(), 10);
+        to->setValue(6); // before the first: it pushes it back
+        QCOMPARE(panel.player()->firstFrame(), 5);
+        from->setValue(5);
+        to->setValue(8);
+        controller.setCurrentFrame(0);
+        panel.player()->start();
+        QCOMPARE(controller.currentFrame(), 4); // out of the range: it starts at the first
+        QTRY_VERIFY(controller.currentFrame() != 4);
+        QTest::qWait(400);
+        QVERIFY(controller.currentFrame() >= 4 && controller.currentFrame() <= 7);
+        panel.player()->stop();
+
+        // Free numbers: negative ones and past the scene, and any speed.
+        from->setValue(-30);
+        to->setValue(count + 500);
+        QCOMPARE(panel.player()->firstFrame(), -31);
+        QCOMPARE(panel.player()->lastFrame(), count + 499);
+        speed->setValue(200);
+        QCOMPARE(controller.document().frameRate().fps(), 200.0);
+        controller.undo();
+
+        // The range is the document's: other windows see it. Left at the end of the scene, it follows it.
+        QCOMPARE(controller.playRangeFirst(), -31);
+        controller.setPlayRange(0, document::DocumentController::kSceneEnd);
+        QVERIFY(panel.player()->followsSceneEnd());
+        controller.setSceneLength(count + 10);
+        QCOMPARE(panel.player()->lastFrame(), count + 9);
+        QCOMPARE(to->value(), count + 10);
+    }
+
+
+    // Scrolling the timeline has no end: past the last frame and before the first the room grows as it is reached.
+    void scrollingIsUnlimitedBothWays()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        ui::TimelinePanel panel(&controller, &state);
+        panel.resize(900, 300);
+        panel.show();
+        QScrollBar *bar = panel.view()->horizontalScrollBar();
+        const int max0 = bar->maximum();
+        for (int i = 0; i < 3; ++i)
+            bar->setValue(bar->maximum());
+        QVERIFY(bar->maximum() > max0);
+        QVERIFY(bar->value() > max0);
+        QVERIFY(bar->maximum() - max0 < 100 * 16); // a step at a time, not thousands of frames
+        for (int i = 0; i < 3; ++i)
+            bar->setValue(bar->minimum());
+        QVERIFY(bar->minimum() < 0);
+        QVERIFY(bar->value() < 0);
+    }
+
+
     // Space plays and pauses the timeline while the focus is in it (the pointer is over it); with the focus
     // anywhere else in the window it does not (over the canvas it is the key that pans).
     void spacePlaysAndPausesTheTimeline()

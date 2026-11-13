@@ -147,6 +147,9 @@ private slots:
         QTest::mouseMove(range, QPoint(12 + int(376.0 * 12 / last), 13));
         QTest::mouseRelease(range, Qt::LeftButton, {}, QPoint(12 + int(376.0 * 12 / last), 13));
         QVERIFY(range->first() >= 11 && range->first() <= 13);
+        controller.setPlayRange(10, 13); // the Timeline's boxes set the same range
+        QCOMPARE(range->first(), 10);
+        QCOMPARE(range->last(), 13);
         range->setRange(10, 13);
         // Playing stays inside it, and starts from its beginning when the frame is outside.
         controller.setCurrentFrame(2);
@@ -155,7 +158,7 @@ private slots:
         QVERIFY(controller.currentFrame() >= 10 && controller.currentFrame() <= 13);
         window.stop();
         // An untouched range follows the scene's length (another project, here).
-        range->setRange(0, last);
+        controller.setPlayRange(0, document::DocumentController::kSceneEnd);
         auto longer = std::make_unique<doc::Document>(64, 48);
         longer->setFrameCount(last + 11);
         controller.replaceDocument(std::move(longer));
