@@ -315,9 +315,9 @@ private slots:
     }
 
 
-    // The camera has a row at the top of the Layers panel: it is made elsewhere (the Timeline's camera key), the row
-    // selects it, its eye turns it on and off, Delete takes it away; while it is selected the cels cannot be drawn on.
-    void cameraHasARowInTheLayersPanel()
+    // The camera is the timeline's: the panel has no row for it and no button to make it; chosen in the timeline,
+    // it is what is selected (no drawing), and the bin takes it away.
+    void theCameraHasNoRowInTheLayersPanel()
     {
         document::DocumentController controller;
         ui::LayersPanel panel(&controller);
@@ -326,47 +326,22 @@ private slots:
         QVERIFY(QTest::qWaitForWindowExposed(&panel));
         auto *tree = panel.findChild<QTreeWidget *>();
         QVERIFY(tree);
-        QVERIFY(!panel.findChild<QToolButton *>(QStringLiteral("cameraButton"))); // the panel does not make it
+        QVERIFY(!panel.findChild<QToolButton *>(QStringLiteral("cameraButton")));
         QImage image(20, 20, QImage::Format_ARGB32);
         image.fill(Qt::red);
         controller.importImage(image, QStringLiteral("x"));
         QCoreApplication::processEvents();
-        QVERIFY(!panel.cameraItem()); // none in the project
+        const int rows = tree->topLevelItemCount();
 
-        controller.addCamera(); // made as the Timeline makes it; the panel shows its row
+        controller.addCamera();
         QCoreApplication::processEvents();
-        tree->setCurrentItem(panel.cameraItem()); // and selected by its row
         QVERIFY(controller.camera());
-        QVERIFY(panel.cameraItem());
-        QCOMPARE(tree->topLevelItem(0), panel.cameraItem()); // above the cels
+        QCOMPARE(tree->topLevelItemCount(), rows); // no row for it
+
+        controller.selectCamera(true); // as the timeline chooses it
         QCOMPARE(panel.focus(), ui::LayersPanel::Focus::Camera);
-        QVERIFY(controller.cameraSelected());
-        QCOMPARE(tree->currentItem(), panel.cameraItem());
         QString reason;
         QVERIFY(!controller.beginPaint(true, &reason)); // not drawn on
-
-        // Its eye: on and off.
-        auto *eye = tree->itemWidget(panel.cameraItem(), 0)->findChild<QToolButton *>();
-        QVERIFY(eye && eye->isChecked());
-        eye->click();
-        QVERIFY(!controller.camera()->visible);
-        QVERIFY(panel.cameraItem()); // the row stays, off
-        eye = tree->itemWidget(panel.cameraItem(), 0)->findChild<QToolButton *>();
-        QVERIFY(!eye->isChecked());
-        eye->click();
-        QVERIFY(controller.camera()->visible);
-
-        // Another row chosen: the camera is not selected, and a layer can be drawn on again.
-        tree->setCurrentItem(panel.layerItem(controller.currentLayer()));
-        QVERIFY(!controller.cameraSelected());
-        QVERIFY(panel.focus() != ui::LayersPanel::Focus::Camera);
-        QVERIFY(controller.beginPaint(true, &reason));
-        controller.cancelPaint();
-
-        // Its row again selects it (it does not make another one); the bin takes it away.
-        tree->setCurrentItem(panel.cameraItem());
-        QCOMPARE(controller.camera()->keys().size(), size_t(1));
-        QVERIFY(controller.cameraSelected());
         QToolButton *bin = nullptr;
         for (QToolButton *b : panel.findChildren<QToolButton *>())
             if (b->toolTip() == QStringLiteral("Delete the camera"))
@@ -375,13 +350,9 @@ private slots:
         bin->click();
         QCoreApplication::processEvents();
         QVERIFY(!controller.camera());
-        QVERIFY(!panel.cameraItem());
         QVERIFY(!controller.cameraSelected());
         QVERIFY(panel.focus() != ui::LayersPanel::Focus::Camera);
-        // Undone, the camera is back, not selected.
-        controller.undo();
-        QVERIFY(panel.cameraItem());
-        QVERIFY(!controller.cameraSelected());
+        QCOMPARE(tree->topLevelItemCount(), rows);
     }
 
     // The effect brushes and the shape tool have a size too: the palette, the [ ] keys and the size slider work
@@ -1073,8 +1044,8 @@ private slots:
     }
 
     // The panel has no way to add a cel (the timeline's plus has it, standard or trajectory); its buttons add layers.
-    // A trajectory has its own icon row and no picture.
-    void trajectoryRowsHaveTheirOwnLook()
+    // Trajectories are for the timeline: the panel has no row for them, and a cel that follows one stays in its place.
+    void trajectoriesHaveNoRowHere()
     {
         document::DocumentController controller;
         ui::LayersPanel panel(&controller);
@@ -1093,26 +1064,20 @@ private slots:
         QCoreApplication::processEvents();
         QCOMPARE(controller.document().celCount(), cels + 1);
         QVERIFY(controller.document().cel(controller.currentCel())->properties().trajectory);
-        QVERIFY(panel.celItem(controller.currentCel())); // its row
-        // Its row: a box for active or not in place of the eye, and it says which trajectory it follows.
+        QVERIFY(!panel.celItem(controller.currentCel())); // no row
         const doc::CelId first = controller.currentCel();
         controller.addTrajectory();
         QVERIFY(controller.setTrajectoryParent(controller.currentCel(), first));
         QCoreApplication::processEvents();
-        QWidget *row = panel.findChild<QTreeWidget *>()->itemWidget(panel.celItem(controller.currentCel()), 0);
-        QVERIFY(row);
-        bool activation = false, eye = false;
-        for (auto *button : row->findChildren<QToolButton *>()) {
-            activation = activation || button->toolTip() == QStringLiteral("Activate / deactivate the trajectory");
-            eye = eye || button->toolTip() == QStringLiteral("Show / hide the cel");
-        }
-        QVERIFY(activation && !eye);
-        // It is shown inside the one it follows: right under it, a step in.
+        QVERIFY(!panel.celItem(controller.currentCel()));
+        QVERIFY(!panel.celItem(first));
+        // A cel that follows a trajectory is still a row of its own, at the top level.
+        const doc::CelId plain = controller.document().celAt(0).id();
+        QVERIFY(controller.setTrajectoryParent(plain, first));
+        QCoreApplication::processEvents();
         auto *tree = panel.findChild<QTreeWidget *>();
-        QCOMPARE(tree->indexOfTopLevelItem(panel.celItem(controller.currentCel())),
-                 tree->indexOfTopLevelItem(panel.celItem(first)) + 1);
-        QVERIFY(row->layout()->contentsMargins().left()
-                > tree->itemWidget(panel.celItem(first), 0)->layout()->contentsMargins().left());
+        QVERIFY(panel.celItem(plain));
+        QVERIFY(tree->indexOfTopLevelItem(panel.celItem(plain)) >= 0);
     }
 
     // The clip button (in the row of the mask ones): a raster layer with another below it is clipped to it, and let go of

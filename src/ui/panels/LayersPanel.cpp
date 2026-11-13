@@ -56,7 +56,7 @@ constexpr int kKindRole = Qt::UserRole + 1;
 constexpr int kCelRole = Qt::UserRole + 2;
 constexpr int kLayerRole = Qt::UserRole + 3;
 constexpr int kDrawingRole = Qt::UserRole + 4;
-enum class Row { Cel, Frame, Layer, Paper, Camera };
+enum class Row { Cel, Frame, Layer, Paper };
 
 Row kindOf(const QTreeWidgetItem *item)
 {
@@ -427,7 +427,7 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
         moving, [this] { return dragPreview(); },
         [this](QTreeWidgetItem *item) {
             const doc::Document &d = m_document->document();
-            const int index = kindOf(item) == Row::Camera || kindOf(item) == Row::Paper ? -1 : d.indexOf(celOf(item));
+            const int index = kindOf(item) == Row::Paper ? -1 : d.indexOf(celOf(item));
             if (index < 0)
                 return QColor();
             const bool chosen = celOf(item) == m_document->currentCel() && !m_document->cameraSelected();
@@ -661,11 +661,6 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     // The chosen cel's column is whole, the others' fainter: they follow the current cel.
     connect(m_document, &DocumentController::currentCelChanged, this, [this] { m_tree->viewport()->update(); });
     connect(m_document, &DocumentController::cameraSelectionChanged, this, [this] { m_tree->viewport()->update(); });
-    // The camera's row follows the camera (a key, the eye, the camera added, taken away, undone).
-    connect(m_document, &DocumentController::cameraChanged, this, [this] {
-        if (cameraRowState(*m_document) != m_cameraRowState)
-            rebuildTree();
-    });
     // The camera went (or another row was chosen): back to a layer, if the panel still thought it selected.
     connect(m_document, &DocumentController::cameraSelectionChanged, this, [this] {
         if (m_document->cameraSelected() && m_focus != Focus::Camera) { // chosen elsewhere (the timeline)
@@ -696,20 +691,6 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
 }
 
 // --- rows ----------------------------------------------------------------------------
-
-int LayersPanel::cameraRowState(const document::DocumentController &document)
-{
-    const auto &camera = document.camera();
-    return camera ? int(camera->keys().size()) * 2 + (camera->visible ? 1 : 0) : -1;
-}
-
-QTreeWidgetItem *LayersPanel::cameraItem() const
-{
-    for (int i = 0; i < m_tree->topLevelItemCount(); ++i)
-        if (kindOf(m_tree->topLevelItem(i)) == Row::Camera)
-            return m_tree->topLevelItem(i);
-    return nullptr;
-}
 
 QTreeWidgetItem *LayersPanel::celItem(doc::CelId cel) const
 {
@@ -801,39 +782,12 @@ void LayersPanel::rebuildTree()
         return std::pair{row, h};
     };
 
-    // The camera, above all the cels: an eye (is it on), its icon and how many keys it has.
-    if (d.camera()) {
-        auto [row, h] = rowWidget();
-        auto *eye = toggleButton(IconId::Eye, tr("Turn the camera on / off: off, the picture is the whole sheet"),
-                                 d.camera()->visible, row);
-        h->addWidget(eye);
-        h->addWidget(iconLabel(IconId::Camera, row));
-        const int keys = int(d.camera()->keys().size());
-        h->addWidget(new QLabel(tr("Camera\n%n keyframe(s)", "", keys), row), 1);
-        connect(eye, &QToolButton::clicked, this, [this](bool on) { m_document->setCameraVisible(on); });
-        QTreeWidgetItem *cameraRow = addRow(nullptr, Row::Camera, doc::kNoId, doc::kNoId, doc::kNoId, row);
-        cameraRow->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable); // not dragged, nothing dropped on it
-    }
-    m_cameraRowState = cameraRowState(*m_document);
-
     const QPixmap blank = thumbnail(nullptr, nullptr, docSize, nullptr);
-    // Top cel first; a trajectory that follows another comes right under it, a step in (the stack is as it was).
+    // Top cel first. Trajectories are not here: they live in the timeline and have no place in the drawing order.
     std::vector<std::pair<int, int>> order; // cel index, depth
-    {
-        std::vector<bool> seen(d.celCount(), false);
-        auto visit = [&](auto &&self, int i, int depth) -> void {
-            seen[i] = true;
-            order.push_back({i, depth});
-            for (int j = d.celCount() - 1; j >= 0; --j) {
-                const doc::Cel *parent = d.trajectoryParent(d.celAt(j));
-                if (!seen[j] && parent && parent->id() == d.celAt(i).id())
-                    self(self, j, depth + 1);
-            }
-        };
-        for (int i = d.celCount() - 1; i >= 0; --i)
-            if (!seen[i] && !d.trajectoryParent(d.celAt(i)))
-                visit(visit, i, 0);
-    }
+    for (int i = d.celCount() - 1; i >= 0; --i)
+        if (!d.celAt(i).properties().trajectory)
+            order.push_back({i, 0});
     for (const auto &[i, depth] : order) {
         const doc::Cel &cel = d.celAt(i);
         const doc::CelId celId = cel.id();
@@ -1039,7 +993,7 @@ void LayersPanel::changeEvent(QEvent *event)
 QString LayersPanel::shapeKey() const
 {
     const doc::Document &d = m_document->document();
-    QString key = QStringLiteral("%1x%2,%3,%4;").arg(d.width()).arg(d.height()).arg(d.paperColor()).arg(cameraRowState(*m_document));
+    QString key = QStringLiteral("%1x%2,%3;").arg(d.width()).arg(d.height()).arg(d.paperColor());
     for (int i = 0; i < d.celCount(); ++i) {
         const doc::Cel &cel = d.celAt(i);
         key += QStringLiteral("c%1:").arg(cel.id());
@@ -1218,13 +1172,6 @@ void LayersPanel::rowChosen(QTreeWidgetItem *item)
     const Row kind = kindOf(item);
     if (kind == Row::Paper)
         return;
-    if (kind == Row::Camera) { // not a cel: nothing is current but the camera
-        m_focus = Focus::Camera;
-        m_document->setLayerChosen(false);
-        m_document->selectCamera(true);
-        syncHeader();
-        return;
-    }
     m_focus = kind == Row::Cel ? Focus::Cel : kind == Row::Layer ? Focus::Layer : Focus::Frame;
     m_document->selectCamera(false);
     m_document->setLayerChosen(m_focus == Focus::Layer);
@@ -1259,9 +1206,6 @@ static void setCurrentQuietly(QTreeWidget *tree, QTreeWidgetItem *item, QItemSel
 static QTreeWidgetItem *currentRow(const LayersPanel &panel, LayersPanel::Focus focus,
                                    const DocumentController &document)
 {
-    if (focus == LayersPanel::Focus::Camera)
-        if (QTreeWidgetItem *item = panel.cameraItem())
-            return item;
     if (focus == LayersPanel::Focus::Layer)
         if (QTreeWidgetItem *item = panel.layerItem(document.currentLayer()))
             return item;
@@ -1844,20 +1788,6 @@ bool LayersPanel::dropAt(const QPoint &pos)
     if (m_focus != Focus::Cel)
         return false;
 
-    // A trajectory dropped on the middle of another one follows it; on itself, it lets go of its parent.
-    if (kind == Row::Cel && static_cast<LayerTree *>(m_tree)->droppingOnRow()) {
-        const std::vector<doc::CelId> chosen = m_document->celSelection();
-        const doc::Cel *dragged = chosen.size() == 1 ? m_document->document().cel(chosen.front()) : nullptr;
-        const doc::Cel *onto = m_document->document().cel(celOf(target));
-        if (dragged && onto && dragged->properties().trajectory && onto->properties().trajectory) {
-            if (dragged->id() == onto->id()) {
-                m_document->setTrajectoryParent(dragged->id(), doc::kNoId);
-            } else if (!m_document->setTrajectoryParent(dragged->id(), onto->id())) {
-                emit statusMessage(tr("A trajectory cannot follow one that follows it"));
-            }
-            return true;
-        }
-    }
     // A cel among the cels: before the cel under the pen (after it in the
     // lower half of its row, or anywhere in its folder), to the bottom on the paper.
     const doc::Document &d = m_document->document();
