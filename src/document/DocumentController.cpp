@@ -172,8 +172,6 @@ void DocumentController::replaceDocument(std::unique_ptr<doc::Document> document
     }
 
     m_tempPoseCel = doc::kNoId;
-    m_playFirst = 0;
-    m_playLast = kSceneEnd;
     m_floating.reset();
     emit playRangeChanged();
     emit documentReplaced();
@@ -1514,18 +1512,18 @@ void DocumentController::setFrameRate(int fps)
 
 int DocumentController::playRangeLast() const
 {
-    const int end = m_playLast == kSceneEnd ? std::max(0, m_document->frameCount() - 1) : m_playLast;
-    return std::max(end, m_playFirst);
+    const int last = m_document->playLast();
+    const int end = last == kSceneEnd ? std::max(0, m_document->frameCount() - 1) : last;
+    return std::max(end, m_document->playFirst());
 }
 
 void DocumentController::setPlayRange(int first, int last)
 {
     if (last != kSceneEnd)
         last = std::max(last, first);
-    if (first == m_playFirst && last == m_playLast)
+    if (first == m_document->playFirst() && last == m_document->playLast())
         return;
-    m_playFirst = first;
-    m_playLast = last;
+    m_document->setPlayRange(first, last);
     emit playRangeChanged();
 }
 

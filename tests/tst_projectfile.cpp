@@ -115,6 +115,8 @@ std::unique_ptr<doc::Document> sampleDocument()
     graph.nextId = 10;
     d->setCompositing(graph);
     d->setCompositingView({true, 1.5, -120.25, 40});
+    d->setFrameRate({30, 1});
+    d->setPlayRange(-5, 40); // the Timeline's From and To, before the scene too
     d->allocateCelId(); // ids used by a cel and a layer since deleted: must not come back
     d->allocateLayerId();
     return d;
@@ -128,6 +130,8 @@ void compareDocuments(const doc::Document &x, const doc::Document &y)
     QCOMPARE(x.frameCount(), y.frameCount());
     QCOMPARE(x.paperColor(), y.paperColor());
     QVERIFY(x.markers() == y.markers());
+    QCOMPARE(x.playFirst(), y.playFirst());
+    QCOMPARE(x.playLast(), y.playLast());
     QCOMPARE(x.nextCelId(), y.nextCelId());
     QCOMPARE(x.nextDrawingId(), y.nextDrawingId());
     QCOMPARE(x.nextLayerId(), y.nextLayerId());
@@ -267,6 +271,7 @@ private slots:
         original->setCompositingView({});
         original->setCamera(std::nullopt); // and the camera with format 8
         original->setMarkers({}); // and the markers with format 10
+        original->setPlayRange(0, doc::Document::kSceneEnd); // and the play range with format 17
         for (int i = 0; i < original->celCount(); ++i) // and the motion of the cels with format 11
             original->celAt(i).setMotion({});
         for (int i = 0; i < original->celCount(); ++i) // and the Blender links with format 12
@@ -320,6 +325,31 @@ private slots:
         const auto loaded = io::loadProject(path, &error);
         QVERIFY2(loaded, qPrintable(error));
         compareDocuments(*original, *loaded);
+    }
+
+    // Format 17: the frame rate and the play range come back; a last frame at the end of the scene stays so (it follows the
+    // scene), and a project that never set a range has the whole scene.
+    void thePlayRangeAndTheRateSurviveTheFile()
+    {
+        QTemporaryDir dir;
+        const QString path = dir.filePath(QStringLiteral("range.moth"));
+        const auto original = sampleDocument();
+        original->setFrameRate({12, 1});
+        original->setPlayRange(7, doc::Document::kSceneEnd);
+        QString error;
+        QVERIFY2(io::saveProject(*original, path, &error), qPrintable(error));
+        auto loaded = io::loadProject(path, &error);
+        QVERIFY2(loaded, qPrintable(error));
+        QCOMPARE(loaded->frameRate().fps(), 12.0);
+        QCOMPARE(loaded->playFirst(), 7);
+        QCOMPARE(loaded->playLast(), doc::Document::kSceneEnd);
+
+        original->setPlayRange(0, doc::Document::kSceneEnd); // nothing set: nothing written
+        QVERIFY2(io::saveProject(*original, path, &error), qPrintable(error));
+        loaded = io::loadProject(path, &error);
+        QVERIFY2(loaded, qPrintable(error));
+        QCOMPARE(loaded->playFirst(), 0);
+        QCOMPARE(loaded->playLast(), doc::Document::kSceneEnd);
     }
 
     // Format 13: the layers clipped to the one below, and only those.

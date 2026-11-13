@@ -5,6 +5,7 @@
 #include "core/document/Cel.h"
 #include "core/document/Compositing.h"
 
+#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
@@ -53,6 +54,17 @@ public:
 
     // Markers: a name on a frame of the timeline (frame -> name; the name may be empty), to find one's way in a long
     // scene. They are not tied to a cel: they stay where they are as frames are added or taken away.
+    // The frames that play (from `first` to `last`, 0-based, both included, any whole numbers): the Timeline's From and To,
+    // which Autoplay and the Compositing window go by too. `last` of kSceneEnd is the end of the scene, wherever it is put.
+    // Saved with the project, but not an edit: it is not an undo step.
+    static constexpr int kSceneEnd = std::numeric_limits<int>::min();
+    int playFirst() const { return m_playFirst; }
+    int playLast() const { return m_playLast; }
+    void setPlayRange(int first, int last)
+    {
+        m_playFirst = first;
+        m_playLast = last;
+    }
     const std::map<int, std::string> &markers() const { return m_markers; }
     void setMarkers(std::map<int, std::string> markers) { m_markers = std::move(markers); }
 
@@ -119,6 +131,8 @@ private:
     std::optional<AudioTrack> m_audio;
     std::optional<Camera> m_camera;
     std::map<int, std::string> m_markers;
+    int m_playFirst = 0;
+    int m_playLast = kSceneEnd;
     GraphData m_compositing;
     GraphView m_compositingView;
     std::vector<std::unique_ptr<Cel>> m_cels;

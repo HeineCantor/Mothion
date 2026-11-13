@@ -78,6 +78,8 @@ const char *const kSchema[] = {
     "create table trajectory_parents (cel integer primary key references cels(id), parent integer not null)",
     // Format 16: the strokes of the vector layers (layers of kind 'vector'), as JSON.
     "create table vector_strokes (layer integer primary key references layers(id), data text not null)",
+    // Format 17: the frames that play (the Timeline's From and To); a null last frame is the end of the scene.
+    "create table play_range (first integer not null, last integer)",
 };
 
 // Stored by name, so reordering the enum cannot change old files.
@@ -771,6 +773,16 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
             return false;
         }
     }
+    if (d.playFirst() != 0 || d.playLast() != doc::Document::kSceneEnd) { // (the whole scene is what a file without it has)
+        QSqlQuery range(db);
+        range.prepare(QStringLiteral("insert into play_range values (?, ?)"));
+        range.addBindValue(d.playFirst());
+        range.addBindValue(d.playLast() == doc::Document::kSceneEnd ? QVariant() : QVariant(d.playLast()));
+        if (!range.exec()) {
+            failure = sqlError(range);
+            return false;
+        }
+    }
     if (!db.commit()) {
         failure = db.lastError().text();
         return false;
@@ -1042,6 +1054,9 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
                 markers[q.value(0).toInt()] = q.value(1).toString().toStdString();
         d->setMarkers(std::move(markers));
     }
+
+    if (version >= 17 && q.exec(QStringLiteral("select first, last from play_range")) && q.next())
+        d->setPlayRange(q.value(0).toInt(), q.value(1).isNull() ? doc::Document::kSceneEnd : q.value(1).toInt());
 
     if (version >= 8 && q.exec(QStringLiteral("select data from camera")) && q.next())
         d->setCamera(cameraFromJson(q.value(0).toString()));

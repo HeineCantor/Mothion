@@ -246,13 +246,13 @@ public:
     int sceneLength() const;
     // The frames that play (the Timeline, Autoplay and the Compositing window all go through this one range): from
     // `first` to `last`, 0-based, both included, any whole numbers (before the scene or past it too). `last` of
-    // kSceneEnd is the end of the scene, wherever it is put. Not saved with the project; a new project plays the
-    // whole scene.
-    static constexpr int kSceneEnd = std::numeric_limits<int>::min();
+    // kSceneEnd is the end of the scene, wherever it is put. Saved with the project (not an undo step); a new project
+    // plays the whole scene.
+    static constexpr int kSceneEnd = doc::Document::kSceneEnd;
     void setPlayRange(int first, int last);
-    int playRangeFirst() const { return m_playFirst; }
+    int playRangeFirst() const { return m_document->playFirst(); }
     int playRangeLast() const; // resolved, and never before the first
-    bool playRangeFollowsSceneEnd() const { return m_playLast == kSceneEnd; }
+    bool playRangeFollowsSceneEnd() const { return m_document->playLast() == kSceneEnd; }
     // The frame after the last exposure of any cel: how short the scene can be without leaving some out.
     int usedFrames() const;
     void setCameraVisible(bool visible);
@@ -622,8 +622,6 @@ private:
     int m_currentFrame = 0;
     std::optional<FloatingPaste> m_floating;
     std::vector<doc::VectorStroke> m_copiedStrokes;
-    int m_playFirst = 0;
-    int m_playLast = kSceneEnd;
     bool m_layerChosen = true;
     bool m_cameraSelected = false;
     doc::LayerId m_currentLayer = doc::kNoId;

@@ -335,10 +335,10 @@ dialoghi di importazione/esportazione e pannelli sono organizzati sotto `src/ui/
 
 [`ProjectFile`](../src/io/ProjectFile.h) memorizza il documento in un database SQLite.
 È il formato nativo, con versione esplicita tramite `PRAGMA user_version` e
-identificatore applicazione `MOTH`. La versione corrente è 16. Il database contiene
+identificatore applicazione `MOTH`. La versione corrente è 17. Il database contiene
 metadati del documento, cels, disegni, livelli (con i tratti dei livelli vettoriali, in
 formato JSON nella tabella `vector_strokes`), esposizioni, tile, miniature, audio,
-grafo compositing, camera, maschere, marcatori, motion e riferimenti Blender.
+grafo compositing, camera, maschere, marcatori, intervallo di riproduzione (Da/A della Timeline), motion e riferimenti Blender.
 
 I pixel delle tile sono salvati come blocchi ARGB premoltiplicati compressi. Il
 salvataggio crea un file temporaneo vicino al file di destinazione e lo rinomina al
