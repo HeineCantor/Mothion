@@ -72,6 +72,8 @@ public:
     // The trajectory whose path is shown: the current cel if it is one, or the one it follows; nullptr for none (or the
     // camera is selected, trajectory mode is off, or the trajectory is inactive).
     const doc::Cel *pathTrajectory() const;
+    // The motion the path goes by: the cel's, or what it would be with the keys dragged on the timeline (live).
+    const doc::CelMotion &motionOf(const doc::Cel &cel) const;
     // Trajectory mode (ToolState::trajectoryMode()): the path is shown, and its keys dragged, only while it is on.
     void setPathVisible(bool on) { m_pathVisible = on; }
     bool pathShown() const { return pathTrajectory() != nullptr; }

@@ -99,7 +99,7 @@ std::optional<int> TrajectoryGizmo::keyAt(const QPointF &docPos, const ViewTrans
     const QPointF at = toView.map(docPos);
     std::optional<int> found;
     double best = kGrab;
-    for (const doc::CelKey &key : trajectory->motion().keys(doc::Channel::Position)) {
+    for (const doc::CelKey &key : motionOf(*trajectory).keys(doc::Channel::Position)) {
         const double distance = QLineF(at, toView.map(pathPoint(*trajectory, key.frame))).length();
         if (distance <= best) {
             best = distance;
@@ -288,6 +288,12 @@ bool TrajectoryGizmo::hover(const QPointF &docPos, const ViewTransform &view)
     return true;
 }
 
+const doc::CelMotion &TrajectoryGizmo::motionOf(const doc::Cel &cel) const
+{
+    const doc::CelMotion *preview = m_document->previewedMotion(cel.id()); // keys being dragged on the timeline
+    return preview ? *preview : cel.motion();
+}
+
 const doc::Cel *TrajectoryGizmo::pathTrajectory() const
 {
     if (!m_pathVisible || m_document->cameraSelected())
@@ -303,7 +309,7 @@ const doc::Cel *TrajectoryGizmo::pathTrajectory() const
 QPointF TrajectoryGizmo::pathPoint(const doc::Cel &trajectory, int frame) const
 {
     const doc::Document &d = m_document->document();
-    const doc::CelMotion &motion = trajectory.motion();
+    const doc::CelMotion &motion = motionOf(trajectory);
     const doc::Matrix2x3 world =
         motion.interpolatedAt(frame).matrix(motion.pivotX, motion.pivotY).then(d.trajectoryParentMatrix(trajectory.id(), frame));
     double x = 0, y = 0;
@@ -317,7 +323,7 @@ bool TrajectoryGizmo::pathRange(const doc::Cel &trajectory, int *first, int *las
     int lo = -1, hi = -1;
     int guard = 0;
     for (const doc::Cel *t = &trajectory; t && guard < 64; t = d.trajectoryParent(*t), ++guard) { // its parents move it too
-        const std::vector<int> keys = t->motion().keyFrames();
+        const std::vector<int> keys = motionOf(*t).keyFrames();
         if (keys.empty())
             continue;
         lo = lo < 0 ? keys.front() : std::min(lo, keys.front());
@@ -371,9 +377,9 @@ void TrajectoryGizmo::paintPath(QPainter &painter, const ViewTransform &view) co
     }
     // The keys: a dot each (the ones of the position are dragged; a key of only the rotation or scale is a small ring).
     const bool editable = pathEditable();
-    for (int f : trajectory->motion().keyFrames()) {
+    for (int f : motionOf(*trajectory).keyFrames()) {
         const QPointF at = toView.map(pathPoint(*trajectory, f));
-        if (trajectory->motion().keyAt(doc::Channel::Position, f)) {
+        if (motionOf(*trajectory).keyAt(doc::Channel::Position, f)) {
             const bool picked = editable && keyFrame() == f;
             painter.setPen(QPen(Qt::white, 1.8));
             painter.setBrush(picked ? QColor(40, 110, 230) : accent);

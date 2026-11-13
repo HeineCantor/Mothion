@@ -1699,6 +1699,18 @@ void TimelineView::mouseMoveEvent(QMouseEvent *event)
         const int to = std::max(0, frameAt(pos.x()));
         if (to != m_motionDrag->to) {
             m_motionDrag->to = to;
+            // The canvas shows the keys where they would go (the path of a trajectory bends with them).
+            std::vector<document::DocumentController::CelKeyRef> keys;
+            if (m_chosenKeys.size() > 1) {
+                keys = chosenKeyRefs();
+            } else {
+                const doc::Cel *cel = m_document->document().cel(m_motionDrag->cel);
+                for (doc::Channel c : doc::kChannels)
+                    if (cel && (!m_motionDrag->channel || *m_motionDrag->channel == c)
+                        && cel->motion().keyAt(c, m_motionDrag->from))
+                        keys.push_back({m_motionDrag->cel, m_motionDrag->from, c});
+            }
+            m_document->previewKeyMove(keys, to - m_motionDrag->from);
             viewport()->update();
         }
         return;
@@ -1781,6 +1793,7 @@ void TimelineView::mouseReleaseEvent(QMouseEvent *)
     if (m_motionDrag) {
         const MotionDrag drag = *m_motionDrag;
         m_motionDrag.reset();
+        m_document->clearKeyMovePreview(); // (the move itself, if it is made, is the edit)
         const int delta = drag.to - drag.from;
         if (delta == 0 && drag.collapse) { // a click on one of several: it alone
             m_chosenKeys = {{drag.cel, drag.from, drag.channel}};

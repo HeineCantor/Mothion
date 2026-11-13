@@ -1329,12 +1329,9 @@ bool DocumentController::removeCelKeys(const std::vector<CelKeyRef> &keys)
     return true;
 }
 
-bool DocumentController::moveCelKeys(const std::vector<CelKeyRef> &keys, int delta)
+bool DocumentController::movedKeyMotions(const std::vector<CelKeyRef> &keys, int delta,
+                                         std::map<doc::CelId, doc::CelMotion> &motions) const
 {
-    if (delta == 0)
-        return false;
-    clearTemporaryPose();
-    std::map<doc::CelId, doc::CelMotion> motions;
     std::vector<std::pair<CelKeyRef, doc::CelKey>> lifted; // taken out of their motions, to be put back `delta` on
     for (const CelKeyRef &k : keys) {
         const doc::Cel *cel = m_document->cel(k.cel);
@@ -1352,11 +1349,47 @@ bool DocumentController::moveCelKeys(const std::vector<CelKeyRef> &keys, int del
             return false;
         motion.setKey(k.channel, k.frame + delta, key.pose, key.easing);
     }
+    return true;
+}
+
+bool DocumentController::moveCelKeys(const std::vector<CelKeyRef> &keys, int delta)
+{
+    if (delta == 0)
+        return false;
+    clearTemporaryPose();
+    std::map<doc::CelId, doc::CelMotion> motions;
+    if (!movedKeyMotions(keys, delta, motions))
+        return false;
     auto command = motionsCommand(*m_document, motions);
     if (!command)
         return false;
     execute(std::move(command));
     return true;
+}
+
+void DocumentController::previewKeyMove(const std::vector<CelKeyRef> &keys, int delta)
+{
+    std::map<doc::CelId, doc::CelMotion> motions;
+    if (delta == 0 || !movedKeyMotions(keys, delta, motions))
+        motions.clear(); // nothing moved (or refused): the keys as they are
+    if (motions.empty() && m_keyPreview.empty())
+        return;
+    m_keyPreview = std::move(motions);
+    emit motionPreviewChanged();
+}
+
+void DocumentController::clearKeyMovePreview()
+{
+    if (m_keyPreview.empty())
+        return;
+    m_keyPreview.clear();
+    emit motionPreviewChanged();
+}
+
+const doc::CelMotion *DocumentController::previewedMotion(doc::CelId cel) const
+{
+    const auto it = m_keyPreview.find(cel);
+    return it == m_keyPreview.end() ? nullptr : &it->second;
 }
 
 std::vector<DocumentController::CelKeyCopy> DocumentController::copyCelKeys(const std::vector<CelKeyRef> &keys) const

@@ -255,6 +255,7 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
     });
     // Trajectory mode: the path of the trajectory is shown and its keys dragged (and nothing is drawn meanwhile).
     m_trajectoryGizmo.setPathVisible(m_toolState->trajectoryMode());
+    connect(m_document, &DocumentController::motionPreviewChanged, this, [this] { update(); }); // keys dragged on the timeline
     connect(m_toolState, &ToolState::trajectoryModeChanged, this, [this](bool on) {
         m_trajectoryGizmo.setPathVisible(on);
         update();

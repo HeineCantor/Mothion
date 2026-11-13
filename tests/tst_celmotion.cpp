@@ -813,6 +813,25 @@ private slots:
         QCOMPARE(gizmo.handleAt(keyDot, view), canvas::TrajectoryGizmo::Handle::None);
         lock(false);
 
+        // Keys dragged on the timeline show on the path live, with no edit: the key of frame 12 and the one of 22 would go
+        // 3 frames on, the path's range and points follow; a move that is refused (a place taken) shows nothing moved.
+        controller.chooseCel(follower);
+        const doc::Cel &trajectoryCel = *controller.document().cel(trajectory);
+        using Ref = document::DocumentController::CelKeyRef;
+        controller.previewKeyMove({Ref{trajectory, 12, doc::Channel::Position}, Ref{trajectory, 22, doc::Channel::Position}}, 3);
+        QVERIFY(controller.previewedMotion(trajectory));
+        QCOMPARE(gizmo.pathPoint(trajectoryCel, 15), QPointF(px + 200, py + 100));
+        QVERIFY(gizmo.pathRange(trajectoryCel, &first, &last));
+        QCOMPARE(last, 25);
+        QVERIFY(controller.celMotion(trajectory)->keyAt(doc::Channel::Position, 12)); // nothing was edited
+        controller.previewKeyMove({Ref{trajectory, 12, doc::Channel::Position}}, -10); // onto frame 2, a place taken
+        QVERIFY(!controller.previewedMotion(trajectory));
+        controller.previewKeyMove({Ref{trajectory, 12, doc::Channel::Position}}, 4);
+        controller.clearKeyMovePreview();
+        QVERIFY(!controller.previewedMotion(trajectory));
+        QVERIFY(gizmo.pathRange(trajectoryCel, &first, &last));
+        QCOMPARE(last, 22);
+
         // Another cel with no trajectory: none.
         controller.addCel();
         QVERIFY(!gizmo.pathTrajectory());

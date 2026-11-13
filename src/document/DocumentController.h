@@ -178,6 +178,13 @@ public:
     bool removeCelKeys(const std::vector<CelKeyRef> &keys);
     // All of them `delta` frames on (or back): refused if one would go before the first frame or on a key that is not moved too.
     bool moveCelKeys(const std::vector<CelKeyRef> &keys, int delta);
+    // While keys are dragged on the timeline: the motions the cels would have with `keys` moved `delta` frames (as
+    // moveCelKeys() would leave them), for the views that draw a motion (the path of a trajectory) to show it live. No
+    // edit is made. A move that would be refused (a place taken) shows nothing moved. clearKeyMovePreview() ends it.
+    void previewKeyMove(const std::vector<CelKeyRef> &keys, int delta);
+    void clearKeyMovePreview();
+    // The motion of `cel` as it would be with the keys moved, or nullptr when none is being previewed.
+    const doc::CelMotion *previewedMotion(doc::CelId cel) const;
     // What was copied: a key with its curve, where it was relative to the first copied (`offset`), and the cel it came from.
     struct CelKeyCopy
     {
@@ -549,6 +556,8 @@ signals:
     void markersChanged();
     // The keys or the pivot of a cel's motion changed (the frame shown is drawn again, and the timeline's keys).
     void motionChanged();
+    // The preview of keys being dragged changed (see previewKeyMove()).
+    void motionPreviewChanged();
     // The camera was selected, or another row was (see cameraSelected()).
     void cameraSelectionChanged();
     // Pixels of (a layer of) `drawing` changed in `rect` (document coordinates).
@@ -621,6 +630,9 @@ private:
     doc::CelId m_currentCel = doc::kNoId;
     int m_currentFrame = 0;
     std::optional<FloatingPaste> m_floating;
+    std::map<doc::CelId, doc::CelMotion> m_keyPreview;
+    // The motions of the cels with `keys` moved `delta` frames; false if that is refused.
+    bool movedKeyMotions(const std::vector<CelKeyRef> &keys, int delta, std::map<doc::CelId, doc::CelMotion> &motions) const;
     std::vector<doc::VectorStroke> m_copiedStrokes;
     bool m_layerChosen = true;
     bool m_cameraSelected = false;
