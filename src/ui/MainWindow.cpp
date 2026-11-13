@@ -482,6 +482,15 @@ void MainWindow::createMenus()
         m_autoplay->raise();
         m_autoplay->activateWindow();
     });
+    // A spacing chart (a mark for each frame, drawn in order on a vector layer) becomes a trajectory; its path is then shown.
+    animation->addAction(tr("Trajectory from spacing marks"), this, [this] {
+        QString reason;
+        if (m_document->trajectoryFromMarks(&reason))
+            m_toolState->setTrajectoryMode(true);
+        else
+            statusBar()->showMessage(reason, 5000);
+    })->setToolTip(tr("Each stroke of the current vector layer, in the order drawn, is one frame: a trajectory with a key "
+                      "for each, from the current frame"));
     animation->addSeparator();
     // One frame back or on along the timeline, from anywhere in the window
     // (text and number fields keep their keys); stops at the ends.

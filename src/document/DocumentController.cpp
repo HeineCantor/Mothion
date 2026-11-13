@@ -253,6 +253,91 @@ void DocumentController::addTrajectory()
     chooseCel(id);
 }
 
+bool DocumentController::trajectoryFromMarks(QString *reason)
+{
+    auto fail = [reason](const QString &why) {
+        if (reason)
+            *reason = why;
+        return false;
+    };
+    QString why;
+    const doc::Layer *layer = workLayer(false, tr("Nothing to make a trajectory from"), &why, true);
+    if (!layer)
+        return fail(why);
+    if (layer->kind != doc::LayerKind::Vector)
+        return fail(tr("The marks of a spacing chart are strokes: draw them on a vector layer"));
+    // The middle of each stroke, in the order drawn (the strokes are kept in that order), and how long it is across.
+    struct Mark
+    {
+        QPointF middle;
+        double extent = 0;
+    };
+    std::vector<Mark> all;
+    for (const doc::VectorStroke &stroke : layer->strokes) {
+        if (stroke.erase || stroke.points.empty())
+            continue;
+        double x = 0, y = 0, minX = stroke.points.front().x, maxX = minX, minY = stroke.points.front().y, maxY = minY;
+        for (const auto &p : stroke.points) {
+            x += p.x;
+            y += p.y;
+            minX = std::min(minX, p.x);
+            maxX = std::max(maxX, p.x);
+            minY = std::min(minY, p.y);
+            maxY = std::max(maxY, p.y);
+        }
+        all.push_back({QPointF(x / double(stroke.points.size()), y / double(stroke.points.size())),
+                       std::max(maxX - minX, maxY - minY)});
+    }
+    // The path a chart is drawn along is not a mark: a stroke much longer than the usual one is left out (more than three
+    // times the median).
+    std::vector<QPointF> middles;
+    if (all.size() >= 3) {
+        std::vector<double> extents;
+        for (const Mark &m : all)
+            extents.push_back(m.extent);
+        std::nth_element(extents.begin(), extents.begin() + std::ptrdiff_t(extents.size() / 2), extents.end());
+        const double median = extents[extents.size() / 2];
+        for (const Mark &m : all)
+            if (m.extent <= 3 * std::max(median, 1.0))
+                middles.push_back(m.middle);
+    } else {
+        for (const Mark &m : all)
+            middles.push_back(m.middle);
+    }
+    if (middles.size() < 2)
+        return fail(tr("Draw at least two marks, one for each frame, in the order of the movement"));
+
+    doc::Document &d = *m_document;
+    QString name; // the first free number
+    for (int n = 1;; ++n) {
+        name = tr("Trajectory %1").arg(n);
+        bool used = false;
+        for (int i = 0; i < d.celCount() && !used; ++i)
+            used = d.celAt(i).properties().name == name.toStdString();
+        if (!used)
+            break;
+    }
+    doc::CelProperties properties{name.toStdString()};
+    properties.trajectory = true;
+    auto add = std::make_unique<doc::AddCelCommand>(d, d.indexOf(m_currentCel) + 1, std::move(properties));
+    const doc::CelId id = add->celId();
+    doc::CelMotion motion;
+    motion.pivotX = d.width() / 2.0;
+    motion.pivotY = d.height() / 2.0;
+    for (std::size_t i = 0; i < middles.size(); ++i) {
+        doc::CelPose pose; // the pivot goes to the middle of the mark
+        pose.x = middles[i].x() - motion.pivotX;
+        pose.y = middles[i].y() - motion.pivotY;
+        motion.setKey(doc::Channel::Position, m_currentFrame + int(i), pose, doc::Easing::linear());
+    }
+    std::vector<std::unique_ptr<doc::Command>> steps;
+    steps.push_back(std::move(add));
+    steps.push_back(std::make_unique<doc::SetCelMotionCommand>(id, std::move(motion)));
+    execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::AddCel, std::move(steps)));
+    chooseCel(id);
+    return true;
+}
+
 bool DocumentController::setTrajectoryParent(doc::CelId childId, doc::CelId parentId)
 {
     const doc::Cel *child = m_document->cel(childId);

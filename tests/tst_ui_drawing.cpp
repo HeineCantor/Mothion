@@ -586,6 +586,66 @@ private slots:
         QCOMPARE(pixel(950, 540), 255);
     }
 
+    // A spacing chart drawn on a vector layer (one mark for each frame, in order) makes a trajectory with a position key on each
+    // frame from the current one, at the middle of its mark; it is one undo step and the trajectory is chosen.
+    void aSpacingChartMakesATrajectory()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(500, 400);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 4, "Line").command);
+        QString reason;
+        QVERIFY(!controller.trajectoryFromMarks(&reason)); // a raster layer
+        QVERIFY(!reason.isEmpty());
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Vector));
+        QCoreApplication::processEvents();
+        QVERIFY(!controller.trajectoryFromMarks(&reason)); // no marks yet
+
+        state.setActiveTool(tools::ToolId::Brush);
+        const QTransform toView = canvas.view().documentToView();
+        // The path the chart is drawn along comes first: a long stroke, which is no mark.
+        {
+            const QPoint from = toView.map(QPointF(700, 650)).toPoint();
+            QTest::mousePress(&canvas, Qt::LeftButton, {}, from);
+            for (int i = 1; i <= 40; ++i)
+                QTest::mouseMove(&canvas, from + QPoint(i * 3, -(i % 9)));
+            QTest::mouseRelease(&canvas, Qt::LeftButton, {}, from + QPoint(120, -3));
+        }
+        QCOMPARE(controller.currentDrawing()->layer(controller.currentLayer())->strokes.size(), std::size_t(1));
+        QVERIFY(!controller.trajectoryFromMarks(&reason)); // the path alone is not enough: no marks
+        const QPointF marks[] = {{800, 600}, {830, 560}, {880, 540}, {950, 530}, {1040, 540}};
+        for (const QPointF &mark : marks) { // a short dash for each
+            const QPoint at = toView.map(mark).toPoint();
+            QTest::mousePress(&canvas, Qt::LeftButton, {}, at);
+            QTest::mouseMove(&canvas, at + QPoint(1, 0));
+            QTest::mouseMove(&canvas, at + QPoint(2, 0));
+            QTest::mouseRelease(&canvas, Qt::LeftButton, {}, at + QPoint(2, 0));
+        }
+        QCOMPARE(controller.currentDrawing()->layer(controller.currentLayer())->strokes.size(), std::size_t(6)); // the path and 5 marks
+        const doc::CelId drawn = controller.currentCel();
+        const int cels = controller.document().celCount();
+        controller.setCurrentFrame(3);
+        QVERIFY2(controller.trajectoryFromMarks(&reason), qPrintable(reason));
+        QCOMPARE(controller.document().celCount(), cels + 1);
+        const doc::CelId made = controller.currentCel();
+        QVERIFY(made != drawn);
+        const doc::Cel *cel = controller.document().cel(made);
+        QVERIFY(cel->properties().trajectory);
+        const std::vector<int> frames = cel->motion().keyFrames();
+        QCOMPARE(frames, std::vector<int>({3, 4, 5, 6, 7})); // one frame for each mark, from the current one
+        for (int i = 0; i < 5; ++i) { // the pivot (the middle of the page) goes to each mark (the view is zoomed out: a pixel is several of the page)
+            const doc::CelPose pose = cel->motion().poseAt(3 + i);
+            QVERIFY(qAbs(cel->motion().pivotX + pose.x - marks[i].x()) < 24);
+            QVERIFY(qAbs(cel->motion().pivotY + pose.y - marks[i].y()) < 24);
+        }
+        controller.undo(); // one step
+        QCOMPARE(controller.document().celCount(), cels);
+    }
+
     // On a vector layer a paste is the copied strokes, floating the same way; pixels are refused there.
     void aPasteOfStrokesFloatsOnAVectorLayer()
     {
