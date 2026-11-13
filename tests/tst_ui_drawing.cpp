@@ -646,6 +646,50 @@ private slots:
         QCOMPARE(controller.document().celCount(), cels);
     }
 
+    // With the path drawn too, the marks go in the order they come along it, from where it was begun, not in the order drawn.
+    void theMarksFollowThePathWhateverTheOrderDrawn()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(500, 400);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 4, "Line").command);
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Vector));
+        QCoreApplication::processEvents();
+        state.setActiveTool(tools::ToolId::Brush);
+        const QTransform toView = canvas.view().documentToView();
+        // The path, left to right and bending (a bow), then the marks scrambled.
+        auto dragTo = [&](const std::vector<QPointF> &docPoints) {
+            QTest::mousePress(&canvas, Qt::LeftButton, {}, toView.map(docPoints.front()).toPoint());
+            for (const QPointF &p : docPoints)
+                QTest::mouseMove(&canvas, toView.map(p).toPoint());
+            QTest::mouseRelease(&canvas, Qt::LeftButton, {}, toView.map(docPoints.back()).toPoint());
+        };
+        std::vector<QPointF> bow;
+        for (int i = 0; i <= 40; ++i)
+            bow.emplace_back(500 + i * 25.0, 700 - 200 * std::sin(i * M_PI / 40));
+        dragTo(bow);
+        const int order[] = {3, 0, 4, 2, 1}; // the marks, in this order of the path, drawn
+        for (int k : order) {
+            const QPointF at = bow[std::size_t(4 + k * 8)];
+            dragTo({at, at + QPointF(10, 0)});
+        }
+        QString reason;
+        QVERIFY2(controller.trajectoryFromMarks(&reason), qPrintable(reason));
+        const doc::Cel *cel = controller.document().cel(controller.currentCel());
+        const std::vector<int> frames = cel->motion().keyFrames();
+        QCOMPARE(int(frames.size()), 5);
+        double last = -1e9;
+        for (int f : frames) { // left to right: the way the path was drawn
+            const doc::CelPose pose = cel->motion().poseAt(f);
+            QVERIFY(cel->motion().pivotX + pose.x > last);
+            last = cel->motion().pivotX + pose.x;
+        }
+    }
+
     // On a vector layer a paste is the copied strokes, floating the same way; pixels are refused there.
     void aPasteOfStrokesFloatsOnAVectorLayer()
     {

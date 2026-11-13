@@ -289,7 +289,8 @@ bool DocumentController::trajectoryFromMarks(QString *reason)
                        std::max(maxX - minX, maxY - minY)});
     }
     // The path a chart is drawn along is not a mark: a stroke much longer than the usual one is left out (more than three
-    // times the median).
+    // times the median), and if there is one it gives the order: the marks go in the order they come along it, from where it
+    // was begun to where it ended (the way the pen went), whatever the order they were drawn in. With no path, the order drawn.
     std::vector<QPointF> middles;
     if (all.size() >= 3) {
         std::vector<double> extents;
@@ -297,9 +298,49 @@ bool DocumentController::trajectoryFromMarks(QString *reason)
             extents.push_back(m.extent);
         std::nth_element(extents.begin(), extents.begin() + std::ptrdiff_t(extents.size() / 2), extents.end());
         const double median = extents[extents.size() / 2];
-        for (const Mark &m : all)
-            if (m.extent <= 3 * std::max(median, 1.0))
+        std::vector<QPointF> path; // the longest of the long strokes
+        double pathExtent = 0;
+        std::size_t index = 0;
+        for (const doc::VectorStroke &stroke : layer->strokes) {
+            if (stroke.erase || stroke.points.empty())
+                continue;
+            const Mark &m = all[index++];
+            if (m.extent <= 3 * std::max(median, 1.0)) {
                 middles.push_back(m.middle);
+            } else if (m.extent > pathExtent) {
+                pathExtent = m.extent;
+                path.clear();
+                for (const auto &p : stroke.points)
+                    path.emplace_back(p.x, p.y);
+            }
+        }
+        if (path.size() >= 2 && middles.size() >= 2) {
+            // How far along the path each mark is: its nearest point on the line, counted from the start.
+            std::vector<double> along(path.size(), 0.0); // the length up to each point
+            for (std::size_t i = 1; i < path.size(); ++i)
+                along[i] = along[i - 1] + QLineF(path[i - 1], path[i]).length();
+            auto position = [&](const QPointF &p) {
+                double best = std::numeric_limits<double>::max(), at = 0;
+                for (std::size_t i = 1; i < path.size(); ++i) {
+                    const QPointF ab = path[i] - path[i - 1];
+                    const double length2 = ab.x() * ab.x() + ab.y() * ab.y();
+                    const double t = length2 > 0 ? std::clamp(QPointF::dotProduct(p - path[i - 1], ab) / length2, 0.0, 1.0) : 0.0;
+                    const double distance = QLineF(p, path[i - 1] + ab * t).length();
+                    if (distance < best) {
+                        best = distance;
+                        at = along[i - 1] + t * std::sqrt(length2);
+                    }
+                }
+                return at;
+            };
+            std::vector<std::pair<double, QPointF>> placed;
+            for (const QPointF &m : middles)
+                placed.emplace_back(position(m), m);
+            std::stable_sort(placed.begin(), placed.end(), [](const auto &x, const auto &y) { return x.first < y.first; });
+            middles.clear();
+            for (const auto &[s, m] : placed)
+                middles.push_back(m);
+        }
     } else {
         for (const Mark &m : all)
             middles.push_back(m.middle);

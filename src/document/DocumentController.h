@@ -83,7 +83,7 @@ public:
     void addTrajectory();
     // A trajectory made from the marks of a spacing chart drawn on the current vector layer: each stroke (a dot or a short
     // dash), in the order it was drawn, is one frame, its middle (the mean of its points) the place the trajectory has
-    // there: the keys of the position go one on each frame, from the current one. One undo step; the new trajectory is
+    // there (with a long stroke among them, the path, they go in the order they come along it instead): the keys of the position go one on each frame, from the current one. One undo step; the new trajectory is
     // chosen. False, with `reason`, if the layer is not a vector one or has fewer than two strokes.
     bool trajectoryFromMarks(QString *reason = nullptr);
     // `child` follows `parent` (a trajectory; kNoId lets it go); its own keys then come on top of the parent's way. The child
