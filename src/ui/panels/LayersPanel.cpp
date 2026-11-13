@@ -393,7 +393,8 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     , m_blend(new QComboBox(this))
     , m_opacity(new QSlider(Qt::Horizontal, this))
     , m_opacityValue(new QSpinBox(this))
-    , m_add(actionButton(IconId::Add, tr("New layer"), this))
+    , m_addLayer(actionButton(IconId::AddLayer, tr("New layer"), this))
+    , m_addPerspective(actionButton(IconId::AddPerspective, tr("New perspective layer"), this))
     , m_merge(actionButton(IconId::MergeLayers, tr("Merge the selected layers"), this))
     , m_mergeDown(actionButton(IconId::MergeDown, tr("Merge with the layer below"), this))
     , m_remove(actionButton(IconId::Delete, tr("Delete layer"), this))
@@ -469,7 +470,10 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
 
     auto *buttons = new QHBoxLayout;
     buttons->setSpacing(0);
-    buttons->addWidget(m_add);
+    m_addLayer->setObjectName(QStringLiteral("addLayer"));
+    m_addPerspective->setObjectName(QStringLiteral("addPerspective"));
+    buttons->addWidget(m_addLayer);
+    buttons->addWidget(m_addPerspective);
     buttons->addWidget(m_merge);
     buttons->addWidget(m_mergeDown);
     buttons->addWidget(m_remove);
@@ -529,15 +533,8 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
         commitOpacity();
     });
 
-    connect(m_add, &QToolButton::clicked, this, [this] { addClicked(doc::LayerKind::Raster); });
-    // The arrow next to +: which kind of layer.
-    m_addMenu = new QMenu(m_add);
-    m_addMenu->addAction(tr("Layer"), this, [this] { addClicked(doc::LayerKind::Raster); });
-    m_addMenu->addAction(tr("Perspective Layer"), this, [this] { addClicked(doc::LayerKind::Perspective); });
-    // With a cel's row chosen the arrow offers the kinds of cel.
-    m_addCelMenu = new QMenu(m_add);
-    m_addCelMenu->addAction(tr("Cel"), this, [this] { m_document->addCel(); });
-    m_addCelMenu->addAction(tr("Trajectory Cel"), this, [this] { m_document->addTrajectory(); });
+    connect(m_addLayer, &QToolButton::clicked, this, [this] { addClicked(doc::LayerKind::Raster); });
+    connect(m_addPerspective, &QToolButton::clicked, this, [this] { addClicked(doc::LayerKind::Perspective); });
     connect(m_remove, &QToolButton::clicked, this, &LayersPanel::removeSelected);
     connect(m_merge, &QToolButton::clicked, this, &LayersPanel::mergeSelected);
     connect(m_mergeDown, &QToolButton::clicked, this, &LayersPanel::mergeSelectedDown);
@@ -1464,7 +1461,7 @@ void LayersPanel::commitOpacity()
 void LayersPanel::addClicked(doc::LayerKind kind)
 {
     switch (m_focus) {
-    case Focus::Cel: m_document->addCel(); break;
+    case Focus::Cel: // on top of the cel's current frame
     case Focus::Frame:
         m_focus = Focus::Layer; // the new layer is shown as current
         m_document->setLayerChosen(true);
@@ -1949,7 +1946,7 @@ void LayersPanel::syncHeader()
     switch (m_focus) {
     case Focus::Cel: {
         const int index = cel ? d.indexOf(cel->id()) : -1;
-        canAdd = cel != nullptr; // its blend mode and opacity are the timeline's to change
+        canAdd = drawing != nullptr; // its blend mode and opacity are the timeline's to change
         canRemove = cel && d.celCount() > 1; // keep at least one cel
         int lowest = index, highest = index; // of the cels chosen together
         for (doc::CelId id : m_document->celSelection()) {
@@ -1962,7 +1959,6 @@ void LayersPanel::syncHeader()
             opacity = cel->properties().opacity;
             blend = cel->properties().blend;
         }
-        m_add->setToolTip(tr("New cel"));
         m_remove->setToolTip(tr("Delete the cel"));
         const bool several = m_document->celSelection().size() > 1;
         m_up->setToolTip(several ? tr("Move the cels up") : tr("Move the cel up"));
@@ -1971,16 +1967,16 @@ void LayersPanel::syncHeader()
     }
     case Focus::Camera:
         canRemove = m_document->camera().has_value();
-        m_add->setToolTip(tr("New cel"));
         m_remove->setToolTip(tr("Delete the camera"));
         m_up->setToolTip(tr("Move up"));
         m_down->setToolTip(tr("Move down"));
         break;
     case Focus::Frame:
         canAdd = drawing != nullptr;
+        m_addLayer->setToolTip(tr("New layer on top of the frame"));
+        m_addPerspective->setToolTip(tr("New perspective layer on top of the frame"));
         for (const QTreeWidgetItem *item : m_tree->selectedItems())
             canRemove = canRemove || kindOf(item) == Row::Frame;
-        m_add->setToolTip(tr("New layer on top of the frame"));
         m_remove->setToolTip(tr("Delete the selected frames"));
         m_up->setToolTip(tr("Move up"));
         m_down->setToolTip(tr("Move down"));
@@ -2007,7 +2003,6 @@ void LayersPanel::syncHeader()
             opacity = layer->properties.opacity;
             blend = layer->properties.blend;
         }
-        m_add->setToolTip(tr("New layer"));
         m_remove->setToolTip(tr("Delete the selected layers"));
         m_up->setToolTip(tr("Move the selected layers up"));
         m_down->setToolTip(tr("Move the selected layers down"));
@@ -2016,10 +2011,12 @@ void LayersPanel::syncHeader()
     }
     for (QWidget *w : std::initializer_list<QWidget *>{m_blend, m_opacity, m_opacityValue})
         w->setEnabled(header);
-    m_add->setEnabled(canAdd);
-    // The kinds of layer to add, unless + adds a cel.
-    m_add->setMenu(m_focus == Focus::Cel ? m_addCelMenu : m_addMenu);
-    m_add->setPopupMode(QToolButton::MenuButtonPopup);
+    if (m_focus != Focus::Frame) {
+        m_addLayer->setToolTip(tr("New layer"));
+        m_addPerspective->setToolTip(tr("New perspective layer"));
+    }
+    m_addLayer->setEnabled(canAdd);
+    m_addPerspective->setEnabled(canAdd);
     m_remove->setEnabled(canRemove);
     m_merge->setEnabled(canMerge);
     m_mergeDown->setEnabled(canMergeDown);

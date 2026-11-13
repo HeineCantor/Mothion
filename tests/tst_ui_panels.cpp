@@ -766,7 +766,7 @@ private slots:
         QVERIFY(!panel.findChild<QComboBox *>()->isEnabled());
         QVERIFY(!panel.findChild<QSlider *>()->isEnabled());
         QCOMPARE(d.cel(cel)->properties().opacity, 1.0f);
-        button(QStringLiteral("New cel"))->click();
+        controller.addCel(); // cels are added from the timeline
         QCoreApplication::processEvents();
         QCOMPARE(d.celCount(), 2);
         const doc::CelId second = controller.currentCel();
@@ -968,9 +968,9 @@ private slots:
         QCOMPARE(controller.celSelection(), std::vector<doc::CelId>{id[4]});
     }
 
-    // The arrow next to the plus offers, with a cel chosen, a standard cel or a trajectory cel; a trajectory has its own icon
-    // row and no picture.
-    void thePlusOffersATrajectoryCel()
+    // The panel has no way to add a cel (the timeline's plus has it, standard or trajectory); its buttons add layers.
+    // A trajectory has its own icon row and no picture.
+    void trajectoryRowsHaveTheirOwnLook()
     {
         document::DocumentController controller;
         ui::LayersPanel panel(&controller);
@@ -980,22 +980,12 @@ private slots:
         QCoreApplication::processEvents();
         controller.chooseCel(controller.currentCel()); // the cel's row, as chosen in the timeline
         QCoreApplication::processEvents();
-        QToolButton *plus = nullptr;
         for (auto *button : panel.findChildren<QToolButton *>())
-            if (button->menu() && button->toolTip().contains(QStringLiteral("cel"), Qt::CaseInsensitive))
-                plus = button;
-        QVERIFY(plus);
-        QStringList kinds;
-        QAction *trajectory = nullptr;
-        for (QAction *action : plus->menu()->actions()) {
-            kinds << action->text();
-            if (action->text() == QStringLiteral("Trajectory Cel"))
-                trajectory = action;
-        }
-        QVERIFY2(trajectory, qPrintable(kinds.join(", ")));
-        QVERIFY(kinds.contains(QStringLiteral("Cel")));
+            QVERIFY2(!button->menu(), qPrintable(button->toolTip())); // no menu offers a kind of cel
+        QVERIFY(panel.findChild<QToolButton *>(QStringLiteral("addLayer")));
+        QVERIFY(panel.findChild<QToolButton *>(QStringLiteral("addPerspective")));
         const int cels = controller.document().celCount();
-        trajectory->trigger();
+        controller.addTrajectory();
         QCoreApplication::processEvents();
         QCOMPARE(controller.document().celCount(), cels + 1);
         QVERIFY(controller.document().cel(controller.currentCel())->properties().trajectory);

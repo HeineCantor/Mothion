@@ -41,13 +41,14 @@ namespace mothion::ui {
 // The current row says what the header and the buttons act on:
 //  - the camera (a row at the top, with the Camera button): drawing is refused, the canvas moves the camera
 //    with the pen; its eye turns it on and off; delete removes it;
-//  - a cel: its blend mode and opacity; new cel, delete, up and down;
-//  - a frame: new layer on top of it (the arrow next to +: a layer or a
-//    perspective layer); delete removes every selected frame
+//  - a cel: its blend mode and opacity; new layer on top of its current frame, delete, up and down (new cels
+//    are the timeline's);
+//  - a frame: new layer on top of it (one button per kind of layer: drawing, perspective); delete removes
+//    every selected frame
 //    (Ctrl and Shift select several, of any cel);
 //  - a layer: the blend mode and opacity of the selected layers (of that
 //    frame: Ctrl+click adds or takes away one, Shift+click a range); new
-//    layer above (of either kind), merge (into the lowest), delete, up and
+//    layer above (one button per kind), merge (into the lowest), delete, up and
 //    down; right click on a row offers merge and delete; "Snap to" (on a perspective layer) makes
 //    it the reference of the pen's snapping. A perspective
 //    layer is set on the canvas (canvas::PerspectiveGizmo).
@@ -166,9 +167,8 @@ private:
     QSlider *m_opacity;
     QSpinBox *m_opacityValue;
     QTreeWidget *m_tree;
-    QToolButton *m_add;
-    QMenu *m_addMenu = nullptr; // the kinds of layer, from the arrow next to +
-    QMenu *m_addCelMenu = nullptr; // and, with a cel chosen, the kinds of cel
+    QToolButton *m_addLayer;       // a new drawing layer
+    QToolButton *m_addPerspective; // a new perspective layer
     QToolButton *m_merge;
     QToolButton *m_mergeDown;
     QToolButton *m_remove;

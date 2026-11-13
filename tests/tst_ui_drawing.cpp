@@ -202,7 +202,7 @@ private slots:
     }
 
 
-    // The arrow next to + adds a perspective layer: a grid that cannot be
+    // The perspective button adds a perspective layer: a grid that cannot be
     // drawn on, and that the panel has no controls for (it is set on the canvas).
     void perspectiveLayers()
     {
@@ -215,16 +215,9 @@ private slots:
         controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 1, "Line").command);
         QCoreApplication::processEvents();
 
-        QToolButton *add = nullptr;
-        for (QToolButton *b : panel.findChildren<QToolButton *>())
-            if (b->toolTip() == QStringLiteral("New layer"))
-                add = b;
-        QVERIFY(add && add->menu());
-        QStringList kinds;
-        for (QAction *a : add->menu()->actions())
-            kinds << a->text();
-        QCOMPARE(kinds, (QStringList{QStringLiteral("Layer"), QStringLiteral("Perspective Layer")}));
-        add->menu()->actions()[1]->trigger();
+        auto *add = panel.findChild<QToolButton *>(QStringLiteral("addPerspective"));
+        QVERIFY(add && add->isEnabled());
+        add->click();
         QCoreApplication::processEvents();
         const doc::Drawing &drawing = *controller.currentDrawing();
         const doc::Layer *grid = drawing.layer(controller.currentLayer());
