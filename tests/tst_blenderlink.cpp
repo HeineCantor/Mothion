@@ -808,14 +808,14 @@ bpy.app.timers.register(quit_when_asked, first_interval=1.0, persistent=True)
         process.start(xvfb, {QStringLiteral("-a"), QStringLiteral("-s"), QStringLiteral("-screen 0 1280x800x24"), blender,
                              QStringLiteral("--factory-startup"), scene, QStringLiteral("--python"), boot});
         const auto cleanup = qScopeGuard([&] {
-            QFile(dir.filePath(QStringLiteral("quit.flag"))).open(QIODevice::WriteOnly);
+            QVERIFY(QFile(dir.filePath(QStringLiteral("quit.flag"))).open(QIODevice::WriteOnly));
             if (process.state() != QProcess::NotRunning && !process.waitForFinished(15000)) {
                 process.kill();
                 process.waitForFinished(5000);
             }
         });
         auto quit = [&] {
-            QFile(dir.filePath(QStringLiteral("quit.flag"))).open(QIODevice::WriteOnly);
+            QVERIFY(QFile(dir.filePath(QStringLiteral("quit.flag"))).open(QIODevice::WriteOnly));
             if (!process.waitForFinished(15000)) {
                 process.kill();
                 process.waitForFinished(5000);
@@ -876,7 +876,7 @@ bpy.app.timers.register(quit_when_asked, first_interval=1.0, persistent=True)
         QTest::qWait(1200);
         QCOMPARE(changed.size(), 0);
         // ...but the person moving something in it is: the link says so, once.
-        QFile(dir.filePath(QStringLiteral("edit.flag"))).open(QIODevice::WriteOnly);
+        QVERIFY(QFile(dir.filePath(QStringLiteral("edit.flag"))).open(QIODevice::WriteOnly));
         const bool told = QTest::qWaitFor([&] { return changed.size() >= 1; }, 20000);
         if (told)
             QTest::qWait(1500);
@@ -885,7 +885,7 @@ bpy.app.timers.register(quit_when_asked, first_interval=1.0, persistent=True)
         QCOMPARE(server.session(sessionId)->frame, frameBefore); // the frames were drawn on a copy: the timeline never moved
         // The range of frames is not geometry, but a change of it is told too.
         QCOMPARE(server.session(sessionId)->frameEnd, 3);
-        QFile(dir.filePath(QStringLiteral("range.flag"))).open(QIODevice::WriteOnly);
+        QVERIFY(QFile(dir.filePath(QStringLiteral("range.flag"))).open(QIODevice::WriteOnly));
         QVERIFY(QTest::qWaitFor([&] { return server.session(sessionId)->frameEnd == 2; }, 20000));
         quit();
     }

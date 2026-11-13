@@ -2332,7 +2332,7 @@ bool DocumentController::flipSelection(bool horizontal, QString *reason)
         QImage area(box.size(), QImage::Format_ARGB32_Premultiplied);
         inside.read(box.x(), box.y(), box.width(), box.height(), reinterpret_cast<doc::Pixel *>(area.bits()),
                     area.bytesPerLine() / 4);
-        const QImage mirrored = area.mirrored(horizontal, !horizontal);
+        const QImage mirrored = area.flipped(horizontal ? Qt::Horizontal : Qt::Vertical);
         doc::TiledImage piece;
         piece.write(box.x(), box.y(), box.width(), box.height(),
                     reinterpret_cast<const doc::Pixel *>(mirrored.constBits()), mirrored.bytesPerLine() / 4);
@@ -2545,8 +2545,8 @@ bool DocumentController::beginFloatingPaste(const QImage &image, std::optional<Q
             *reason = why;
         return false;
     }
-    if (!layer && (m_document->cel(m_currentCel) && !m_document->cel(m_currentCel)->properties().visible
-                   || m_document->cel(m_currentCel) && m_document->cel(m_currentCel)->properties().locked)) {
+    if (!layer && m_document->cel(m_currentCel)
+        && (!m_document->cel(m_currentCel)->properties().visible || m_document->cel(m_currentCel)->properties().locked)) {
         if (reason)
             *reason = why;
         return false;

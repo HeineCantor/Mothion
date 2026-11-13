@@ -122,7 +122,7 @@ void prune()
     QList<int> counts;
     for (const Entry &entry : backups()) {
         const QString key = entry.projectPath.isEmpty() ? QString() : QFileInfo(entry.projectPath).absoluteFilePath();
-        int index = seen.indexOf(key);
+        int index = int(seen.indexOf(key));
         if (index < 0) {
             seen << key;
             counts << 0;

@@ -280,7 +280,7 @@ void VectorEraseState::erase(const std::vector<QPointF> &pathPoints, double radi
                 // stroke's end.
                 auto firstCrossing = [&](std::size_t segment, bool forward) -> double {
                     // The crossing nearest the touched stretch on segment (segment, segment + 1): -1 if none.
-                    double best = -1.0;
+                    double nearestT = -1.0;
                     const QPointF a = at(q[segment]), b = at(q[segment + 1]);
                     const QRectF segBox = QRectF(a, b).normalized().adjusted(-1e-6, -1e-6, 1e-6, 1e-6);
                     for (std::size_t o = 0; o < m_original.size(); ++o) {
@@ -292,11 +292,11 @@ void VectorEraseState::erase(const std::vector<QPointF> &pathPoints, double radi
                             if (t < 0.0)
                                 continue;
                             // Nearest the stretch: the largest t going back, the smallest going forward.
-                            if (best < 0.0 || (forward ? t < best : t > best))
-                                best = t;
+                            if (nearestT < 0.0 || (forward ? t < nearestT : t > nearestT))
+                                nearestT = t;
                         }
                     }
-                    return best;
+                    return nearestT;
                 };
                 from = 0.0;
                 for (std::size_t j = i; j > 0; --j) {

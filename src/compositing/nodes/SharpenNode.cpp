@@ -13,7 +13,7 @@ QImage SharpenNode::process(const QList<QImage> &inputs, const QVariantMap &para
     if (inputs.value(0).isNull())
         return {};
     const QImage source = inputs.value(0).convertToFormat(QImage::Format_ARGB32_Premultiplied);
-    const float amount = params.value(QStringLiteral("amount")).toInt() / 100.0f;
+    const float amount = float(params.value(QStringLiteral("amount")).toInt()) / 100.0f;
     const int radius = std::max(1, int(std::lround(params.value(QStringLiteral("radius")).toInt() * context.scale)));
     if (amount <= 0.0f)
         return source;
@@ -28,7 +28,7 @@ QImage SharpenNode::process(const QList<QImage> &inputs, const QVariantMap &para
             const int a = qAlpha(in[x]);
             // The detail (what the picture has over its blur) added back, kept between nothing and its alpha: the
             // picture is premultiplied, so a color may not pass its alpha.
-            auto channel = [&](int c, int s) { return std::clamp(int(std::lround(c + amount * (c - s))), 0, a); };
+            auto channel = [&](int c, int s) { return std::clamp(int(std::lround(float(c) + amount * float(c - s))), 0, a); };
             out[x] = qRgba(channel(qRed(in[x]), qRed(soft[x])), channel(qGreen(in[x]), qGreen(soft[x])),
                            channel(qBlue(in[x]), qBlue(soft[x])), a);
         }

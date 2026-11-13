@@ -717,29 +717,29 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
         }
     }
     for (int i = 0; i < d.celCount(); ++i) {
-        const doc::Cel &cel = d.celAt(i);
-        if (cel.motion().isEmpty())
+        const doc::Cel &celHere = d.celAt(i);
+        if (celHere.motion().isEmpty())
             continue;
         QSqlQuery motion(db);
         motion.prepare(QStringLiteral("insert into cel_motion values (?, ?)"));
-        motion.addBindValue(qint64(cel.id()));
-        motion.addBindValue(motionToJson(cel.motion()));
+        motion.addBindValue(qint64(celHere.id()));
+        motion.addBindValue(motionToJson(celHere.motion()));
         if (!motion.exec()) {
             failure = sqlError(motion);
             return false;
         }
     }
     for (int i = 0; i < d.celCount(); ++i) {
-        const doc::Cel &cel = d.celAt(i);
-        if (!cel.blenderLink())
+        const doc::Cel &celHere = d.celAt(i);
+        if (!celHere.blenderLink())
             continue;
         QSqlQuery link(db);
         link.prepare(QStringLiteral("insert into blender_links values (?, ?, ?, ?, ?)"));
-        link.addBindValue(qint64(cel.id()));
-        link.addBindValue(QString::fromStdString(cel.blenderLink()->path));
-        link.addBindValue(QString::fromStdString(cel.blenderLink()->scene));
-        link.addBindValue(cel.blenderLink()->startFrame);
-        link.addBindValue(cel.blenderLink()->percent);
+        link.addBindValue(qint64(celHere.id()));
+        link.addBindValue(QString::fromStdString(celHere.blenderLink()->path));
+        link.addBindValue(QString::fromStdString(celHere.blenderLink()->scene));
+        link.addBindValue(celHere.blenderLink()->startFrame);
+        link.addBindValue(celHere.blenderLink()->percent);
         if (!link.exec()) {
             failure = sqlError(link);
             return false;
@@ -864,7 +864,7 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
     std::map<doc::DrawingId, doc::Layer *> v1Layers;
     if (v1) {
         for (auto &[id, drawing] : drawings)
-            v1Layers[id] = &drawing->layers.emplace_back(doc::Layer{doc::kNoId, {"Layer 1"}, {}});
+            v1Layers[id] = &drawing->layers.emplace_back(doc::Layer{doc::kNoId, {"Layer 1"}, {}, doc::LayerKind::Raster, std::nullopt, {}});
     } else {
         const bool kinds = version >= 3; // before, all raster
         QString columns = QStringLiteral("id, drawing, name, visible, locked, opacity, blend");
@@ -892,7 +892,7 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
             } else if (kinds && q.value(7).toString() == QLatin1String("vector")) {
                 kind = doc::LayerKind::Vector;
             }
-            layers[id] = &it->second->layers.emplace_back(doc::Layer{id, std::move(p), {}, kind});
+            layers[id] = &it->second->layers.emplace_back(doc::Layer{id, std::move(p), {}, kind, std::nullopt, {}});
         }
         // Pointers into the layer vectors: taken again now that they are complete.
         layers.clear();

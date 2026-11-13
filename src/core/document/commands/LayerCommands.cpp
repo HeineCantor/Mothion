@@ -31,7 +31,7 @@ AddLayerCommand::AddLayerCommand(Document &doc, CelId cel, DrawingId drawing, in
     , m_drawing(drawing)
     , m_id(doc.allocateLayerId())
     , m_index(index)
-    , m_layer(Layer{m_id, std::move(properties), std::move(image), kind})
+    , m_layer(Layer{m_id, std::move(properties), std::move(image), kind, std::nullopt, {}})
 {
 }
 

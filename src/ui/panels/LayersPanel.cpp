@@ -1317,8 +1317,8 @@ QColor LayersPanel::celRowColor(int slot, const QPalette &palette)
         return color.darker(170); // on a dark theme, deep, under the light text
     // On a light one the color itself, a little lightened, under the dark text.
     const QColor base = palette.color(QPalette::Base);
-    return QColor::fromRgbF(0.70 * color.redF() + 0.30 * base.redF(), 0.70 * color.greenF() + 0.30 * base.greenF(),
-                            0.70 * color.blueF() + 0.30 * base.blueF());
+    return QColor::fromRgbF(float(0.70 * color.redF() + 0.30 * base.redF()), float(0.70 * color.greenF() + 0.30 * base.greenF()),
+                            float(0.70 * color.blueF() + 0.30 * base.blueF()));
 }
 
 // --- edits -----------------------------------------------------------------------------

@@ -61,9 +61,9 @@ QImage ColorCorrectNode::process(const QList<QImage> &inputs, const QVariantMap 
                 continue;
             }
             // The color as it is without the alpha (the picture holds it multiplied by it).
-            float r = std::min(255.0f, qRed(in[x]) * 255.0f / float(a));
-            float g = std::min(255.0f, qGreen(in[x]) * 255.0f / float(a));
-            float b = std::min(255.0f, qBlue(in[x]) * 255.0f / float(a));
+            float r = std::min(255.0f, float(qRed(in[x])) * 255.0f / float(a));
+            float g = std::min(255.0f, float(qGreen(in[x])) * 255.0f / float(a));
+            float b = std::min(255.0f, float(qBlue(in[x])) * 255.0f / float(a));
             if (colors) {
                 const float nr = matrix[0][0] * r + matrix[0][1] * g + matrix[0][2] * b;
                 const float ng = matrix[1][0] * r + matrix[1][1] * g + matrix[1][2] * b;

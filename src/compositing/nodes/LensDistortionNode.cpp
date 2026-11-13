@@ -40,19 +40,19 @@ int radius(Kernel kernel) { return kernel == Kernel::Bilinear ? 1 : (kernel == K
 void sample(const QImage &image, Kernel kernel, float sx, float sy, float out[4])
 {
     const int w = image.width(), h = image.height();
-    const float coverage = std::clamp(sx + 1.0f, 0.0f, 1.0f) * std::clamp(w - sx, 0.0f, 1.0f)
-                           * std::clamp(sy + 1.0f, 0.0f, 1.0f) * std::clamp(h - sy, 0.0f, 1.0f);
+    const float coverage = std::clamp(sx + 1.0f, 0.0f, 1.0f) * std::clamp(float(w) - sx, 0.0f, 1.0f)
+                           * std::clamp(sy + 1.0f, 0.0f, 1.0f) * std::clamp(float(h) - sy, 0.0f, 1.0f);
     out[0] = out[1] = out[2] = out[3] = 0.0f;
     if (coverage <= 0.0f)
         return;
     const int r = radius(kernel);
     const int x0 = int(std::floor(sx)), y0 = int(std::floor(sy));
-    const float fx = sx - x0, fy = sy - y0;
+    const float fx = sx - float(x0), fy = sy - float(y0);
     float wx[6], wy[6];
     float sumX = 0, sumY = 0;
     for (int i = 0; i < 2 * r; ++i) {
-        wx[i] = weight(kernel, fx - (i - (r - 1)));
-        wy[i] = weight(kernel, fy - (i - (r - 1)));
+        wx[i] = weight(kernel, fx - float(i - (r - 1)));
+        wy[i] = weight(kernel, fy - float(i - (r - 1)));
         sumX += wx[i];
         sumY += wy[i];
     }
@@ -63,10 +63,10 @@ void sample(const QImage &image, Kernel kernel, float sx, float sy, float out[4]
         for (int i = 0; i < 2 * r; ++i) {
             const QRgb px = line[std::clamp(x0 + i - (r - 1), 0, w - 1)];
             const float wt = wj * wx[i] / sumX;
-            acc[0] += wt * qAlpha(px);
-            acc[1] += wt * qRed(px);
-            acc[2] += wt * qGreen(px);
-            acc[3] += wt * qBlue(px);
+            acc[0] += wt * float(qAlpha(px));
+            acc[1] += wt * float(qRed(px));
+            acc[2] += wt * float(qGreen(px));
+            acc[3] += wt * float(qBlue(px));
         }
     }
     for (int c = 0; c < 4; ++c)
@@ -87,14 +87,15 @@ QImage LensDistortionNode::process(const QList<QImage> &inputs, const QVariantMa
         return source;
     const Kernel kernel = Kernel(std::clamp(params.value(QStringLiteral("quality"), 1).toInt(), 0, 2));
     const int w = source.width(), h = source.height();
-    const float a = amountPercent / 100.0f;
+    const float a = float(amountPercent) / 100.0f;
     // Outwards the lens draws the edges in a lot; inwards, less (past a point the picture would fold over itself).
     const float k = a > 0 ? 1.2f * a : 0.3f * a;
-    float zoom = zoomPercent / 100.0f;
-    const float cx = params.value(QStringLiteral("centerx"), 50).toInt() / 100.0f * (w - 1);
-    const float cy = params.value(QStringLiteral("centery"), 50).toInt() / 100.0f * (h - 1);
+    float zoom = float(zoomPercent) / 100.0f;
+    const float fw = float(w), fh = float(h); // the picture's size, as the float it is used as
+    const float cx = float(params.value(QStringLiteral("centerx"), 50).toInt()) / 100.0f * (fw - 1.0f);
+    const float cy = float(params.value(QStringLiteral("centery"), 50).toInt()) / 100.0f * (fh - 1.0f);
     // r is 1 at the farthest corner from the center.
-    const float reach = std::max(1.0f, std::hypot(std::max(cx, w - 1 - cx), std::max(cy, h - 1 - cy)));
+    const float reach = std::max(1.0f, std::hypot(std::max(cx, fw - 1.0f - cx), std::max(cy, fh - 1.0f - cy)));
 
     if (autosize) {
         // The smallest zoom with every point of the result coming from inside the picture. Along each ray from the
@@ -105,22 +106,22 @@ QImage LensDistortionNode::process(const QList<QImage> &inputs, const QVariantMa
             const float r = std::hypot(dx, dy) / reach;
             const float far = 1.0f + k * r * r;
             float z = 0.0f;
-            if (dx > 0 && w - 1 - cx > 0)
-                z = std::max(z, dx * far / (w - 1 - cx));
+            if (dx > 0 && fw - 1.0f - cx > 0)
+                z = std::max(z, dx * far / (fw - 1.0f - cx));
             else if (dx < 0 && cx > 0)
                 z = std::max(z, -dx * far / cx);
-            if (dy > 0 && h - 1 - cy > 0)
-                z = std::max(z, dy * far / (h - 1 - cy));
+            if (dy > 0 && fh - 1.0f - cy > 0)
+                z = std::max(z, dy * far / (fh - 1.0f - cy));
             else if (dy < 0 && cy > 0)
                 z = std::max(z, -dy * far / cy);
             return z;
         };
         float z = 0.0f;
         for (int x = 0; x < w; ++x)
-            z = std::max({z, need(float(x), -0.5f), need(float(x), h - 0.5f)});
+            z = std::max({z, need(float(x), -0.5f), need(float(x), fh - 0.5f)});
         for (int y = 0; y < h; ++y)
-            z = std::max({z, need(-0.5f, float(y)), need(w - 0.5f, float(y))});
-        z = std::max({z, need(-0.5f, -0.5f), need(w - 0.5f, -0.5f), need(-0.5f, h - 0.5f), need(w - 0.5f, h - 0.5f)});
+            z = std::max({z, need(-0.5f, float(y)), need(fw - 0.5f, float(y))});
+        z = std::max({z, need(-0.5f, -0.5f), need(fw - 0.5f, -0.5f), need(-0.5f, fh - 0.5f), need(fw - 0.5f, fh - 0.5f)});
         zoom = std::max(0.05f, z * 1.001f); // (a hair over, so a rounding does not show an edge)
     }
 
@@ -131,14 +132,14 @@ QImage LensDistortionNode::process(const QList<QImage> &inputs, const QVariantMa
             // Where the lens takes the point's neighborhood from: its distance to the center is stretched by this much
             // along the radius (the slope of the mapping) and across it (the mapping itself). More than a pixel of
             // the picture for one of the result, and the pixel's whole area is read, in a few points.
-            const float dx0 = x - cx, dy0 = y - cy;
+            const float dx0 = float(x) - cx, dy0 = float(y) - cy;
             const float r0 = std::hypot(dx0, dy0) / reach;
             const float stretch = std::max(1.0f + 3.0f * k * r0 * r0, 1.0f + k * r0 * r0) / zoom;
             const int n = kernel == Kernel::Bilinear ? 1 : std::clamp(int(std::ceil(stretch - 0.25f)), 1, 4);
             float acc[4] = {0, 0, 0, 0};
             for (int j = 0; j < n; ++j) {
                 for (int i = 0; i < n; ++i) {
-                    const float dx = dx0 + (i + 0.5f) / n - 0.5f, dy = dy0 + (j + 0.5f) / n - 0.5f;
+                    const float dx = dx0 + (float(i) + 0.5f) / float(n) - 0.5f, dy = dy0 + (float(j) + 0.5f) / float(n) - 0.5f;
                     const float r = std::hypot(dx, dy) / reach;
                     const float scale = (1.0f + k * r * r) / zoom;
                     float px[4];

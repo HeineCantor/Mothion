@@ -217,7 +217,6 @@ void TimelineView::toggleFold(doc::CelId cel, bool keyframesRow)
 
 int TimelineView::rowCount() const
 {
-    const doc::Document &d = m_document->document();
     int rows = 0;
     for (const Placed &p : celOrder()) {
         ++rows;

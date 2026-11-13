@@ -125,7 +125,7 @@ NewDrawing makeNewDrawing(Document &doc, CelId celId, int frame, int length, std
 
     std::vector<std::unique_ptr<Command>> steps;
     steps.push_back(std::make_unique<AddDrawingCommand>(
-        celId, Drawing{id, cel->nextDrawingName(), {Layer{layer, {std::move(layerName)}, {}}}}));
+        celId, Drawing{id, cel->nextDrawingName(), {Layer{layer, {std::move(layerName)}, {}, LayerKind::Raster, std::nullopt, {}}}}));
     steps.push_back(std::make_unique<SetTimingCommand>(celId, cel->timing(), std::move(after)));
     return {std::make_unique<GroupCommand>(CommandKind::AddDrawing, std::move(steps)), id, layer};
 }
@@ -231,7 +231,7 @@ NewDrawing makeInbetween(Document &doc, CelId celId, int frame, std::string laye
 
     std::vector<std::unique_ptr<Command>> steps;
     steps.push_back(std::make_unique<AddDrawingCommand>(
-        celId, Drawing{id, cel->nextDrawingName(), {Layer{layer, {std::move(layerName)}, {}}}}));
+        celId, Drawing{id, cel->nextDrawingName(), {Layer{layer, {std::move(layerName)}, {}, LayerKind::Raster, std::nullopt, {}}}}));
     steps.push_back(std::make_unique<SetTimingCommand>(celId, cel->timing(), std::move(after)));
     return {std::make_unique<GroupCommand>(kind, std::move(steps)), id, layer};
 }
