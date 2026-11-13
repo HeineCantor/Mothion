@@ -15,6 +15,8 @@ import/export), ma le API interne e l'esperienza utente possono ancora evolvere.
   partire dal [README](../README.md).
 - Per la griglia prospettica, vedere [Griglia prospettica](perspective-layer.md).
 - Per i dettagli dell'algoritmo di deformazione, vedere [Puppet warp](puppet-warp.md).
+- Per i livelli vettoriali (tratti salvati, gomma vettoriale, strumenti), vedere
+  [Livelli vettoriali](vector-layers.md).
 - Per un riferimento tecnico più fitto a classi e gruppi di sorgenti, vedere la
   sezione [Riferimento tecnico dei moduli](#riferimento-tecnico-dei-moduli) di questa guida.
 - Per un elenco dei moduli del codice, continuare con la sezione
@@ -168,8 +170,12 @@ Il pixel del core è ARGB premoltiplicato, compatibile con
 composizione senza includere Qt.
 
 Ogni disegno ha livelli ordinati dal basso verso l'alto. Un livello può essere
-raster oppure una griglia prospettica; può avere visibilità, blocco, opacità, modalità
-di fusione e, se raster, una maschera. La maschera è interpretata in scala di grigi:
+raster, una griglia prospettica oppure vettoriale (`LayerKind::Vector`): un livello
+vettoriale conserva i tratti del pennello (`Layer::strokes`, punti più pennello,
+dimensione, colori e seme) e la sua immagine è una cache di ciò che quei tratti
+mostrano, così il rendering, l'esportazione e le miniature non cambiano; i tratti
+si ridisegnano da zero quando il livello viene trasformato. Un livello può avere
+visibilità, blocco, opacità, modalità di fusione e, se raster, una maschera. La maschera è interpretata in scala di grigi:
 bianco o pixel assente lascia vedere il livello, nero lo nasconde e i grigi lo
 mostrano parzialmente.
 
@@ -329,8 +335,9 @@ dialoghi di importazione/esportazione e pannelli sono organizzati sotto `src/ui/
 
 [`ProjectFile`](../src/io/ProjectFile.h) memorizza il documento in un database SQLite.
 È il formato nativo, con versione esplicita tramite `PRAGMA user_version` e
-identificatore applicazione `MOTH`. La versione corrente è 12. Il database contiene
-metadati del documento, cels, disegni, livelli, esposizioni, tile, miniature, audio,
+identificatore applicazione `MOTH`. La versione corrente è 16. Il database contiene
+metadati del documento, cels, disegni, livelli (con i tratti dei livelli vettoriali, in
+formato JSON nella tabella `vector_strokes`), esposizioni, tile, miniature, audio,
 grafo compositing, camera, maschere, marcatori, motion e riferimenti Blender.
 
 I pixel delle tile sono salvati come blocchi ARGB premoltiplicati compressi. Il
@@ -642,6 +649,9 @@ utile sia per la portabilità sia per i test costruiti senza hardware.
 | `Resample.h/.cpp` | Filtri per la ricampionatura di immagini trasformate. |
 | `SelectionMask.h/.cpp` | Maschera pixel derivata da una selezione vettoriale e antialiasing ai bordi. |
 | `PerspectiveGizmo.h/.cpp`, `PerspectiveSnap.h/.cpp` | Manipolazione e aggancio alla griglia prospettica. |
+| `VectorRender.h/.cpp` | Ridisegno dei tratti di un livello vettoriale (`drawStrokes`), loro trasformazione e taglio lungo una selezione. |
+| `VectorErase.h/.cpp`, `VectorEraseTool.h/.cpp` | Gomma vettoriale: algoritmo incrementale sui tratti (parte toccata, fino all'intersezione, linea intera) e strumento che lo usa. |
+| `VectorWarp.h/.cpp` | Spostamento dei tratti attraverso la mesh del puppet warp. |
 | `CameraGizmo.h/.cpp` | Manipolazione visuale dell'inquadratura della camera. |
 | `DebugOverlay.h/.cpp` | Overlay diagnostico dei campioni e del dispositivo di input. |
 
@@ -653,7 +663,10 @@ Gli strumenti concreti sono:
 - `SelectionTool`: crea e modifica selezioni rettangolari o a mano libera;
 - `TransformTool`: trasforma l'area o i pixel selezionati mantenendo la modifica
   aperta fino ad applicazione/annullamento;
-- `PuppetTool`: apre il rig, gestisce pin o drag locale e applica il raster deformato;
+- `PuppetTool`: apre il rig, gestisce pin o drag locale e applica il raster deformato
+  (su un livello vettoriale, anche i tratti spostati dalla mesh);
+- `VectorEraseTool`: la gomma su un livello vettoriale, quando è scelta una delle modalità
+  vettoriali nelle sue proprietà;
 - `ShapeTool`: linee, rettangoli, rettangoli arrotondati, ellissi, poligoni e curve;
 - `EffectBrushTools`: strumenti a pennello per fusione e liquify;
 - `AnimateTool`: strumenti di animazione/motion del cel e manipolazione delle pose.
@@ -673,7 +686,7 @@ trasformazione del contenuto produce invece un comando sul documento.
 | `tools/BrushLibrary.h/.cpp` | Raccolta e selezione delle definizioni/preset di pennello. |
 | `tools/SutImporter.h/.cpp` | Importazione di definizioni `.sut` tramite database/risorse del formato. |
 | `tools/ColorSetLibrary.h/.cpp` | Palette di colori salvate e selezione delle tinte. |
-| `tools/Preferences.h/.cpp` | Preferenze applicative persistenti non appartenenti a un singolo documento. |
+| `tools/Preferences.h/.cpp` | Preferenze applicative persistenti non appartenenti a un singolo documento (compresa l'ultima modalità della gomma vettoriale). |
 
 È essenziale distinguere tre livelli di configurazione:
 

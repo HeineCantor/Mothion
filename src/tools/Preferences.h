@@ -58,6 +58,11 @@ public:
     bool brushOutline() const { return m_brushOutline; }
     void setBrushOutline(bool on);
 
+    // The mode the vector eraser was last set to (a VectorEraserSettings::Mode's number: 0 is "like a brush"), so that
+    // it is as it was at the next start. Not a choice of the Settings window: the tool's properties keep it.
+    int vectorEraserMode() const { return m_vectorEraserMode; }
+    void setVectorEraserMode(int mode);
+
     // Minutes between the autosaves of a project that has unsaved work (0: no autosave).
     int autosaveMinutes() const { return m_autosaveMinutes; }
     void setAutosaveMinutes(int minutes);
@@ -96,6 +101,7 @@ private:
     int m_undoSteps = kDefaultUndoSteps;
     int m_mousePressure = 100;
     int m_autosaveMinutes = kDefaultAutosaveMinutes;
+    int m_vectorEraserMode = 0;
 };
 
 } // namespace mothion::tools

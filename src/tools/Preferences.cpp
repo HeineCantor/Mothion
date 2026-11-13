@@ -23,6 +23,7 @@ constexpr auto kPaper = "paperColor";
 constexpr auto kUndoSteps = "undoSteps";
 constexpr auto kMousePressure = "mousePressure";
 constexpr auto kAutosave = "autosaveMinutes";
+constexpr auto kVectorEraserMode = "vectorEraserMode";
 
 QString path(const char *key)
 {
@@ -55,6 +56,7 @@ Preferences::Preferences()
     m_undoSteps = std::clamp(settings.value(path(kUndoSteps), kDefaultUndoSteps).toInt(), 10, 5000);
     m_mousePressure = std::clamp(settings.value(path(kMousePressure), 100).toInt(), 10, 100);
     m_autosaveMinutes = std::clamp(settings.value(path(kAutosave), kDefaultAutosaveMinutes).toInt(), 0, 120);
+    m_vectorEraserMode = std::clamp(settings.value(path(kVectorEraserMode), 0).toInt(), 0, 3);
 }
 
 void Preferences::save(const char *key, const QVariant &value)
@@ -105,6 +107,15 @@ void Preferences::setTransformFilter(int filter)
         return;
     m_transformFilter = filter;
     save(kTransformFilter, filter);
+}
+
+void Preferences::setVectorEraserMode(int mode)
+{
+    mode = std::clamp(mode, 0, 3);
+    if (mode == m_vectorEraserMode)
+        return;
+    m_vectorEraserMode = mode;
+    save(kVectorEraserMode, mode);
 }
 
 void Preferences::setBrushOutline(bool on)

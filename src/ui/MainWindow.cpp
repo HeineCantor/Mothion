@@ -137,6 +137,12 @@ MainWindow::MainWindow(QWidget *parent)
                     return preset.brush;
         return nullptr;
     });
+    // The vector eraser's mode is kept from one session to the next: as it was last set, and kept as it changes.
+    m_toolState->setVectorEraser(
+        {static_cast<tools::VectorEraserSettings::Mode>(tools::Preferences::instance().vectorEraserMode())});
+    connect(m_toolState, &tools::ToolState::vectorEraserChanged, this, [this] {
+        tools::Preferences::instance().setVectorEraserMode(int(m_toolState->vectorEraser().mode));
+    });
     m_audioPlayer = new audio::AudioPlayer(m_document, this);
     // If the program dies, a copy of the project is tried (the stroke being drawn is not in it).
     diagnostics::setEmergencySave([this](const QString &path) {

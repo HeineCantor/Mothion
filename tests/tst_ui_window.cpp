@@ -11,6 +11,28 @@ private:
     QTemporaryDir m_settingsDir;
 
 private slots:
+    // The vector eraser's mode is remembered: a new window has the one last set, and changing it changes what is kept.
+    void theVectorEraserModeIsRemembered()
+    {
+        tools::Preferences &prefs = tools::Preferences::instance();
+        const int before = prefs.vectorEraserMode();
+        prefs.setVectorEraserMode(2); // up to the intersection, from an earlier session
+        {
+            ui::MainWindow window;
+            auto *state = window.findChild<tools::ToolState *>();
+            QVERIFY(state);
+            QCOMPARE(state->vectorEraser().mode, tools::VectorEraserSettings::Mode::ToIntersection);
+            state->setVectorEraser({tools::VectorEraserSettings::Mode::WholeLine});
+            QCOMPARE(prefs.vectorEraserMode(), 3); // kept as it changes
+        }
+        {
+            ui::MainWindow again; // the next start
+            QCOMPARE(again.findChild<tools::ToolState *>()->vectorEraser().mode,
+                     tools::VectorEraserSettings::Mode::WholeLine);
+        }
+        prefs.setVectorEraserMode(before);
+    }
+
     void initTestCase()
     {
         QStandardPaths::setTestModeEnabled(true); // keep the user's brushes out
