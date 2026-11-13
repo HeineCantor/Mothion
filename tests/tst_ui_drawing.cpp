@@ -532,6 +532,118 @@ private slots:
         QCOMPARE(qAlpha(layer->image.pixel(-30 + 5, 100 + 5)), 0);              // not left behind
     }
 
+    // A paste floats in the Transform tool: pasted over the layer it was copied from, it moves alone, and what lay under
+    // it stays. One undo step; Esc drops the paste and brings back the selection there was.
+    void aPasteFloatsAndMovesAloneOnTheSameLayer()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        QImage image(60, 40, QImage::Format_ARGB32);
+        image.fill(Qt::red);
+        controller.importImage(image, QStringLiteral("block")); // at 930..989, 520..559
+        QPainterPath copied;
+        copied.addRect(930, 520, 60, 40);
+        controller.setSelection(copied);
+        QPoint origin;
+        const QImage taken = controller.copyPixels(&origin);
+        QVERIFY(!taken.isNull());
+        controller.clearSelection();
+        auto pixel = [&](int x, int y) {
+            const doc::Layer *layer = controller.document().layer(controller.currentCel(), controller.currentDrawing()->id,
+                                                                  controller.currentLayer());
+            return qAlpha(layer->image.pixel(x, y));
+        };
+
+        canvas::TransformTool tool(&controller, &state, [](const QString &) {}, [] {});
+        tool.setDeferredRendering(false);
+        QString reason;
+        QVERIFY(controller.beginFloatingPaste(taken, origin, nullptr, &reason));
+        tool.activated(); // the paste comes up in the box, in place
+        QVERIFY(tool.hasPendingEdit());
+        QCOMPARE(tool.box(), QRect(origin, taken.size()));
+        QCOMPARE(pixel(950, 540), 255);
+        const QPointF inside(950, 540);
+        tool.press(inside, Qt::NoModifier);
+        tool.move(inside + QPointF(100, 0), Qt::NoModifier);
+        tool.release(inside + QPointF(100, 0), Qt::NoModifier);
+        tool.commit();
+        QCOMPARE(pixel(950, 540), 255);  // what was there stays
+        QCOMPARE(pixel(1050, 540), 255); // and the paste went on its own
+        QCOMPARE(pixel(1100, 540), 0);
+        QVERIFY(controller.undoText().contains(QStringLiteral("paste"), Qt::CaseInsensitive));
+        controller.undo(); // one step takes the paste away
+        QCOMPARE(pixel(950, 540), 255);
+        QCOMPARE(pixel(1050, 540), 0);
+
+        // Dropped with Esc: nothing is pasted, and there is no selection left.
+        QVERIFY(controller.beginFloatingPaste(taken, origin, nullptr, &reason));
+        tool.activated();
+        QVERIFY(tool.hasPendingEdit());
+        QVERIFY(controller.hasSelection());
+        QVERIFY(tool.keyPress(Qt::Key_Escape));
+        QVERIFY(!tool.hasPendingEdit());
+        QVERIFY(!controller.hasSelection());
+        QCOMPARE(pixel(950, 540), 255);
+    }
+
+    // On a vector layer a paste is the copied strokes, floating the same way; pixels are refused there.
+    void aPasteOfStrokesFloatsOnAVectorLayer()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(500, 400);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 4, "Line").command);
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Vector));
+        QCoreApplication::processEvents();
+        auto layer = [&]() -> const doc::Layer & { return *controller.currentDrawing()->layer(controller.currentLayer()); };
+        state.setColor(QColor(200, 30, 30));
+        state.setActiveTool(tools::ToolId::Brush);
+        const QTransform toView = canvas.view().documentToView();
+        const QPoint start = toView.map(QPointF(900, 540)).toPoint();
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, start);
+        for (int i = 1; i <= 30; ++i)
+            QTest::mouseMove(&canvas, start + QPoint(i * 2, 0));
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, start + QPoint(60, 0));
+        QCOMPARE(layer().strokes.size(), std::size_t(1));
+        const double y0 = layer().strokes.front().points.front().y;
+
+        QPoint origin;
+        QString reason;
+        const QImage taken = controller.copyPixels(&origin);
+        QVERIFY(!taken.isNull());
+        QCOMPARE(controller.copiedStrokes().size(), std::size_t(1));
+        const std::vector<doc::VectorStroke> copied = controller.copiedStrokes();
+        QVERIFY(!controller.beginFloatingPaste(taken, origin, nullptr, &reason)); // pixels on a vector layer
+
+        state.setActiveTool(tools::ToolId::Brush);
+        QVERIFY(controller.beginFloatingPaste(taken, origin, &copied, &reason));
+        QCOMPARE(state.activeTool(), tools::ToolId::Transform); // the canvas takes the paste up in the Transform tool
+        QCoreApplication::processEvents();
+        // Dragged down 60 px, by the middle of its box.
+        const QPoint mid = toView.map(QPointF(origin) + QPointF(taken.width() / 2.0, taken.height() / 2.0)).toPoint();
+        const QPoint down = toView.map(QPointF(origin) + QPointF(taken.width() / 2.0, taken.height() / 2.0 + 60)).toPoint();
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, mid);
+        QTest::mouseMove(&canvas, (mid + down) / 2);
+        QTest::mouseMove(&canvas, down);
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, down);
+        QTest::keyClick(&canvas, Qt::Key_Return); // applied
+        QCoreApplication::processEvents();
+        QCOMPARE(layer().strokes.size(), std::size_t(2)); // the original, and the paste moved
+        std::set<int> rows;
+        for (const auto &s : layer().strokes)
+            rows.insert(int(std::lround(s.points.front().y)));
+        QVERIFY(rows.count(int(std::lround(y0))) == 1); // the original has not moved
+        QCOMPARE(int(rows.size()), 2);
+        QVERIFY(std::abs(*rows.rbegin() - y0) > 40);
+        controller.undo(); // the paste is one step
+        QCOMPARE(layer().strokes.size(), std::size_t(1));
+    }
+
+
     // A vector layer drawn again keeps what lies out of the canvas too (as a raster layer does): the strokes are drawn
     // beyond the page, so rasterizing the layer afterwards does not cut them.
     void aVectorLayerKeepsWhatLiesOutOfTheCanvasWhenDrawnAgain()

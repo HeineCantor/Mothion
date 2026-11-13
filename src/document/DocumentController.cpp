@@ -174,6 +174,7 @@ void DocumentController::replaceDocument(std::unique_ptr<doc::Document> document
     m_tempPoseCel = doc::kNoId;
     m_playFirst = 0;
     m_playLast = kSceneEnd;
+    m_floating.reset();
     emit playRangeChanged();
     emit documentReplaced();
     if (cameraWasSelected)
@@ -2307,6 +2308,19 @@ QImage DocumentController::copyPixels(QPoint *origin, QString *reason)
         return fail(tr("Nothing in the selection on this frame"));
     if (origin)
         *origin = tiles.topLeft() + crop.topLeft();
+    // From a vector layer the strokes are kept too (inside the selection: cut along its outline), to paste as strokes.
+    m_copiedStrokes.clear();
+    if (layer->kind == doc::LayerKind::Vector) {
+        if (!hasSelection()) {
+            m_copiedStrokes = layer->strokes;
+        } else {
+            const canvas::SelectionMask mask = canvas::SelectionMask::fromPath(m_selection);
+            for (const doc::VectorStroke &stroke : layer->strokes) {
+                canvas::SplitStroke cut = canvas::splitStrokeByMask(stroke, mask);
+                m_copiedStrokes.insert(m_copiedStrokes.end(), cut.inside.begin(), cut.inside.end());
+            }
+        }
+    }
     return area.copy(crop);
 }
 
@@ -2346,6 +2360,61 @@ bool DocumentController::pasteImage(const QImage &image, std::optional<QPoint> o
     setSelection(selected, false);
     endPaint(before, doc::CommandKind::Paste);
     return true;
+}
+
+bool DocumentController::beginFloatingPaste(const QImage &image, std::optional<QPoint> origin,
+                                            const std::vector<doc::VectorStroke> *strokes, QString *reason)
+{
+    if (image.isNull()) {
+        if (reason)
+            *reason = tr("Nothing to paste");
+        return false;
+    }
+    doc::Document &d = *m_document;
+    QImage pixels = image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    const QPoint at = origin.value_or(QPoint((d.width() - pixels.width()) / 2, (d.height() - pixels.height()) / 2));
+    if ((QRect(at, pixels.size()) & QRect(0, 0, d.width(), d.height())).isEmpty()) {
+        if (reason)
+            *reason = tr("The pasted image is outside the sheet");
+        return false;
+    }
+    // The layer must take it: strokes go to a vector layer, pixels to a raster one.
+    const bool wantsStrokes = strokes && !strokes->empty();
+    QString why;
+    // (An empty frame has no layer yet: the paste makes the drawing, as pasteImage() does.)
+    const doc::Layer *layer = workLayer(true, tr("Nothing to paste"), &why, true);
+    if (!layer && currentDrawingId() != doc::kNoId) {
+        if (reason)
+            *reason = why;
+        return false;
+    }
+    if (!layer && (m_document->cel(m_currentCel) && !m_document->cel(m_currentCel)->properties().visible
+                   || m_document->cel(m_currentCel) && m_document->cel(m_currentCel)->properties().locked)) {
+        if (reason)
+            *reason = why;
+        return false;
+    }
+    if (layer && wantsStrokes != (layer->kind == doc::LayerKind::Vector)) {
+        if (reason)
+            *reason = wantsStrokes ? tr("These strokes need a vector layer") : tr("Pixels cannot be pasted on a vector layer");
+        return false;
+    }
+    FloatingPaste floating;
+    floating.image = std::move(pixels);
+    floating.at = at;
+    floating.vector = wantsStrokes;
+    if (wantsStrokes)
+        floating.strokes = *strokes;
+    m_floating = std::move(floating);
+    emit floatingPasteStarted();
+    return true;
+}
+
+std::optional<DocumentController::FloatingPaste> DocumentController::takeFloatingPaste()
+{
+    std::optional<FloatingPaste> taken = std::move(m_floating);
+    m_floating.reset();
+    return taken;
 }
 
 void DocumentController::undo()

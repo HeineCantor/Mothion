@@ -2,6 +2,7 @@
 
 #include "io/Autosave.h"
 
+#include <QByteArray>
 #include <QElapsedTimer>
 #include "io/BlenderFrameCache.h"
 #include "io/BlenderLinkServer.h"
@@ -124,6 +125,7 @@ private:
     // any image onto the current layer.
     void copyPixels(bool cut);
     void pastePixels();
+    QByteArray m_vectorCopy; // the clipboard data of the last copy taken from a vector layer (empty after another copy)
     void importBrush();
     // The audio track: asks for a sound file and puts it in the project (a song under the animation).
     void importAudio();

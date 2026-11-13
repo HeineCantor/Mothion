@@ -233,6 +233,26 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
         m_transformTool->activated();
         update();
     });
+    // A paste floats in the Transform tool: what was open is applied, and the pasted pixels (or strokes) come up in its
+    // box, ready to be moved, scaled or turned without taking what lies under them along.
+    connect(m_document, &DocumentController::floatingPasteStarted, this, [this] {
+        if (m_toolState->keyframeMode()) { // (the Transform tool moves the cel then: the paste goes in as it is)
+            if (const auto pasted = m_document->takeFloatingPaste())
+                m_document->pasteImage(pasted->image, pasted->at);
+            return;
+        }
+        for (CanvasTool *tool : {m_moveTool.get(), m_rectSelectTool.get(), m_lassoSelectTool.get(), m_puppetTool.get(),
+                                  m_shapeTool.get(), m_transformTool.get(), m_animateTool.get()})
+            if (tool->hasPendingEdit())
+                tool->commit();
+        if (m_toolState->activeTool() == ToolId::Transform) {
+            m_transformTool->setViewZoom(m_view.zoom());
+            m_transformTool->activated();
+        } else {
+            m_toolState->setActiveTool(ToolId::Transform);
+        }
+        update();
+    });
     connect(m_toolState, &ToolState::activeToolChanged, this, &CanvasView::renderWholeFrame); // posed or as drawn
     // The Transform and Move tools move the pixels, or (the cel has keys) the cel as a piece, with a key: another tool then
     // is the one at work (what the first left open is applied), and the cel is shown posed or as drawn.

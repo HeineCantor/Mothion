@@ -386,6 +386,25 @@ public:
     // with `reason`, if the layer cannot be painted (hidden, locked).
     bool pasteImage(const QImage &image, std::optional<QPoint> origin, QString *reason = nullptr);
 
+    // What a paste puts on the canvas before it is part of the layer: it floats, in a Transform session, so it can be
+    // moved or turned at once and does not move what lies under it. `strokes` (when copied from a vector layer onto
+    // one) are the strokes, at their own places; the image is what they look like (or the pixels, for a raster layer).
+    struct FloatingPaste
+    {
+        QImage image; // premultiplied ARGB32
+        QPoint at;    // its top-left corner in the document
+        std::vector<doc::VectorStroke> strokes;
+        bool vector = false;
+    };
+    // Starts a floating paste for the Transform tool to take (see takeFloatingPaste(), and floatingPasteStarted()). Checks
+    // what pasteImage() does (and that a vector layer gets strokes, a raster layer an image); nothing in the document
+    // changes until the transform is applied. False, with `reason`, if it cannot be done.
+    bool beginFloatingPaste(const QImage &image, std::optional<QPoint> origin,
+                            const std::vector<doc::VectorStroke> *strokes, QString *reason = nullptr);
+    std::optional<FloatingPaste> takeFloatingPaste();
+    // The strokes the last copy took from a vector layer (empty after a copy of a raster layer).
+    const std::vector<doc::VectorStroke> &copiedStrokes() const { return m_copiedStrokes; }
+
     QString undoText() const; // "Undo stroke", or plain "Undo"
     QString redoText() const;
     static QString commandName(doc::CommandKind kind);
@@ -564,6 +583,8 @@ signals:
     // A new or loaded document took the place of the old one (size and frame
     // rate may differ); structureChanged and the current-item signals follow.
     void documentReplaced();
+    // A floating paste is ready (beginFloatingPaste()): the canvas takes it up in the Transform tool.
+    void floatingPasteStarted();
 
 private:
     // A new cel above `above` of pictures: picture i is a drawing shown for runs[i].second frames from runs[i].first
@@ -599,6 +620,8 @@ private:
     doc::History m_history;
     doc::CelId m_currentCel = doc::kNoId;
     int m_currentFrame = 0;
+    std::optional<FloatingPaste> m_floating;
+    std::vector<doc::VectorStroke> m_copiedStrokes;
     int m_playFirst = 0;
     int m_playLast = kSceneEnd;
     bool m_layerChosen = true;

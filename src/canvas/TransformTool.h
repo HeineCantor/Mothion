@@ -151,6 +151,10 @@ private:
         QPainterPath selection;           // as it was, empty if none
         QTransform transform;
         QRect shown; // area last drawn by the transform
+        // A paste that floats: the pasted pixels (or strokes) are what moves, over the layer as it was; Esc drops it and
+        // the selection goes back to what it was before.
+        bool floating = false;
+        QPainterPath priorSelection;
         bool changed = false;
         bool everythingDrawn = true; // the layers out of sight are at the transform too
         std::vector<QTransform> undo; // the transform before each drag

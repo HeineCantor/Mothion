@@ -107,15 +107,31 @@ void TransformTool::activated()
 bool TransformTool::start()
 {
     QString reason;
-    const auto targets = m_document->beginPaintLayers(&reason, true);
+    // A paste that floats takes the layer it was made for, and an empty frame gets its drawing (as a paste does).
+    std::optional<document::DocumentController::FloatingPaste> pasted = m_document->takeFloatingPaste();
+    std::vector<document::DocumentController::PaintTarget> targets;
+    if (pasted && m_document->layerSelection().empty()) {
+        if (const auto target = m_document->beginPaint(true, &reason, false, true))
+            targets.push_back(*target);
+    } else {
+        targets = m_document->beginPaintLayers(&reason, true);
+    }
     if (targets.empty()) {
         m_status(reason.isEmpty() ? QObject::tr("Nothing to transform on this frame") : reason);
         return false;
     }
     auto s = std::make_unique<Session>();
-    s->selection = m_document->selection();
+    // Only the first target (the current layer, when it is in) gets the pasted pixels.
+    const bool pastes = pasted && targets.front().layer == m_document->currentLayer();
+    if (pastes) {
+        s->floating = true;
+        s->priorSelection = m_document->selection();
+        s->selection.addRect(QRect(pasted->at, pasted->image.size()));
+    } else {
+        s->selection = m_document->selection();
+    }
     const std::optional<SelectionMask> mask =
-        s->selection.isEmpty() ? std::nullopt : std::optional(SelectionMask::fromPath(s->selection));
+        s->selection.isEmpty() || pastes ? std::nullopt : std::optional(SelectionMask::fromPath(s->selection));
     // What moves of each layer, and one box around all of it. Each layer is looked at on its own core.
     std::vector<Part> parts(targets.size());
     std::vector<QRect> opaque(targets.size());
@@ -132,7 +148,12 @@ bool TransformTool::start()
         part.layer = target.layer;
         if (const doc::Layer *layer = m_document->document().layer(target.cel, target.drawing, target.layer)) {
             part.allStrokes = layer->strokes;
-            if (!mask) {
+            if (pastes && i == 0) { // the layer as it is stays, and the pasted strokes are what moves
+                part.restStrokes = layer->strokes;
+                part.strokes = pasted->strokes;
+            } else if (pastes) {
+                part.restStrokes = layer->strokes;
+            } else if (!mask) {
                 part.strokes = layer->strokes;
             } else { // the strokes are cut along the outline: those inside move, the rest stays
                 for (const doc::VectorStroke &stroke : layer->strokes) {
@@ -148,10 +169,17 @@ bool TransformTool::start()
         Part &part = parts[std::size_t(i)];
         part.image = target.image;
         part.before = *target.image;
-        if (mask)
+        if (pastes) { // the layer stays whole and the pasted pixels are what moves
+            part.rest = part.before;
+            if (i == 0)
+                part.moving.write(pasted->at.x(), pasted->at.y(), pasted->image.width(), pasted->image.height(),
+                                  reinterpret_cast<const doc::Pixel *>(pasted->image.constBits()),
+                                  pasted->image.bytesPerLine() / 4);
+        } else if (mask) {
             splitByMask(part.before, *mask, part.moving, part.rest);
-        else
+        } else {
             part.moving = part.before;
+        }
         const QRect tiles = tileBounds(part.moving);
         if (!tiles.isEmpty()) {
             QImage area(tiles.size(), QImage::Format_ARGB32_Premultiplied);
@@ -196,7 +224,12 @@ bool TransformTool::start()
     s->parts = std::move(parts);
     s->box = box;
     s->shown = box;
+    const bool floating = s->floating;
     m_session = std::move(s);
+    if (floating) { // the pasted pixels are drawn at once, where they were copied from, ready to be moved
+        renderParts(true);
+        m_session->undo.clear();
+    }
     return true;
 }
 
@@ -417,7 +450,7 @@ void TransformTool::refreshRendering()
 void TransformTool::show()
 {
     Session &s = *m_session;
-    if (!s.undo.empty()) {
+    if (!s.undo.empty() || s.floating) { // (a paste is drawn at its own place, not as the layer was)
         render();
         return;
     }
@@ -573,7 +606,7 @@ void TransformTool::commit()
             target.vector = true;
             m_document->attachStrokeChange(target, part.allStrokes, std::move(moved));
         }
-        m_document->endPaint(before, doc::CommandKind::Transform);
+        m_document->endPaint(before, s->floating ? doc::CommandKind::Paste : doc::CommandKind::Transform);
     }
     else
         m_document->cancelPaint();
@@ -590,8 +623,14 @@ void TransformTool::cancel()
     m_drag.reset();
     for (const Part &part : s->parts)
         *part.image = part.before;
-    if (!s->selection.isEmpty())
+    if (s->floating) { // the paste is dropped: the selection is as it was before it
+        if (s->priorSelection.isEmpty())
+            m_document->clearSelection();
+        else
+            m_document->setSelection(s->priorSelection);
+    } else if (!s->selection.isEmpty()) {
         m_document->setSelection(s->selection);
+    }
     m_document->notifyPainted(s->shown | s->box);
     m_document->cancelPaint();
     m_repaint();

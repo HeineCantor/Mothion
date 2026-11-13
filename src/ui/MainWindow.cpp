@@ -576,6 +576,7 @@ void MainWindow::copyPixels(bool cut)
     out << origin << image;
     mime->setData(kPixelsMime, ours);
     QGuiApplication::clipboard()->setMimeData(mime);
+    m_vectorCopy = m_document->copiedStrokes().empty() ? QByteArray() : ours; // pasting that copy on a vector layer: strokes
     if (!cut)
         return;
     const bool erased = m_document->hasSelection() ? m_document->eraseSelection(&reason)
@@ -602,8 +603,12 @@ void MainWindow::pastePixels()
     }
     if (image.isNull() && mime && mime->hasImage())
         image = qvariant_cast<QImage>(mime->imageData()); // from another app: centered
+    // The paste floats in the Transform tool, so it can be moved at once (it would otherwise land on the pixels it was
+    // copied from). A copy of a vector layer's strokes goes onto a vector layer as strokes.
+    const bool strokes = mime && !m_vectorCopy.isEmpty() && mime->hasFormat(kPixelsMime)
+                         && mime->data(kPixelsMime) == m_vectorCopy && m_document->currentLayerIsVector();
     QString reason;
-    if (!m_document->pasteImage(image, origin, &reason))
+    if (!m_document->beginFloatingPaste(image, origin, strokes ? &m_document->copiedStrokes() : nullptr, &reason))
         statusBar()->showMessage(reason.isEmpty() ? tr("Nothing to paste") : reason, 4000);
 }
 
