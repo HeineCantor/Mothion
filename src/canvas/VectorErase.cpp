@@ -55,7 +55,9 @@ double crossing(const QPointF &a, const QPointF &b, const QPointF &c, const QPoi
     const QPointF ca = c - a;
     const double t = (ca.x() * s.y() - ca.y() * s.x()) / denom;
     const double u = (ca.x() * r.y() - ca.y() * r.x()) / denom;
-    return t >= 0.0 && t <= 1.0 && u >= 0.0 && u <= 1.0 ? t : -1.0;
+    // A line that ends on the crossing (a stroke cut there a moment ago) still crosses it: the end is hit up to rounding.
+    constexpr double kEnd = 1e-6;
+    return t >= -kEnd && t <= 1.0 + kEnd && u >= -kEnd && u <= 1.0 + kEnd ? std::clamp(t, 0.0, 1.0) : -1.0;
 }
 
 double segmentDistance(const QPointF &a, const QPointF &b, const QPointF &c, const QPointF &d)
@@ -82,6 +84,15 @@ struct Path
         bounds = extent.rect();
     }
 
+    // How near the path comes to the segment ab.
+    double distanceTo(const QPointF &a, const QPointF &b) const
+    {
+        double best = 1e300;
+        for (const auto &seg : segments)
+            best = std::min(best, segmentDistance(a, b, seg.first, seg.second));
+        return best;
+    }
+
     // Whether the path comes within `reach` of segment ab.
     bool reaches(const QPointF &a, const QPointF &b, double reach) const
     {
@@ -103,6 +114,13 @@ QRectF boundsOf(const Points &points)
     for (const BrushInput &p : points)
         extent.add(at(p));
     return extent.rect();
+}
+
+// The box around a stroke's line and its width.
+QRectF strokeBox(const doc::VectorStroke &stroke)
+{
+    const double margin = stroke.size * 1.5 + 2.0; // a soft edge reaches past the radius
+    return boundsOf(stroke.points).adjusted(-margin, -margin, margin, margin);
 }
 
 // The points from continuous position `a` to `b` along `q` (an integer is a point of `q`), the ends put on the line.
@@ -130,25 +148,90 @@ Points slice(const Points &q, double a, double b)
 
 } // namespace
 
-VectorErasure eraseFromStrokes(const std::vector<doc::VectorStroke> &strokes, const std::vector<QPointF> &path,
-                               double radius, VectorEraseMode mode)
+VectorEraseState::VectorEraseState(std::vector<doc::VectorStroke> original)
+    : m_original(std::move(original))
 {
-    VectorErasure result;
-    if (path.empty()) {
-        result.strokes = strokes;
-        return result;
+    for (std::size_t i = 0; i < m_original.size(); ++i) {
+        m_originalBoxes.push_back(boundsOf(m_original[i].points).adjusted(-1e-6, -1e-6, 1e-6, 1e-6));
+        m_left.push_back({m_original[i], i, strokeBox(m_original[i])});
     }
-    const Path eraser(path);
-    std::vector<QRectF> boxes(strokes.size());
-    for (std::size_t i = 0; i < strokes.size(); ++i)
-        boxes[i] = boundsOf(strokes[i].points).adjusted(-1e-6, -1e-6, 1e-6, 1e-6); // never empty: it must intersect
+}
 
-    for (std::size_t index = 0; index < strokes.size(); ++index) {
-        const doc::VectorStroke &stroke = strokes[index];
-        const double reach = radius + stroke.size / 2.0;
-        const QRectF near = boxes[index].adjusted(-reach, -reach, reach, reach);
+std::vector<doc::VectorStroke> VectorEraseState::strokes() const
+{
+    std::vector<doc::VectorStroke> out;
+    out.reserve(m_left.size());
+    for (const Entry &e : m_left)
+        out.push_back(e.stroke);
+    return out;
+}
+
+QRectF VectorEraseState::takeDirty()
+{
+    const QRectF dirty = m_hasDirty ? m_dirty : QRectF();
+    m_hasDirty = false;
+    return dirty;
+}
+
+std::vector<doc::VectorStroke> VectorEraseState::strokesIn(const QRectF &area) const
+{
+    std::vector<doc::VectorStroke> out;
+    for (const Entry &e : m_left)
+        if (e.box.intersects(area))
+            out.push_back(e.stroke);
+    return out;
+}
+
+void VectorEraseState::erase(const std::vector<QPointF> &pathPoints, double radius, VectorEraseMode mode, bool pressed)
+{
+    if (pathPoints.empty())
+        return;
+    const Path eraser(pathPoints);
+    std::vector<Entry> next;
+    next.reserve(m_left.size());
+
+    // Up to the intersection, the eraser's circle does not say what is taken: only the eraser's own path does. A circle
+    // that reaches over a crossing touches both lines there, or the start of the piece beyond a cut made a moment ago,
+    // and what it touched would be taken too (the erasing running on past the crossing, depending on what was
+    // erased before and how far the pen went on). So a stroke is taken only where the path goes over its ink (within
+    // half its width on the press, within a hair of its line after), and of those only the ones the path passes closest to (all it crosses; at a crossing of two
+    // thick lines, the one it is on), and only the stretch of it within a hair of the path.
+    constexpr double kCoreTolerance = 2.0; // px
+    std::vector<double> nearest(m_left.size(), 1e300);
+    double best = 1e300;
+    if (mode == VectorEraseMode::ToIntersection) {
+        for (std::size_t e = 0; e < m_left.size(); ++e) {
+            const doc::VectorStroke &stroke = m_left[e].stroke;
+            const double body = (pressed ? stroke.size / 2.0 : 0.0) + kCoreTolerance;
+            if (stroke.erase || stroke.points.empty()
+                || !m_left[e].box.adjusted(-body, -body, body, body)
+                        .intersects(eraser.bounds.adjusted(-1e-6, -1e-6, 1e-6, 1e-6)))
+                continue;
+            double d = eraser.distanceTo(at(stroke.points.front()), at(stroke.points.front()));
+            for (std::size_t i = 1; i < stroke.points.size() && d > 0.0; ++i)
+                d = std::min(d, eraser.distanceTo(at(stroke.points[i - 1]), at(stroke.points[i])));
+            if (d <= body) {
+                nearest[e] = d;
+                best = std::min(best, d);
+            }
+        }
+    }
+
+    std::size_t entryIndex = 0;
+    for (Entry &entry : m_left) {
+        const std::size_t e = entryIndex++;
+        const doc::VectorStroke &stroke = entry.stroke;
+        double reach = radius + stroke.size / 2.0;
+        if (mode == VectorEraseMode::ToIntersection) {
+            if (nearest[e] > 1e299 || nearest[e] > best + kCoreTolerance) { // not one the eraser went by
+                next.push_back(std::move(entry));
+                continue;
+            }
+            reach = nearest[e] + kCoreTolerance;
+        }
+        const QRectF near = entry.box.adjusted(-reach, -reach, reach, reach);
         if (stroke.erase || stroke.points.empty() || !near.intersects(eraser.bounds.adjusted(-1e-6, -1e-6, 1e-6, 1e-6))) {
-            result.strokes.push_back(stroke);
+            next.push_back(std::move(entry));
             continue;
         }
 
@@ -172,10 +255,12 @@ VectorErasure eraseFromStrokes(const std::vector<doc::VectorStroke> &strokes, co
             any |= touched[i];
         }
         if (!any) {
-            result.strokes.push_back(stroke);
+            next.push_back(std::move(entry));
             continue;
         }
-        result.changed = true;
+        m_changed = true;
+        m_dirty = m_hasDirty ? m_dirty.united(entry.box) : entry.box;
+        m_hasDirty = true;
         if (mode == VectorEraseMode::WholeLine)
             continue;
 
@@ -191,16 +276,17 @@ VectorErasure eraseFromStrokes(const std::vector<doc::VectorStroke> &strokes, co
                 ++last;
             double from = double(i), to = double(last);
             if (mode == VectorEraseMode::ToIntersection) {
-                // Out from the touched stretch, to the first crossing with another stroke, or to the stroke's end.
+                // Out from the touched stretch, to the first crossing with another stroke (as it was drawn), or to the
+                // stroke's end.
                 auto firstCrossing = [&](std::size_t segment, bool forward) -> double {
                     // The crossing nearest the touched stretch on segment (segment, segment + 1): -1 if none.
                     double best = -1.0;
                     const QPointF a = at(q[segment]), b = at(q[segment + 1]);
-                    const QRectF segBox = QRectF(a, b).normalized();
-                    for (std::size_t o = 0; o < strokes.size(); ++o) {
-                        if (o == index || strokes[o].erase || !boxes[o].intersects(segBox.adjusted(-1e-6, -1e-6, 1e-6, 1e-6)))
+                    const QRectF segBox = QRectF(a, b).normalized().adjusted(-1e-6, -1e-6, 1e-6, 1e-6);
+                    for (std::size_t o = 0; o < m_original.size(); ++o) {
+                        if (o == entry.origin || m_original[o].erase || !m_originalBoxes[o].intersects(segBox))
                             continue;
-                        const Points &op = strokes[o].points;
+                        const Points &op = m_original[o].points;
                         for (std::size_t j = 0; j + 1 < op.size(); ++j) {
                             const double t = crossing(a, b, at(op[j]), at(op[j + 1]));
                             if (t < 0.0)
@@ -247,7 +333,8 @@ VectorErasure eraseFromStrokes(const std::vector<doc::VectorStroke> &strokes, co
                 return;
             doc::VectorStroke piece = stroke;
             piece.points = std::move(points);
-            result.strokes.push_back(std::move(piece));
+            const QRectF box = strokeBox(piece);
+            next.push_back({std::move(piece), entry.origin, box});
         };
         for (const auto &g : gone) {
             keep(cursor, g.first);
@@ -255,6 +342,17 @@ VectorErasure eraseFromStrokes(const std::vector<doc::VectorStroke> &strokes, co
         }
         keep(cursor, double(q.size() - 1));
     }
+    m_left = std::move(next);
+}
+
+VectorErasure eraseFromStrokes(const std::vector<doc::VectorStroke> &strokes, const std::vector<QPointF> &path,
+                               double radius, VectorEraseMode mode)
+{
+    VectorEraseState state(strokes);
+    state.erase(path, radius, mode);
+    VectorErasure result;
+    result.strokes = state.strokes();
+    result.changed = state.changed();
     return result;
 }
 

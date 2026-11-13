@@ -17,6 +17,11 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QSignalBlocker>
+#include <QAbstractButton>
+#include <QIcon>
+#include <QPixmap>
+#include <QPainter>
+#include <QButtonGroup>
 #include <QSpinBox>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -27,6 +32,60 @@ namespace mothion::ui {
 
 using tools::ToolId;
 using tools::ToolState;
+
+namespace {
+
+// What each mode of the vector eraser does, in a few strokes: the pixels of a brush, a gap in a line, a line cut up to
+// the crossing, a line gone whole.
+QIcon vectorEraserIcon(int mode, const QColor &color)
+{
+    QPixmap pixmap(48, 48); // twice the size shown: sharp on a dense screen
+    pixmap.fill(Qt::transparent);
+    QPainter p(&pixmap);
+    p.setRenderHint(QPainter::Antialiasing);
+    QPen solid(color, 4.0, Qt::SolidLine, Qt::RoundCap);
+    QColor faded = color;
+    faded.setAlphaF(0.3f);
+    QPen ghost(faded, 4.0, Qt::DashLine, Qt::FlatCap);
+    switch (mode) {
+    case 0: // pixels: four squares, one of them cleared
+        p.setPen(Qt::NoPen);
+        p.setBrush(color);
+        p.drawRect(QRectF(8, 8, 15, 15));
+        p.drawRect(QRectF(25, 8, 15, 15));
+        p.drawRect(QRectF(8, 25, 15, 15));
+        p.setBrush(faded);
+        p.drawRect(QRectF(25, 25, 15, 15));
+        break;
+    case 1: // a line with a gap, and the eraser's circle over it
+        p.setPen(solid);
+        p.drawLine(QPointF(6, 30), QPointF(16, 30));
+        p.drawLine(QPointF(32, 30), QPointF(42, 30));
+        p.setPen(QPen(color, 2.5));
+        p.setBrush(Qt::NoBrush);
+        p.drawEllipse(QPointF(24, 30), 10, 10);
+        break;
+    case 2: // a cross, its left arm gone up to the crossing
+        p.setPen(ghost);
+        p.drawLine(QPointF(6, 24), QPointF(22, 24));
+        p.setPen(solid);
+        p.drawLine(QPointF(26, 24), QPointF(42, 24));
+        p.drawLine(QPointF(24, 6), QPointF(24, 42));
+        break;
+    default: // a line crossed out
+        p.setPen(ghost);
+        p.drawLine(QPointF(6, 24), QPointF(42, 24));
+        p.setPen(QPen(color, 3.0, Qt::SolidLine, Qt::RoundCap));
+        p.drawLine(QPointF(14, 12), QPointF(34, 36));
+        p.drawLine(QPointF(34, 12), QPointF(14, 36));
+        break;
+    }
+    p.end();
+    pixmap.setDevicePixelRatio(2.0);
+    return QIcon(pixmap);
+}
+
+} // namespace
 
 ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
     : QWidget(parent)
@@ -77,12 +136,71 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
     brush->addWidget(m_size);
     brush->addWidget(m_opacity);
     brush->addWidget(m_smoothing);
+    // On a vector layer the eraser can take away strokes (as Clip Studio's vector eraser) instead of erasing like a
+    // brush: four buttons side by side, one of them down.
+    m_vectorEraserControls = new QWidget(m_brushControls);
+    m_vectorEraserModes = new QButtonGroup(this);
+    m_vectorEraserModes->setExclusive(true);
+    auto *modes = new QHBoxLayout(m_vectorEraserControls);
+    modes->setContentsMargins(0, 0, 0, 0);
+    modes->setSpacing(2);
+    modes->addWidget(new QLabel(tr("Vector layer"), m_vectorEraserControls));
+    const QString modeTips[] = {
+        tr("Like a brush: it erases pixels, and the layer keeps the eraser's strokes"),
+        tr("Touched part: it takes away what its circle covers of the strokes"),
+        tr("Up to the intersection: from the touched place to the nearest crossing with another stroke"),
+        tr("Whole line: the whole of every stroke it touches"),
+    };
+    for (int i = 0; i < 4; ++i) {
+        auto *button = new QToolButton(m_vectorEraserControls);
+        button->setObjectName(QStringLiteral("vectorEraserMode%1").arg(i));
+        button->setCheckable(true);
+        button->setAutoRaise(true);
+        button->setIcon(vectorEraserIcon(i, palette().color(QPalette::ButtonText)));
+        button->setIconSize(QSize(24, 24));
+        button->setToolTip(modeTips[i]);
+        m_vectorEraserModes->addButton(button, i);
+        modes->addWidget(button);
+    }
+    modes->addStretch(1);
+    connect(m_vectorEraserModes, &QButtonGroup::idClicked, this, [this](int i) {
+        m_state->setVectorEraser({static_cast<tools::VectorEraserSettings::Mode>(i)});
+    });
+    connect(m_state, &ToolState::vectorEraserChanged, this, &ToolPropertiesPanel::syncVectorEraserFromState);
+    brush->addWidget(m_vectorEraserControls);
+    syncVectorEraserFromState();
+
+    // The advanced options, folded away at the end: the pen's tilt and the pressure curve.
     m_useTilt->setToolTip(tr("Off: the pen's tilt changes nothing, whatever the brush's tilt dynamics say"));
-    brush->addWidget(m_useTilt);
+    m_advancedToggle = new QToolButton(m_brushControls);
+    m_advancedToggle->setObjectName(QStringLiteral("advancedOptions"));
+    m_advancedToggle->setText(tr("Advanced options"));
+    m_advancedToggle->setCheckable(true);
+    m_advancedToggle->setAutoRaise(true);
+    m_advancedToggle->setArrowType(Qt::RightArrow);
+    m_advancedToggle->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    m_advancedBody = new QWidget(m_brushControls);
+    m_advancedBody->setObjectName(QStringLiteral("advancedOptionsBody"));
+    m_advancedBody->setVisible(false);
+    auto *advancedLayout = new QVBoxLayout(m_advancedBody);
+    advancedLayout->setContentsMargins(0, 0, 0, 0);
+    advancedLayout->setSpacing(4);
+    advancedLayout->addWidget(m_useTilt);
+    advancedLayout->addSpacing(6);
+    advancedLayout->addWidget(new QLabel(tr("Pressure curve"), m_advancedBody));
+    advancedLayout->addWidget(m_curveEditor, 1); // takes the panel's spare height
+    advancedLayout->addWidget(resetCurve, 0, Qt::AlignRight);
+    m_curveEditor->setParent(m_advancedBody);
+    m_useTilt->setParent(m_advancedBody);
+    resetCurve->setParent(m_advancedBody);
     brush->addSpacing(6);
-    brush->addWidget(new QLabel(tr("Pressure curve"), m_brushControls));
-    brush->addWidget(m_curveEditor, 1); // takes the panel's spare height
-    brush->addWidget(resetCurve, 0, Qt::AlignRight);
+    brush->addWidget(m_advancedToggle);
+    brush->addWidget(m_advancedBody, 1);
+    brush->addStretch(0);
+    connect(m_advancedToggle, &QToolButton::toggled, this, [this](bool open) {
+        m_advancedBody->setVisible(open);
+        m_advancedToggle->setArrowType(open ? Qt::DownArrow : Qt::RightArrow);
+    });
 
     // Not in the panel's layout: the dock puts it under the panel.
     m_footer->hide();
@@ -161,25 +279,6 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
     layout->addWidget(m_fillControls);
     layout->addWidget(m_effectControls);
     layout->addWidget(m_shapeControls);
-    // On a vector layer the eraser can take away strokes (as Clip Studio's vector eraser) instead of erasing like a brush.
-    m_vectorEraserControls = new QWidget(this);
-    m_vectorEraserMode = new QComboBox(m_vectorEraserControls);
-    m_vectorEraserMode->setObjectName(QStringLiteral("vectorEraserMode"));
-    m_vectorEraserMode->addItems({tr("Like a brush"), tr("Touched part"), tr("Up to the intersection"), tr("Whole line")});
-    m_vectorEraserMode->setToolTip(tr("What the eraser does on a vector layer:\n"
-                                      "Like a brush: it erases pixels, and the layer keeps the eraser's strokes.\n"
-                                      "Touched part: it takes away what its circle covers of the strokes.\n"
-                                      "Up to the intersection: from the touched place to the nearest crossing with another stroke.\n"
-                                      "Whole line: the whole of every stroke it touches."));
-    auto *vectorEraser = new QFormLayout(m_vectorEraserControls);
-    vectorEraser->setContentsMargins(0, 0, 0, 0);
-    vectorEraser->addRow(tr("Vector layer"), m_vectorEraserMode);
-    layout->addWidget(m_vectorEraserControls);
-    connect(m_vectorEraserMode, &QComboBox::currentIndexChanged, this, [this](int i) {
-        m_state->setVectorEraser({static_cast<tools::VectorEraserSettings::Mode>(i)});
-    });
-    connect(m_state, &ToolState::vectorEraserChanged, this, &ToolPropertiesPanel::syncVectorEraserFromState);
-    syncVectorEraserFromState();
     // The filter of the transform (as in Krita's): bicubic by default, Lanczos3 for making a small picture bigger, nearest
     // neighbor for pixel art. The choice is kept (Preferences), and is taken up at once by a transform that is open.
     m_transformControls = new QWidget(this);
@@ -423,8 +522,8 @@ void ToolPropertiesPanel::syncEffectFromState()
 
 void ToolPropertiesPanel::syncVectorEraserFromState()
 {
-    const QSignalBlocker block(m_vectorEraserMode);
-    m_vectorEraserMode->setCurrentIndex(int(m_state->vectorEraser().mode));
+    if (QAbstractButton *button = m_vectorEraserModes->button(int(m_state->vectorEraser().mode)))
+        button->setChecked(true);
 }
 
 void ToolPropertiesPanel::syncShapeFromState()

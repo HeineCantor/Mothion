@@ -42,43 +42,46 @@ void VectorEraseTool::press(const QPointF &docPos, Qt::KeyboardModifiers)
         m_document->cancelPaint();
         return;
     }
-    Session s;
+    std::vector<doc::VectorStroke> strokes;
+    if (const doc::Layer *layer = m_document->document().layer(target->cel, target->drawing, target->layer))
+        strokes = layer->strokes;
+    Session s(std::move(strokes));
     s.target = *target;
     s.before = *target->image;
-    if (const doc::Layer *layer = m_document->document().layer(target->cel, target->drawing, target->layer))
-        s.original = layer->strokes;
-    s.left = s.original;
-    s.path = {docPos};
+    s.last = docPos;
     m_session = std::move(s);
-    update();
+    eraseTo(docPos, true);
 }
 
 void VectorEraseTool::move(const QPointF &docPos, Qt::KeyboardModifiers)
 {
     if (!m_session)
         return;
-    if (QLineF(m_session->path.back(), docPos).length() < 1.0)
+    if (QLineF(m_session->last, docPos).length() < 1.0)
         return;
-    m_session->path.push_back(docPos);
-    update();
+    eraseTo(docPos);
 }
 
-void VectorEraseTool::update()
+void VectorEraseTool::eraseTo(const QPointF &to, bool pressed)
 {
     Session &s = *m_session;
     const double radius = m_toolState->settings(tools::ToolId::Eraser).size / 2.0;
-    VectorErasure erased =
-        eraseFromStrokes(s.original, s.path, radius, modeOf(m_toolState->vectorEraser().mode));
-    if (!erased.changed && !s.changed)
+    s.state.erase({s.last, to}, radius, modeOf(m_toolState->vectorEraser().mode), pressed);
+    s.last = to;
+    const QRectF dirty = s.state.takeDirty();
+    if (dirty.isNull())
         return;
-    s.changed = erased.changed;
-    s.left = std::move(erased.strokes);
-    // The layer drawn again from what is left.
+    // Only the area the cut strokes covered is drawn again, from the strokes that reach into it.
     const doc::Document &d = m_document->document();
-    const QRect page(0, 0, d.width(), d.height());
-    *s.target.image = doc::TiledImage();
-    drawStrokes(*s.target.image, s.left, *m_toolState, page);
-    m_document->notifyPainted(page);
+    const QRect region = dirty.toAlignedRect().adjusted(-1, -1, 1, 1) & QRect(0, 0, d.width(), d.height());
+    if (region.isEmpty())
+        return;
+    doc::TiledImage patch;
+    drawStrokes(patch, s.state.strokesIn(region), *m_toolState, region);
+    std::vector<doc::Pixel> pixels(std::size_t(region.width()) * std::size_t(region.height()));
+    patch.read(region.x(), region.y(), region.width(), region.height(), pixels.data(), region.width());
+    s.target.image->write(region.x(), region.y(), region.width(), region.height(), pixels.data(), region.width());
+    m_document->notifyPainted(region);
 }
 
 void VectorEraseTool::release(const QPointF &docPos, Qt::KeyboardModifiers modifiers)
@@ -88,12 +91,12 @@ void VectorEraseTool::release(const QPointF &docPos, Qt::KeyboardModifiers modif
     move(docPos, modifiers);
     Session s = std::move(*m_session);
     m_session.reset();
-    if (!s.changed) {
+    if (!s.state.changed()) {
         *s.target.image = s.before;
         m_document->cancelPaint();
         return;
     }
-    m_document->attachStrokeChange(s.target, std::move(s.original), std::move(s.left));
+    m_document->attachStrokeChange(s.target, std::move(s.original), s.state.strokes());
     m_document->endPaint(s.before, doc::CommandKind::Paint);
 }
 

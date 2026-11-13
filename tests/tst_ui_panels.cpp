@@ -1,6 +1,8 @@
 // Tests for the UI layer: the panels: layers, brush size, color sets, tool properties.
 
 #include "test_common.h"
+#include "ui/panels/PressureCurveEditor.h"
+#include "ui/panels/SliderField.h"
 
 class TestUiPanels : public QObject
 {
@@ -452,6 +454,64 @@ private slots:
         QVERIFY(tilt->isChecked());
     }
 
+
+    // The pen tilt and the pressure curve are advanced options: folded away at the end of the brush's properties, open on
+    // a click.
+    void advancedBrushOptionsAreFoldedAway()
+    {
+        tools::ToolState state;
+        ui::ToolPropertiesPanel panel(&state);
+        panel.resize(260, 700);
+        panel.show();
+        auto *toggle = panel.findChild<QToolButton *>(QStringLiteral("advancedOptions"));
+        QVERIFY(toggle);
+        QCheckBox *tilt = nullptr;
+        for (QCheckBox *box : panel.findChildren<QCheckBox *>())
+            if (box->text() == QStringLiteral("Use pen tilt"))
+                tilt = box;
+        QVERIFY(tilt);
+        QVERIFY(toggle->isVisible());
+        QVERIFY(!tilt->isVisible());
+        QVERIFY(!panel.findChild<ui::PressureCurveEditor *>()->isVisible());
+        toggle->click();
+        QVERIFY(tilt->isVisible());
+        QVERIFY(panel.findChild<ui::PressureCurveEditor *>()->isVisible());
+        // At the end: below the size, the opacity and the stabilizer.
+        QVERIFY(toggle->y() > panel.findChildren<ui::SliderField *>().front()->y());
+        toggle->click();
+        QVERIFY(!tilt->isVisible());
+    }
+
+    // The vector eraser's modes are four buttons side by side, one down at a time, that follow the tool state.
+    void vectorEraserModesAreFourExclusiveButtons()
+    {
+        tools::ToolState state;
+        ui::ToolPropertiesPanel panel(&state);
+        panel.resize(260, 700);
+        state.setActiveTool(tools::ToolId::Eraser);
+        panel.show();
+        QToolButton *buttons[4];
+        for (int i = 0; i < 4; ++i) {
+            buttons[i] = panel.findChild<QToolButton *>(QStringLiteral("vectorEraserMode%1").arg(i));
+            QVERIFY(buttons[i]);
+            QVERIFY(buttons[i]->isVisible());
+            QVERIFY(buttons[i]->isCheckable());
+            QVERIFY(i == 0 || buttons[i]->y() == buttons[0]->y()); // in a row
+            QVERIFY(i == 0 || buttons[i]->x() > buttons[i - 1]->x());
+        }
+        QVERIFY(buttons[0]->isChecked()); // like a brush, as before
+        buttons[2]->click();
+        QCOMPARE(state.vectorEraser().mode, tools::VectorEraserSettings::Mode::ToIntersection);
+        QVERIFY(buttons[2]->isChecked());
+        QVERIFY(!buttons[0]->isChecked());
+        buttons[2]->click(); // the one down stays down
+        QVERIFY(buttons[2]->isChecked());
+        state.setVectorEraser({tools::VectorEraserSettings::Mode::WholeLine});
+        QVERIFY(buttons[3]->isChecked());
+        QVERIFY(!buttons[2]->isChecked());
+        state.setActiveTool(tools::ToolId::Brush);
+        QVERIFY(!buttons[0]->isVisible()); // only for the eraser
+    }
 
     // The Transform tool's options hold the filter that reads the pixels (not the OK / Cancel bar): shown with that
     // tool only, kept in the preferences, and followed back.

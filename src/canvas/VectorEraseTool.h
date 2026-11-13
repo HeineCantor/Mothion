@@ -1,6 +1,7 @@
 #pragma once
 
 #include "canvas/CanvasTool.h"
+#include "canvas/VectorErase.h"
 #include "core/document/TiledImage.h"
 #include "core/document/VectorStroke.h"
 #include "document/DocumentController.h"
@@ -40,11 +41,16 @@ private:
         document::DocumentController::PaintTarget target;
         doc::TiledImage before;                  // the layer's pixels at the press
         std::vector<doc::VectorStroke> original; // its strokes at the press
-        std::vector<doc::VectorStroke> left;     // what is left now
-        std::vector<QPointF> path;
-        bool changed = false;
+        VectorEraseState state;                  // what is left, as the eraser goes on
+        QPointF last;                            // the last point of the path
+        explicit Session(std::vector<doc::VectorStroke> strokes)
+            : original(strokes)
+            , state(std::move(strokes))
+        {
+        }
     };
-    void update();
+    // Takes away what the eraser covers going from the last point to `to`, and draws again only the area that changed.
+    void eraseTo(const QPointF &to, bool pressed = false);
 
     document::DocumentController *m_document;
     tools::ToolState *m_toolState;

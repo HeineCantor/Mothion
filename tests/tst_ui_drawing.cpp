@@ -1,6 +1,7 @@
 // Tests for the UI layer: the drawing tools: shapes, effect brushes, perspective, straight lines.
 
 #include "test_common.h"
+#include "canvas/VectorErase.h"
 #include "canvas/VectorEraseTool.h"
 #include "canvas/VectorRender.h"
 
@@ -744,6 +745,266 @@ private slots:
         controller.undo();
         QCOMPARE(layer().strokes.size(), std::size_t(1));
         QCOMPARE(layer().strokes.front().points.size(), original.front().points.size());
+    }
+
+    // Dragging the vector eraser a long way gives what the whole path gives at once, and the pixels are those of the
+    // strokes that are left (only the area that changed is drawn again, step by step).
+    void theVectorEraserDraggedLongEqualsItsWholePath()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(500, 400);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 4, "Line").command);
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Vector));
+        QCoreApplication::processEvents();
+        auto layer = [&]() -> const doc::Layer & { return *controller.currentDrawing()->layer(controller.currentLayer()); };
+
+        state.setColor(QColor(200, 30, 30));
+        state.setActiveTool(tools::ToolId::Brush);
+        state.setSize(tools::ToolId::Brush, 6);
+        for (int row = 0; row < 12; ++row) { // twelve horizontal lines
+            const QPoint from = canvas.view().documentToView().map(QPointF(900, 300 + row * 40)).toPoint();
+            QTest::mousePress(&canvas, Qt::LeftButton, {}, from);
+            for (int i = 1; i <= 40; ++i)
+                QTest::mouseMove(&canvas, from + QPoint(i, 0));
+            QTest::mouseRelease(&canvas, Qt::LeftButton, {}, from + QPoint(40, 0));
+        }
+        QCOMPARE(layer().strokes.size(), std::size_t(12));
+        const std::vector<doc::VectorStroke> original = layer().strokes;
+        const double x = original.front().points[20].x;
+
+        // A vertical drag down through all of them, in many small moves.
+        state.setSize(tools::ToolId::Eraser, 20);
+        state.setVectorEraser({tools::VectorEraserSettings::Mode::Part});
+        std::vector<QPointF> path;
+        for (double y = 280; y <= 780; y += 4)
+            path.push_back(QPointF(x, y));
+        canvas::VectorEraseTool tool(&controller, &state, [](const QString &) {});
+        tool.press(path.front(), Qt::NoModifier);
+        for (const QPointF &p : path)
+            tool.move(p, Qt::NoModifier);
+        tool.release(path.back(), Qt::NoModifier);
+
+        const canvas::VectorErasure whole = canvas::eraseFromStrokes(original, path, 10.0, canvas::VectorEraseMode::Part);
+        QVERIFY(whole.changed);
+        QCOMPARE(layer().strokes.size(), whole.strokes.size());
+        QCOMPARE(layer().strokes.size(), std::size_t(24)); // every line cut in two
+        for (std::size_t i = 0; i < whole.strokes.size(); ++i) {
+            QCOMPARE(layer().strokes[i].points.size(), whole.strokes[i].points.size());
+            QCOMPARE(layer().strokes[i].points.front().x, whole.strokes[i].points.front().x);
+            QCOMPARE(layer().strokes[i].points.back().x, whole.strokes[i].points.back().x);
+        }
+        // The pixels are the strokes left, drawn again.
+        doc::TiledImage again;
+        canvas::drawStrokes(again, layer().strokes, state, QRect(0, 0, d.width(), d.height()));
+        int worst = 0;
+        for (int y = 280; y < 800; y += 3)
+            for (int xx = int(x) - 60; xx < int(x) + 60; ++xx)
+                worst = std::max(worst, std::abs(int(doc::alphaOf(layer().image.pixel(xx, y)))
+                                                 - int(doc::alphaOf(again.pixel(xx, y)))));
+        QVERIFY2(worst <= 2, qPrintable(QStringLiteral("alpha differs by %1").arg(worst)));
+    }
+
+    // Up to the intersection, erasing the six outer ends of a triangle of three crossing lines leaves its three sides,
+    // in whatever order the ends are erased, however big the eraser: a circle that reaches over a vertex does not run
+    // the erasing on past it.
+    void theIntersectionEraserStopsAtTheNearestCrossing()
+    {
+        // Three long lines crossing in a small triangle (the shape of a drawn test: thick lines, a triangle in the middle).
+        auto line = [](QPointF from, QPointF to) {
+            doc::VectorStroke s;
+            s.size = 17;
+            for (int i = 0; i <= 40; ++i) {
+                brush::BrushInput in;
+                in.x = from.x() + (to.x() - from.x()) * i / 40.0;
+                in.y = from.y() + (to.y() - from.y()) * i / 40.0;
+                s.points.push_back(in);
+            }
+            return s;
+        };
+        const std::vector<doc::VectorStroke> strokes{line({927, 245}, {973, 877}), line({723, 878}, {1303, 391}),
+                                                     line({691, 309}, {1358, 843})};
+        auto P = [](const brush::BrushInput &in) { return QPointF(in.x, in.y); };
+        auto crossingOf = [&](int a, int b) {
+            QPointF at;
+            for (std::size_t i = 0; i + 1 < 41; ++i)
+                for (std::size_t j = 0; j + 1 < 41; ++j)
+                    if (QLineF(P(strokes[a].points[i]), P(strokes[a].points[i + 1]))
+                            .intersects(QLineF(P(strokes[b].points[j]), P(strokes[b].points[j + 1])), &at)
+                        == QLineF::BoundedIntersection)
+                        return at;
+            return QPointF();
+        };
+        const QPointF vertices[3] = {crossingOf(0, 1), crossingOf(0, 2), crossingOf(1, 2)};
+        // For each line, its two vertices, and the outer ends: the point `distance` out from a vertex, away from the other.
+        struct End { int stroke; QPointF vertex, away; };
+        std::vector<End> ends;
+        double sides = 0;
+        for (int s = 0; s < 3; ++s) {
+            QPointF a, b;
+            if (s == 0) { a = vertices[0]; b = vertices[1]; }
+            else if (s == 1) { a = vertices[0]; b = vertices[2]; }
+            else { a = vertices[1]; b = vertices[2]; }
+            sides += QLineF(a, b).length();
+            ends.push_back({s, a, a + (a - b)});
+            ends.push_back({s, b, b + (b - a)});
+        }
+        int bad = 0;
+        std::vector<int> order{0, 1, 2, 3, 4, 5};
+        for (double radius : {8.0, 20.0, 40.0})
+            for (double out : {6.0, 12.0, 25.0}) {
+                std::sort(order.begin(), order.end());
+                do {
+                    canvas::VectorEraseState state(strokes);
+                    for (int k : order) {
+                        const End &e = ends[std::size_t(k)];
+                        QLineF toward(e.vertex, e.away);
+                        toward.setLength(out);
+                        state.erase({toward.p2(), toward.p2()}, radius, canvas::VectorEraseMode::ToIntersection);
+                    }
+                    double total = 0;
+                    const auto left = state.strokes();
+                    for (const doc::VectorStroke &piece : left)
+                        for (std::size_t i = 0; i + 1 < piece.points.size(); ++i)
+                            total += QLineF(P(piece.points[i]), P(piece.points[i + 1])).length();
+                    if (left.size() != 3 || std::abs(total - sides) > 4.0)
+                        ++bad;
+                } while (std::next_permutation(order.begin(), order.end()));
+            }
+        QCOMPARE(bad, 0);
+
+        // The same dragging the eraser along each outer end, in toward the vertex and stopping short of it (the first
+        // step erases the whole outer part, and the pen goes on over where it was: nothing beyond the crossing may go).
+        // Each drag is a new erasing that starts from the strokes as they are then, as with the tool: a stroke cut by
+        // an earlier drag ends exactly on a crossing, and the next drag must still find that crossing.
+        for (double radius : {8.0, 20.0, 40.0})
+            for (double stop : {8.0, 15.0, 30.0}) {
+                std::sort(order.begin(), order.end());
+                do {
+                    std::vector<doc::VectorStroke> current = strokes;
+                    for (int k : order) {
+                        canvas::VectorEraseState state(current);
+                        const End &e = ends[std::size_t(k)];
+                        const double outer = QLineF(e.vertex, e.away).length();
+                        QPointF last;
+                        bool first = true;
+                        for (double d = outer - 5; d >= stop; d -= 3) {
+                            QLineF toward(e.vertex, e.away);
+                            toward.setLength(d);
+                            state.erase({first ? toward.p2() : last, toward.p2()}, radius,
+                                        canvas::VectorEraseMode::ToIntersection, first);
+                            first = false;
+                            last = toward.p2();
+                        }
+                        current = state.strokes();
+                    }
+                    double total = 0;
+                    for (const doc::VectorStroke &piece : current)
+                        for (std::size_t i = 0; i + 1 < piece.points.size(); ++i)
+                            total += QLineF(P(piece.points[i]), P(piece.points[i + 1])).length();
+                    if (current.size() != 3 || std::abs(total - sides) > 6.0)
+                        ++bad;
+                } while (std::next_permutation(order.begin(), order.end()));
+            }
+        QCOMPARE(bad, 0);
+
+        // An eraser far from every line takes nothing, however many moves it makes.
+        canvas::VectorEraseState far(strokes);
+        far.erase({QPointF(100, 100), QPointF(120, 100)}, 20.0, canvas::VectorEraseMode::ToIntersection);
+        QVERIFY(!far.changed());
+        QCOMPARE(far.strokes().size(), std::size_t(3));
+        // Once a line is cut, the cut-off piece is not touched again from afar.
+        canvas::VectorEraseState cut(strokes);
+        QLineF out(ends[0].vertex, ends[0].away);
+        out.setLength(30);
+        cut.erase({out.p2(), out.p2()}, 10.0, canvas::VectorEraseMode::ToIntersection);
+        QCOMPARE(cut.strokes().size(), std::size_t(3));
+        cut.erase({QPointF(100, 100), QPointF(120, 100)}, 10.0, canvas::VectorEraseMode::ToIntersection);
+        QCOMPARE(cut.strokes().size(), std::size_t(3));
+    }
+
+    // The same with the tool itself, one press and drag after the other: the three strokes of a triangle, the outer ends
+    // erased one by one (up to the intersection) leave the three sides, whatever the order.
+    void theIntersectionEraserAcrossSeparateDragsKeepsTheTriangle()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(500, 400);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 4, "Line").command);
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Vector));
+        QCoreApplication::processEvents();
+        auto line = [](QPointF from, QPointF to) {
+            doc::VectorStroke s;
+            s.size = 17;
+            s.color = 0xFFC81E1E;
+            for (int i = 0; i <= 40; ++i) {
+                brush::BrushInput in;
+                in.x = from.x() + (to.x() - from.x()) * i / 40.0;
+                in.y = from.y() + (to.y() - from.y()) * i / 40.0;
+                s.points.push_back(in);
+            }
+            return s;
+        };
+        const std::vector<doc::VectorStroke> strokes{line({927, 245}, {973, 877}), line({723, 878}, {1303, 391}),
+                                                     line({691, 309}, {1358, 843})};
+        doc::Layer *layer = d.layer(controller.currentCel(), controller.currentDrawing()->id, controller.currentLayer());
+        auto P = [](const brush::BrushInput &in) { return QPointF(in.x, in.y); };
+        auto crossingOf = [&](int a, int b) {
+            QPointF at;
+            for (std::size_t i = 0; i + 1 < 41; ++i)
+                for (std::size_t j = 0; j + 1 < 41; ++j)
+                    if (QLineF(P(strokes[a].points[i]), P(strokes[a].points[i + 1]))
+                            .intersects(QLineF(P(strokes[b].points[j]), P(strokes[b].points[j + 1])), &at)
+                        == QLineF::BoundedIntersection)
+                        return at;
+            return QPointF();
+        };
+        const QPointF v01 = crossingOf(0, 1), v02 = crossingOf(0, 2), v12 = crossingOf(1, 2);
+        struct End { QPointF vertex, away; };
+        // The three ends on the high side of each stroke, then the three on the low side.
+        const std::vector<End> ends{{v01, v01 + (v01 - v02)}, {v12, v12 + (v12 - v01)}, {v12, v12 + (v12 - v02)},
+                                    {v02, v02 + (v02 - v01)}, {v01, v01 + (v01 - v12)}, {v02, v02 + (v02 - v12)}};
+        const double sides = QLineF(v01, v02).length() + QLineF(v01, v12).length() + QLineF(v02, v12).length();
+
+        state.setSize(tools::ToolId::Eraser, 30);
+        state.setVectorEraser({tools::VectorEraserSettings::Mode::ToIntersection});
+        // A few orders, among them the one that showed it: the lower right end, the one left of it, then the right one.
+        const std::vector<std::vector<int>> orders{{2, 0, 1}, {0, 1, 2}, {1, 2, 0}, {2, 1, 0}, {0, 2, 1}, {1, 0, 2}};
+        for (const std::vector<int> &order : orders) {
+            layer->strokes = strokes;
+            layer->image = doc::TiledImage();
+            canvas::drawStrokes(layer->image, strokes, state, QRect(0, 0, d.width(), d.height()));
+            std::vector<int> all = order;
+            for (int k : order)
+                all.push_back(k + 3);
+            for (int k : all) {
+                const End &e = ends[std::size_t(k)];
+                canvas::VectorEraseTool tool(&controller, &state, [](const QString &) {});
+                QLineF toward(e.vertex, e.away);
+                const double outer = toward.length();
+                toward.setLength(outer - 5);
+                tool.press(toward.p2(), Qt::NoModifier);
+                for (double dist = outer - 5; dist >= 18; dist -= 6) {
+                    toward.setLength(dist);
+                    tool.move(toward.p2(), Qt::NoModifier);
+                }
+                tool.release(toward.p2(), Qt::NoModifier);
+            }
+            QCOMPARE(layer->strokes.size(), std::size_t(3));
+            double total = 0;
+            for (const doc::VectorStroke &piece : layer->strokes)
+                for (std::size_t i = 0; i + 1 < piece.points.size(); ++i)
+                    total += QLineF(P(piece.points[i]), P(piece.points[i + 1])).length();
+            QVERIFY2(std::abs(total - sides) < 6.0, qPrintable(QStringLiteral("left %1, the sides are %2").arg(total).arg(sides)));
+        }
     }
 
     // Erase and flip under a selection, and merging, work on vector layers: the strokes are cut, mirrored or joined.
