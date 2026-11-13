@@ -31,4 +31,38 @@ std::size_t AddVectorStrokeCommand::memoryBytes() const
     return sizeof(*this) + m_stroke.points.size() * sizeof(brush::BrushInput);
 }
 
+SetVectorStrokesCommand::SetVectorStrokesCommand(CelId cel, DrawingId drawing, LayerId layer,
+                                                 std::vector<VectorStroke> before, std::vector<VectorStroke> after)
+    : m_cel(cel)
+    , m_drawing(drawing)
+    , m_layer(layer)
+    , m_before(std::move(before))
+    , m_after(std::move(after))
+{
+}
+
+ChangeSet SetVectorStrokesCommand::apply(Document &doc)
+{
+    if (Layer *layer = doc.layer(m_cel, m_drawing, m_layer))
+        layer->strokes = m_after;
+    return {};
+}
+
+ChangeSet SetVectorStrokesCommand::revert(Document &doc)
+{
+    if (Layer *layer = doc.layer(m_cel, m_drawing, m_layer))
+        layer->strokes = m_before;
+    return {};
+}
+
+std::size_t SetVectorStrokesCommand::memoryBytes() const
+{
+    std::size_t points = 0;
+    for (const VectorStroke &s : m_before)
+        points += s.points.size();
+    for (const VectorStroke &s : m_after)
+        points += s.points.size();
+    return sizeof(*this) + points * sizeof(brush::BrushInput);
+}
+
 } // namespace mothion::doc

@@ -458,7 +458,12 @@ public:
     // current layer when it is empty) that can be painted: hidden and locked
     // ones, or in hidden or locked cels, are left out. Empty, with `reason`,
     // when none is left. The first target is the current layer if it is in.
-    std::vector<PaintTarget> beginPaintLayers(QString *reason = nullptr);
+    // A vector layer is taken only with `vectorOk` (the tool draws its strokes again, see attachStrokeChange()).
+    std::vector<PaintTarget> beginPaintLayers(QString *reason = nullptr, bool vectorOk = false);
+    // After beginPaintLayers(): the strokes of the vector layer `target` are `after` now (they were `before`), in the
+    // same undo step as its pixels.
+    void attachStrokeChange(const PaintTarget &target, std::vector<doc::VectorStroke> before,
+                            std::vector<doc::VectorStroke> after);
     // Records the stroke; `before` is the layer image as it was at beginPaint().
     // If the selection changed meanwhile, that change is part of the same
     // undo step. `kind` names the step ("Undo move").
@@ -592,6 +597,7 @@ private:
         std::vector<PaintTarget> others; // painted along with `target` (beginPaintLayers)
         std::unique_ptr<doc::Command> createdDrawing; // applied, not yet recorded
         std::optional<doc::VectorStroke> stroke;      // the stroke of a vector layer (attachStroke())
+        std::vector<std::unique_ptr<doc::Command>> strokeChanges; // applied, not yet recorded (attachStrokeChange())
         QPainterPath selectionBefore;
     };
     std::optional<PaintState> m_paint;

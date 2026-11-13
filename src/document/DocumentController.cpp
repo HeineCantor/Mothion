@@ -2432,7 +2432,7 @@ void DocumentController::setLayerSelection(std::vector<LayerRef> layers)
     emit layerSelectionChanged();
 }
 
-std::vector<DocumentController::PaintTarget> DocumentController::beginPaintLayers(QString *reason)
+std::vector<DocumentController::PaintTarget> DocumentController::beginPaintLayers(QString *reason, bool vectorOk)
 {
     if (m_cameraSelected) { // the camera is what the pen moves: not the layers
         if (reason)
@@ -2440,7 +2440,7 @@ std::vector<DocumentController::PaintTarget> DocumentController::beginPaintLayer
         return {};
     }
     if (m_layerSelection.empty()) {
-        const auto target = beginPaint(false, reason, false);
+        const auto target = beginPaint(false, reason, false, vectorOk);
         return target ? std::vector<PaintTarget>{*target} : std::vector<PaintTarget>{};
     }
     interruptStroke(); // a previous stroke left open
@@ -2449,9 +2449,11 @@ std::vector<DocumentController::PaintTarget> DocumentController::beginPaintLayer
         const doc::Cel *cel = m_document->cel(ref.cel);
         doc::Layer *layer = m_document->layer(ref.cel, ref.drawing, ref.layer);
         if (!layer || !cel->properties().visible || cel->properties().locked || !layer->properties.visible
-            || layer->properties.locked || layer->kind != doc::LayerKind::Raster)
+            || layer->properties.locked || layer->kind == doc::LayerKind::Perspective
+            || (layer->kind == doc::LayerKind::Vector && !vectorOk))
             continue;
         PaintTarget target{ref.cel, ref.drawing, ref.layer, &layer->image};
+        target.vector = layer->kind == doc::LayerKind::Vector;
         if (layer->mask && m_maskLayer == layer->id) {
             target.image = &*layer->mask;
             target.mask = true;
@@ -2507,6 +2509,8 @@ void DocumentController::endPaint(const std::vector<doc::TiledImage> &before, do
         if (auto paint = doc::PaintCommand::capture(targets[i].cel, targets[i].drawing, targets[i].layer, before[i],
                                                     *targets[i].image, targets[i].mask))
             steps.push_back(std::move(paint));
+    for (std::unique_ptr<doc::Command> &change : state.strokeChanges) // the strokes drawn again
+        steps.push_back(std::move(change));
     if (!steps.empty() && state.stroke && state.target.vector) { // the stroke goes with the pixels it painted
         auto add = std::make_unique<doc::AddVectorStrokeCommand>(state.target.cel, state.target.drawing,
                                                                  state.target.layer, std::move(*state.stroke));
@@ -2530,6 +2534,17 @@ void DocumentController::endPaint(const std::vector<doc::TiledImage> &before, do
     else
         m_history.pushApplied(std::make_unique<doc::GroupCommand>(kind, std::move(steps)));
     emit historyChanged();
+}
+
+void DocumentController::attachStrokeChange(const PaintTarget &target, std::vector<doc::VectorStroke> before,
+                                            std::vector<doc::VectorStroke> after)
+{
+    if (!m_paint || !target.vector)
+        return;
+    auto change = std::make_unique<doc::SetVectorStrokesCommand>(target.cel, target.drawing, target.layer,
+                                                                 std::move(before), std::move(after));
+    change->apply(*m_document); // the pixels are painted already; the strokes follow as recorded
+    m_paint->strokeChanges.push_back(std::move(change));
 }
 
 void DocumentController::attachStroke(doc::VectorStroke stroke)

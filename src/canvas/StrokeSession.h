@@ -72,7 +72,9 @@ public:
     // Paints a whole stroke at once, as it is drawn for good (its final
     // points, then finish()), with setStyle(style) applied. For previews and
     // tools; the canvas draws live with addDabs() instead.
-    QRect paintStroke(const brush::BrushStyle &style, std::uint32_t seed, std::vector<brush::BrushInput> points);
+    // `cornerTips`: the points of sharp corners are painted too.
+    QRect paintStroke(const brush::BrushStyle &style, std::uint32_t seed, std::vector<brush::BrushInput> points,
+                      bool cornerTips = true);
 
     // Clears the stroke to paint it again (the final pass); returns the area cleared.
     QRect restart();

@@ -252,13 +252,13 @@ QRect StrokeSession::addCornerTip(const brush::CornerTip &tip, const brush::Brus
 }
 
 QRect StrokeSession::paintStroke(const brush::BrushStyle &style, std::uint32_t seed,
-                                 std::vector<brush::BrushInput> points)
+                                 std::vector<brush::BrushInput> points, bool cornerTips)
 {
     setStyle(style);
     points = brush::finalPoints(style, std::move(points));
     brush::DabGenerator generator(style, seed);
     generator.setStrokeLength(brush::strokeLength(points));
-    return drawPoints(generator, points) | finish();
+    return drawPoints(generator, points, cornerTips) | finish();
 }
 
 QRect StrokeSession::drawPoints(brush::DabGenerator &generator, const std::vector<brush::BrushInput> &points,

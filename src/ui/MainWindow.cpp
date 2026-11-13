@@ -129,6 +129,14 @@ MainWindow::MainWindow(QWidget *parent)
     , m_document(new document::DocumentController(this))
     , m_canvas(new canvas::CanvasView(m_toolState, m_document, this))
 {
+    // The strokes of vector layers name their brush: the library knows them (the ones imported too).
+    m_toolState->setBrushResolver([library = m_brushes](const QString &name) -> tools::BrushDefinitionPtr {
+        for (const tools::ToolId tool : {tools::ToolId::Brush, tools::ToolId::Eraser})
+            for (const tools::BrushPreset &preset : library->presets(tool))
+                if (preset.brush && preset.brush->name == name)
+                    return preset.brush;
+        return nullptr;
+    });
     m_audioPlayer = new audio::AudioPlayer(m_document, this);
     // If the program dies, a copy of the project is tried (the stroke being drawn is not in it).
     diagnostics::setEmergencySave([this](const QString &path) {

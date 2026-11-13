@@ -1,7 +1,9 @@
 #pragma once
 
 #include "canvas/CanvasTool.h"
+#include "core/document/Ids.h"
 #include "core/document/TiledImage.h"
+#include "core/document/VectorStroke.h"
 
 #include <QCursor>
 #include <QImage>
@@ -132,6 +134,13 @@ private:
         doc::TiledImage moving;           // the pixels that move
         QImage source;                    // those, over the box (made when first drawn, for a layer out of sight)
         bool live = true;                 // in the drawing shown at the current frame
+        // A vector layer: while the pen drags, its pixels are stretched like any layer's; once it is up (and when the
+        // transform is applied) its strokes are drawn again at the transform, which is what keeps them sharp.
+        bool vector = false;
+        doc::CelId cel = doc::kNoId;
+        doc::DrawingId drawing = doc::kNoId;
+        doc::LayerId layer = doc::kNoId;
+        std::vector<doc::VectorStroke> strokes; // as they were when the transform started
     };
     struct Session
     {

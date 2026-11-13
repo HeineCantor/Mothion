@@ -9,6 +9,7 @@
 #include <QString>
 
 #include <array>
+#include <functional>
 
 namespace mothion::tools {
 
@@ -145,6 +146,12 @@ public:
     // The brush a paint tool draws with (never null; round by default).
     BrushDefinitionPtr brush(ToolId tool) const { return m_brushes[index(tool)]; }
     void setBrush(ToolId tool, BrushDefinitionPtr brush);
+    // Finds a brush by the name its definition has, for the strokes of vector layers that are drawn again: the
+    // library of brushes lends its presets.
+    using BrushResolver = std::function<BrushDefinitionPtr(const QString &name)>;
+    void setBrushResolver(BrushResolver resolver) { m_resolver = std::move(resolver); }
+    // The brush named `name`: one a tool holds now, else what the resolver knows, else the round brush (never null).
+    BrushDefinitionPtr findBrush(const QString &name) const;
 
     // Two colors that keep their places, the main and the secondary, and one of them selected: the selected
     // color is the one the tools paint with and the wheel, the hex field and the eyedropper edit; the
@@ -253,6 +260,7 @@ private:
     ToolId m_previousTool = ToolId::Brush;
     std::array<BrushSettings, kToolCount> m_settings;
     std::array<BrushDefinitionPtr, kToolCount> m_brushes;
+    BrushResolver m_resolver;
     QColor m_color = QColor(0x20, 0x20, 0x24);
     QColor m_secondaryColor = Qt::white;
     bool m_secondarySelected = false;

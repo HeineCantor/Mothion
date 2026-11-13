@@ -97,6 +97,7 @@ qt_add_library(mothion_gui STATIC
     canvas/DabStamper.h canvas/DabStamper.cpp
     canvas/TileQt.h canvas/TileQt.cpp
     canvas/StrokeSession.h canvas/StrokeSession.cpp
+    canvas/VectorRender.h canvas/VectorRender.cpp
     canvas/BlendDraw.h canvas/BlendDraw.cpp
     canvas/FrameRenderer.h canvas/FrameRenderer.cpp
     canvas/PerspectiveGizmo.h canvas/PerspectiveGizmo.cpp

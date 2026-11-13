@@ -80,6 +80,17 @@ void ToolState::setOpacity(ToolId tool, double opacity)
     emit toolSettingsChanged(tool);
 }
 
+BrushDefinitionPtr ToolState::findBrush(const QString &name) const
+{
+    for (const BrushDefinitionPtr &held : m_brushes)
+        if (held && held->name == name)
+            return held;
+    if (m_resolver)
+        if (BrushDefinitionPtr found = m_resolver(name))
+            return found;
+    return roundBrush();
+}
+
 void ToolState::setBrush(ToolId tool, BrushDefinitionPtr brush)
 {
     if (!brush)

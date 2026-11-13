@@ -3,6 +3,7 @@
 #include "canvas/SelectionMask.h"
 #include "core/Parallel.h"
 #include "canvas/TileQt.h"
+#include "canvas/VectorRender.h"
 #include "canvas/ViewTransform.h"
 #include "document/DocumentController.h"
 #include "tools/ToolState.h"
@@ -105,9 +106,16 @@ void TransformTool::activated()
 bool TransformTool::start()
 {
     QString reason;
-    const auto targets = m_document->beginPaintLayers(&reason);
+    const auto targets = m_document->beginPaintLayers(&reason, true);
     if (targets.empty()) {
         m_status(reason.isEmpty() ? QObject::tr("Nothing to transform on this frame") : reason);
+        return false;
+    }
+    // A vector layer is transformed whole: its strokes are not cut by an outline.
+    if (!m_document->selection().isEmpty()
+        && std::any_of(targets.begin(), targets.end(), [](const auto &t) { return t.vector; })) {
+        m_document->cancelPaint();
+        m_status(QObject::tr("A vector layer is transformed whole: clear the selection first"));
         return false;
     }
     auto s = std::make_unique<Session>();
@@ -119,6 +127,18 @@ bool TransformTool::start()
     std::vector<QRect> opaque(targets.size());
     const int shownFrame = m_document->currentFrame();
     const tools::OnionSkinSettings onion = m_toolState->onionSkin();
+    for (std::size_t i = 0; i < targets.size(); ++i) { // the strokes of the vector layers, as they are now
+        const auto &target = targets[i];
+        if (!target.vector)
+            continue;
+        Part &part = parts[i];
+        part.vector = true;
+        part.cel = target.cel;
+        part.drawing = target.drawing;
+        part.layer = target.layer;
+        if (const doc::Layer *layer = m_document->document().layer(target.cel, target.drawing, target.layer))
+            part.strokes = layer->strokes;
+    }
     parallelFor(int(targets.size()), [&](int i) {
         const auto &target = targets[std::size_t(i)];
         Part &part = parts[std::size_t(i)];
@@ -448,17 +468,34 @@ void TransformTool::renderParts(bool onlyLive)
     // is used once the pen is up.
     const ResampleFilter filter = ResampleFilter(tools::Preferences::instance().transformFilter());
     const bool rough = m_drag.has_value() && (filter == ResampleFilter::Bicubic || filter == ResampleFilter::Lanczos3);
-    m_rough = rough;
+    // A vector layer is stretched while the pen drags too, and drawn again from its strokes once the pen is up.
+    m_rough = rough || (m_drag.has_value() && std::any_of(s.parts.begin(), s.parts.end(),
+                                                         [](const Part &p) { return p.vector; }));
     const doc::Document &d = m_document->document();
     const QRect now = s.transform.mapRect(QRectF(s.box)).toAlignedRect().adjusted(-1, -1, 1, 1)
                       & QRect(0, 0, d.width(), d.height());
-    std::vector<Part *> todo;
+    std::vector<Part *> todo, drawnAgain;
     bool skipped = false;
     for (Part &part : s.parts) {
-        if (!onlyLive || part.live)
-            todo.push_back(&part);
-        else
+        if (onlyLive && !part.live)
             skipped = true;
+        else if (part.vector && !m_drag)
+            drawnAgain.push_back(&part);
+        else
+            todo.push_back(&part);
+    }
+    // The vector layers: their strokes drawn again at the transform, not stretched (one at a time: the brushes are
+    // looked up in the library).
+    const QRect page(0, 0, d.width(), d.height());
+    for (Part *part : drawnAgain) {
+        std::vector<doc::VectorStroke> moved;
+        moved.reserve(part->strokes.size());
+        for (const doc::VectorStroke &stroke : part->strokes)
+            moved.push_back(transformedStroke(stroke, s.transform));
+        doc::TiledImage result;
+        drawStrokes(result, moved, *m_toolState, page);
+        *part->image = std::move(result);
+        part->source = QImage(); // what it stretched is stale
     }
     // Each layer on its own core: they do not share anything but the transform.
     parallelFor(int(todo.size()), [&](int i) {
@@ -514,8 +551,23 @@ void TransformTool::commit()
     m_drag.reset();
     if (s->changed) {
         std::vector<doc::TiledImage> before;
-        for (const Part &part : s->parts)
+        for (const Part &part : s->parts) {
             before.push_back(part.before);
+            if (!part.vector)
+                continue;
+            // The strokes of a vector layer go where the transform took them, in the same undo step as its pixels.
+            std::vector<doc::VectorStroke> moved;
+            moved.reserve(part.strokes.size());
+            for (const doc::VectorStroke &stroke : part.strokes)
+                moved.push_back(transformedStroke(stroke, s->transform));
+            document::DocumentController::PaintTarget target;
+            target.cel = part.cel;
+            target.drawing = part.drawing;
+            target.layer = part.layer;
+            target.image = part.image;
+            target.vector = true;
+            m_document->attachStrokeChange(target, part.strokes, std::move(moved));
+        }
         m_document->endPaint(before, doc::CommandKind::Transform);
     }
     else

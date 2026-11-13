@@ -1,6 +1,7 @@
 // Tests for the UI layer: the drawing tools: shapes, effect brushes, perspective, straight lines.
 
 #include "test_common.h"
+#include "canvas/VectorRender.h"
 
 class TestUiDrawing : public QObject
 {
@@ -221,6 +222,88 @@ private slots:
         QVERIFY(!controller.clearCurrentLayer(&reason));
         QVERIFY(reason.contains(QStringLiteral("vector")));
         QCOMPARE(layer().strokes.size(), std::size_t(1));
+    }
+
+
+    // The strokes of a vector layer drawn again make the layer's pixels (that is what keeps them sharp), and
+    // a transform scales them: the points and the brush size follow it, the pixels are made anew (a thin line stays as
+    // thin as the size says, not stretched), and undo gives the strokes and the pixels back together.
+    void aVectorLayerIsDrawnAgainWhenTransformed()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(500, 400);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 4, "Line").command);
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Vector));
+        QCoreApplication::processEvents();
+        auto layer = [&]() -> const doc::Layer & { return *controller.currentDrawing()->layer(controller.currentLayer()); };
+
+        state.setColor(QColor(200, 30, 30));
+        state.setActiveTool(tools::ToolId::Brush);
+        const QTransform toView = canvas.view().documentToView();
+        const QPoint start = toView.map(QPointF(900, 540)).toPoint();
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, start);
+        for (int i = 1; i <= 30; ++i)
+            QTest::mouseMove(&canvas, start + QPoint(i * 2, i % 7));
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, start + QPoint(60, 2));
+        QCOMPARE(layer().strokes.size(), std::size_t(1));
+
+        // Drawn again from the strokes, the pixels are what the pen made.
+        const QRect page(0, 0, d.width(), d.height());
+        doc::TiledImage again;
+        canvas::drawStrokes(again, layer().strokes, state, page);
+        auto tiles = layer().image.tileCoords();
+        QVERIFY(!tiles.empty());
+        int worst = 0;
+        for (const doc::TileCoord &c : tiles)
+            for (int y = 0; y < doc::kTileSize; ++y)
+                for (int x = 0; x < doc::kTileSize; ++x) {
+                    const int px = c.x * doc::kTileSize + x, py = c.y * doc::kTileSize + y;
+                    worst = std::max(worst, std::abs(int(doc::alphaOf(layer().image.pixel(px, py)))
+                                                     - int(doc::alphaOf(again.pixel(px, py)))));
+                }
+        QVERIFY2(worst <= 2, qPrintable(QStringLiteral("alpha differs by %1").arg(worst)));
+
+        // Scaled to twice the size, from the top left.
+        const std::vector<doc::VectorStroke> original = layer().strokes;
+        const doc::TiledImage originalImage = layer().image;
+        state.setActiveTool(tools::ToolId::Transform);
+        canvas::TransformTool tool(&controller, &state, [](const QString &) {}, [] {});
+        tool.setDeferredRendering(false);
+        tool.activated();
+        const QRect box = tool.box();
+        QVERIFY(!box.isEmpty());
+        const QPointF corner(box.x() + box.width(), box.y() + box.height());
+        tool.press(corner, Qt::NoModifier);
+        tool.move(corner + QPointF(box.width(), box.height()), Qt::NoModifier);
+        tool.release(corner + QPointF(box.width(), box.height()), Qt::NoModifier);
+        tool.commit();
+        QCoreApplication::processEvents();
+
+        QCOMPARE(layer().strokes.size(), std::size_t(1));
+        const doc::VectorStroke &scaled = layer().strokes.front();
+        QCOMPARE(scaled.points.size(), original.front().points.size());
+        QVERIFY(std::abs(scaled.size - 2.0 * original.front().size) < 1e-6);
+        const brush::BrushInput &was = original.front().points[5], &now = scaled.points[5];
+        QVERIFY(std::abs(now.x - (box.x() + 2.0 * (was.x - box.x()))) < 1e-6);
+        QVERIFY(std::abs(now.y - (box.y() + 2.0 * (was.y - box.y()))) < 1e-6);
+        // The pixels are the new strokes drawn: the same as drawing them again.
+        doc::TiledImage fresh;
+        canvas::drawStrokes(fresh, layer().strokes, state, page);
+        QCOMPARE(layer().image.pixel(int(now.x), int(now.y)), fresh.pixel(int(now.x), int(now.y)));
+        QVERIFY(qAlpha(layer().image.pixel(int(now.x), int(now.y))) > 200);
+
+        controller.undo(); // the strokes and the pixels, together
+        QCOMPARE(layer().strokes.size(), std::size_t(1));
+        QCOMPARE(layer().strokes.front().size, original.front().size);
+        QCOMPARE(layer().strokes.front().points[5].x, was.x);
+        QCOMPARE(layer().image.tileCoords().size(), originalImage.tileCoords().size());
+        controller.redo();
+        QVERIFY(std::abs(layer().strokes.front().size - 2.0 * original.front().size) < 1e-6);
     }
 
 
