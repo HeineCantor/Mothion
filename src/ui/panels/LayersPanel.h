@@ -170,10 +170,10 @@ private:
     QToolButton *m_addLayer;       // a new drawing layer
     QToolButton *m_addPerspective; // a new perspective layer
     QToolButton *m_addVector;      // a new vector layer
+    QToolButton *m_rasterize;      // the selected vector layers become raster layers
     QToolButton *m_merge;
     QToolButton *m_mergeDown;
     QToolButton *m_remove;
-    QToolButton *m_camera; // adds the camera, or selects it
     QToolButton *m_up;
     QToolButton *m_down;
     QToolButton *m_snapTo;  // the layer actions' second row

@@ -15,6 +15,16 @@ class ToolState;
 
 namespace mothion::canvas {
 
+// How far out of the canvas the pixels of a layer are kept when they are made again (a layer moved, scaled or warped
+// partly out of the canvas keeps what is out of it, as a raster layer does); past it they are let go, to keep a big
+// scale from asking for a picture that does not fit memory.
+inline constexpr int kBeyondPage = 4096;
+// The page, and that much around it: where strokes are drawn again.
+inline QRect workArea(const QRect &page)
+{
+    return page.adjusted(-kBeyondPage, -kBeyondPage, kBeyondPage, kBeyondPage);
+}
+
 // A vector layer's strokes drawn again from their points, which is what keeps them sharp when the layer is
 // scaled or turned: the pixels are made anew at the new size, not stretched.
 

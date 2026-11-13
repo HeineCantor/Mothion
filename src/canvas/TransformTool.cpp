@@ -24,7 +24,6 @@ namespace mothion::canvas {
 
 namespace {
 
-constexpr int kReachBeyondPage = 4096; // px: how far out of the canvas a transformed layer is kept
 
 constexpr double kHandleSize = 8.0;  // screen px, as drawn
 constexpr double kGrabRadius = 6.0;  // screen px, to pick a handle: just outside it is the turn
@@ -479,8 +478,7 @@ void TransformTool::renderParts(bool onlyLive)
     const doc::Document &d = m_document->document();
     // Where the pixels land: not cut to the page, what lies out of it (a layer moved partly out of the canvas) comes
     // along. Only so far around the page, to keep a big scale from asking for a picture that does not fit memory.
-    const QRect reach = QRect(0, 0, d.width(), d.height()).adjusted(-kReachBeyondPage, -kReachBeyondPage,
-                                                                    kReachBeyondPage, kReachBeyondPage);
+    const QRect reach = workArea(QRect(0, 0, d.width(), d.height()));
     const QRect now = s.transform.mapRect(QRectF(s.box)).toAlignedRect().adjusted(-1, -1, 1, 1) & reach;
     std::vector<Part *> todo, drawnAgain;
     bool skipped = false;
@@ -494,14 +492,13 @@ void TransformTool::renderParts(bool onlyLive)
     }
     // The vector layers: their strokes drawn again at the transform, not stretched (one at a time: the brushes are
     // looked up in the library).
-    const QRect page(0, 0, d.width(), d.height());
     for (Part *part : drawnAgain) {
         std::vector<doc::VectorStroke> moved = part->restStrokes;
         moved.reserve(moved.size() + part->strokes.size());
         for (const doc::VectorStroke &stroke : part->strokes)
             moved.push_back(transformedStroke(stroke, s.transform));
         doc::TiledImage result;
-        drawStrokes(result, moved, *m_toolState, page);
+        drawStrokes(result, moved, *m_toolState, reach); // out of the canvas too
         *part->image = std::move(result);
         part->source = QImage(); // what it stretched is stale
     }

@@ -315,8 +315,8 @@ private slots:
     }
 
 
-    // The camera has a row at the top of the Layers panel: the Camera button adds and selects it, its eye turns it
-    // on and off, Delete takes it away; while it is selected the cels cannot be drawn on.
+    // The camera has a row at the top of the Layers panel: it is made elsewhere (the Timeline's camera key), the row
+    // selects it, its eye turns it on and off, Delete takes it away; while it is selected the cels cannot be drawn on.
     void cameraHasARowInTheLayersPanel()
     {
         document::DocumentController controller;
@@ -325,15 +325,17 @@ private slots:
         panel.show();
         QVERIFY(QTest::qWaitForWindowExposed(&panel));
         auto *tree = panel.findChild<QTreeWidget *>();
-        auto *button = panel.findChild<QToolButton *>(QStringLiteral("cameraButton"));
-        QVERIFY(tree && button);
+        QVERIFY(tree);
+        QVERIFY(!panel.findChild<QToolButton *>(QStringLiteral("cameraButton"))); // the panel does not make it
         QImage image(20, 20, QImage::Format_ARGB32);
         image.fill(Qt::red);
         controller.importImage(image, QStringLiteral("x"));
         QCoreApplication::processEvents();
         QVERIFY(!panel.cameraItem()); // none in the project
 
-        button->click(); // made, and selected
+        controller.addCamera(); // made as the Timeline makes it; the panel shows its row
+        QCoreApplication::processEvents();
+        tree->setCurrentItem(panel.cameraItem()); // and selected by its row
         QVERIFY(controller.camera());
         QVERIFY(panel.cameraItem());
         QCOMPARE(tree->topLevelItem(0), panel.cameraItem()); // above the cels
@@ -361,8 +363,8 @@ private slots:
         QVERIFY(controller.beginPaint(true, &reason));
         controller.cancelPaint();
 
-        // The button again selects it (it does not make another one); the bin takes it away.
-        button->click();
+        // Its row again selects it (it does not make another one); the bin takes it away.
+        tree->setCurrentItem(panel.cameraItem());
         QCOMPARE(controller.camera()->keys().size(), size_t(1));
         QVERIFY(controller.cameraSelected());
         QToolButton *bin = nullptr;
@@ -454,6 +456,48 @@ private slots:
         QVERIFY(tilt->isChecked());
     }
 
+
+    // Each layer row says what the layer is (raster, vector, perspective), and the rasterize button, next to the one
+    // that makes a vector layer, turns the selected vector layers into raster ones (the name stays: the icon says it).
+    void layerRowsShowTheirKindAndRasterizeIsNextToNewVector()
+    {
+        document::DocumentController controller;
+        ui::LayersPanel panel(&controller);
+        panel.resize(320, 800);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        auto *tree = panel.findChild<QTreeWidget *>();
+        auto *addVector = panel.findChild<QToolButton *>(QStringLiteral("addVector"));
+        auto *rasterize = panel.findChild<QToolButton *>(QStringLiteral("rasterize"));
+        QVERIFY(tree && addVector && rasterize);
+        QVERIFY(!panel.findChild<QToolButton *>(QStringLiteral("cameraButton")));
+        QImage image(20, 20, QImage::Format_ARGB32);
+        image.fill(Qt::red);
+        controller.importImage(image, QStringLiteral("x"));
+        QCoreApplication::processEvents();
+        auto kindOf = [&](doc::LayerId id) {
+            QWidget *row = tree->itemWidget(panel.layerItem(id), 0);
+            auto *icon = row ? row->findChild<QLabel *>(QStringLiteral("kindIcon")) : nullptr;
+            return icon ? icon->toolTip() : QString();
+        };
+        QCOMPARE(kindOf(controller.currentLayer()), QStringLiteral("Raster layer"));
+        QVERIFY(!rasterize->isEnabled()); // nothing vector chosen
+
+        addVector->click();
+        QCoreApplication::processEvents();
+        const doc::LayerId vector = controller.currentLayer();
+        QCOMPARE(kindOf(vector), QStringLiteral("Vector layer"));
+        QVERIFY(rasterize->isEnabled());
+        QVERIFY(rasterize->x() > addVector->x() && rasterize->x() - addVector->x() < 40); // right next to it
+
+        rasterize->click();
+        QCoreApplication::processEvents();
+        QCOMPARE(kindOf(vector), QStringLiteral("Raster layer")); // the row follows, the name stays
+        QVERIFY(!rasterize->isEnabled());
+        controller.undo();
+        QCoreApplication::processEvents();
+        QCOMPARE(kindOf(vector), QStringLiteral("Vector layer"));
+    }
 
     // The pen tilt and the pressure curve are advanced options: folded away at the end of the brush's properties, open on
     // a click.

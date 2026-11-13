@@ -73,7 +73,7 @@ void VectorEraseTool::eraseTo(const QPointF &to, bool pressed)
         return;
     // Only the area the cut strokes covered is drawn again, from the strokes that reach into it.
     const doc::Document &d = m_document->document();
-    const QRect region = dirty.toAlignedRect().adjusted(-1, -1, 1, 1) & QRect(0, 0, d.width(), d.height());
+    const QRect region = dirty.toAlignedRect().adjusted(-1, -1, 1, 1) & workArea(QRect(0, 0, d.width(), d.height()));
     if (region.isEmpty())
         return;
     doc::TiledImage patch;

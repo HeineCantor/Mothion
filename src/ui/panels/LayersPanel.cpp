@@ -246,14 +246,15 @@ QString looksOf(const doc::Drawing &drawing)
     QString key;
     for (const doc::Layer &layer : drawing.layers) {
         const doc::LayerProperties &p = layer.properties;
-        key += QStringLiteral("%1,%2,%3,%4,%5,%6,%7;")
+        key += QStringLiteral("%1,%2,%3,%4,%5,%6,%7,%8;")
                    .arg(layer.id)
                    .arg(p.visible)
                    .arg(p.locked)
                    .arg(double(p.opacity))
                    .arg(int(p.blend))
                    .arg(QString::fromStdString(p.name))
-                   .arg(p.clipped);
+                   .arg(p.clipped)
+                   .arg(int(layer.kind));
     }
     return key;
 }
@@ -396,10 +397,10 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     , m_addLayer(actionButton(IconId::AddLayer, tr("New layer"), this))
     , m_addPerspective(actionButton(IconId::AddPerspective, tr("New perspective layer"), this))
     , m_addVector(actionButton(IconId::AddVector, tr("New vector layer"), this))
+    , m_rasterize(actionButton(IconId::Rasterize, tr("Rasterize the selected vector layers: they become raster layers"), this))
     , m_merge(actionButton(IconId::MergeLayers, tr("Merge the selected layers"), this))
     , m_mergeDown(actionButton(IconId::MergeDown, tr("Merge with the layer below"), this))
     , m_remove(actionButton(IconId::Delete, tr("Delete layer"), this))
-    , m_camera(actionButton(IconId::Camera, tr("Camera: add it to the project, or select it"), this))
     , m_up(actionButton(IconId::ArrowUp, tr("Move up"), this))
     , m_down(actionButton(IconId::ArrowDown, tr("Move down"), this))
     , m_snapTo(actionButton(IconId::Crosshair,
@@ -477,11 +478,12 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     buttons->addWidget(m_addPerspective);
     m_addVector->setObjectName(QStringLiteral("addVector"));
     buttons->addWidget(m_addVector);
+    m_rasterize->setObjectName(QStringLiteral("rasterize"));
+    m_rasterize->setEnabled(false);
+    buttons->addWidget(m_rasterize); // next to the one that makes a vector layer
     buttons->addWidget(m_merge);
     buttons->addWidget(m_mergeDown);
     buttons->addWidget(m_remove);
-    m_camera->setObjectName(QStringLiteral("cameraButton"));
-    buttons->addWidget(m_camera);
     buttons->addStretch(1);
     buttons->addWidget(m_up);
     buttons->addWidget(m_down);
@@ -547,16 +549,11 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     connect(m_maskAdd, &QToolButton::clicked, this, [this] { m_document->createLayerMask(); });
     connect(m_maskDelete, &QToolButton::clicked, this, [this] { m_document->deleteLayerMask(); });
     connect(m_document, &DocumentController::maskEditingChanged, this, &LayersPanel::updateMaskFrames);
-    // The camera: made if the project has none, and selected.
-    connect(m_camera, &QToolButton::clicked, this, [this] {
-        m_focus = Focus::Camera;
-        m_document->setLayerChosen(false);
-        if (!m_document->camera())
-            m_document->addCamera(); // the row is made as the change is told
-        m_document->selectCamera(true);
-        if (QTreeWidgetItem *row = cameraItem())
-            m_tree->setCurrentItem(row);
-        syncHeader();
+    connect(m_rasterize, &QToolButton::clicked, this, [this] {
+        const QList<doc::LayerId> selected = selectedLayers();
+        QString reason;
+        if (!m_document->rasterizeLayers(std::vector<doc::LayerId>(selected.begin(), selected.end()), &reason))
+            emit statusMessage(reason);
     });
     // Right click on a row: the same commands, where the pointer is.
     m_tree->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -932,6 +929,16 @@ void LayersPanel::rebuildTree()
                     maskThumb->onPress = [this, id] { m_document->setMaskEditing(id); };
                     lh->addWidget(maskThumb);
                 }
+                // What the layer is, at a glance: raster, vector or perspective (a rasterized layer keeps its name).
+                auto *kindIcon = iconLabel(layer.kind == doc::LayerKind::Vector        ? IconId::KindVector
+                                           : layer.kind == doc::LayerKind::Perspective ? IconId::KindPerspective
+                                                                                       : IconId::KindRaster,
+                                           layerRow);
+                kindIcon->setObjectName(QStringLiteral("kindIcon"));
+                kindIcon->setToolTip(layer.kind == doc::LayerKind::Vector        ? tr("Vector layer")
+                                     : layer.kind == doc::LayerKind::Perspective ? tr("Perspective layer")
+                                                                                 : tr("Raster layer"));
+                lh->addWidget(kindIcon);
                 auto *layerText = new QLabel(propertiesText(layer.properties.opacity, layer.properties.blend,
                                                             layer.properties.name),
                                              layerRow);
@@ -1953,7 +1960,7 @@ void LayersPanel::syncHeader()
     const doc::Layer *layer = drawing ? drawing->layer(m_document->currentLayer()) : nullptr;
 
     bool header = false, canAdd = false, canRemove = false, canUp = false, canDown = false, canMerge = false,
-         canMergeDown = false;
+         canMergeDown = false, canRasterize = false;
     float opacity = 1.0f;
     doc::BlendMode blend = doc::BlendMode::Normal;
     switch (m_focus) {
@@ -2011,6 +2018,8 @@ void LayersPanel::syncHeader()
                    && m_document->canMergeLayers(std::vector<doc::LayerId>(selected.begin(), selected.end()));
         canMergeDown = drawing
                        && m_document->canMergeDown(std::vector<doc::LayerId>(selected.begin(), selected.end()));
+        canRasterize = drawing
+                       && m_document->canRasterizeLayers(std::vector<doc::LayerId>(selected.begin(), selected.end()));
         canUp = layer && canUp;
         canDown = layer && canDown;
         if (layer) {
@@ -2033,6 +2042,7 @@ void LayersPanel::syncHeader()
     m_addLayer->setEnabled(canAdd);
     m_addPerspective->setEnabled(canAdd);
     m_addVector->setEnabled(canAdd);
+    m_rasterize->setEnabled(canRasterize);
     m_remove->setEnabled(canRemove);
     m_merge->setEnabled(canMerge);
     m_mergeDown->setEnabled(canMergeDown);

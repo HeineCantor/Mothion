@@ -543,6 +543,41 @@ void drawGlyph(QPainter &p, IconId id)
         path.moveTo(5, 12);
         path.lineTo(19, 12);
         break;
+    case IconId::KindRaster: // a sheet of pixels: squares in a checker
+        path.addRect(QRectF(3.5, 3.5, 17, 17));
+        for (const QPointF &at : {QPointF(6.5, 6.5), QPointF(12.5, 12.5)})
+            path.addRect(QRectF(at.x(), at.y(), 5, 5));
+        break;
+    case IconId::KindVector: // a sheet with a curve through two points
+        path.addRect(QRectF(3.5, 3.5, 17, 17));
+        path.moveTo(7, 17);
+        path.cubicTo(8, 7, 14, 7, 17, 15);
+        path.addEllipse(QPointF(7, 17), 1.2, 1.2);
+        path.addEllipse(QPointF(17, 15), 1.2, 1.2);
+        break;
+    case IconId::KindPerspective: // a sheet with a grid in perspective
+        path.addRect(QRectF(3.5, 3.5, 17, 17));
+        for (double x : {7.0, 12.0, 17.0}) { // converging at the top
+            path.moveTo(x, 20.5);
+            path.lineTo(12 + (x - 12) * 0.35, 8);
+        }
+        path.moveTo(3.5, 13);
+        path.lineTo(20.5, 13);
+        break;
+    case IconId::Rasterize: // a curve through two points, an arrow, and pixels
+        path.moveTo(3, 19);
+        path.cubicTo(3.5, 10, 7.5, 10, 10, 16);
+        path.addEllipse(QPointF(3, 19), 1.1, 1.1);
+        path.addEllipse(QPointF(10, 16), 1.1, 1.1);
+        path.moveTo(11.5, 8.5);
+        path.lineTo(14.5, 8.5);
+        path.moveTo(13, 7);
+        path.lineTo(14.5, 8.5);
+        path.lineTo(13, 10);
+        path.addRect(QRectF(16, 4, 4, 4));
+        path.addRect(QRectF(20, 8, 3.5, 4));
+        path.addRect(QRectF(16, 12, 4, 4));
+        break;
     case IconId::AddLayer: // a sheet, and a plus
     case IconId::AddVector: // a sheet with a curve through two points, and a plus
     case IconId::AddPerspective: { // a grid in perspective (lines to a vanishing point), and a plus

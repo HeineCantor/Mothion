@@ -532,6 +532,63 @@ private slots:
         QCOMPARE(qAlpha(layer->image.pixel(-30 + 5, 100 + 5)), 0);              // not left behind
     }
 
+    // A vector layer drawn again keeps what lies out of the canvas too (as a raster layer does): the strokes are drawn
+    // beyond the page, so rasterizing the layer afterwards does not cut them.
+    void aVectorLayerKeepsWhatLiesOutOfTheCanvasWhenDrawnAgain()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(500, 400);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 4, "Line").command);
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Vector));
+        QCoreApplication::processEvents();
+        doc::Layer *layer = d.layer(controller.currentCel(), controller.currentDrawing()->id, controller.currentLayer());
+        const int W = d.width();
+        // A thick line across the right edge of the page: from inside it to well out of it.
+        doc::VectorStroke line;
+        line.size = 30;
+        line.color = 0xFFC81E1E;
+        for (int i = 0; i <= 40; ++i) {
+            brush::BrushInput in;
+            in.x = W - 300 + i * 10.0; // up to W + 100
+            in.y = 400;
+            line.points.push_back(in);
+        }
+        layer->strokes = {line};
+        canvas::drawStrokes(layer->image, layer->strokes, state, canvas::workArea(QRect(0, 0, W, d.height())));
+        QVERIFY(qAlpha(layer->image.pixel(W + 50, 400)) > 200); // out of the page, as the layer is
+        auto outside = [&] {
+            layer = d.layer(controller.currentCel(), controller.currentDrawing()->id, controller.currentLayer());
+            return qAlpha(layer->image.pixel(W + 50, 400));
+        };
+
+        state.setActiveTool(tools::ToolId::Transform);
+        canvas::TransformTool tool(&controller, &state, [](const QString &) {}, [] {});
+        tool.setDeferredRendering(false);
+        tool.activated();
+        QVERIFY(tool.hasPendingEdit());
+        const QRect box = tool.box();
+        const QPointF inside(box.center());
+        tool.press(inside, Qt::NoModifier);
+        tool.move(inside + QPointF(0, 60), Qt::NoModifier);
+        tool.release(inside + QPointF(0, 60), Qt::NoModifier);
+        tool.commit();
+        QCoreApplication::processEvents();
+        QVERIFY(qAlpha(controller.currentDrawing()->layer(controller.currentLayer())->image.pixel(W + 50, 460)) > 200);
+
+        // Rasterized, nothing is lost.
+        QString reason;
+        QVERIFY(controller.rasterizeLayers({controller.currentLayer()}, &reason));
+        layer = d.layer(controller.currentCel(), controller.currentDrawing()->id, controller.currentLayer());
+        QCOMPARE(layer->kind, doc::LayerKind::Raster);
+        QVERIFY(qAlpha(layer->image.pixel(W + 50, 460)) > 200);
+        Q_UNUSED(outside);
+    }
+
     // Move and the puppet warp keep what lies out of the canvas too.
     void moveAndPuppetKeepWhatLiesOutOfTheCanvas()
     {

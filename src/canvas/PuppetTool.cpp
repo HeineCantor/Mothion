@@ -147,7 +147,7 @@ void PuppetTool::render()
     for (Part &part : s.parts) {
         if (part.vector && !dragging) {
             const doc::Document &d = m_document->document();
-            const QRect page(0, 0, d.width(), d.height());
+            const QRect page = workArea(QRect(0, 0, d.width(), d.height())); // out of the canvas too
             doc::TiledImage result;
             std::vector<doc::VectorStroke> shown = part.restStrokes; // what stays, then what is warped
             for (doc::VectorStroke &stroke : warpedStrokes(part.strokes, *s.rig))
