@@ -161,6 +161,25 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
     layout->addWidget(m_fillControls);
     layout->addWidget(m_effectControls);
     layout->addWidget(m_shapeControls);
+    // On a vector layer the eraser can take away strokes (as Clip Studio's vector eraser) instead of erasing like a brush.
+    m_vectorEraserControls = new QWidget(this);
+    m_vectorEraserMode = new QComboBox(m_vectorEraserControls);
+    m_vectorEraserMode->setObjectName(QStringLiteral("vectorEraserMode"));
+    m_vectorEraserMode->addItems({tr("Like a brush"), tr("Touched part"), tr("Up to the intersection"), tr("Whole line")});
+    m_vectorEraserMode->setToolTip(tr("What the eraser does on a vector layer:\n"
+                                      "Like a brush: it erases pixels, and the layer keeps the eraser's strokes.\n"
+                                      "Touched part: it takes away what its circle covers of the strokes.\n"
+                                      "Up to the intersection: from the touched place to the nearest crossing with another stroke.\n"
+                                      "Whole line: the whole of every stroke it touches."));
+    auto *vectorEraser = new QFormLayout(m_vectorEraserControls);
+    vectorEraser->setContentsMargins(0, 0, 0, 0);
+    vectorEraser->addRow(tr("Vector layer"), m_vectorEraserMode);
+    layout->addWidget(m_vectorEraserControls);
+    connect(m_vectorEraserMode, &QComboBox::currentIndexChanged, this, [this](int i) {
+        m_state->setVectorEraser({static_cast<tools::VectorEraserSettings::Mode>(i)});
+    });
+    connect(m_state, &ToolState::vectorEraserChanged, this, &ToolPropertiesPanel::syncVectorEraserFromState);
+    syncVectorEraserFromState();
     // The filter of the transform (as in Krita's): bicubic by default, Lanczos3 for making a small picture bigger, nearest
     // neighbor for pixel art. The choice is kept (Preferences), and is taken up at once by a transform that is open.
     m_transformControls = new QWidget(this);
@@ -337,6 +356,8 @@ void ToolPropertiesPanel::syncFromState()
         m_footer->setVisible(brush);
     m_effectControls->setVisible(effect);
     m_shapeControls->setVisible(shape);
+    if (m_vectorEraserControls)
+        m_vectorEraserControls->setVisible(tool == ToolId::Eraser);
     syncEffectFromState();
     m_transformHelp->setVisible(transform);
     m_transformControls->setVisible(transform);
@@ -398,6 +419,12 @@ void ToolPropertiesPanel::syncEffectFromState()
     const QSignalBlocker b1(m_effectSize), b2(m_effectStrength);
     m_effectSize->setValue(int(std::lround(s.size)));
     m_effectStrength->setValue(int(std::lround(s.opacity * 100)));
+}
+
+void ToolPropertiesPanel::syncVectorEraserFromState()
+{
+    const QSignalBlocker block(m_vectorEraserMode);
+    m_vectorEraserMode->setCurrentIndex(int(m_state->vectorEraser().mode));
 }
 
 void ToolPropertiesPanel::syncShapeFromState()

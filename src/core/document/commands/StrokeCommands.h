@@ -46,4 +46,22 @@ private:
     std::vector<VectorStroke> m_before, m_after;
 };
 
+// A vector layer becomes a raster layer: its pixels stay, the strokes are let go. Undo makes it vector again.
+class RasterizeLayerCommand : public Command
+{
+public:
+    RasterizeLayerCommand(CelId cel, DrawingId drawing, LayerId layer, std::vector<VectorStroke> strokes);
+
+    CommandKind kind() const override { return CommandKind::ChangeLayerProperties; }
+    ChangeSet apply(Document &doc) override;
+    ChangeSet revert(Document &doc) override;
+    std::size_t memoryBytes() const override;
+
+private:
+    CelId m_cel;
+    DrawingId m_drawing;
+    LayerId m_layer;
+    std::vector<VectorStroke> m_strokes;
+};
+
 } // namespace mothion::doc

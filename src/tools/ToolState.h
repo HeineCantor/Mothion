@@ -32,6 +32,16 @@ struct PuppetSettings
     bool operator==(const PuppetSettings &) const = default;
 };
 
+// What the eraser does on a vector layer (as Clip Studio's vector eraser): Off, it erases like a brush (the eraser's
+// strokes are kept with the layer); otherwise it takes away strokes, or parts of them.
+struct VectorEraserSettings
+{
+    enum class Mode { Off, Part, ToIntersection, WholeLine };
+    Mode mode = Mode::Off;
+
+    bool operator==(const VectorEraserSettings &) const = default;
+};
+
 // Paint bucket options.
 struct FillSettings
 {
@@ -225,6 +235,9 @@ public:
     doc::LayerId perspectiveSnapLayer() const { return m_snapLayer; }
     void setPerspectiveSnapLayer(doc::LayerId layer);
 
+    VectorEraserSettings vectorEraser() const { return m_vectorEraser; }
+    void setVectorEraser(const VectorEraserSettings &settings);
+
     ShapeSettings shapeSettings() const { return m_shape; }
     void setShapeSettings(const ShapeSettings &settings);
 
@@ -251,6 +264,7 @@ signals:
     void blendSettingsChanged();
     void liquifySettingsChanged();
     void shapeSettingsChanged();
+    void vectorEraserChanged();
     void onionSkinChanged();
 
 private:
@@ -278,6 +292,7 @@ private:
     BlendSettings m_blend;
     LiquifySettings m_liquify;
     ShapeSettings m_shape;
+    VectorEraserSettings m_vectorEraser;
     OnionSkinSettings m_onion;
 };
 

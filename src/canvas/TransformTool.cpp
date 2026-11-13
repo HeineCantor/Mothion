@@ -24,6 +24,8 @@ namespace mothion::canvas {
 
 namespace {
 
+constexpr int kReachBeyondPage = 4096; // px: how far out of the canvas a transformed layer is kept
+
 constexpr double kHandleSize = 8.0;  // screen px, as drawn
 constexpr double kGrabRadius = 6.0;  // screen px, to pick a handle: just outside it is the turn
 constexpr double kMinScale = 0.01;
@@ -111,13 +113,6 @@ bool TransformTool::start()
         m_status(reason.isEmpty() ? QObject::tr("Nothing to transform on this frame") : reason);
         return false;
     }
-    // A vector layer is transformed whole: its strokes are not cut by an outline.
-    if (!m_document->selection().isEmpty()
-        && std::any_of(targets.begin(), targets.end(), [](const auto &t) { return t.vector; })) {
-        m_document->cancelPaint();
-        m_status(QObject::tr("A vector layer is transformed whole: clear the selection first"));
-        return false;
-    }
     auto s = std::make_unique<Session>();
     s->selection = m_document->selection();
     const std::optional<SelectionMask> mask =
@@ -136,8 +131,18 @@ bool TransformTool::start()
         part.cel = target.cel;
         part.drawing = target.drawing;
         part.layer = target.layer;
-        if (const doc::Layer *layer = m_document->document().layer(target.cel, target.drawing, target.layer))
-            part.strokes = layer->strokes;
+        if (const doc::Layer *layer = m_document->document().layer(target.cel, target.drawing, target.layer)) {
+            part.allStrokes = layer->strokes;
+            if (!mask) {
+                part.strokes = layer->strokes;
+            } else { // the strokes are cut along the outline: those inside move, the rest stays
+                for (const doc::VectorStroke &stroke : layer->strokes) {
+                    SplitStroke cut = splitStrokeByMask(stroke, *mask);
+                    part.strokes.insert(part.strokes.end(), cut.inside.begin(), cut.inside.end());
+                    part.restStrokes.insert(part.restStrokes.end(), cut.outside.begin(), cut.outside.end());
+                }
+            }
+        }
     }
     parallelFor(int(targets.size()), [&](int i) {
         const auto &target = targets[std::size_t(i)];
@@ -472,8 +477,11 @@ void TransformTool::renderParts(bool onlyLive)
     m_rough = rough || (m_drag.has_value() && std::any_of(s.parts.begin(), s.parts.end(),
                                                          [](const Part &p) { return p.vector; }));
     const doc::Document &d = m_document->document();
-    const QRect now = s.transform.mapRect(QRectF(s.box)).toAlignedRect().adjusted(-1, -1, 1, 1)
-                      & QRect(0, 0, d.width(), d.height());
+    // Where the pixels land: not cut to the page, what lies out of it (a layer moved partly out of the canvas) comes
+    // along. Only so far around the page, to keep a big scale from asking for a picture that does not fit memory.
+    const QRect reach = QRect(0, 0, d.width(), d.height()).adjusted(-kReachBeyondPage, -kReachBeyondPage,
+                                                                    kReachBeyondPage, kReachBeyondPage);
+    const QRect now = s.transform.mapRect(QRectF(s.box)).toAlignedRect().adjusted(-1, -1, 1, 1) & reach;
     std::vector<Part *> todo, drawnAgain;
     bool skipped = false;
     for (Part &part : s.parts) {
@@ -488,8 +496,8 @@ void TransformTool::renderParts(bool onlyLive)
     // looked up in the library).
     const QRect page(0, 0, d.width(), d.height());
     for (Part *part : drawnAgain) {
-        std::vector<doc::VectorStroke> moved;
-        moved.reserve(part->strokes.size());
+        std::vector<doc::VectorStroke> moved = part->restStrokes;
+        moved.reserve(moved.size() + part->strokes.size());
         for (const doc::VectorStroke &stroke : part->strokes)
             moved.push_back(transformedStroke(stroke, s.transform));
         doc::TiledImage result;
@@ -556,8 +564,8 @@ void TransformTool::commit()
             if (!part.vector)
                 continue;
             // The strokes of a vector layer go where the transform took them, in the same undo step as its pixels.
-            std::vector<doc::VectorStroke> moved;
-            moved.reserve(part.strokes.size());
+            std::vector<doc::VectorStroke> moved = part.restStrokes; // what stays, then what moved
+            moved.reserve(moved.size() + part.strokes.size());
             for (const doc::VectorStroke &stroke : part.strokes)
                 moved.push_back(transformedStroke(stroke, s->transform));
             document::DocumentController::PaintTarget target;
@@ -566,7 +574,7 @@ void TransformTool::commit()
             target.layer = part.layer;
             target.image = part.image;
             target.vector = true;
-            m_document->attachStrokeChange(target, part.strokes, std::move(moved));
+            m_document->attachStrokeChange(target, part.allStrokes, std::move(moved));
         }
         m_document->endPaint(before, doc::CommandKind::Transform);
     }

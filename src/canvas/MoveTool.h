@@ -2,6 +2,8 @@
 
 #include "canvas/CanvasTool.h"
 #include "core/document/TiledImage.h"
+#include "core/document/VectorStroke.h"
+#include "document/DocumentController.h"
 
 #include <QPainterPath>
 #include <QPoint>
@@ -52,6 +54,11 @@ private:
         // With a selection only the selected pixels move: `floating` over `rest`.
         doc::TiledImage floating;
         doc::TiledImage rest;
+        // A vector layer: where its strokes are kept, and what they were at the press.
+        std::optional<document::DocumentController::PaintTarget> target;
+        // With a selection the strokes are cut along its outline: `strokes` are those inside (they move),
+        // `restStrokes` those outside; `allStrokes` is the layer's list at the press.
+        std::vector<doc::VectorStroke> strokes, restStrokes, allStrokes;
     };
     struct Session
     {

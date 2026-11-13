@@ -248,6 +248,7 @@ private:
     std::unique_ptr<CanvasTool> m_blendTool;
     std::unique_ptr<CanvasTool> m_liquifyTool;
     std::unique_ptr<CanvasTool> m_shapeTool;
+    std::unique_ptr<CanvasTool> m_vectorEraseTool; // the eraser on a vector layer, in one of the vector eraser modes
     std::unique_ptr<CanvasTool> m_transformTool;
     std::unique_ptr<CanvasTool> m_animateTool;
     CanvasTool *m_editTool = nullptr; // the canvas tool between its press and release

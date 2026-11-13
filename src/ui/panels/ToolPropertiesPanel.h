@@ -48,6 +48,7 @@ private:
     void syncFillFromState();
     void syncEffectFromState();
     void syncShapeFromState();
+    void syncVectorEraserFromState();
     void showAdvancedSettings();
 
     tools::ToolState *m_state;
@@ -84,6 +85,10 @@ private:
     SliderField *m_shapeOpacity;
     QComboBox *m_shapeStyle;
     SliderField *m_shapeRadius;
+
+    // Eraser: what it does on a vector layer (tools::VectorEraserSettings).
+    QWidget *m_vectorEraserControls = nullptr;
+    QComboBox *m_vectorEraserMode = nullptr;
 
     QWidget *m_footer;
     QLabel *m_transformHelp;

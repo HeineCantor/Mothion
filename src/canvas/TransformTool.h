@@ -140,7 +140,9 @@ private:
         doc::CelId cel = doc::kNoId;
         doc::DrawingId drawing = doc::kNoId;
         doc::LayerId layer = doc::kNoId;
-        std::vector<doc::VectorStroke> strokes; // as they were when the transform started
+        // With a selection the strokes are cut along its outline: `strokes` are those inside (they move), `restStrokes`
+        // those outside (they stay); `allStrokes` is the layer's list as it was when the transform started.
+        std::vector<doc::VectorStroke> strokes, restStrokes, allStrokes;
     };
     struct Session
     {

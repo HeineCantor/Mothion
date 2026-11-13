@@ -1,6 +1,7 @@
 #include "canvas/ShapeTool.h"
 
 #include "canvas/SelectionMask.h"
+#include "canvas/VectorRender.h"
 #include "canvas/ViewTransform.h"
 #include "core/document/Tile.h"
 #include "document/DocumentController.h"
@@ -179,6 +180,52 @@ bool ShapeTool::building() const
     return !m_points.isEmpty() && ShapeSettings::isMultiPoint(m_state->shapeSettings().kind);
 }
 
+std::vector<doc::VectorStroke> shapeStrokes(const tools::ShapeSettings &settings, double thickness, double opacity,
+                                            const QColor &color, bool erase, const ShapeGeometry &geometry)
+{
+    constexpr double kCornerAngle = 25.0; // degrees: a turn sharper than this is a corner
+    std::vector<doc::VectorStroke> strokes;
+    const QPainterPath path = shapePath(settings, geometry);
+    for (const QPolygonF &polygon : path.toSubpathPolygons(QTransform())) {
+        std::vector<QPointF> at;
+        for (const QPointF &p : polygon)
+            if (at.empty() || QLineF(at.back(), p).length() > 1e-6)
+                at.push_back(p);
+        if (at.size() < 2)
+            continue;
+        const bool closed = at.size() > 2 && QLineF(at.front(), at.back()).length() < 1e-6;
+        if (closed)
+            at.back() = at.front();
+        auto heading = [&](std::size_t from, std::size_t to) {
+            return std::atan2(at[to].y() - at[from].y(), at[to].x() - at[from].x()) * 180.0 / std::numbers::pi;
+        };
+        auto turn = [](double a, double b) {
+            double d = std::fmod(std::abs(a - b), 360.0);
+            return d > 180.0 ? 360.0 - d : d;
+        };
+        doc::VectorStroke stroke;
+        stroke.size = thickness;
+        stroke.opacity = opacity;
+        stroke.color = color.rgba();
+        stroke.erase = erase;
+        stroke.cornerTips = true;
+        const std::size_t last = at.size() - 1;
+        for (std::size_t i = 0; i <= last; ++i) {
+            brush::BrushInput in;
+            in.x = at[i].x();
+            in.y = at[i].y();
+            in.hasTilt = false;
+            const double before = i > 0 ? heading(i - 1, i) : closed ? heading(last - 1, last) : heading(0, 1);
+            const double after = i < last ? heading(i, i + 1) : closed ? heading(0, 1) : before;
+            in.direction = i < last ? after : before;
+            in.corner = (i > 0 || closed) && (i < last || closed) && turn(before, after) > kCornerAngle;
+            stroke.points.push_back(in);
+        }
+        strokes.push_back(std::move(stroke));
+    }
+    return strokes;
+}
+
 QPointF ShapeTool::constrained(const QPointF &docPos, Qt::KeyboardModifiers modifiers) const
 {
     // Shift: the next point on a 15° line from the last one.
@@ -257,7 +304,7 @@ void ShapeTool::release(const QPointF &docPos, Qt::KeyboardModifiers modifiers)
     m_active = false;
     if (QLineF(m_start, m_current).length() < kClickTolerance)
         return;
-    draw(render(currentGeometry(false)));
+    draw(currentGeometry(false));
 }
 
 void ShapeTool::commit()
@@ -269,7 +316,7 @@ void ShapeTool::commit()
     m_points.clear();
     notify();
     if (enough)
-        draw(render(geometry));
+        draw(geometry);
 }
 
 bool ShapeTool::wantsKey(int key) const
@@ -294,19 +341,45 @@ bool ShapeTool::keyPress(int key)
     }
 }
 
-void ShapeTool::draw(const RenderedShape &shape)
+void ShapeTool::draw(const ShapeGeometry &geometry)
 {
+    const RenderedShape shape = render(geometry);
     if (shape.image.isNull())
         return; // all of it outside the page
 
     QString reason;
-    const auto target = m_document->beginPaint(true, &reason);
+    const auto target = m_document->beginPaint(true, &reason, true, true); // a vector layer keeps the outline
     if (!target) {
         if (!reason.isEmpty())
             m_status(reason);
         return;
     }
     const doc::TiledImage before = *target->image;
+
+    if (target->vector) { // the outline kept as strokes, which are drawn from there
+        const tools::ShapeSettings settings = m_state->shapeSettings();
+        if (!ShapeSettings::isOpen(settings.kind) && settings.style != ShapeSettings::Style::Outline)
+            m_status(QObject::tr("A vector layer has no fill: only the outline is drawn"));
+        const tools::BrushSettings brush = m_state->settings(tools::ToolId::Shape);
+        std::vector<doc::VectorStroke> strokes = shapeStrokes(settings, brush.size, brush.opacity, m_state->color(),
+                                                              m_state->transparentSelected(), geometry);
+        if (m_document->hasSelection()) { // only what is inside the selection is kept
+            const SelectionMask mask = SelectionMask::fromPath(m_document->selection());
+            std::vector<doc::VectorStroke> inside;
+            for (const doc::VectorStroke &stroke : strokes) {
+                SplitStroke cut = splitStrokeByMask(stroke, mask);
+                inside.insert(inside.end(), cut.inside.begin(), cut.inside.end());
+            }
+            strokes = std::move(inside);
+        }
+        const doc::Document &d = m_document->document();
+        const QRect painted = drawStrokes(*target->image, strokes, *m_state, QRect(0, 0, d.width(), d.height()));
+        for (doc::VectorStroke &stroke : strokes)
+            m_document->attachStroke(std::move(stroke));
+        m_document->notifyPainted(painted);
+        m_document->endPaint(before, doc::CommandKind::Shape);
+        return;
+    }
 
     const QRect box(shape.origin, shape.image.size());
     const SelectionMask selection = SelectionMask::fromPath(m_document->selection());

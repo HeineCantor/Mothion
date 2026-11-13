@@ -2,6 +2,8 @@
 
 #include "canvas/SelectionMask.h"
 #include "canvas/TileQt.h"
+#include "canvas/VectorRender.h"
+#include "canvas/VectorWarp.h"
 #include "canvas/ViewTransform.h"
 #include "document/DocumentController.h"
 #include "tools/ToolState.h"
@@ -64,7 +66,7 @@ PuppetTool::~PuppetTool()
 bool PuppetTool::start(bool quiet)
 {
     QString reason;
-    const auto targets = m_document->beginPaintLayers(&reason);
+    const auto targets = m_document->beginPaintLayers(&reason, true);
     if (targets.empty()) {
         if (!quiet)
             m_status(reason.isEmpty() ? QObject::tr("Nothing to warp on this frame") : reason);
@@ -80,6 +82,21 @@ bool PuppetTool::start(bool quiet)
         Part part;
         part.image = target.image;
         part.before = *target.image;
+        if (target.vector) {
+            part.vector = target;
+            if (const doc::Layer *layer = m_document->document().layer(target.cel, target.drawing, target.layer)) {
+                part.allStrokes = layer->strokes;
+                if (!mask) {
+                    part.strokes = layer->strokes;
+                } else { // cut along the outline: the strokes inside are warped, the rest stays
+                    for (const doc::VectorStroke &stroke : layer->strokes) {
+                        SplitStroke cut = splitStrokeByMask(stroke, *mask);
+                        part.strokes.insert(part.strokes.end(), cut.inside.begin(), cut.inside.end());
+                        part.restStrokes.insert(part.restStrokes.end(), cut.outside.begin(), cut.outside.end());
+                    }
+                }
+            }
+        }
         doc::TiledImage pixels;
         if (mask)
             splitByMask(part.before, *mask, pixels, part.rest);
@@ -125,7 +142,20 @@ void PuppetTool::render()
     Session &s = *m_session;
     int x, y, w, h;
     puppet::deformedBounds(*s.rig, x, y, w, h);
+    // A vector layer is stretched while the pen drags, and drawn again from its warped strokes once it rests.
+    const bool dragging = m_draggingPins || m_localDrag;
     for (Part &part : s.parts) {
+        if (part.vector && !dragging) {
+            const doc::Document &d = m_document->document();
+            const QRect page(0, 0, d.width(), d.height());
+            doc::TiledImage result;
+            std::vector<doc::VectorStroke> shown = part.restStrokes; // what stays, then what is warped
+            for (doc::VectorStroke &stroke : warpedStrokes(part.strokes, *s.rig))
+                shown.push_back(std::move(stroke));
+            drawStrokes(result, shown, *m_toolState, page);
+            *part.image = std::move(result);
+            continue;
+        }
         puppet::RasterImage target(x, y, w, h);
         puppet::warp(*s.rig, part.source, target);
         doc::TiledImage result = part.rest;
@@ -134,7 +164,11 @@ void PuppetTool::render()
         compositeOver(result, warped);
         *part.image = std::move(result);
     }
-    const QRect now(x, y, w, h);
+    QRect now(x, y, w, h);
+    if (std::any_of(s.parts.begin(), s.parts.end(), [](const Part &p) { return p.vector.has_value(); })) {
+        const doc::Document &d = m_document->document();
+        now |= QRect(0, 0, d.width(), d.height()); // strokes drawn again may land anywhere
+    }
     m_document->notifyPainted(s.shown | now);
     s.shown = now;
     s.changed = true;
@@ -348,12 +382,13 @@ void PuppetTool::release(const QPointF &docPos, Qt::KeyboardModifiers)
     }
     if (!m_session || !m_draggingPins)
         return;
-    if (m_dragMoved) { // settle the shape where the pen left it
+    const bool moved = m_dragMoved;
+    if (moved) // settle the shape where the pen left it
         moveDraggedPins(docPos, kSettleIterations);
-        render();
-    }
     m_draggingPins = false;
     m_dragMoved = false;
+    if (moved)
+        render();
     endStep();
 }
 
@@ -374,8 +409,16 @@ void PuppetTool::commit()
     clearSelection();
     if (s->changed) {
         std::vector<doc::TiledImage> before;
-        for (const Part &part : s->parts)
+        for (const Part &part : s->parts) {
             before.push_back(part.before);
+            // The strokes of a vector layer go where the mesh took them, in the same undo step as its pixels.
+            if (part.vector) {
+                std::vector<doc::VectorStroke> after = part.restStrokes;
+                for (doc::VectorStroke &stroke : warpedStrokes(part.strokes, *s->rig))
+                    after.push_back(std::move(stroke));
+                m_document->attachStrokeChange(*part.vector, part.allStrokes, std::move(after));
+            }
+        }
         m_document->endPaint(before, doc::CommandKind::Paint);
     } else {
         m_document->cancelPaint();

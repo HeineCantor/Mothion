@@ -259,6 +259,14 @@ void ToolState::setPerspectiveSnapLayer(doc::LayerId layer)
     emit perspectiveSnapChanged();
 }
 
+void ToolState::setVectorEraser(const VectorEraserSettings &settings)
+{
+    if (settings == m_vectorEraser)
+        return;
+    m_vectorEraser = settings;
+    emit vectorEraserChanged();
+}
+
 void ToolState::setShapeSettings(const ShapeSettings &settings)
 {
     if (settings == m_shape)

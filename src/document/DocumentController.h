@@ -89,10 +89,14 @@ public:
     // fit to the document. One undo step; false on an empty frame.
     // Merges layers of the current drawing into the lowest of them (it keeps
     // its name and place; the rest go): what they show together, each with
-    // its own opacity and blend mode, as one undo step. Only raster layers
-    // that are shown and not locked are taken; false, with `reason`, when
-    // fewer than two are left. The result becomes the current layer.
+    // its own opacity and blend mode, as one undo step. Only raster layers, or only vector
+    // layers (their strokes joined, bottom to top), that are shown and not locked are taken; false, with `reason`, when
+    // fewer than two are left or the kinds are mixed. The result becomes the current layer.
     bool mergeLayers(const std::vector<doc::LayerId> &layers, QString *reason = nullptr);
+    // Makes the vector layers among `layers` raster layers: the pixels stay, the strokes go (undo brings them back).
+    // The Fill and Gradient tools and the like work on them then.
+    bool rasterizeLayers(const std::vector<doc::LayerId> &layers, QString *reason = nullptr);
+    bool canRasterizeLayers(const std::vector<doc::LayerId> &layers) const;
     bool canMergeLayers(const std::vector<doc::LayerId> &layers) const;
     // Merges the layers into the one right below the lowest of them (it keeps its name and place; the result is drawn
     // plainly, as in mergeLayers()). One layer chosen is "merge down". False, with `reason`, when there is no layer
@@ -324,6 +328,8 @@ public:
     bool clearCurrentLayer(QString *reason = nullptr);
     // Whether clearCurrentLayer() would do something.
     bool canClearCurrentLayer() const;
+    // The current layer is a vector layer (not the mask drawn on it).
+    bool currentLayerIsVector() const;
 
     // --- selection ------------------------------------------------------------------
     // The selected area in document coordinates; empty = nothing selected
@@ -554,7 +560,7 @@ private:
     // The current layer, if it can be worked on, or nullptr with `reason`
     // set: no cel, it or the layer hidden (or locked, if `changesIt`), or
     // no layer because the frame is empty (`nothing` then says why).
-    doc::Layer *workLayer(bool changesIt, const QString &nothing, QString *reason);
+    doc::Layer *workLayer(bool changesIt, const QString &nothing, QString *reason, bool vectorOk = false);
     bool selectionToLayer(bool cut, QString *reason);
     bool flipSelection(bool horizontal, QString *reason);
     // The first key of a cel: where it turns around (the middle of what it shows).
@@ -589,14 +595,15 @@ private:
     std::vector<doc::Layer> m_copiedLayers; // bottom to top
     // The layer the chosen ones merge down into: the one under the lowest of them (kNoId if there is none).
     doc::LayerId layerBelow(const std::vector<doc::LayerId> &ids) const;
-    std::vector<const doc::Layer *> mergeableLayers(const std::vector<doc::LayerId> &ids) const;
+    // `incompatible` is set when the kinds do not mix (or vector layers have a blend or clip): none is returned then.
+    std::vector<const doc::Layer *> mergeableLayers(const std::vector<doc::LayerId> &ids, bool *incompatible = nullptr) const;
 
     struct PaintState
     {
         PaintTarget target;
         std::vector<PaintTarget> others; // painted along with `target` (beginPaintLayers)
         std::unique_ptr<doc::Command> createdDrawing; // applied, not yet recorded
-        std::optional<doc::VectorStroke> stroke;      // the stroke of a vector layer (attachStroke())
+        std::vector<doc::VectorStroke> strokes;       // the strokes of a vector layer (attachStroke())
         std::vector<std::unique_ptr<doc::Command>> strokeChanges; // applied, not yet recorded (attachStrokeChange())
         QPainterPath selectionBefore;
     };

@@ -65,4 +65,44 @@ std::size_t SetVectorStrokesCommand::memoryBytes() const
     return sizeof(*this) + points * sizeof(brush::BrushInput);
 }
 
+RasterizeLayerCommand::RasterizeLayerCommand(CelId cel, DrawingId drawing, LayerId layer,
+                                             std::vector<VectorStroke> strokes)
+    : m_cel(cel)
+    , m_drawing(drawing)
+    , m_layer(layer)
+    , m_strokes(std::move(strokes))
+{
+}
+
+ChangeSet RasterizeLayerCommand::apply(Document &doc)
+{
+    if (Layer *layer = doc.layer(m_cel, m_drawing, m_layer)) {
+        layer->kind = LayerKind::Raster;
+        layer->strokes.clear();
+    }
+    ChangeSet changes;
+    changes.structure = true;
+    return changes;
+}
+
+ChangeSet RasterizeLayerCommand::revert(Document &doc)
+{
+    if (Layer *layer = doc.layer(m_cel, m_drawing, m_layer)) {
+        layer->kind = LayerKind::Vector;
+        layer->strokes = m_strokes;
+    }
+    ChangeSet changes;
+    changes.structure = true;
+    return changes;
+}
+
+std::size_t RasterizeLayerCommand::memoryBytes() const
+{
+    std::size_t points = 0;
+    for (const VectorStroke &s : m_strokes)
+        points += s.points.size();
+    return sizeof(*this) + points * sizeof(brush::BrushInput);
+}
+
 } // namespace mothion::doc
+

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "canvas/SelectionMask.h"
 #include "core/document/TiledImage.h"
 #include "core/document/VectorStroke.h"
 
@@ -18,7 +19,7 @@ namespace mothion::canvas {
 // scaled or turned: the pixels are made anew at the new size, not stretched.
 
 // `stroke` moved by `transform` (document coordinates): its points go where the transform takes them, the
-// direction of travel turns with it, and the brush size follows the scale (the square root of the area scale: a
+// direction of travel follows it (turned by a rotation, mirrored by a flip), and the brush size follows the scale (the square root of the area scale: a
 // round tip stays round; an uneven scale does not squash it).
 doc::VectorStroke transformedStroke(const doc::VectorStroke &stroke, const QTransform &transform);
 
@@ -28,5 +29,14 @@ doc::VectorStroke transformedStroke(const doc::VectorStroke &stroke, const QTran
 // outside `clip` (empty: no limit). Returns the area painted.
 QRect drawStrokes(doc::TiledImage &target, const std::vector<doc::VectorStroke> &strokes, const tools::ToolState &state,
                   const QRect &clip);
+
+// A stroke cut along a selection: the runs of its points inside the mask and those outside, each a stroke of its
+// own with the stroke's brush, colors and seed. Where the path crosses the outline a point is put on it (found
+// to a fraction of a pixel), so the pieces end at the selection's edge. A stroke wholly in or out comes back whole.
+struct SplitStroke
+{
+    std::vector<doc::VectorStroke> inside, outside;
+};
+SplitStroke splitStrokeByMask(const doc::VectorStroke &stroke, const SelectionMask &mask);
 
 } // namespace mothion::canvas

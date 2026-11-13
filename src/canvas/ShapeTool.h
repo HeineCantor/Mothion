@@ -1,6 +1,7 @@
 #pragma once
 
 #include "canvas/CanvasTool.h"
+#include "core/document/VectorStroke.h"
 #include "tools/ToolState.h"
 
 #include <QImage>
@@ -12,6 +13,7 @@
 #include <QRectF>
 
 #include <functional>
+#include <vector>
 
 namespace mothion::document {
 class DocumentController;
@@ -49,6 +51,12 @@ struct RenderedShape
 };
 RenderedShape renderShape(const tools::ShapeSettings &settings, double thickness, const QColor &main,
                           const QColor &secondary, const ShapeGeometry &geometry, const QRect &clip);
+
+// The outline of the shape as strokes of a vector layer (the round brush at `thickness`): each part of the path a
+// stroke, its points along it, with a corner wherever the path turns sharply. Only the outline: a vector layer has
+// no fill. `erase`: the strokes erase.
+std::vector<doc::VectorStroke> shapeStrokes(const tools::ShapeSettings &settings, double thickness, double opacity,
+                                            const QColor &color, bool erase, const ShapeGeometry &geometry);
 
 // Draws a line, rectangle, rounded rectangle or ellipse by dragging, or a
 // polygon or curve by clicking its points (the first point of a polygon, a
@@ -93,7 +101,7 @@ private:
     }
     ShapeGeometry currentGeometry(bool withHover) const;
     RenderedShape render(const ShapeGeometry &geometry) const;
-    void draw(const RenderedShape &shape);
+    void draw(const ShapeGeometry &geometry);
     QPointF constrained(const QPointF &docPos, Qt::KeyboardModifiers modifiers) const;
 
     document::DocumentController *m_document;

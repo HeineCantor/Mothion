@@ -1,6 +1,8 @@
 #pragma once
 
 #include "canvas/CanvasTool.h"
+#include "core/document/VectorStroke.h"
+#include "document/DocumentController.h"
 #include "core/document/TiledImage.h"
 #include "core/puppet/PuppetRig.h"
 #include "core/puppet/WarpRaster.h"
@@ -108,6 +110,12 @@ private:
         doc::TiledImage before;           // as it was when the warp started
         doc::TiledImage rest;             // what stays put (outside the selection)
         puppet::RasterImage source;       // the pixels being warped, undeformed
+        // A vector layer: while the pen drags, its pixels are warped like any layer's; once it rests, its strokes
+        // are carried along by the mesh and drawn again, which keeps them sharp.
+        std::optional<document::DocumentController::PaintTarget> vector;
+        // With a selection the strokes are cut along its outline: `strokes` are those inside (they are warped),
+        // `restStrokes` those outside; `allStrokes` is the layer's list as it was when the warp started.
+        std::vector<doc::VectorStroke> strokes, restStrokes, allStrokes;
     };
     struct Session
     {

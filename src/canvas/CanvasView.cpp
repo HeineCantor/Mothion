@@ -8,7 +8,10 @@
 #include "canvas/FillTool.h"
 #include "canvas/MoveTool.h"
 #include "canvas/PuppetTool.h"
+#include "canvas/SelectionMask.h"
 #include "canvas/SelectionTool.h"
+#include "canvas/VectorEraseTool.h"
+#include "canvas/VectorRender.h"
 #include "canvas/AnimateTool.h"
 #include "canvas/ShapeTool.h"
 #include "canvas/TransformTool.h"
@@ -196,6 +199,8 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
             emit shapeChanged();
         });
     connect(m_toolState, &ToolState::shapeSettingsChanged, this, &CanvasView::shapeChanged);
+    m_vectorEraseTool = std::make_unique<VectorEraseTool>(m_document, m_toolState,
+                                                          [this](const QString &text) { emit statusMessage(text); });
     m_animateTool = std::make_unique<AnimateTool>(
         m_document, m_toolState, [this](const QString &text) { emit statusMessage(text); }, [this] {
             update();
@@ -787,6 +792,14 @@ void CanvasView::handleSample(const PenSample &sample)
         } else if (picksColor() && sample.tipDown() && sample.tool != InputTool::Eraser) {
             // Alt and the pen down: a drag turns the frames over, a click picks the color (known on release).
             m_flip = Flip{sample.x, m_document->currentFrame(), docPos, false};
+        } else if (sample.tipDown() && !m_lineArmed
+                   && (sample.tool == InputTool::Eraser || m_toolState->activeTool() == ToolId::Eraser)
+                   && m_toolState->vectorEraser().mode != tools::VectorEraserSettings::Mode::Off
+                   && m_document->currentLayerIsVector()) {
+            // The eraser on a vector layer takes away strokes or parts of them.
+            m_vectorEraseTool->press(celPos, modifiers);
+            m_editTool = m_vectorEraseTool->isActive() ? m_vectorEraseTool.get() : nullptr;
+            update();
         } else if (sample.tipDown()
                    && (sample.tool == InputTool::Eraser || ToolState::isPaintTool(m_toolState->activeTool()))) {
             if (m_lineArmed)
@@ -1194,7 +1207,13 @@ void CanvasView::endStroke()
         m_lastPoint = lineStartOf(m_points);
     if (m_vectorStroke) {
         m_vectorStroke->points = m_points;
-        m_document->attachStroke(std::move(*m_vectorStroke));
+        if (m_document->hasSelection()) { // painted only inside the selection: so is what is kept
+            const SplitStroke cut = splitStrokeByMask(*m_vectorStroke, SelectionMask::fromPath(m_document->selection()));
+            for (const doc::VectorStroke &piece : cut.inside)
+                m_document->attachStroke(piece);
+        } else {
+            m_document->attachStroke(std::move(*m_vectorStroke));
+        }
         m_vectorStroke.reset();
     }
     m_document->endPaint(m_stroke->before());

@@ -3,6 +3,7 @@
 #include "canvas/FrameRenderer.h"
 #include "tools/Preferences.h"
 #include "canvas/SelectionMask.h"
+#include "canvas/VectorRender.h"
 #include "canvas/TileQt.h"
 #include "core/document/commands/DrawingCommands.h"
 #include "core/Parallel.h"
@@ -289,18 +290,32 @@ bool DocumentController::addLayer(bool onTop, doc::LayerKind kind)
     return true;
 }
 
-std::vector<const doc::Layer *> DocumentController::mergeableLayers(const std::vector<doc::LayerId> &ids) const
+std::vector<const doc::Layer *> DocumentController::mergeableLayers(const std::vector<doc::LayerId> &ids,
+                                                                     bool *incompatible) const
 {
-    // Raster layers, shown and not locked, of the current drawing, bottom to top.
+    // Raster layers, or vector layers, shown and not locked, of the current drawing, bottom to top. Kinds do not
+    // mix; a vector layer keeps what it shows as strokes, so it takes no blend mode and no clipping.
+    if (incompatible)
+        *incompatible = false;
     std::vector<const doc::Layer *> found;
     const doc::Cel *cel = m_document->cel(m_currentCel);
     const doc::Drawing *drawing = currentDrawing();
     if (!cel || !drawing || !cel->properties().visible || cel->properties().locked)
         return found;
     for (const doc::Layer &layer : drawing->layers)
-        if (std::find(ids.begin(), ids.end(), layer.id) != ids.end() && layer.kind == doc::LayerKind::Raster
+        if (std::find(ids.begin(), ids.end(), layer.id) != ids.end() && layer.kind != doc::LayerKind::Perspective
             && layer.properties.visible && !layer.properties.locked)
             found.push_back(&layer);
+    const bool vector = !found.empty() && found.front()->kind == doc::LayerKind::Vector;
+    const bool bad = std::any_of(found.begin(), found.end(), [&](const doc::Layer *layer) {
+        return (layer->kind == doc::LayerKind::Vector) != vector
+               || (vector && (layer->properties.blend != doc::BlendMode::Normal || layer->properties.clipped));
+    });
+    if (bad) {
+        if (incompatible)
+            *incompatible = true;
+        found.clear();
+    }
     return found;
 }
 
@@ -309,13 +324,49 @@ bool DocumentController::canMergeLayers(const std::vector<doc::LayerId> &ids) co
     return mergeableLayers(ids).size() >= 2;
 }
 
+bool DocumentController::canRasterizeLayers(const std::vector<doc::LayerId> &ids) const
+{
+    const doc::Drawing *drawing = currentDrawing();
+    if (!drawing)
+        return false;
+    return std::any_of(drawing->layers.begin(), drawing->layers.end(), [&](const doc::Layer &layer) {
+        return layer.kind == doc::LayerKind::Vector && std::find(ids.begin(), ids.end(), layer.id) != ids.end();
+    });
+}
+
+bool DocumentController::rasterizeLayers(const std::vector<doc::LayerId> &ids, QString *reason)
+{
+    interruptStroke();
+    const doc::Cel *cel = m_document->cel(m_currentCel);
+    const doc::Drawing *drawing = currentDrawing();
+    std::vector<std::unique_ptr<doc::Command>> steps;
+    if (cel && drawing && !cel->properties().locked)
+        for (const doc::Layer &layer : drawing->layers)
+            if (layer.kind == doc::LayerKind::Vector && !layer.properties.locked
+                && std::find(ids.begin(), ids.end(), layer.id) != ids.end())
+                steps.push_back(std::make_unique<doc::RasterizeLayerCommand>(m_currentCel, drawing->id, layer.id,
+                                                                             layer.strokes));
+    if (steps.empty()) {
+        if (reason)
+            *reason = tr("Choose an unlocked vector layer to rasterize");
+        return false;
+    }
+    if (steps.size() == 1)
+        execute(std::move(steps.front()));
+    else
+        execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::ChangeLayerProperties, std::move(steps)));
+    return true;
+}
+
 bool DocumentController::mergeLayers(const std::vector<doc::LayerId> &ids, QString *reason)
 {
     interruptStroke();
-    const auto layers = mergeableLayers(ids);
+    bool incompatible = false;
+    const auto layers = mergeableLayers(ids, &incompatible);
     if (layers.size() < 2) {
         if (reason)
-            *reason = tr("Choose at least two shown, unlocked layers to merge");
+            *reason = incompatible ? tr("Layers merge when all are raster, or all vector (with the Normal blend, not clipped)")
+                                   : tr("Choose at least two shown, unlocked layers to merge");
         return false;
     }
     const doc::Drawing *drawing = currentDrawing();
@@ -334,6 +385,16 @@ bool DocumentController::mergeLayers(const std::vector<doc::LayerId> &ids, QStri
     std::vector<std::unique_ptr<doc::Command>> steps;
     if (auto paint = doc::PaintCommand::capture(m_currentCel, drawing->id, bottom.id, bottom.image, merged))
         steps.push_back(std::move(paint));
+    if (bottom.kind == doc::LayerKind::Vector) { // the strokes of all, bottom to top, each with its layer's opacity
+        std::vector<doc::VectorStroke> all;
+        for (const doc::Layer *layer : layers)
+            for (doc::VectorStroke stroke : layer->strokes) {
+                stroke.opacity *= double(layer->properties.opacity);
+                all.push_back(std::move(stroke));
+            }
+        steps.push_back(std::make_unique<doc::SetVectorStrokesCommand>(m_currentCel, drawing->id, bottom.id,
+                                                                       bottom.strokes, std::move(all)));
+    }
     doc::LayerProperties plain = bottom.properties;
     plain.opacity = 1.0f;
     plain.blend = doc::BlendMode::Normal;
@@ -386,7 +447,7 @@ bool DocumentController::mergeDown(const std::vector<doc::LayerId> &ids, QString
     }
     if (!canMergeDown(ids)) {
         if (reason)
-            *reason = tr("The layers to merge, and the one below, must be shown, unlocked drawing layers");
+            *reason = tr("The layers to merge, and the one below, must be shown, unlocked, and all raster or all vector");
         return false;
     }
     std::vector<doc::LayerId> together = ids;
@@ -1852,7 +1913,7 @@ doc::DrawingId DocumentController::currentDrawingId() const
     return cel ? cel->timing().drawingAt(m_currentFrame) : doc::kNoId;
 }
 
-doc::Layer *DocumentController::workLayer(bool changesIt, const QString &nothing, QString *reason)
+doc::Layer *DocumentController::workLayer(bool changesIt, const QString &nothing, QString *reason, bool vectorOk)
 {
     auto fail = [reason](const QString &why) -> doc::Layer * {
         if (reason)
@@ -1877,9 +1938,15 @@ doc::Layer *DocumentController::workLayer(bool changesIt, const QString &nothing
         return fail(tr("Layer “%1” is locked").arg(name));
     if (layer->kind == doc::LayerKind::Perspective)
         return fail(tr("“%1” is a perspective layer: it has no pixels to work on").arg(name));
-    if (layer->kind == doc::LayerKind::Vector)
-        return fail(tr("“%1” is a vector layer: only the brush and the eraser work on it so far").arg(name));
+    if (layer->kind == doc::LayerKind::Vector && !vectorOk)
+        return fail(tr("“%1” is a vector layer: its strokes can't be cut by a selection, use the eraser").arg(name));
     return layer;
+}
+
+bool DocumentController::currentLayerIsVector() const
+{
+    const doc::Layer *layer = m_document->layer(m_currentCel, currentDrawingId(), m_currentLayer);
+    return layer && layer->kind == doc::LayerKind::Vector && !(layer->mask && m_maskLayer == layer->id);
 }
 
 bool DocumentController::canClearCurrentLayer() const
@@ -1891,20 +1958,23 @@ bool DocumentController::canClearCurrentLayer() const
     if (!layer || !layer->properties.visible || layer->properties.locked)
         return false;
     // What there is to clear: the mask when it is what is drawn on, the layer's pixels otherwise.
-    return !(layer->mask && m_maskLayer == layer->id ? *layer->mask : layer->image).isEmpty();
+    if (layer->mask && m_maskLayer == layer->id)
+        return !layer->mask->isEmpty();
+    return !layer->image.isEmpty() || !layer->strokes.empty();
 }
 
 bool DocumentController::clearCurrentLayer(QString *reason)
 {
     interruptStroke(); // an open edit is applied first, then cleared with the rest
     const QString nothing = tr("Nothing to clear on this frame");
-    doc::Layer *layer = workLayer(true, nothing, reason);
+    doc::Layer *layer = workLayer(true, nothing, reason, true); // a vector layer loses its strokes too
     if (!layer)
         return false;
     // With the mask being drawn on, it is the mask that is cleared (nothing hidden again), not the layer.
     const bool onMask = layer->mask && m_maskLayer == layer->id;
     doc::TiledImage &image = onMask ? *layer->mask : layer->image;
-    if (image.isEmpty()) {
+    const bool strokesToo = layer->kind == doc::LayerKind::Vector && !onMask;
+    if (image.isEmpty() && !(strokesToo && !layer->strokes.empty())) {
         if (reason)
             *reason = nothing;
         return false;
@@ -1916,7 +1986,14 @@ bool DocumentController::clearCurrentLayer(QString *reason)
     const QRect area = boundsOf(before.tileCoords());
     image = doc::TiledImage();
     std::vector<std::unique_ptr<doc::Command>> steps;
-    steps.push_back(doc::PaintCommand::capture(m_currentCel, drawingId, m_currentLayer, before, image, onMask));
+    if (auto paint = doc::PaintCommand::capture(m_currentCel, drawingId, m_currentLayer, before, image, onMask))
+        steps.push_back(std::move(paint));
+    if (strokesToo && !layer->strokes.empty()) {
+        auto strokes = std::make_unique<doc::SetVectorStrokesCommand>(m_currentCel, drawingId, m_currentLayer,
+                                                                      layer->strokes, std::vector<doc::VectorStroke>());
+        strokes->apply(*m_document);
+        steps.push_back(std::move(strokes));
+    }
     m_history.pushApplied(std::make_unique<doc::GroupCommand>(doc::CommandKind::ClearLayer, std::move(steps)));
     emit pixelsChanged(m_currentCel, drawingId, area);
     emit historyChanged();
@@ -1979,13 +2056,23 @@ bool DocumentController::eraseSelection(QString *reason)
             *reason = tr("Nothing is selected");
         return false;
     }
-    doc::Layer *layer = workLayer(true, nothing, reason);
+    doc::Layer *layer = workLayer(true, nothing, reason, true);
     if (!layer)
         return false;
     const canvas::SelectionMask mask = canvas::SelectionMask::fromPath(m_selection);
     doc::TiledImage inside, outside;
     canvas::splitByMask(layer->image, mask, inside, outside);
-    if (inside.isEmpty()) {
+    // A vector layer's strokes are cut along the outline: what is outside stays.
+    const bool vector = layer->kind == doc::LayerKind::Vector;
+    std::vector<doc::VectorStroke> strokesOutside;
+    bool strokesInside = false;
+    if (vector)
+        for (const doc::VectorStroke &stroke : layer->strokes) {
+            canvas::SplitStroke split = canvas::splitStrokeByMask(stroke, mask);
+            strokesInside |= !split.inside.empty();
+            strokesOutside.insert(strokesOutside.end(), split.outside.begin(), split.outside.end());
+        }
+    if (inside.isEmpty() && !strokesInside) {
         if (reason)
             *reason = nothing;
         return false;
@@ -1994,7 +2081,14 @@ bool DocumentController::eraseSelection(QString *reason)
     const doc::TiledImage before = layer->image;
     layer->image = std::move(outside);
     std::vector<std::unique_ptr<doc::Command>> steps;
-    steps.push_back(doc::PaintCommand::capture(m_currentCel, drawingId, m_currentLayer, before, layer->image));
+    if (auto paint = doc::PaintCommand::capture(m_currentCel, drawingId, m_currentLayer, before, layer->image))
+        steps.push_back(std::move(paint));
+    if (vector) {
+        auto strokes = std::make_unique<doc::SetVectorStrokesCommand>(m_currentCel, drawingId, m_currentLayer,
+                                                                      layer->strokes, std::move(strokesOutside));
+        strokes->apply(*m_document);
+        steps.push_back(std::move(strokes));
+    }
     m_history.pushApplied(std::make_unique<doc::GroupCommand>(doc::CommandKind::ClearLayer, std::move(steps)));
     emit pixelsChanged(m_currentCel, drawingId, mask.bounds);
     emit historyChanged();
@@ -2012,20 +2106,42 @@ bool DocumentController::flipSelection(bool horizontal, QString *reason)
     }
     // The layers the tools work on: the one current, or every one chosen in the Layers panel (those of a chosen cel or
     // frame are all chosen together), the hidden and locked ones left out.
-    const std::vector<PaintTarget> targets = beginPaintLayers(reason);
+    const std::vector<PaintTarget> targets = beginPaintLayers(reason, true);
     if (targets.empty())
         return false;
     const canvas::SelectionMask mask = canvas::SelectionMask::fromPath(m_selection);
     const QRect box = mask.bounds;
+    // The outline is mirrored across the same line (pixel x goes to left + right - x), and goes into the same undo step.
+    const QTransform across = horizontal ? QTransform(-1, 0, 0, 1, 2.0 * box.left() + box.width(), 0)
+                                         : QTransform(1, 0, 0, -1, 0, 2.0 * box.top() + box.height());
     std::vector<doc::TiledImage> before;
     bool anything = false;
     for (const PaintTarget &target : targets) {
         before.push_back(*target.image);
         doc::TiledImage inside, outside;
         canvas::splitByMask(*target.image, mask, inside, outside);
-        if (inside.isEmpty())
+        // The strokes of a vector layer: those inside the outline are mirrored, the rest stays.
+        bool strokesInside = false;
+        if (target.vector) {
+            const doc::Layer *vectorLayer = m_document->layer(target.cel, target.drawing, target.layer);
+            std::vector<doc::VectorStroke> kept, flipped;
+            for (const doc::VectorStroke &stroke : vectorLayer->strokes) {
+                canvas::SplitStroke split = canvas::splitStrokeByMask(stroke, mask);
+                kept.insert(kept.end(), split.outside.begin(), split.outside.end());
+                for (const doc::VectorStroke &piece : split.inside)
+                    flipped.push_back(canvas::transformedStroke(piece, across));
+            }
+            strokesInside = !flipped.empty();
+            if (strokesInside) {
+                kept.insert(kept.end(), flipped.begin(), flipped.end());
+                attachStrokeChange(target, vectorLayer->strokes, std::move(kept));
+            }
+        }
+        if (inside.isEmpty() && !strokesInside)
             continue;
         anything = true;
+        if (inside.isEmpty())
+            continue;
         // The part under the selection, mirrored in the box it was in, and laid over what stays.
         QImage area(box.size(), QImage::Format_ARGB32_Premultiplied);
         inside.read(box.x(), box.y(), box.width(), box.height(), reinterpret_cast<doc::Pixel *>(area.bits()),
@@ -2043,9 +2159,6 @@ bool DocumentController::flipSelection(bool horizontal, QString *reason)
             *reason = nothing;
         return false;
     }
-    // The outline is mirrored across the same line (pixel x goes to left + right - x), and goes into the same undo step.
-    const QTransform across = horizontal ? QTransform(-1, 0, 0, 1, 2.0 * box.left() + box.width(), 0)
-                                         : QTransform(1, 0, 0, -1, 0, 2.0 * box.top() + box.height());
     setSelection(across.map(m_selection), false);
     notifyPainted(box);
     endPaint(before, doc::CommandKind::Flip);
@@ -2071,7 +2184,7 @@ bool DocumentController::selectionToLayer(bool cut, QString *reason)
             *reason = tr("Nothing is selected");
         return false;
     }
-    doc::Layer *layer = workLayer(cut, nothing, reason);
+    doc::Layer *layer = workLayer(cut, nothing, reason, true);
     if (!layer)
         return false;
     doc::Document &d = *m_document;
@@ -2085,6 +2198,16 @@ bool DocumentController::selectionToLayer(bool cut, QString *reason)
         return false;
     }
 
+    // A vector layer's strokes are cut along the outline too: the new layer is a vector layer with the parts inside.
+    const bool vector = layer->kind == doc::LayerKind::Vector;
+    std::vector<doc::VectorStroke> strokesInside, strokesOutside;
+    if (vector)
+        for (const doc::VectorStroke &stroke : layer->strokes) {
+            canvas::SplitStroke split = canvas::splitStrokeByMask(stroke, mask);
+            strokesInside.insert(strokesInside.end(), split.inside.begin(), split.inside.end());
+            strokesOutside.insert(strokesOutside.end(), split.outside.begin(), split.outside.end());
+        }
+
     // The source loses its part (cut), then a new layer above it in the same
     // drawing gets the part: applied now, recorded together.
     std::vector<std::unique_ptr<doc::Command>> steps;
@@ -2092,14 +2215,27 @@ bool DocumentController::selectionToLayer(bool cut, QString *reason)
         const doc::TiledImage before = layer->image;
         layer->image = std::move(outside);
         steps.push_back(doc::PaintCommand::capture(m_currentCel, drawingId, m_currentLayer, before, layer->image));
+        if (vector) {
+            auto strokes = std::make_unique<doc::SetVectorStrokesCommand>(m_currentCel, drawingId, m_currentLayer,
+                                                                          layer->strokes, strokesOutside);
+            strokes->apply(*m_document);
+            steps.push_back(std::move(strokes));
+        }
     }
     const QString name = QString::fromStdString(layer->properties.name);
     auto added = std::make_unique<doc::AddLayerCommand>(
         d, m_currentCel, drawingId, currentDrawing()->indexOf(m_currentLayer) + 1,
-        doc::LayerProperties{(cut ? tr("%1 (cut)") : tr("%1 (copy)")).arg(name).toStdString()}, std::move(inside));
+        doc::LayerProperties{(cut ? tr("%1 (cut)") : tr("%1 (copy)")).arg(name).toStdString()}, std::move(inside),
+        vector ? doc::LayerKind::Vector : doc::LayerKind::Raster);
     const doc::LayerId layerId = added->layerId();
     publish(added->apply(d)); // `layer` may have moved: not used from here on
     steps.push_back(std::move(added));
+    if (vector) {
+        auto strokes = std::make_unique<doc::SetVectorStrokesCommand>(m_currentCel, drawingId, layerId,
+                                                                      std::vector<doc::VectorStroke>(), strokesInside);
+        strokes->apply(d);
+        steps.push_back(std::move(strokes));
+    }
     emit pixelsChanged(m_currentCel, drawingId, mask.bounds);
 
     m_history.pushApplied(std::make_unique<doc::GroupCommand>(
@@ -2119,7 +2255,7 @@ QImage DocumentController::copyPixels(QPoint *origin, QString *reason)
     interruptStroke(); // an open edit is part of what is copied
     const QString nothing = tr("Nothing to copy on this frame");
     QString why;
-    const doc::Layer *layer = workLayer(false, nothing, &why);
+    const doc::Layer *layer = workLayer(false, nothing, &why, true);
     if (!layer)
         return fail(why);
     if (layer->image.isEmpty())
@@ -2416,6 +2552,7 @@ std::optional<DocumentController::PaintTarget> DocumentController::beginPaint(bo
     if (layer->mask && m_maskLayer == layer->id) { // the mask is what is drawn on
         state.target.image = &*layer->mask;
         state.target.mask = true;
+        state.target.vector = false; // a mask holds pixels only
     }
     state.selectionBefore = m_selection;
     m_paint = std::move(state);
@@ -2457,6 +2594,7 @@ std::vector<DocumentController::PaintTarget> DocumentController::beginPaintLayer
         if (layer->mask && m_maskLayer == layer->id) {
             target.image = &*layer->mask;
             target.mask = true;
+            target.vector = false;
         }
         if (ref.layer == m_currentLayer)
             targets.insert(targets.begin(), target);
@@ -2511,12 +2649,13 @@ void DocumentController::endPaint(const std::vector<doc::TiledImage> &before, do
             steps.push_back(std::move(paint));
     for (std::unique_ptr<doc::Command> &change : state.strokeChanges) // the strokes drawn again
         steps.push_back(std::move(change));
-    if (!steps.empty() && state.stroke && state.target.vector) { // the stroke goes with the pixels it painted
-        auto add = std::make_unique<doc::AddVectorStrokeCommand>(state.target.cel, state.target.drawing,
-                                                                 state.target.layer, std::move(*state.stroke));
-        add->apply(*m_document); // the pixels were painted live; the stroke is added now, as recorded
-        steps.push_back(std::move(add));
-    }
+    if (!steps.empty() && state.target.vector) // the strokes go with the pixels they painted
+        for (doc::VectorStroke &stroke : state.strokes) {
+            auto add = std::make_unique<doc::AddVectorStrokeCommand>(state.target.cel, state.target.drawing,
+                                                                     state.target.layer, std::move(stroke));
+            add->apply(*m_document); // the pixels were painted live; the stroke is added now, as recorded
+            steps.push_back(std::move(add));
+        }
     if (!steps.empty()) {
         if (state.createdDrawing)
             steps.insert(steps.begin(), std::move(state.createdDrawing));
@@ -2550,7 +2689,7 @@ void DocumentController::attachStrokeChange(const PaintTarget &target, std::vect
 void DocumentController::attachStroke(doc::VectorStroke stroke)
 {
     if (m_paint && m_paint->target.vector)
-        m_paint->stroke = std::move(stroke);
+        m_paint->strokes.push_back(std::move(stroke));
 }
 
 void DocumentController::cancelPaint()

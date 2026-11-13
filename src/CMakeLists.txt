@@ -98,6 +98,9 @@ qt_add_library(mothion_gui STATIC
     canvas/TileQt.h canvas/TileQt.cpp
     canvas/StrokeSession.h canvas/StrokeSession.cpp
     canvas/VectorRender.h canvas/VectorRender.cpp
+    canvas/VectorErase.h canvas/VectorErase.cpp
+    canvas/VectorWarp.h canvas/VectorWarp.cpp
+    canvas/VectorEraseTool.h canvas/VectorEraseTool.cpp
     canvas/BlendDraw.h canvas/BlendDraw.cpp
     canvas/FrameRenderer.h canvas/FrameRenderer.cpp
     canvas/PerspectiveGizmo.h canvas/PerspectiveGizmo.cpp

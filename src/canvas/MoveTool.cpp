@@ -2,8 +2,10 @@
 
 #include "canvas/SelectionMask.h"
 #include "canvas/TileQt.h"
+#include "canvas/VectorRender.h"
 #include "document/DocumentController.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace mothion::canvas {
@@ -27,7 +29,7 @@ void MoveTool::flush()
 void MoveTool::press(const QPointF &docPos, Qt::KeyboardModifiers)
 {
     QString reason;
-    const auto targets = m_document->beginPaintLayers(&reason);
+    const auto targets = m_document->beginPaintLayers(&reason, true);
     if (targets.empty()) {
         if (reason.isEmpty())
             reason = QObject::tr("Nothing to move on this frame");
@@ -42,6 +44,21 @@ void MoveTool::press(const QPointF &docPos, Qt::KeyboardModifiers)
         Moving m;
         m.image = target.image;
         m.before = *target.image;
+        if (target.vector) {
+            m.target = target;
+            if (const doc::Layer *layer = m_document->document().layer(target.cel, target.drawing, target.layer)) {
+                m.allStrokes = layer->strokes;
+                if (!mask) {
+                    m.strokes = layer->strokes;
+                } else { // cut along the outline: the strokes inside move, the rest stays
+                    for (const doc::VectorStroke &stroke : layer->strokes) {
+                        SplitStroke cut = splitStrokeByMask(stroke, *mask);
+                        m.strokes.insert(m.strokes.end(), cut.inside.begin(), cut.inside.end());
+                        m.restStrokes.insert(m.restStrokes.end(), cut.outside.begin(), cut.outside.end());
+                    }
+                }
+            }
+        }
         if (mask) {
             splitByMask(m.before, *mask, m.floating, m.rest);
         } else {
@@ -106,8 +123,18 @@ void MoveTool::release(const QPointF &docPos, Qt::KeyboardModifiers modifiers)
     m_session.reset();
     // Pixels and selection in one undo step; nothing if it did not move.
     std::vector<doc::TiledImage> before;
-    for (const Moving &m : s.layers)
+    for (const Moving &m : s.layers) {
         before.push_back(m.before);
+        if (!m.target || s.offset == QPoint())
+            continue;
+        // The strokes of a vector layer go with its pixels, in the same undo step.
+        const QTransform shift = QTransform::fromTranslate(s.offset.x(), s.offset.y());
+        std::vector<doc::VectorStroke> moved = m.restStrokes; // what stays, then what moved
+        moved.reserve(moved.size() + m.strokes.size());
+        for (const doc::VectorStroke &stroke : m.strokes)
+            moved.push_back(transformedStroke(stroke, shift));
+        m_document->attachStrokeChange(*m.target, m.allStrokes, std::move(moved));
+    }
     m_document->endPaint(before, doc::CommandKind::Move);
 }
 

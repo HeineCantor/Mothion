@@ -1,6 +1,7 @@
 // Tests for the UI layer: the drawing tools: shapes, effect brushes, perspective, straight lines.
 
 #include "test_common.h"
+#include "canvas/VectorEraseTool.h"
 #include "canvas/VectorRender.h"
 
 class TestUiDrawing : public QObject
@@ -219,8 +220,6 @@ private slots:
         QString reason;
         QVERIFY(!controller.beginPaint(true, &reason));
         QVERIFY(reason.contains(QStringLiteral("vector")));
-        QVERIFY(!controller.clearCurrentLayer(&reason));
-        QVERIFY(reason.contains(QStringLiteral("vector")));
         QCOMPARE(layer().strokes.size(), std::size_t(1));
     }
 
@@ -306,6 +305,573 @@ private slots:
         QVERIFY(std::abs(layer().strokes.front().size - 2.0 * original.front().size) < 1e-6);
     }
 
+    // The Move tool and "clear layer" work on a vector layer too: the strokes go with the pixels, or are cleared.
+    void aVectorLayerMovesAndClears()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(500, 400);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 4, "Line").command);
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Vector));
+        QCoreApplication::processEvents();
+        auto layer = [&]() -> const doc::Layer & { return *controller.currentDrawing()->layer(controller.currentLayer()); };
+
+        state.setColor(QColor(200, 30, 30));
+        state.setActiveTool(tools::ToolId::Brush);
+        const QTransform toView = canvas.view().documentToView();
+        const QPoint start = toView.map(QPointF(900, 540)).toPoint();
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, start);
+        for (int i = 1; i <= 30; ++i)
+            QTest::mouseMove(&canvas, start + QPoint(i * 2, i % 7));
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, start + QPoint(60, 2));
+        QCOMPARE(layer().strokes.size(), std::size_t(1));
+        const std::vector<doc::VectorStroke> original = layer().strokes;
+        const doc::TiledImage originalImage = layer().image;
+
+        // Moved 40 px to the right and 25 down.
+        {
+            canvas::MoveTool move(&controller, [](const QString &) {});
+            move.press(QPointF(100, 100), Qt::NoModifier);
+            QVERIFY(move.isActive());
+            move.move(QPointF(140, 125), Qt::NoModifier);
+            move.release(QPointF(140, 125), Qt::NoModifier);
+        }
+        QCOMPARE(layer().strokes.size(), std::size_t(1));
+        QCOMPARE(layer().strokes.front().points[5].x, original.front().points[5].x + 40.0);
+        QCOMPARE(layer().strokes.front().points[5].y, original.front().points[5].y + 25.0);
+        QCOMPARE(layer().strokes.front().size, original.front().size);
+        controller.undo();
+        QCOMPARE(layer().strokes.front().points[5].x, original.front().points[5].x);
+        QCOMPARE(layer().image.tileCoords().size(), originalImage.tileCoords().size());
+        controller.redo();
+        QCOMPARE(layer().strokes.front().points[5].x, original.front().points[5].x + 40.0);
+
+        // With a selection only the part of the strokes inside it moves: they are cut along the outline.
+        {
+            const double midX = layer().strokes.front().points[15].x;
+            const double minX = layer().strokes.front().points.front().x;
+            const double y0 = layer().strokes.front().points.front().y;
+            QPainterPath area;
+            area.addRect(0, 0, midX, d.height());
+            controller.setSelection(area, true);
+            canvas::MoveTool selected(&controller, [](const QString &) {});
+            selected.press(QPointF(minX, y0), Qt::NoModifier);
+            QVERIFY(selected.isActive());
+            selected.move(QPointF(minX, y0 + 80), Qt::NoModifier);
+            selected.release(QPointF(minX, y0 + 80), Qt::NoModifier);
+            int down = 0, still = 0;
+            for (const doc::VectorStroke &piece : layer().strokes)
+                for (const brush::BrushInput &in : piece.points) {
+                    if (in.x < midX - 3 && std::abs(in.y - (y0 + 80)) < 30)
+                        ++down;
+                    else if (in.x > midX + 3)
+                        ++still;
+                }
+            QVERIFY(layer().strokes.size() >= 2);
+            QVERIFY(down > 0);
+            QVERIFY(still > 0);
+            controller.undo();
+            QCOMPARE(layer().strokes.size(), std::size_t(1));
+            controller.clearSelection();
+        }
+
+        // Copying what is under a selection makes a vector layer with the strokes (cut along the outline).
+        QString why;
+        QPainterPath left; // the left half of the stroke
+        const double midX = layer().strokes.front().points[15].x;
+        left.addRect(0, 0, midX, d.height());
+        controller.setSelection(left, true);
+        QVERIFY(controller.copySelectionToLayer(&why));
+        QCOMPARE(controller.currentDrawing()->layers.size(), std::size_t(3));
+        QCOMPARE(layer().kind, doc::LayerKind::Vector);
+        QVERIFY(!layer().strokes.empty());
+        for (const doc::VectorStroke &piece : layer().strokes)
+            for (const brush::BrushInput &in : piece.points)
+                QVERIFY(in.x <= midX + 0.5);
+        QVERIFY(!layer().image.isEmpty());
+        controller.undo(); // the copy layer
+        QCOMPARE(controller.currentDrawing()->layers.size(), std::size_t(2));
+        QCOMPARE(layer().strokes.size(), std::size_t(1));
+        // Cut: the source keeps only the part outside, the new layer has the rest.
+        QVERIFY(controller.cutSelectionToLayer(&why));
+        QCOMPARE(controller.currentDrawing()->layers.size(), std::size_t(3));
+        const doc::Layer &cutLayer = layer();
+        QCOMPARE(cutLayer.kind, doc::LayerKind::Vector);
+        const doc::Layer &source = controller.currentDrawing()->layers[1];
+        QVERIFY(!source.strokes.empty());
+        for (const doc::VectorStroke &piece : source.strokes)
+            for (const brush::BrushInput &in : piece.points)
+                QVERIFY(in.x >= midX - 0.5);
+        controller.undo();
+        QCOMPARE(controller.currentDrawing()->layers.size(), std::size_t(2));
+        QCOMPARE(layer().strokes.size(), std::size_t(1));
+        QCOMPARE(layer().strokes.front().points.size(), original.front().points.size());
+        controller.clearSelection();
+
+        // Clearing the layer takes its strokes too, and undo brings them back.
+        QVERIFY(controller.canClearCurrentLayer());
+        QVERIFY(controller.clearCurrentLayer());
+        QVERIFY(layer().strokes.empty());
+        QVERIFY(layer().image.isEmpty());
+        controller.undo();
+        QCOMPARE(layer().strokes.size(), std::size_t(1));
+        QVERIFY(!layer().image.isEmpty());
+    }
+
+
+    // The vector eraser: the touched part, up to the crossing with another stroke, or the whole line.
+    void theVectorEraserTakesAwayStrokesOrParts()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(500, 400);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 4, "Line").command);
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Vector));
+        QCoreApplication::processEvents();
+        auto layer = [&]() -> const doc::Layer & { return *controller.currentDrawing()->layer(controller.currentLayer()); };
+
+        // A horizontal line, and a vertical one across its middle.
+        state.setActiveTool(tools::ToolId::Brush);
+        const QPoint start = canvas.view().documentToView().map(QPointF(900, 540)).toPoint();
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, start);
+        for (int i = 1; i <= 60; ++i)
+            QTest::mouseMove(&canvas, start + QPoint(i, 0));
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, start + QPoint(60, 0));
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, start + QPoint(30, -30));
+        for (int i = 1; i <= 60; ++i)
+            QTest::mouseMove(&canvas, start + QPoint(30, -30 + i));
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, start + QPoint(30, 30));
+        QCOMPARE(layer().strokes.size(), std::size_t(2));
+        const double lineY = layer().strokes[0].points.front().y;
+        const double crossX = layer().strokes[1].points.front().x;
+        const double startX = layer().strokes[0].points.front().x;
+        const QPointF touch(startX + (crossX - startX) / 2.0, lineY); // on the line, left of the crossing
+
+        state.setSize(tools::ToolId::Eraser, 10);
+        auto erase = [&](tools::VectorEraserSettings::Mode mode) {
+            state.setVectorEraser({mode});
+            canvas::VectorEraseTool tool(&controller, &state, [](const QString &) {});
+            tool.press(touch, Qt::NoModifier);
+            QVERIFY(tool.isActive());
+            tool.move(touch + QPointF(2, 0), Qt::NoModifier);
+            tool.release(touch + QPointF(2, 0), Qt::NoModifier);
+        };
+
+        erase(tools::VectorEraserSettings::Mode::Part);
+        QCOMPARE(layer().strokes.size(), std::size_t(3)); // the line in two pieces, and the vertical one
+        for (const doc::VectorStroke &piece : layer().strokes)
+            for (const brush::BrushInput &in : piece.points)
+                QVERIFY(std::abs(in.x - touch.x()) > 4.0 || std::abs(in.y - lineY) > 4.0);
+        QVERIFY(qAlpha(layer().image.pixel(int(touch.x()), int(lineY))) == 0);
+        controller.undo();
+        QCOMPARE(layer().strokes.size(), std::size_t(2));
+        QVERIFY(qAlpha(layer().image.pixel(int(touch.x()), int(lineY))) > 100);
+
+        erase(tools::VectorEraserSettings::Mode::ToIntersection);
+        QCOMPARE(layer().strokes.size(), std::size_t(2)); // what is left of the line, and the vertical one
+        for (const brush::BrushInput &in : layer().strokes[0].points)
+            QVERIFY(in.x >= crossX - 1.0); // from the crossing on
+        controller.undo();
+        QCOMPARE(layer().strokes.size(), std::size_t(2));
+        QCOMPARE(layer().strokes[0].points.front().x, startX);
+
+        erase(tools::VectorEraserSettings::Mode::WholeLine);
+        QCOMPARE(layer().strokes.size(), std::size_t(1)); // the vertical one stays
+        QCOMPARE(layer().strokes[0].points.front().x, crossX);
+        controller.undo();
+        controller.redo();
+        QCOMPARE(layer().strokes.size(), std::size_t(1));
+    }
+
+    // What lies out of the canvas is moved with the rest by the Transform tool, not cut off.
+    void transformKeepsWhatLiesOutOfTheCanvas()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(500, 400);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 4, "Line").command);
+        QVERIFY(controller.currentDrawing());
+        doc::Layer *layer = d.layer(controller.currentCel(), controller.currentDrawing()->id, controller.currentLayer());
+        QVERIFY(layer);
+        // A block half out of the page to the left, and one wholly outside.
+        std::vector<doc::Pixel> block(60 * 40, 0xFFC81E1E);
+        layer->image.write(-30, 100, 60, 40, block.data(), 60);
+        layer->image.write(-200, 300, 60, 40, block.data(), 60);
+
+        state.setActiveTool(tools::ToolId::Transform);
+        canvas::TransformTool tool(&controller, &state, [](const QString &) {}, [] {});
+        tool.setDeferredRendering(false);
+        tool.activated();
+        QVERIFY(tool.hasPendingEdit());
+        const QRect box = tool.box();
+        QVERIFY(box.left() <= -200); // the box takes in what is out of the canvas
+        const QPointF inside(box.center());
+        tool.press(inside, Qt::NoModifier);
+        tool.move(inside + QPointF(10, 20), Qt::NoModifier);
+        tool.release(inside + QPointF(10, 20), Qt::NoModifier);
+        tool.commit();
+        QCoreApplication::processEvents();
+
+        layer = d.layer(controller.currentCel(), controller.currentDrawing()->id, controller.currentLayer());
+        QVERIFY(qAlpha(layer->image.pixel(-30 + 10 + 5, 100 + 20 + 5)) > 200);  // the part that was out
+        QVERIFY(qAlpha(layer->image.pixel(-200 + 10 + 5, 300 + 20 + 5)) > 200); // what was wholly out
+        QVERIFY(qAlpha(layer->image.pixel(10 + 5, 100 + 20 + 5)) > 200);        // the part that was in
+        QCOMPARE(qAlpha(layer->image.pixel(-30 + 5, 100 + 5)), 0);              // not left behind
+    }
+
+    // Move and the puppet warp keep what lies out of the canvas too.
+    void moveAndPuppetKeepWhatLiesOutOfTheCanvas()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(500, 400);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 4, "Line").command);
+        auto layer = [&]() -> doc::Layer * {
+            return d.layer(controller.currentCel(), controller.currentDrawing()->id, controller.currentLayer());
+        };
+        std::vector<doc::Pixel> block(60 * 40, 0xFFC81E1E);
+        layer()->image.write(-30, 100, 60, 40, block.data(), 60);     // half out
+        layer()->image.write(-200, 300, 60, 40, block.data(), 60);    // wholly out
+        layer()->image.write(400, 100, 60, 40, block.data(), 60);     // in
+
+        canvas::MoveTool move(&controller, [](const QString &) {});
+        move.press(QPointF(100, 100), Qt::NoModifier);
+        move.move(QPointF(110, 120), Qt::NoModifier);
+        move.release(QPointF(110, 120), Qt::NoModifier);
+        QVERIFY(qAlpha(layer()->image.pixel(-30 + 10 + 5, 100 + 20 + 5)) > 200);
+        QVERIFY(qAlpha(layer()->image.pixel(-200 + 10 + 5, 300 + 20 + 5)) > 200);
+        QVERIFY(qAlpha(layer()->image.pixel(400 + 10 + 5, 100 + 20 + 5)) > 200);
+        controller.undo();
+
+        // A pin dragged moves its own piece of the drawing: here one wholly out of the canvas, then one half out.
+        for (const auto &[from, probe] : {std::pair{QPointF(-170, 320), QPoint(-200 + 10 + 30, 300 + 20 + 20)},
+                                          std::pair{QPointF(-10, 120), QPoint(-30 + 10 + 5, 100 + 20 + 20)}}) {
+            canvas::PuppetTool puppet(&controller, &state, [](const QString &) {}, [] {});
+            puppet.press(from, Qt::NoModifier);
+            QVERIFY(puppet.isActive());
+            puppet.move(from + QPointF(10, 20), Qt::NoModifier);
+            puppet.release(from + QPointF(10, 20), Qt::NoModifier);
+            puppet.commit();
+            QCoreApplication::processEvents();
+            QVERIFY(qAlpha(layer()->image.pixel(probe.x(), probe.y())) > 100);
+        }
+        QVERIFY(qAlpha(layer()->image.pixel(-170 + 10, 320 + 20)) > 100);
+    }
+
+    // With a selection only the part of the strokes inside it is transformed: they are cut along the outline.
+    void aTransformOfASelectionCutsTheStrokesOfAVectorLayer()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(500, 400);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 4, "Line").command);
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Vector));
+        QCoreApplication::processEvents();
+        auto layer = [&]() -> const doc::Layer & { return *controller.currentDrawing()->layer(controller.currentLayer()); };
+
+        state.setColor(QColor(200, 30, 30));
+        state.setActiveTool(tools::ToolId::Brush);
+        const QPoint start = canvas.view().documentToView().map(QPointF(900, 540)).toPoint();
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, start);
+        for (int i = 1; i <= 60; ++i)
+            QTest::mouseMove(&canvas, start + QPoint(i, 0));
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, start + QPoint(60, 0));
+        QCOMPARE(layer().strokes.size(), std::size_t(1));
+        const std::vector<doc::VectorStroke> original = layer().strokes;
+        const double midX = original.front().points[30].x;
+        const double lineY = original.front().points.front().y;
+
+        QPainterPath left;
+        left.addRect(0, 0, midX, d.height());
+        controller.setSelection(left, true);
+        state.setActiveTool(tools::ToolId::Transform);
+        canvas::TransformTool tool(&controller, &state, [](const QString &) {}, [] {});
+        tool.setDeferredRendering(false);
+        tool.activated();
+        QVERIFY(tool.hasPendingEdit()); // the box is open: a vector layer takes a selection now
+        const QRect box = tool.box();
+        QVERIFY(!box.isEmpty());
+        const QPointF inside(box.center());
+        tool.press(inside, Qt::NoModifier);
+        tool.move(inside + QPointF(0, 100), Qt::NoModifier);
+        tool.release(inside + QPointF(0, 100), Qt::NoModifier);
+        tool.commit();
+        QCoreApplication::processEvents();
+
+        QVERIFY(layer().strokes.size() >= 2);
+        int moved = 0, stayed = 0;
+        for (const doc::VectorStroke &piece : layer().strokes)
+            for (const brush::BrushInput &in : piece.points) {
+                if (in.x < midX - 3 && std::abs(in.y - (lineY + 100)) < 1.0)
+                    ++moved;
+                else if (in.x > midX + 3 && std::abs(in.y - lineY) < 1.0)
+                    ++stayed;
+                else
+                    QVERIFY2(std::abs(in.x - midX) <= 3.0, "a point is neither moved nor left where it was");
+            }
+        QVERIFY(moved > 0);
+        QVERIFY(stayed > 0);
+        QVERIFY(qAlpha(layer().image.pixel(int(midX - 100), int(lineY + 100))) > 100);
+        QCOMPARE(qAlpha(layer().image.pixel(int(midX - 100), int(lineY))), 0);
+        controller.undo();
+        QCOMPARE(layer().strokes.size(), std::size_t(1));
+        QCOMPARE(layer().strokes.front().points.size(), original.front().points.size());
+    }
+
+    // The puppet warp on a vector layer carries the strokes along with the mesh, and draws them again.
+    void aPuppetWarpMovesTheStrokesOfAVectorLayer()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(500, 400);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 4, "Line").command);
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Vector));
+        QCoreApplication::processEvents();
+        auto layer = [&]() -> const doc::Layer & { return *controller.currentDrawing()->layer(controller.currentLayer()); };
+
+        state.setColor(QColor(200, 30, 30));
+        state.setActiveTool(tools::ToolId::Brush);
+        const QPoint start = canvas.view().documentToView().map(QPointF(900, 540)).toPoint();
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, start);
+        for (int i = 1; i <= 60; ++i)
+            QTest::mouseMove(&canvas, start + QPoint(i, i / 6));
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, start + QPoint(60, 10));
+        QCOMPARE(layer().strokes.size(), std::size_t(1));
+        const std::vector<doc::VectorStroke> original = layer().strokes;
+        double firstX = 1e9;
+        for (const brush::BrushInput &in : original.front().points)
+            firstX = std::min(firstX, in.x);
+        const brush::BrushInput &mid = original.front().points[30];
+
+        // One pin on the line, dragged 100 px to the right and 60 down: the whole shape goes with it.
+        canvas::PuppetTool tool(&controller, &state, [](const QString &) {}, [] {});
+        tool.press(QPointF(mid.x, mid.y), Qt::NoModifier);
+        QVERIFY(tool.isActive());
+        tool.move(QPointF(mid.x + 100, mid.y + 60), Qt::NoModifier);
+        tool.release(QPointF(mid.x + 100, mid.y + 60), Qt::NoModifier);
+        tool.commit();
+        QCoreApplication::processEvents();
+
+        QCOMPARE(layer().strokes.size(), std::size_t(1));
+        QVERIFY(layer().strokes.front().points.size() >= original.front().points.size());
+        double movedX = 1e9;
+        for (const brush::BrushInput &in : layer().strokes.front().points)
+            movedX = std::min(movedX, in.x);
+        QVERIFY2(std::abs(movedX - (firstX + 100.0)) < 6.0, qPrintable(QString::number(movedX - firstX)));
+        QVERIFY(qAlpha(layer().image.pixel(int(mid.x + 100), int(mid.y + 60))) > 100);
+        QCOMPARE(qAlpha(layer().image.pixel(int(mid.x), int(mid.y))), 0);
+
+        controller.undo(); // the strokes and the pixels, together
+        QCOMPARE(layer().strokes.front().points.size(), original.front().points.size());
+        QCOMPARE(layer().strokes.front().points[30].x, mid.x);
+        QVERIFY(qAlpha(layer().image.pixel(int(mid.x), int(mid.y))) > 100);
+    }
+
+    // With a selection the puppet warp carries only the part of the strokes inside it.
+    void aPuppetWarpOfASelectionCutsTheStrokesOfAVectorLayer()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(500, 400);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 4, "Line").command);
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Vector));
+        QCoreApplication::processEvents();
+        auto layer = [&]() -> const doc::Layer & { return *controller.currentDrawing()->layer(controller.currentLayer()); };
+
+        state.setColor(QColor(200, 30, 30));
+        state.setActiveTool(tools::ToolId::Brush);
+        const QPoint start = canvas.view().documentToView().map(QPointF(900, 540)).toPoint();
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, start);
+        for (int i = 1; i <= 60; ++i)
+            QTest::mouseMove(&canvas, start + QPoint(i, 0));
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, start + QPoint(60, 0));
+        const std::vector<doc::VectorStroke> original = layer().strokes;
+        const double midX = original.front().points[30].x;
+        const brush::BrushInput quarter = original.front().points[12];
+
+        QPainterPath left;
+        left.addRect(0, 0, midX, d.height());
+        controller.setSelection(left, true);
+        canvas::PuppetTool tool(&controller, &state, [](const QString &) {}, [] {});
+        tool.press(QPointF(quarter.x, quarter.y), Qt::NoModifier);
+        QVERIFY(tool.isActive());
+        tool.move(QPointF(quarter.x, quarter.y + 120), Qt::NoModifier);
+        tool.release(QPointF(quarter.x, quarter.y + 120), Qt::NoModifier);
+        tool.commit();
+        QCoreApplication::processEvents();
+
+        QVERIFY(layer().strokes.size() >= 2);
+        int away = 0, still = 0;
+        for (const doc::VectorStroke &piece : layer().strokes)
+            for (const brush::BrushInput &in : piece.points) {
+                if (in.x > midX + 3) {
+                    QVERIFY(std::abs(in.y - quarter.y) < 1.0); // the right part stays
+                    ++still;
+                } else if (in.y > quarter.y + 60) {
+                    ++away;
+                }
+            }
+        QVERIFY(still > 0);
+        QVERIFY(away > 0);
+        controller.undo();
+        QCOMPARE(layer().strokes.size(), std::size_t(1));
+        QCOMPARE(layer().strokes.front().points.size(), original.front().points.size());
+    }
+
+    // Erase and flip under a selection, and merging, work on vector layers: the strokes are cut, mirrored or joined.
+    void aVectorLayerErasesFlipsAndMerges()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(500, 400);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 4, "Line").command);
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Vector));
+        QCoreApplication::processEvents();
+        auto layer = [&]() -> const doc::Layer & { return *controller.currentDrawing()->layer(controller.currentLayer()); };
+        auto stroke = [&](int y) {
+            state.setActiveTool(tools::ToolId::Brush);
+            const QPoint start = canvas.view().documentToView().map(QPointF(900, y)).toPoint();
+            QTest::mousePress(&canvas, Qt::LeftButton, {}, start);
+            for (int i = 1; i <= 30; ++i)
+                QTest::mouseMove(&canvas, start + QPoint(i * 2, 0));
+            QTest::mouseRelease(&canvas, Qt::LeftButton, {}, start + QPoint(60, 0));
+        };
+        stroke(540);
+        QCOMPARE(layer().strokes.size(), std::size_t(1));
+        const std::vector<doc::VectorStroke> original = layer().strokes;
+        const double midX = original.front().points[15].x;
+
+        // Erase the left half: what is kept lies on the right.
+        QPainterPath left;
+        left.addRect(0, 0, midX, d.height());
+        controller.setSelection(left, true);
+        QString why;
+        QVERIFY(controller.eraseSelection(&why));
+        QVERIFY(!layer().strokes.empty());
+        for (const doc::VectorStroke &piece : layer().strokes)
+            for (const brush::BrushInput &in : piece.points)
+                QVERIFY(in.x >= midX - 0.5);
+        controller.undo();
+        QCOMPARE(layer().strokes.size(), std::size_t(1));
+        QCOMPARE(layer().strokes.front().points.size(), original.front().points.size());
+
+        // Flip the left half upside down: its strokes go across the middle of the selection.
+        QPainterPath box;
+        box.addRect(0, 0, midX, 1000);
+        controller.setSelection(box, true);
+        QVERIFY(controller.flipSelectionVertically(&why));
+        int flipped = 0;
+        for (const doc::VectorStroke &piece : layer().strokes)
+            for (const brush::BrushInput &in : piece.points)
+                if (in.x < midX - 1) {
+                    QVERIFY(std::abs(in.y - 460.0) < 1.0); // it was at 540 in a box 1000 high: now at 1000 - 540
+                    ++flipped;
+                }
+        QVERIFY(flipped > 0);
+        controller.undo();
+        QCOMPARE(layer().strokes.size(), std::size_t(1));
+        QCOMPARE(layer().strokes.front().points[3].y, original.front().points[3].y);
+        controller.clearSelection();
+
+        // Merging two vector layers joins their strokes in the lower one; a raster layer does not mix with them.
+        const doc::LayerId lower = controller.currentLayer();
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Vector));
+        const doc::LayerId upper = controller.currentLayer();
+        stroke(700);
+        QCOMPARE(layer().strokes.size(), std::size_t(1));
+        QVERIFY(controller.canMergeLayers({lower, upper}));
+        QVERIFY(controller.mergeLayers({lower, upper}, &why));
+        QCOMPARE(controller.currentLayer(), lower);
+        QCOMPARE(layer().strokes.size(), std::size_t(2));
+        QCOMPARE(layer().kind, doc::LayerKind::Vector);
+        controller.undo();
+        QVERIFY(controller.currentDrawing()->layer(upper));
+        QCOMPARE(controller.currentDrawing()->layer(lower)->strokes.size(), std::size_t(1));
+        const doc::LayerId raster = controller.currentDrawing()->layers.front().id;
+        QVERIFY(!controller.canMergeLayers({raster, lower}));
+    }
+
+    // A shape on a vector layer is kept as strokes (the outline); rasterizing the layer lets the others tools in.
+    void aShapeOnAVectorLayerIsKeptAndRasterizeLetsGo()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(500, 400);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 4, "Line").command);
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Vector));
+        QCoreApplication::processEvents();
+        auto layer = [&]() -> const doc::Layer & { return *controller.currentDrawing()->layer(controller.currentLayer()); };
+
+        state.setColor(QColor(30, 30, 200));
+        tools::ShapeSettings shape = state.shapeSettings();
+        shape.kind = tools::ShapeSettings::Kind::Rectangle;
+        shape.style = tools::ShapeSettings::Style::Outline;
+        state.setShapeSettings(shape);
+        canvas::ShapeTool tool(&controller, &state, [](const QString &) {});
+        tool.press(QPointF(800, 400), Qt::NoModifier);
+        tool.move(QPointF(1000, 500), Qt::NoModifier);
+        tool.release(QPointF(1000, 500), Qt::NoModifier);
+        QCOMPARE(layer().strokes.size(), std::size_t(1));
+        const doc::VectorStroke &stroke = layer().strokes.front();
+        int corners = 0;
+        for (const brush::BrushInput &in : stroke.points)
+            corners += in.corner;
+        QVERIFY(corners >= 4);
+        QVERIFY(qAlpha(layer().image.pixel(900, 400)) > 200); // on the top edge
+        QCOMPARE(qAlpha(layer().image.pixel(900, 450)), 0);   // not filled
+        controller.undo();
+        QVERIFY(layer().strokes.empty());
+        QVERIFY(layer().image.isEmpty());
+        controller.redo();
+        QCOMPARE(layer().strokes.size(), std::size_t(1));
+
+        QString reason;
+        QVERIFY(controller.canRasterizeLayers({controller.currentLayer()}));
+        QVERIFY(controller.rasterizeLayers({controller.currentLayer()}, &reason));
+        QCOMPARE(layer().kind, doc::LayerKind::Raster);
+        QVERIFY(layer().strokes.empty());
+        QVERIFY(qAlpha(layer().image.pixel(900, 400)) > 200);
+        QVERIFY(!controller.canRasterizeLayers({controller.currentLayer()}));
+        controller.undo();
+        QCOMPARE(layer().kind, doc::LayerKind::Vector);
+        QCOMPARE(layer().strokes.size(), std::size_t(1));
+    }
 
     // A stroke on an empty frame that leaves nothing (the selection is elsewhere) takes back the frame it made when it
     // ends: nothing may look at the image that went with it afterwards (the line start was read from it: a crash).

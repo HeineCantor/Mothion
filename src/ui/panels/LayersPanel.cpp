@@ -1651,6 +1651,15 @@ void LayersPanel::showContextMenu(const QPoint &at)
         clip->setCheckable(true);
         clip->setChecked(m_clip->isChecked());
         clip->setEnabled(m_clip->isEnabled());
+        // A vector layer turns into a raster one: the other tools then work on it.
+        const QList<doc::LayerId> chosen = selectedLayers();
+        const std::vector<doc::LayerId> ids(chosen.begin(), chosen.end());
+        QAction *rasterize = menu.addAction(tr("Rasterize layer"), this, [this, ids] {
+            QString reason;
+            if (!m_document->rasterizeLayers(ids, &reason))
+                emit statusMessage(reason);
+        });
+        rasterize->setEnabled(m_document->canRasterizeLayers(ids));
     }
     if (kindOf(item) == Row::Layer) {
         menu.addAction(tr("Cut layers"), this, &LayersPanel::cutLayers);
