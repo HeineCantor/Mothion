@@ -1304,6 +1304,23 @@ private slots:
     }
 
 
+    // The trajectory mode button of the bar sets the tool state's mode and follows it.
+    void theTrajectoryModeButtonFollowsTheState()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        ui::TimelinePanel panel(&controller, &state);
+        panel.show();
+        auto *button = panel.findChild<QToolButton *>(QStringLiteral("trajectoryMode"));
+        QVERIFY(button && button->isCheckable() && button->text().isEmpty());
+        QVERIFY(!button->isChecked() && !state.trajectoryMode());
+        button->click();
+        QVERIFY(state.trajectoryMode());
+        state.setTrajectoryMode(false);
+        QVERIFY(!button->isChecked());
+    }
+
+
     // Scrolling the timeline has no end: past the last frame and before the first the room grows as it is reached.
     void scrollingIsUnlimitedBothWays()
     {

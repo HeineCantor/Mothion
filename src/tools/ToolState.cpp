@@ -181,6 +181,14 @@ void ToolState::setKeyframeMode(bool on)
     emit keyframeModeChanged(on);
 }
 
+void ToolState::setTrajectoryMode(bool on)
+{
+    if (on == m_trajectoryMode)
+        return;
+    m_trajectoryMode = on;
+    emit trajectoryModeChanged(on);
+}
+
 void ToolState::setSharpCorners(bool on)
 {
     if (on == m_sharpCorners)

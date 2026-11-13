@@ -722,6 +722,128 @@ private slots:
         QVERIFY(qAbs(controller.celPoseAt(id, 0).scaleX - 1.0) < 0.01);
     }
 
+    // The whole path of a trajectory is shown on the page, from its first key to its last: while the trajectory is the
+    // current cel, and while a cel that follows it is (the path is the trajectory's). The camera selected, or an inactive
+    // trajectory: none.
+    void theWholePathOfATrajectoryIsShown()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        controller.setSceneLength(30);
+        controller.addTrajectory();
+        const doc::CelId trajectory = controller.currentCel();
+        doc::CelPose pose;
+        pose.x = 0;
+        pose.y = 0;
+        QVERIFY(controller.setCelKey(trajectory, 2, pose));
+        pose.x = 200;
+        pose.y = 100;
+        QVERIFY(controller.setCelKey(trajectory, 12, pose));
+        pose.x = 400;
+        pose.y = 0;
+        QVERIFY(controller.setCelKey(trajectory, 22, pose));
+        controller.addCel();
+        const doc::CelId follower = controller.currentCel();
+        QVERIFY(controller.setTrajectoryParent(follower, trajectory));
+
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(900, 520);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        state.setActiveTool(tools::ToolId::Brush);
+        const canvas::TrajectoryGizmo &gizmo = canvas.trajectoryGizmo();
+        const canvas::ViewTransform &view = canvas.view();
+
+        // Off by default: no path. Trajectory mode shows it.
+        QVERIFY(!state.trajectoryMode());
+        QVERIFY(!gizmo.pathTrajectory());
+        state.setTrajectoryMode(true);
+
+        // The follower is selected: the path shown is the trajectory's.
+        QCOMPARE(gizmo.pathTrajectory(), controller.document().cel(trajectory));
+        int first = 0, last = 0;
+        QVERIFY(gizmo.pathRange(*controller.document().cel(trajectory), &first, &last));
+        QCOMPARE(first, 2);
+        QCOMPARE(last, 22);
+        const double px = controller.document().cel(trajectory)->motion().pivotX;
+        const double py = controller.document().cel(trajectory)->motion().pivotY;
+        QCOMPARE(gizmo.pathPoint(*controller.document().cel(trajectory), 12), QPointF(px + 200, py + 100));
+
+        // It is drawn: ink at the key at frame 12 (the dot), seen from the follower and from the trajectory itself.
+        auto inkAtKey = [&] {
+            QImage image(canvas.size(), QImage::Format_ARGB32_Premultiplied);
+            image.fill(Qt::black);
+            QPainter painter(&image);
+            gizmo.paintPath(painter, view);
+            painter.end();
+            const QPoint at = view.documentToView().map(QPointF(px + 200, py + 100)).toPoint();
+            return image.pixelColor(at) != QColor(Qt::black);
+        };
+        QVERIFY(inkAtKey());
+        controller.chooseCel(trajectory);
+        QCOMPARE(gizmo.pathTrajectory(), controller.document().cel(trajectory));
+        QVERIFY(inkAtKey());
+
+        // A key is dragged along the page by its dot, with the follower (not the trajectory) the current cel: the position
+        // of that key goes where the pen takes it, in one undo step; the key's frame stays.
+        controller.chooseCel(follower);
+        const QTransform toView = view.documentToView();
+        auto at = [&](const QPointF &docPoint) { return toView.map(docPoint).toPoint(); };
+        const QPointF keyDot(px + 200, py + 100);
+        QCOMPARE(gizmo.handleAt(keyDot, view), canvas::TrajectoryGizmo::Handle::Key);
+        QCOMPARE(gizmo.handleAt(QPointF(px + 100, py + 50), view), canvas::TrajectoryGizmo::Handle::None); // on the line
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, at(keyDot));
+        QTest::mouseMove(&canvas, at(keyDot + QPointF(30, 20)));
+        QTest::mouseMove(&canvas, at(keyDot + QPointF(60, 40)));
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, at(keyDot + QPointF(60, 40)));
+        QVERIFY(controller.celMotion(trajectory)->keyAt(doc::Channel::Position, 12));
+        QVERIFY(qAbs(controller.celPoseAt(trajectory, 12).x - 260) < 2 && qAbs(controller.celPoseAt(trajectory, 12).y - 140) < 2);
+        QVERIFY(qAbs(controller.celPoseAt(trajectory, 2).x) < 1e-6); // the other keys stay
+        QCOMPARE(controller.currentCel(), follower);
+        controller.undo();
+        QVERIFY(qAbs(controller.celPoseAt(trajectory, 12).x - 200) < 1e-6);
+
+        // A locked trajectory's keys are not dragged.
+        auto lock = [&](bool on) {
+            doc::CelProperties p = controller.document().cel(trajectory)->properties();
+            p.locked = on;
+            controller.execute(doc::makeSetCelProperties(controller.document(), trajectory, p));
+        };
+        lock(true);
+        QCOMPARE(gizmo.handleAt(keyDot, view), canvas::TrajectoryGizmo::Handle::None);
+        lock(false);
+
+        // Another cel with no trajectory: none.
+        controller.addCel();
+        QVERIFY(!gizmo.pathTrajectory());
+        QVERIFY(!inkAtKey());
+
+        // Mode off again: the path is gone, and its keys are not taken by the pen.
+        controller.chooseCel(follower);
+        QVERIFY(gizmo.pathShown());
+        state.setTrajectoryMode(false);
+        QVERIFY(!gizmo.pathShown());
+        QCOMPARE(gizmo.handleAt(keyDot, view), canvas::TrajectoryGizmo::Handle::None);
+        QVERIFY(!inkAtKey());
+
+        // On, the pen does not draw while a path is shown (the brush leaves nothing).
+        state.setTrajectoryMode(true);
+        controller.chooseCel(follower);
+        const QPoint far = toView.map(QPointF(300, 900)).toPoint();
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, far);
+        QTest::mouseMove(&canvas, far + QPoint(30, 5));
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, far + QPoint(30, 5));
+        QVERIFY(!controller.currentDrawing() || controller.currentDrawing()->layers.empty()
+                || controller.currentDrawing()->layers.front().image.isEmpty());
+        // The same stroke with the mode off does draw.
+        state.setTrajectoryMode(false);
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, far);
+        QTest::mouseMove(&canvas, far + QPoint(30, 5));
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, far + QPoint(30, 5));
+        QVERIFY(controller.currentDrawing() && !controller.currentDrawing()->layers.empty()
+                && !controller.currentDrawing()->layers.front().image.isEmpty());
+    }
+
     // Trajectories that follow one another: a child goes where its parent takes it, its own pose on top; an inactive one does
     // nothing of its own; no loops; a parent that goes leaves its children free (and back, with the undo).
     void trajectoriesFollowTheirParents()

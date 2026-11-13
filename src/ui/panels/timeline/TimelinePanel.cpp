@@ -223,6 +223,17 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
     connect(m_document, &DocumentController::documentReplaced, celKey, syncCelKey);
     syncCelKey();
 
+    // Trajectory mode: the path of the trajectory (the current cel's, or the one it follows) on the canvas, its keys dragged along
+    // it; drawing is off meanwhile.
+    auto *pathMode = celButton(IconId::Trajectory, QStringLiteral("trajectoryMode"),
+                               tr("Trajectory mode: show the whole path of the trajectory on the canvas and drag its keys along "
+                                  "it. Drawing is off while it is on."),
+                               this);
+    pathMode->setCheckable(true);
+    pathMode->setChecked(toolState->trajectoryMode());
+    connect(pathMode, &QToolButton::toggled, toolState, &tools::ToolState::setTrajectoryMode);
+    connect(toolState, &tools::ToolState::trajectoryModeChanged, pathMode, &QToolButton::setChecked);
+
     // A marker on the current frame: pressed while there is one; the button adds or takes it away (Ctrl+M).
     auto *marker = celButton(IconId::Flag, QStringLiteral("markerButton"),
                              tr("Marker on this frame: add or remove it (Ctrl+M). A marker is a name on the timeline: "
@@ -288,6 +299,7 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
     bar->addWidget(importAudio);
     bar->addWidget(cameraKey);
     bar->addWidget(celKey);
+    bar->addWidget(pathMode);
     bar->addWidget(prevMarker);
     bar->addWidget(marker);
     bar->addWidget(nextMarker);

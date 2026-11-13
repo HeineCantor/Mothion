@@ -84,7 +84,40 @@ std::optional<TrajectoryGizmo::Shape> TrajectoryGizmo::shape(const ViewTransform
     return s;
 }
 
+bool TrajectoryGizmo::pathEditable() const
+{
+    const doc::Cel *trajectory = pathTrajectory();
+    return trajectory && !trajectory->properties().locked;
+}
+
+std::optional<int> TrajectoryGizmo::keyAt(const QPointF &docPos, const ViewTransform &view) const
+{
+    const doc::Cel *trajectory = pathTrajectory();
+    if (!trajectory)
+        return std::nullopt;
+    const QTransform toView = view.documentToView();
+    const QPointF at = toView.map(docPos);
+    std::optional<int> found;
+    double best = kGrab;
+    for (const doc::CelKey &key : trajectory->motion().keys(doc::Channel::Position)) {
+        const double distance = QLineF(at, toView.map(pathPoint(*trajectory, key.frame))).length();
+        if (distance <= best) {
+            best = distance;
+            found = key.frame;
+        }
+    }
+    return found;
+}
+
 TrajectoryGizmo::Handle TrajectoryGizmo::handleAt(const QPointF &docPos, const ViewTransform &view) const
+{
+    const Handle onCircle = circleHandleAt(docPos, view);
+    if (onCircle != Handle::None)
+        return onCircle;
+    return pathEditable() && keyAt(docPos, view) ? Handle::Key : Handle::None;
+}
+
+TrajectoryGizmo::Handle TrajectoryGizmo::circleHandleAt(const QPointF &docPos, const ViewTransform &view) const
 {
     const std::optional<Shape> s = shape(view);
     if (!s)
@@ -116,6 +149,7 @@ std::optional<QPointF> TrajectoryGizmo::handlePoint(Handle handle, const ViewTra
         at = s->center - s->direction * s->radius;
         break;
     }
+    case Handle::Key:
     case Handle::None: return std::nullopt;
     }
     return view.mapToDocument(at);
@@ -123,11 +157,29 @@ std::optional<QPointF> TrajectoryGizmo::handlePoint(Handle handle, const ViewTra
 
 bool TrajectoryGizmo::press(const QPointF &docPos, const ViewTransform &view)
 {
-    if (!editable())
+    if (!editable() && !pathEditable())
         return false;
     const Handle handle = handleAt(docPos, view);
-    if (handle == Handle::None)
+    if (handle == Handle::None || (handle != Handle::Key && !editable()))
         return false;
+    if (handle == Handle::Key) { // a key of the path, dragged along the page: its position follows the pen
+        const doc::Cel *trajectory = pathTrajectory();
+        const int frame = *keyAt(docPos, view);
+        Drag d;
+        d.handle = handle;
+        d.cel = trajectory->id();
+        d.frame = frame;
+        d.before = trajectory->motion();
+        d.press = docPos;
+        d.toView = view.documentToView();
+        d.centerDoc = pathPoint(*trajectory, frame);
+        d.parentsBack = m_document->document().trajectoryParentMatrix(d.cel, frame).inverted();
+        d.start = m_document->celPoseAt(d.cel, frame);
+        m_hovered = handle;
+        m_hoverKey = frame;
+        m_drag = d;
+        return true;
+    }
     const std::optional<Shape> s = shape(view);
     Drag d;
     d.handle = handle;
@@ -160,6 +212,7 @@ void TrajectoryGizmo::move(const QPointF &docPos, Qt::KeyboardModifiers modifier
     doc::CelPose pose = d.start;
     std::vector<doc::Channel> channels;
     switch (d.handle) {
+    case Handle::Key: // the key's position goes where the pen takes the dot (through what the parents do)
     case Handle::Move: {
         // The circle goes where the pen takes it; its own pose is what, after the parents, puts it there.
         const doc::CelMotion &motion = m_document->document().cel(d.cel)->motion();
@@ -226,11 +279,112 @@ void TrajectoryGizmo::cancel()
 
 bool TrajectoryGizmo::hover(const QPointF &docPos, const ViewTransform &view)
 {
-    const Handle now = editable() ? handleAt(docPos, view) : Handle::None;
-    if (now == m_hovered)
+    const Handle now = editable() || pathEditable() ? handleAt(docPos, view) : Handle::None;
+    const int key = now == Handle::Key ? keyAt(docPos, view).value_or(-1) : -1;
+    if (now == m_hovered && key == m_hoverKey)
         return false;
     m_hovered = now;
+    m_hoverKey = key;
     return true;
+}
+
+const doc::Cel *TrajectoryGizmo::pathTrajectory() const
+{
+    if (!m_pathVisible || m_document->cameraSelected())
+        return nullptr;
+    const doc::Document &d = m_document->document();
+    const doc::Cel *cel = d.cel(m_document->currentCel());
+    if (!cel)
+        return nullptr;
+    const doc::Cel *trajectory = cel->properties().trajectory ? cel : d.followedTrajectory(*cel);
+    return trajectory && trajectory->properties().visible ? trajectory : nullptr; // an inactive one does nothing
+}
+
+QPointF TrajectoryGizmo::pathPoint(const doc::Cel &trajectory, int frame) const
+{
+    const doc::Document &d = m_document->document();
+    const doc::CelMotion &motion = trajectory.motion();
+    const doc::Matrix2x3 world =
+        motion.interpolatedAt(frame).matrix(motion.pivotX, motion.pivotY).then(d.trajectoryParentMatrix(trajectory.id(), frame));
+    double x = 0, y = 0;
+    world.map(motion.pivotX, motion.pivotY, x, y);
+    return {x, y};
+}
+
+bool TrajectoryGizmo::pathRange(const doc::Cel &trajectory, int *first, int *last) const
+{
+    const doc::Document &d = m_document->document();
+    int lo = -1, hi = -1;
+    int guard = 0;
+    for (const doc::Cel *t = &trajectory; t && guard < 64; t = d.trajectoryParent(*t), ++guard) { // its parents move it too
+        const std::vector<int> keys = t->motion().keyFrames();
+        if (keys.empty())
+            continue;
+        lo = lo < 0 ? keys.front() : std::min(lo, keys.front());
+        hi = std::max(hi, keys.back());
+    }
+    if (lo < 0)
+        return false;
+    *first = lo;
+    *last = hi;
+    return true;
+}
+
+void TrajectoryGizmo::paintPath(QPainter &painter, const ViewTransform &view) const
+{
+    const doc::Cel *trajectory = pathTrajectory();
+    int first = 0, last = 0;
+    if (!trajectory || !pathRange(*trajectory, &first, &last))
+        return;
+    constexpr int kMostFrames = 4000; // a very long trajectory is drawn every few frames
+    const int step = std::max(1, (last - first + kMostFrames) / kMostFrames);
+    const QTransform toView = view.documentToView();
+    QPolygonF line;
+    for (int f = first; f <= last; f += step)
+        line << toView.map(pathPoint(*trajectory, f));
+    if (last > first && (last - first) % step != 0)
+        line << toView.map(pathPoint(*trajectory, last));
+    painter.save();
+    painter.setWorldTransform(QTransform()); // view coordinates
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setBrush(Qt::NoBrush);
+    const QColor accent(240, 178, 61); // the keys (as the circle)
+    const QColor pathColor(46, 190, 224); // the way between them: cyan
+    const QColor faint(pathColor.red(), pathColor.green(), pathColor.blue(), 235);
+    if (line.size() > 1) {
+        painter.setPen(QPen(Qt::white, 3.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin)); // an edge of white
+        painter.drawPolyline(line);
+        painter.setPen(QPen(faint, 1.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter.drawPolyline(line);
+    }
+    // A dot on each frame (when there is room for them), and a bigger one on each key.
+    if (step == 1) {
+        double gap = 1e9; // on screen, between two frames
+        if (line.size() > 1)
+            gap = QLineF(line[0], line[1]).length();
+        if (gap >= 5.0) {
+            painter.setPen(QPen(QColor(255, 255, 255, 190), 0.8)); // a hair of white round each, to read on any picture
+            painter.setBrush(faint);
+            for (const QPointF &p : line)
+                painter.drawEllipse(p, 2.1, 2.1);
+        }
+    }
+    // The keys: a dot each (the ones of the position are dragged; a key of only the rotation or scale is a small ring).
+    const bool editable = pathEditable();
+    for (int f : trajectory->motion().keyFrames()) {
+        const QPointF at = toView.map(pathPoint(*trajectory, f));
+        if (trajectory->motion().keyAt(doc::Channel::Position, f)) {
+            const bool picked = editable && keyFrame() == f;
+            painter.setPen(QPen(Qt::white, 1.8));
+            painter.setBrush(picked ? QColor(40, 110, 230) : accent);
+            painter.drawEllipse(at, picked ? 6.0 : 5.0, picked ? 6.0 : 5.0);
+        } else {
+            painter.setPen(QPen(accent.darker(120), 1.6));
+            painter.setBrush(Qt::NoBrush);
+            painter.drawEllipse(at, 3.0, 3.0);
+        }
+    }
+    painter.restore();
 }
 
 void TrajectoryGizmo::paint(QPainter &painter, const ViewTransform &view) const

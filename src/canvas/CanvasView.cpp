@@ -253,6 +253,12 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
         }
         update();
     });
+    // Trajectory mode: the path of the trajectory is shown and its keys dragged (and nothing is drawn meanwhile).
+    m_trajectoryGizmo.setPathVisible(m_toolState->trajectoryMode());
+    connect(m_toolState, &ToolState::trajectoryModeChanged, this, [this](bool on) {
+        m_trajectoryGizmo.setPathVisible(on);
+        update();
+    });
     connect(m_toolState, &ToolState::activeToolChanged, this, &CanvasView::renderWholeFrame); // posed or as drawn
     // The Transform and Move tools move the pixels, or (the cel has keys) the cel as a piece, with a key: another tool then
     // is the one at work (what the first left open is applied), and the cel is shown posed or as drawn.
@@ -536,6 +542,7 @@ void CanvasView::paintEvent(QPaintEvent *)
     }
     m_gizmo.paint(p, m_view);
     m_cameraGizmo.paint(p, m_view);
+    m_trajectoryGizmo.paintPath(p, m_view); // the whole way of the trajectory, under its circle
     m_trajectoryGizmo.paint(p, m_view);
     paintSnapGuide(p);
     paintStraightLinePreview(p);
@@ -809,6 +816,11 @@ void CanvasView::handleSample(const PenSample &sample)
             update(); // the circle of the trajectory cel selected: its middle, its arrow or its edge, whatever the tool
         } else if (sample.tipDown() && m_gizmo.press(docPos, m_view)) {
             update(); // a handle of the perspective layer, whatever the tool
+        } else if (sample.tipDown() && m_trajectoryGizmo.pathShown()
+                   && (sample.tool == InputTool::Eraser || ToolState::hasSize(m_toolState->activeTool())
+                       || m_toolState->activeTool() == ToolId::Fill)) {
+            // Trajectory mode excludes drawing while a path is shown: the pen only drags its keys.
+            emit statusMessage(tr("Trajectory mode is on: turn it off to draw"));
         } else if (picksColor() && sample.tipDown() && sample.tool != InputTool::Eraser) {
             // Alt and the pen down: a drag turns the frames over, a click picks the color (known on release).
             m_flip = Flip{sample.x, m_document->currentFrame(), docPos, false};
@@ -1606,7 +1618,8 @@ void CanvasView::focusOutEvent(QFocusEvent *event)
 void CanvasView::updateGizmoCursor()
 {
     if (m_trajectoryGizmo.hovered() != TrajectoryGizmo::Handle::None && !panKeyHeld())
-        setCursor(m_trajectoryGizmo.hovered() == TrajectoryGizmo::Handle::Move ? Qt::SizeAllCursor
+        setCursor(m_trajectoryGizmo.hovered() == TrajectoryGizmo::Handle::Move || m_trajectoryGizmo.hovered() == TrajectoryGizmo::Handle::Key
+                      ? Qt::SizeAllCursor
                   : m_trajectoryGizmo.hovered() == TrajectoryGizmo::Handle::Rotate ? turnCursor()
                                                                                     : Qt::SizeFDiagCursor);
     else if ((m_gizmo.hovered() != PerspectiveGizmo::Handle::None || m_cameraGizmo.hovered() != CameraGizmo::Handle::None)

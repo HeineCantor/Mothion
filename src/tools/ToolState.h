@@ -194,6 +194,11 @@ public:
     // they work on the pixels, as ever. Not a setting of the person's: the canvas keeps it up to date.
     bool keyframeMode() const { return m_keyframeMode; }
     void setKeyframeMode(bool on);
+    // Trajectory mode: the path of the trajectory of the current cel (its own, or the one it follows) is shown on the canvas, and
+    // its keys are dragged along it. It excludes drawing: the pen does not paint (brush, eraser, fill, shape...) while it is
+    // on and a path is shown. A choice of the person's, for the session.
+    bool trajectoryMode() const { return m_trajectoryMode; }
+    void setTrajectoryMode(bool on);
     // The tool and the mode say that the cel is the one moved (not its pixels).
     bool movesTheCel() const { return m_keyframeMode && (m_activeTool == ToolId::Transform || m_activeTool == ToolId::Move); }
 
@@ -256,6 +261,7 @@ signals:
     void smoothingChanged(double amount);
     void useTiltChanged(bool use);
     void keyframeModeChanged(bool on);
+    void trajectoryModeChanged(bool on);
     void correctStartAfterStrokeChanged(bool on);
     void sharpCornersChanged(bool on);
     void puppetSettingsChanged();
@@ -283,6 +289,7 @@ private:
     double m_smoothing = 0.3;
     bool m_useTilt = true;
     bool m_keyframeMode = false;
+    bool m_trajectoryMode = false;
     bool m_correctStartAfterStroke = false;
     bool m_sharpCorners = false;
     PuppetSettings m_puppet;
