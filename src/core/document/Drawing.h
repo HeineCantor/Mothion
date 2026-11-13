@@ -2,6 +2,7 @@
 
 #include "core/document/Ids.h"
 #include "core/document/TiledImage.h"
+#include "core/document/VectorStroke.h"
 #include "core/perspective/PerspectiveGrid.h"
 
 #include <cstddef>
@@ -32,10 +33,11 @@ struct LayerProperties
     bool operator==(const LayerProperties &) const = default;
 };
 
-// What a layer is: pixels drawn on it, or a perspective grid (a guide that
+// What a layer is: pixels drawn on it, a perspective grid (a guide that
 // cannot be drawn on: its image stays empty, its look comes from
-// LayerProperties::perspective).
-enum class LayerKind { Raster, Perspective };
+// LayerProperties::perspective), or a vector layer: pixels too, but made from the strokes it keeps
+// (Layer::strokes), which only the brush and the eraser add to.
+enum class LayerKind { Raster, Perspective, Vector };
 
 // One layer of a drawing, stacked with the drawing's other layers.
 struct Layer
@@ -47,6 +49,8 @@ struct Layer
     // The layer's mask, a bitmap painted in black and white (in any gray between): where it is white, or has no
     // pixel, the layer shows; where it is black, it does not. Only raster layers have one.
     std::optional<TiledImage> mask;
+    // A vector layer's strokes, bottom to top: what `image` is drawn from. Empty on the other kinds.
+    std::vector<VectorStroke> strokes;
 };
 
 // One drawing of a cel, a "frame" in the interface. It exists independently

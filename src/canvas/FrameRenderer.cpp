@@ -89,7 +89,7 @@ int clipBase(const doc::Drawing &drawing, std::size_t index)
         return -1;
     for (std::size_t below = index; below-- > 0;) {
         const doc::Layer &layer = drawing.layers[below];
-        if (layer.kind == doc::LayerKind::Raster && !layer.properties.clipped)
+        if (layer.kind != doc::LayerKind::Perspective && !layer.properties.clipped)
             return int(below);
     }
     return -1;
@@ -115,7 +115,7 @@ void drawLayer(QPainter &p, QImage &target, const QPoint &origin, const QRect &l
                const std::vector<doc::TileCoord> &tiles, double opacity, doc::BlendMode blend,
                const doc::Layer *clipTo = nullptr)
 {
-    if (clipTo && layer.kind == doc::LayerKind::Raster) {
+    if (clipTo && layer.kind != doc::LayerKind::Perspective) {
         // Clipped: what the layer has over the pixels of the layer it is clipped to (their opacity), nothing else; then
         // that goes over the others with the layer's own opacity and blend mode.
         QRect bounds;
@@ -138,7 +138,7 @@ void drawLayer(QPainter &p, QImage &target, const QPoint &origin, const QRect &l
         }
         return;
     }
-    if (layer.kind == doc::LayerKind::Raster && doc::needsSoftwareBlend(blend)) {
+    if (layer.kind != doc::LayerKind::Perspective && doc::needsSoftwareBlend(blend)) {
         blendLayer(target, origin, limit, layer, tiles, opacity, blend);
         return;
     }

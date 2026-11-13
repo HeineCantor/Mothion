@@ -395,6 +395,7 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     , m_opacityValue(new QSpinBox(this))
     , m_addLayer(actionButton(IconId::AddLayer, tr("New layer"), this))
     , m_addPerspective(actionButton(IconId::AddPerspective, tr("New perspective layer"), this))
+    , m_addVector(actionButton(IconId::AddVector, tr("New vector layer"), this))
     , m_merge(actionButton(IconId::MergeLayers, tr("Merge the selected layers"), this))
     , m_mergeDown(actionButton(IconId::MergeDown, tr("Merge with the layer below"), this))
     , m_remove(actionButton(IconId::Delete, tr("Delete layer"), this))
@@ -474,6 +475,8 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     m_addPerspective->setObjectName(QStringLiteral("addPerspective"));
     buttons->addWidget(m_addLayer);
     buttons->addWidget(m_addPerspective);
+    m_addVector->setObjectName(QStringLiteral("addVector"));
+    buttons->addWidget(m_addVector);
     buttons->addWidget(m_merge);
     buttons->addWidget(m_mergeDown);
     buttons->addWidget(m_remove);
@@ -535,6 +538,7 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
 
     connect(m_addLayer, &QToolButton::clicked, this, [this] { addClicked(doc::LayerKind::Raster); });
     connect(m_addPerspective, &QToolButton::clicked, this, [this] { addClicked(doc::LayerKind::Perspective); });
+    connect(m_addVector, &QToolButton::clicked, this, [this] { addClicked(doc::LayerKind::Vector); });
     connect(m_remove, &QToolButton::clicked, this, &LayersPanel::removeSelected);
     connect(m_merge, &QToolButton::clicked, this, &LayersPanel::mergeSelected);
     connect(m_mergeDown, &QToolButton::clicked, this, &LayersPanel::mergeSelectedDown);
@@ -1975,6 +1979,7 @@ void LayersPanel::syncHeader()
         canAdd = drawing != nullptr;
         m_addLayer->setToolTip(tr("New layer on top of the frame"));
         m_addPerspective->setToolTip(tr("New perspective layer on top of the frame"));
+        m_addVector->setToolTip(tr("New vector layer on top of the frame"));
         for (const QTreeWidgetItem *item : m_tree->selectedItems())
             canRemove = canRemove || kindOf(item) == Row::Frame;
         m_remove->setToolTip(tr("Delete the selected frames"));
@@ -2014,9 +2019,11 @@ void LayersPanel::syncHeader()
     if (m_focus != Focus::Frame) {
         m_addLayer->setToolTip(tr("New layer"));
         m_addPerspective->setToolTip(tr("New perspective layer"));
+        m_addVector->setToolTip(tr("New vector layer"));
     }
     m_addLayer->setEnabled(canAdd);
     m_addPerspective->setEnabled(canAdd);
+    m_addVector->setEnabled(canAdd);
     m_remove->setEnabled(canRemove);
     m_merge->setEnabled(canMerge);
     m_mergeDown->setEnabled(canMergeDown);

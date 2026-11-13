@@ -174,6 +174,35 @@ void compareDocuments(const doc::Document &x, const doc::Document &y)
                     for (const doc::TileCoord &c : mx)
                         QVERIFY(kx.mask->tile(c)->pixels == ky.mask->tile(c)->pixels);
                 }
+                QCOMPARE(ky.strokes.size(), kx.strokes.size());
+                for (std::size_t n = 0; n < kx.strokes.size(); ++n) {
+                    const doc::VectorStroke &sx = kx.strokes[n], &sy = ky.strokes[n];
+                    QCOMPARE(sy.brush, sx.brush);
+                    QCOMPARE(sy.size, sx.size);
+                    QCOMPARE(sy.opacity, sx.opacity);
+                    QCOMPARE(sy.color, sx.color);
+                    QCOMPARE(sy.secondaryColor, sx.secondaryColor);
+                    QCOMPARE(sy.seed, sx.seed);
+                    QCOMPARE(sy.erase, sx.erase);
+                    QCOMPARE(sy.cornerTips, sx.cornerTips);
+                    QCOMPARE(sy.startCorrectedAfter, sx.startCorrectedAfter);
+                    QCOMPARE(sy.points.size(), sx.points.size());
+                    for (std::size_t m = 0; m < sx.points.size(); ++m) {
+                        const brush::BrushInput &px = sx.points[m], &py = sy.points[m];
+                        QCOMPARE(py.x, px.x);
+                        QCOMPARE(py.y, px.y);
+                        QCOMPARE(py.pressure, px.pressure);
+                        QCOMPARE(py.velocity, px.velocity);
+                        QCOMPARE(py.tilt, px.tilt);
+                        QCOMPARE(py.hasTilt, px.hasTilt);
+                        QCOMPARE(py.penAngle, px.penAngle);
+                        QCOMPARE(py.inOut, px.inOut);
+                        QCOMPARE(py.sizeScale, px.sizeScale);
+                        QCOMPARE(py.flowScale, px.flowScale);
+                        QCOMPARE(py.direction, px.direction);
+                        QCOMPARE(py.corner, px.corner);
+                    }
+                }
                 auto cx = kx.image.tileCoords(), cy = ky.image.tileCoords();
                 std::sort(cx.begin(), cx.end());
                 std::sort(cy.begin(), cy.end());
@@ -311,6 +340,56 @@ private slots:
         const doc::Drawing &back = loaded->celAt(1).drawings().begin()->second;
         QVERIFY(!back.layers[0].properties.clipped);
         QVERIFY(back.layers[1].properties.clipped);
+    }
+
+    // Format 16: a vector layer keeps its strokes (the points and what draws them again), and comes back a vector
+    // layer; a raster one next to it keeps none.
+    void vectorLayersKeepTheirStrokesInTheFile()
+    {
+        QTemporaryDir dir;
+        const QString path = dir.filePath(QStringLiteral("vector.moth"));
+        const auto original = sampleDocument();
+        doc::Cel &cel = original->celAt(1);
+        doc::Drawing &drawing = *cel.drawing(cel.drawings().begin()->first);
+        drawing.layers.push_back({original->allocateLayerId(), {"Vector ✓"}, {}, doc::LayerKind::Vector});
+        doc::Layer &vector = drawing.layers.back();
+        vector.image.setPixel(7, 8, kRed);
+        for (int n = 0; n < 2; ++n) {
+            doc::VectorStroke st;
+            st.brush = n == 0 ? "Round ✓" : "";
+            st.size = 12.5 + n;
+            st.opacity = 0.75;
+            st.color = 0xff336699u;
+            st.secondaryColor = 0x80ffffffu;
+            st.seed = 0xfedcba98u;
+            st.erase = n == 1;
+            st.cornerTips = n == 0;
+            st.startCorrectedAfter = n == 1;
+            for (int m = 0; m < 5; ++m) {
+                brush::BrushInput in;
+                in.x = 10.25 + m * 3.1;
+                in.y = -4.5 + m * m * 0.37;
+                in.pressure = 0.2 + m * 0.15;
+                in.velocity = 0.1 * m;
+                in.tilt = 0.5;
+                in.hasTilt = m % 2 == 0;
+                in.penAngle = 33.0;
+                in.inOut = m == 0 ? 0.0 : 1.0;
+                in.direction = 12.0 * m;
+                in.corner = m == 3;
+                st.points.push_back(in);
+            }
+            vector.strokes.push_back(std::move(st));
+        }
+        QString error;
+        QVERIFY2(io::saveProject(*original, path, &error), qPrintable(error));
+        const auto loaded = io::loadProject(path, &error);
+        QVERIFY2(loaded, qPrintable(error));
+        compareDocuments(*original, *loaded); // kinds, pixels and strokes
+        const doc::Drawing &back = loaded->celAt(1).drawings().begin()->second;
+        QVERIFY(back.layers.back().kind == doc::LayerKind::Vector);
+        QCOMPARE(back.layers.back().strokes.size(), std::size_t(2));
+        QVERIFY(back.layers.front().strokes.empty());
     }
 
     // Format 14: the cels that are trajectories (and no others).

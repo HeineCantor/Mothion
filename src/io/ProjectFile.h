@@ -18,7 +18,7 @@ namespace mothion::io {
 //   cels       id, position (0 = bottom), name, visible, locked, opacity, blend
 //   drawings   id, cel, name
 //   layers     id, drawing, position (0 = bottom), name, visible, locked,
-//              opacity, blend, kind ("raster" or "perspective"), perspective
+//              opacity, blend, kind ("raster", "perspective" or "vector"), perspective
 //              (a perspective layer's grid, as a JSON object; else empty)
 //   exposures  cel, start, length, drawing (the Timing runs)
 //   thumbnail  one row: the preview file managers show (ProjectThumbnail.h)
@@ -56,10 +56,13 @@ namespace mothion::io {
 //
 // Format 15 adds the parent of a trajectory cel: the table "trajectory_parents". Older files have none.
 //
+// Format 16 adds the vector layers (kind "vector"): the table "vector_strokes" holds the strokes of each as JSON
+// text (see doc::VectorStroke); their tiles are saved as the raster layers' are. Older files have none.
+//
 // A save writes a new file next to the target and renames it over the old
 // one at the end, so a failed save never damages the previous file.
 
-inline constexpr int kProjectFormatVersion = 15;
+inline constexpr int kProjectFormatVersion = 16;
 inline constexpr char kProjectSuffix[] = "moth";
 inline constexpr char kOldProjectSuffix[] = "mothion"; // what projects were named before; they still open
 

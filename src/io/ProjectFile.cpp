@@ -76,6 +76,8 @@ const char *const kSchema[] = {
     "create table trajectory_cels (cel integer primary key references cels(id))",
     // Format 15: the trajectory a trajectory follows.
     "create table trajectory_parents (cel integer primary key references cels(id), parent integer not null)",
+    // Format 16: the strokes of the vector layers (layers of kind 'vector'), as JSON.
+    "create table vector_strokes (layer integer primary key references layers(id), data text not null)",
 };
 
 // Stored by name, so reordering the enum cannot change old files.
@@ -124,6 +126,75 @@ doc::BlendMode blendFromName(const QString &text)
         if (text == QLatin1String(name))
             return mode;
     return doc::BlendMode::Normal; // a mode from a newer version: the closest we have
+}
+
+// A vector layer's strokes as JSON: one object per stroke, its points as arrays of the numbers of a
+// brush::BrushInput (x, y, pressure, velocity, tilt, hasTilt, penAngle, inOut, sizeScale, flowScale,
+// direction, corner).
+QString strokesToJson(const std::vector<doc::VectorStroke> &strokes)
+{
+    QJsonArray all;
+    for (const doc::VectorStroke &st : strokes) {
+        QJsonArray points;
+        for (const brush::BrushInput &in : st.points)
+            points.append(QJsonArray{in.x, in.y, in.pressure, in.velocity, in.tilt, in.hasTilt ? 1 : 0, in.penAngle,
+                                     in.inOut, in.sizeScale, in.flowScale, in.direction, in.corner ? 1 : 0});
+        all.append(QJsonObject{
+            {QStringLiteral("brush"), QString::fromStdString(st.brush)},
+            {QStringLiteral("size"), st.size},
+            {QStringLiteral("opacity"), st.opacity},
+            {QStringLiteral("color"), double(st.color)},
+            {QStringLiteral("secondary"), double(st.secondaryColor)},
+            {QStringLiteral("seed"), double(st.seed)},
+            {QStringLiteral("erase"), st.erase},
+            {QStringLiteral("cornerTips"), st.cornerTips},
+            {QStringLiteral("startAfter"), st.startCorrectedAfter},
+            {QStringLiteral("points"), points},
+        });
+    }
+    return QString::fromUtf8(QJsonDocument(all).toJson(QJsonDocument::Compact));
+}
+
+// Damaged strokes are skipped; missing values keep the defaults.
+std::vector<doc::VectorStroke> strokesFromJson(const QString &text)
+{
+    std::vector<doc::VectorStroke> strokes;
+    for (const QJsonValue &value : QJsonDocument::fromJson(text.toUtf8()).array()) {
+        const QJsonObject o = value.toObject();
+        if (o.isEmpty())
+            continue;
+        doc::VectorStroke st;
+        st.brush = o.value(QStringLiteral("brush")).toString().toStdString();
+        st.size = o.value(QStringLiteral("size")).toDouble(st.size);
+        st.opacity = std::clamp(o.value(QStringLiteral("opacity")).toDouble(st.opacity), 0.0, 1.0);
+        st.color = std::uint32_t(o.value(QStringLiteral("color")).toDouble(st.color));
+        st.secondaryColor = std::uint32_t(o.value(QStringLiteral("secondary")).toDouble(st.secondaryColor));
+        st.seed = std::uint32_t(o.value(QStringLiteral("seed")).toDouble(0.0));
+        st.erase = o.value(QStringLiteral("erase")).toBool(false);
+        st.cornerTips = o.value(QStringLiteral("cornerTips")).toBool(true);
+        st.startCorrectedAfter = o.value(QStringLiteral("startAfter")).toBool(false);
+        for (const QJsonValue &pv : o.value(QStringLiteral("points")).toArray()) {
+            const QJsonArray a = pv.toArray();
+            if (a.size() < 12)
+                continue;
+            brush::BrushInput in;
+            in.x = a[0].toDouble();
+            in.y = a[1].toDouble();
+            in.pressure = a[2].toDouble(1.0);
+            in.velocity = a[3].toDouble();
+            in.tilt = a[4].toDouble(1.0);
+            in.hasTilt = a[5].toInt(1) != 0;
+            in.penAngle = a[6].toDouble();
+            in.inOut = a[7].toDouble(1.0);
+            in.sizeScale = a[8].toDouble(1.0);
+            in.flowScale = a[9].toDouble(1.0);
+            in.direction = a[10].toDouble();
+            in.corner = a[11].toInt() != 0;
+            st.points.push_back(in);
+        }
+        strokes.push_back(std::move(st));
+    }
+    return strokes;
 }
 
 // A perspective layer's grid as JSON, names as in perspective::Grid (the
@@ -549,7 +620,7 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
         return false;
     }
 
-    QSqlQuery cel(db), drawing(db), layer(db), exposure(db), tile(db), mask(db), maskTile(db), clipped(db), trajectory(db), trajectoryParent(db);
+    QSqlQuery cel(db), drawing(db), layer(db), exposure(db), tile(db), mask(db), maskTile(db), clipped(db), trajectory(db), trajectoryParent(db), vectorStrokes(db);
     cel.prepare(QStringLiteral("insert into cels values (?, ?, ?, ?, ?, ?, ?)"));
     drawing.prepare(QStringLiteral("insert into drawings values (?, ?, ?)"));
     layer.prepare(QStringLiteral("insert into layers values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
@@ -560,6 +631,7 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
     clipped.prepare(QStringLiteral("insert into clipped_layers values (?)"));
     trajectory.prepare(QStringLiteral("insert into trajectory_cels values (?)"));
     trajectoryParent.prepare(QStringLiteral("insert into trajectory_parents values (?, ?)"));
+    vectorStrokes.prepare(QStringLiteral("insert into vector_strokes values (?, ?)"));
     auto exec = [&](QSqlQuery &query, std::initializer_list<QVariant> values) {
         for (const QVariant &v : values)
             query.addBindValue(v);
@@ -588,7 +660,9 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
                 const bool perspective = ly.kind == doc::LayerKind::Perspective;
                 if (!exec(layer, {idValue(ly.id), idValue(id), int(position), QString::fromStdString(lp.name),
                                   lp.visible, lp.locked, double(lp.opacity), blendName(lp.blend),
-                                  perspective ? QStringLiteral("perspective") : QStringLiteral("raster"),
+                                  perspective ? QStringLiteral("perspective")
+                                  : ly.kind == doc::LayerKind::Vector ? QStringLiteral("vector")
+                                                                      : QStringLiteral("raster"),
                                   perspective ? gridToJson(lp.perspective) : QStringLiteral("")}))
                     return false;
                 // The tiles are packed (the slow part: deflating them) on all the cores, a batch at a time,
@@ -607,6 +681,8 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
                     if (tiles[n] && !exec(tile, {idValue(ly.id), coords[n].x, coords[n].y, packed[n]}))
                         return false;
                 if (lp.clipped && !exec(clipped, {idValue(ly.id)}))
+                    return false;
+                if (ly.kind == doc::LayerKind::Vector && !exec(vectorStrokes, {idValue(ly.id), strokesToJson(ly.strokes)}))
                     return false;
                 if (ly.mask) { // its mask, the same way
                     if (!exec(mask, {idValue(ly.id)}))
@@ -801,6 +877,8 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
             if (kinds && q.value(7).toString() == QLatin1String("perspective")) {
                 kind = doc::LayerKind::Perspective;
                 p.perspective = gridFromJson(q.value(8).toString());
+            } else if (kinds && q.value(7).toString() == QLatin1String("vector")) {
+                kind = doc::LayerKind::Vector;
             }
             layers[id] = &it->second->layers.emplace_back(doc::Layer{id, std::move(p), {}, kind});
         }
@@ -856,6 +934,13 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
     }
     if (!flush())
         return nullptr;
+
+    if (version >= 16 && q.exec(QStringLiteral("select layer, data from vector_strokes"))) {
+        while (q.next())
+            if (const auto it = layers.find(idFrom(q.value(0)));
+                it != layers.end() && it->second->kind == doc::LayerKind::Vector)
+                it->second->strokes = strokesFromJson(q.value(1).toString());
+    }
 
     if (version >= 15 && q.exec(QStringLiteral("select cel, parent from trajectory_parents"))) {
         while (q.next())

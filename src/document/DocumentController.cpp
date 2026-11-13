@@ -16,6 +16,7 @@
 #include "core/document/commands/CelCommands.h"
 #include "core/document/commands/LayerCommands.h"
 #include "core/document/commands/PaintCommand.h"
+#include "core/document/commands/StrokeCommands.h"
 #include "core/document/commands/TimingCommands.h"
 
 #include <limits>
@@ -268,9 +269,10 @@ bool DocumentController::addLayer(bool onTop, doc::LayerKind kind)
     if (!drawing)
         return false;
     const bool perspective = kind == doc::LayerKind::Perspective;
+    const bool vector = kind == doc::LayerKind::Vector;
     QString name; // the first free number
-    for (int n = perspective ? 1 : int(drawing->layers.size()) + 1;; ++n) {
-        name = perspective ? tr("Perspective %1").arg(n) : tr("Layer %1").arg(n);
+    for (int n = perspective || vector ? 1 : int(drawing->layers.size()) + 1;; ++n) {
+        name = perspective ? tr("Perspective %1").arg(n) : vector ? tr("Vector %1").arg(n) : tr("Layer %1").arg(n);
         if (std::none_of(drawing->layers.begin(), drawing->layers.end(),
                          [&](const doc::Layer &l) { return l.properties.name == name.toStdString(); }))
             break;
@@ -1875,6 +1877,8 @@ doc::Layer *DocumentController::workLayer(bool changesIt, const QString &nothing
         return fail(tr("Layer “%1” is locked").arg(name));
     if (layer->kind == doc::LayerKind::Perspective)
         return fail(tr("“%1” is a perspective layer: it has no pixels to work on").arg(name));
+    if (layer->kind == doc::LayerKind::Vector)
+        return fail(tr("“%1” is a vector layer: only the brush and the eraser work on it so far").arg(name));
     return layer;
 }
 
@@ -2356,7 +2360,7 @@ void DocumentController::setCurrentLayer(doc::LayerId layer)
 // --- painting ----------------------------------------------------------------------
 
 std::optional<DocumentController::PaintTarget> DocumentController::beginPaint(bool createIfEmpty, QString *reason,
-                                                                              bool forDrawing)
+                                                                              bool forDrawing, bool vectorOk)
 {
     auto fail = [reason](const QString &why) -> std::optional<PaintTarget> {
         if (reason)
@@ -2405,7 +2409,10 @@ std::optional<DocumentController::PaintTarget> DocumentController::beginPaint(bo
         return fail(tr("Layer “%1” is locked").arg(name));
     if (layer->kind == doc::LayerKind::Perspective)
         return fail(tr("“%1” is a perspective layer: it can't be drawn on").arg(name));
+    if (layer->kind == doc::LayerKind::Vector && !vectorOk)
+        return fail(tr("“%1” is a vector layer: only the brush and the eraser work on it so far").arg(name));
     state.target = {m_currentCel, drawing, m_currentLayer, &layer->image};
+    state.target.vector = layer->kind == doc::LayerKind::Vector;
     if (layer->mask && m_maskLayer == layer->id) { // the mask is what is drawn on
         state.target.image = &*layer->mask;
         state.target.mask = true;
@@ -2442,7 +2449,7 @@ std::vector<DocumentController::PaintTarget> DocumentController::beginPaintLayer
         const doc::Cel *cel = m_document->cel(ref.cel);
         doc::Layer *layer = m_document->layer(ref.cel, ref.drawing, ref.layer);
         if (!layer || !cel->properties().visible || cel->properties().locked || !layer->properties.visible
-            || layer->properties.locked || layer->kind == doc::LayerKind::Perspective)
+            || layer->properties.locked || layer->kind != doc::LayerKind::Raster)
             continue;
         PaintTarget target{ref.cel, ref.drawing, ref.layer, &layer->image};
         if (layer->mask && m_maskLayer == layer->id) {
@@ -2500,6 +2507,12 @@ void DocumentController::endPaint(const std::vector<doc::TiledImage> &before, do
         if (auto paint = doc::PaintCommand::capture(targets[i].cel, targets[i].drawing, targets[i].layer, before[i],
                                                     *targets[i].image, targets[i].mask))
             steps.push_back(std::move(paint));
+    if (!steps.empty() && state.stroke && state.target.vector) { // the stroke goes with the pixels it painted
+        auto add = std::make_unique<doc::AddVectorStrokeCommand>(state.target.cel, state.target.drawing,
+                                                                 state.target.layer, std::move(*state.stroke));
+        add->apply(*m_document); // the pixels were painted live; the stroke is added now, as recorded
+        steps.push_back(std::move(add));
+    }
     if (!steps.empty()) {
         if (state.createdDrawing)
             steps.insert(steps.begin(), std::move(state.createdDrawing));
@@ -2517,6 +2530,12 @@ void DocumentController::endPaint(const std::vector<doc::TiledImage> &before, do
     else
         m_history.pushApplied(std::make_unique<doc::GroupCommand>(kind, std::move(steps)));
     emit historyChanged();
+}
+
+void DocumentController::attachStroke(doc::VectorStroke stroke)
+{
+    if (m_paint && m_paint->target.vector)
+        m_paint->stroke = std::move(stroke);
 }
 
 void DocumentController::cancelPaint()

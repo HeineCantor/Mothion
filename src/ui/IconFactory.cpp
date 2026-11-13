@@ -544,9 +544,16 @@ void drawGlyph(QPainter &p, IconId id)
         path.lineTo(19, 12);
         break;
     case IconId::AddLayer: // a sheet, and a plus
+    case IconId::AddVector: // a sheet with a curve through two points, and a plus
     case IconId::AddPerspective: { // a grid in perspective (lines to a vanishing point), and a plus
         if (id == IconId::AddLayer) {
             path.addRect(QRectF(3.5, 3.5, 13, 13));
+        } else if (id == IconId::AddVector) {
+            path.addRect(QRectF(3.5, 3.5, 13, 13));
+            path.moveTo(6, 13.5);
+            path.cubicTo(7, 6, 11, 6, 14, 12);
+            path.addEllipse(QPointF(6, 13.5), 1, 1);
+            path.addEllipse(QPointF(14, 12), 1, 1);
         } else {
             path.addRect(QRectF(3.5, 3.5, 13, 13));
             for (double x : {5.5, 10.0, 14.5}) { // converging at the top

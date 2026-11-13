@@ -138,6 +138,92 @@ private slots:
     }
 
 
+    // The vector button of the Layers panel adds a vector layer, with a name of its own.
+    void theVectorButtonAddsAVectorLayer()
+    {
+        document::DocumentController controller;
+        ui::LayersPanel panel(&controller);
+        panel.resize(320, 800);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 1, "Line").command);
+        QCoreApplication::processEvents();
+        auto *add = panel.findChild<QToolButton *>(QStringLiteral("addVector"));
+        QVERIFY(add && add->isEnabled());
+        add->click();
+        add->click();
+        QCoreApplication::processEvents();
+        const doc::Drawing &drawing = *controller.currentDrawing();
+        QCOMPARE(drawing.layers.size(), std::size_t(3));
+        QVERIFY(drawing.layers[1].kind == doc::LayerKind::Vector && drawing.layers[2].kind == doc::LayerKind::Vector);
+        QCOMPARE(drawing.layers[1].properties.name, std::string("Vector 1"));
+        QCOMPARE(drawing.layers[2].properties.name, std::string("Vector 2"));
+    }
+
+
+    // The brush on a vector layer paints its pixels and keeps the stroke (its points and how to draw them again), both
+    // in one undo step; the eraser keeps its strokes too, marked as erasing. The tools that work on pixels are refused.
+    void aStrokeOnAVectorLayerIsKept()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(500, 400);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 4, "Line").command);
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Vector));
+        QCoreApplication::processEvents();
+        auto layer = [&]() -> const doc::Layer & { return *controller.currentDrawing()->layer(controller.currentLayer()); };
+        QVERIFY(layer().kind == doc::LayerKind::Vector);
+        QCOMPARE(layer().properties.name, std::string("Vector 1"));
+        QVERIFY(layer().strokes.empty() && layer().image.isEmpty());
+
+        state.setColor(QColor(10, 120, 200));
+        const QTransform toView = canvas.view().documentToView();
+        const QPoint start = toView.map(QPointF(900, 540)).toPoint();
+        auto stroke = [&](tools::ToolId tool) {
+            state.setActiveTool(tool);
+            QTest::mousePress(&canvas, Qt::LeftButton, {}, start);
+            for (int i = 1; i <= 20; ++i)
+                QTest::mouseMove(&canvas, start + QPoint(i * 2, i));
+            QTest::mouseRelease(&canvas, Qt::LeftButton, {}, start + QPoint(40, 20));
+        };
+        stroke(tools::ToolId::Brush);
+        QCOMPARE(layer().strokes.size(), std::size_t(1));
+        const doc::VectorStroke &kept = layer().strokes.front();
+        QVERIFY(kept.points.size() >= 10);
+        QVERIFY(!kept.erase);
+        QCOMPARE(QColor::fromRgba(kept.color), QColor(10, 120, 200));
+        QCOMPARE(kept.size, state.settings(tools::ToolId::Brush).size);
+        QVERIFY(!kept.brush.empty());
+        QVERIFY(!layer().image.isEmpty()); // the pixels are there too, to be shown
+        const doc::TileCoord tile = layer().image.tileCoords().front();
+
+        stroke(tools::ToolId::Eraser);
+        QCOMPARE(layer().strokes.size(), std::size_t(2));
+        QVERIFY(layer().strokes.back().erase);
+
+        controller.undo(); // the eraser stroke and the pixels it took, together
+        QCOMPARE(layer().strokes.size(), std::size_t(1));
+        controller.undo();
+        QVERIFY(layer().strokes.empty() && layer().image.isEmpty());
+        controller.redo();
+        QCOMPARE(layer().strokes.size(), std::size_t(1));
+        QVERIFY(layer().image.tile(tile));
+
+        // Not the tools that read or move the pixels: they would leave the strokes behind.
+        QString reason;
+        QVERIFY(!controller.beginPaint(true, &reason));
+        QVERIFY(reason.contains(QStringLiteral("vector")));
+        QVERIFY(!controller.clearCurrentLayer(&reason));
+        QVERIFY(reason.contains(QStringLiteral("vector")));
+        QCOMPARE(layer().strokes.size(), std::size_t(1));
+    }
+
+
     // A stroke on an empty frame that leaves nothing (the selection is elsewhere) takes back the frame it made when it
     // ends: nothing may look at the image that went with it afterwards (the line start was read from it: a crash).
     void aStrokeThatPaintsNothingOnAnEmptyFrame()

@@ -42,6 +42,8 @@ add_library(mothion_core STATIC
     core/document/History.h core/document/History.cpp
     core/document/commands/GroupCommand.h core/document/commands/GroupCommand.cpp
     core/document/commands/PaintCommand.h core/document/commands/PaintCommand.cpp
+    core/document/commands/StrokeCommands.h core/document/commands/StrokeCommands.cpp
+    core/document/VectorStroke.h
     core/document/commands/DrawingCommands.h core/document/commands/DrawingCommands.cpp
     core/document/commands/TimingCommands.h core/document/commands/TimingCommands.cpp
     core/document/commands/CelCommands.h core/document/commands/CelCommands.cpp

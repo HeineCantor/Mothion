@@ -933,7 +933,7 @@ void CanvasView::beginStroke(const PenSample &sample)
                     || transparentBrush;
     // Erasing an empty frame has nothing to act on, so only the brush creates drawings.
     QString reason;
-    const auto target = m_document->beginPaint(!m_eraseStroke, &reason);
+    const auto target = m_document->beginPaint(!m_eraseStroke, &reason, true, true); // a vector layer keeps the stroke
     if (!target) {
         if (!reason.isEmpty())
             emit statusMessage(reason);
@@ -951,6 +951,10 @@ void CanvasView::beginStroke(const PenSample &sample)
         style.startTaper = 0.0;
     else
         style.startCorrection = 0;
+    if (target->vector) { // what reads the pixels under the stroke cannot be drawn again from its points
+        style.mix.on = false;
+        style.waterEdge.on = false;
+    }
     auto stamper = std::make_shared<DabStamper>(target->tint(m_toolState->color()), style.hardness, definition->tips,
                                                 style.verticalThickness);
     stamper->setSecondaryColor(target->tint(m_toolState->inactiveColor()));
@@ -965,6 +969,20 @@ void CanvasView::beginStroke(const PenSample &sample)
     m_dabs.emplace(style, m_seed);
     m_points.clear();
     m_drawnPoints = 0;
+    m_vectorStroke.reset();
+    if (target->vector) { // what is needed to draw it again; the points come when the pen lifts
+        doc::VectorStroke kept;
+        kept.brush = definition->name.toStdString();
+        kept.size = settings.size;
+        kept.opacity = settings.opacity;
+        kept.color = m_toolState->color().rgba();
+        kept.secondaryColor = m_toolState->inactiveColor().rgba();
+        kept.seed = m_seed;
+        kept.erase = m_eraseStroke;
+        kept.cornerTips = m_toolState->sharpCorners();
+        kept.startCorrectedAfter = m_toolState->correctsStartAfterStroke();
+        m_vectorStroke = std::move(kept);
+    }
 
     m_smoother.setStrength(m_placingLine ? 0 : m_toolState->smoothing());
     m_smoother.reset();
@@ -1174,6 +1192,11 @@ void CanvasView::endStroke()
     // the image it painted on goes with it.
     if (!m_points.empty())
         m_lastPoint = lineStartOf(m_points);
+    if (m_vectorStroke) {
+        m_vectorStroke->points = m_points;
+        m_document->attachStroke(std::move(*m_vectorStroke));
+        m_vectorStroke.reset();
+    }
     m_document->endPaint(m_stroke->before());
     m_stroke.reset();
     m_strokeImage = nullptr;
@@ -1330,6 +1353,7 @@ void CanvasView::cancelStroke()
     m_stroke.reset();
     m_strokeImage = nullptr;
     m_dabs.reset();
+    m_vectorStroke.reset();
     m_heldSamples.clear();
     m_document->cancelPaint();
     renderWholeFrame();

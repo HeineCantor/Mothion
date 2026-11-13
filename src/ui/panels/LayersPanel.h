@@ -43,7 +43,7 @@ namespace mothion::ui {
 //    with the pen; its eye turns it on and off; delete removes it;
 //  - a cel: its blend mode and opacity; new layer on top of its current frame, delete, up and down (new cels
 //    are the timeline's);
-//  - a frame: new layer on top of it (one button per kind of layer: drawing, perspective); delete removes
+//  - a frame: new layer on top of it (one button per kind of layer: drawing, perspective, vector); delete removes
 //    every selected frame
 //    (Ctrl and Shift select several, of any cel);
 //  - a layer: the blend mode and opacity of the selected layers (of that
@@ -169,6 +169,7 @@ private:
     QTreeWidget *m_tree;
     QToolButton *m_addLayer;       // a new drawing layer
     QToolButton *m_addPerspective; // a new perspective layer
+    QToolButton *m_addVector;      // a new vector layer
     QToolButton *m_merge;
     QToolButton *m_mergeDown;
     QToolButton *m_remove;

@@ -11,6 +11,7 @@
 #include "canvas/ViewTransform.h"
 #include "core/PenSample.h"
 #include "core/document/TiledImage.h"
+#include "core/document/VectorStroke.h"
 #include "core/StrokeSmoother.h"
 #include "core/brush/DabGenerator.h"
 #include "core/brush/StrokeShaper.h"
@@ -258,6 +259,7 @@ private:
     std::vector<brush::BrushInput> m_points; // the stroke so far, for the final pass
     std::size_t m_drawnPoints = 0;           // points already given to m_dabs
     std::uint32_t m_seed = 0;                // the stroke's random seed, reused by the final pass
+    std::optional<doc::VectorStroke> m_vectorStroke; // on a vector layer: the stroke kept with its pixels
     brush::VelocityMeter m_velocity;
     StrokeSmoother m_smoother;
     brush::CornerDetector m_corners; // on the raw pen points, screen pixels

@@ -381,6 +381,7 @@ public:
         doc::LayerId layer = doc::kNoId;
         doc::TiledImage *image = nullptr; // the layer's pixels, or its mask's when `mask`
         bool mask = false;
+        bool vector = false; // the layer is a vector layer: a stroke is kept with the pixels
         // What a painting tool puts on this target: on a mask, black. A mask holds what is hidden, in black (where it
         // has no pixel everything shows, white): a tool that paints puts the layer back (takes the black away) and the
         // eraser hides (paints it): see CanvasView::beginStroke(), FillTool and ShapeTool.
@@ -397,7 +398,13 @@ public:
     // where the cel has a frame; where it has none, drawing makes the frame and selects its layer (see
     // setLayerChosen()).
     // `forDrawing` false is for the tools that move whole layers: they are not refused.
-    std::optional<PaintTarget> beginPaint(bool createIfEmpty, QString *reason = nullptr, bool forDrawing = true);
+    // A vector layer only takes the brush and the eraser, which keep what they draw as a stroke (attachStroke()):
+    // the other tools are refused there, unless `vectorOk`.
+    std::optional<PaintTarget> beginPaint(bool createIfEmpty, QString *reason = nullptr, bool forDrawing = true,
+                                          bool vectorOk = false);
+    // On a vector layer: the stroke that endPaint() records, in the same undo step as its pixels. `points` is
+    // taken as the stroke is over. Dropped by cancelPaint().
+    void attachStroke(doc::VectorStroke stroke);
     // Live pixel updates during the stroke.
     void notifyPainted(const QRect &docRect);
     // A layer of a drawing of a cel.
@@ -584,6 +591,7 @@ private:
         PaintTarget target;
         std::vector<PaintTarget> others; // painted along with `target` (beginPaintLayers)
         std::unique_ptr<doc::Command> createdDrawing; // applied, not yet recorded
+        std::optional<doc::VectorStroke> stroke;      // the stroke of a vector layer (attachStroke())
         QPainterPath selectionBefore;
     };
     std::optional<PaintState> m_paint;
