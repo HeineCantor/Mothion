@@ -243,14 +243,51 @@ private slots:
         tools::BrushLibrary first;
         const qsizetype builtIn = first.presets(tools::ToolId::Brush).size();
         QSignalSpy changed(&first, &tools::BrushLibrary::presetsChanged);
-        QVERIFY(first.importSut(file));
-        QVERIFY(first.importSut(file)); // same file again: no duplicate
+        QVERIFY(first.importSut(file, tools::ToolId::Brush));
+        QVERIFY(first.importSut(file, tools::ToolId::Pen)); // same file again: no duplicate, it stays where it is
         QCOMPARE(changed.count(), 1);
         QCOMPARE(first.presets(tools::ToolId::Brush).size(), builtIn + 1);
 
         tools::BrushLibrary second; // a new start reads the stored copy
         QCOMPARE(second.presets(tools::ToolId::Brush).size(), builtIn + 1);
         QCOMPARE(second.presets(tools::ToolId::Brush).last().name, QStringLiteral("Test brush"));
+        QDir(library.storageFolder()).removeRecursively();
+    }
+
+    // Each brush category keeps its imports; one can be moved to another category, also across restarts; files from
+    // before the categories (right in brushes/) are Brush ones.
+    void libraryKeepsImportsByCategory()
+    {
+        QTemporaryDir dir;
+        const QString file = dir.filePath(QStringLiteral("cat.sut"));
+        writeSut(file, lineThumbnail());
+        tools::BrushLibrary library;
+        QDir(library.storageFolder()).removeRecursively();
+
+        tools::BrushLibrary first;
+        const qsizetype pens = first.presets(tools::ToolId::Pen).size();
+        const qsizetype decorations = first.presets(tools::ToolId::Decoration).size();
+        const qsizetype brushes = first.presets(tools::ToolId::Brush).size();
+        QVERIFY(first.importSut(file, tools::ToolId::Pen));
+        QCOMPARE(first.presets(tools::ToolId::Pen).size(), pens + 1);
+        QCOMPARE(first.presets(tools::ToolId::Brush).size(), brushes);
+        const tools::BrushPreset imported = first.presets(tools::ToolId::Pen).last();
+        QVERIFY(imported.storedFile.startsWith(first.categoryFolder(tools::ToolId::Pen)));
+        QVERIFY(first.presets(tools::ToolId::Pen).first().storedFile.isEmpty()); // a built-in one
+
+        QVERIFY(first.moveToCategory(imported, tools::ToolId::Decoration));
+        QCOMPARE(first.presets(tools::ToolId::Pen).size(), pens);
+        QCOMPARE(first.presets(tools::ToolId::Decoration).size(), decorations + 1);
+        tools::BrushLibrary second;
+        QCOMPARE(second.presets(tools::ToolId::Decoration).size(), decorations + 1);
+        QCOMPARE(second.presets(tools::ToolId::Pen).size(), pens);
+
+        // An old import, right in brushes/.
+        QDir(library.storageFolder()).removeRecursively();
+        QDir().mkpath(library.storageFolder());
+        QVERIFY(QFile::copy(file, library.storageFolder() + QStringLiteral("/old.sut")));
+        tools::BrushLibrary third;
+        QCOMPARE(third.presets(tools::ToolId::Brush).size(), brushes + 1);
         QDir(library.storageFolder()).removeRecursively();
     }
 };

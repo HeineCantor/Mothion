@@ -12,6 +12,7 @@ class QListWidget;
 
 namespace mothion::tools {
 class BrushLibrary;
+class SubToolMemory;
 }
 
 namespace mothion::ui {
@@ -24,7 +25,9 @@ class SubToolPanel : public QWidget
     Q_OBJECT
 
 public:
-    SubToolPanel(tools::ToolState *state, tools::BrushLibrary *library, QWidget *parent = nullptr);
+    // `memory` keeps what each paint sub tool is set to; without one the panel makes its own, for the session only.
+    SubToolPanel(tools::ToolState *state, tools::BrushLibrary *library, tools::SubToolMemory *memory = nullptr,
+                 QWidget *parent = nullptr);
 
 protected:
     void changeEvent(QEvent *event) override;
@@ -34,6 +37,7 @@ private:
 
     tools::ToolState *m_state;
     tools::BrushLibrary *m_library;
+    tools::SubToolMemory *m_memory;
     QListWidget *m_list;
     QLabel *m_empty;
     QList<tools::BrushPreset> m_presets;     // of the tool currently shown

@@ -97,6 +97,83 @@ void drawGlyph(QPainter &p, IconId id)
         p.drawPath(tip);
         return;
     }
+    case IconId::Pencil: // a pencil, its point down to the left
+        path.moveTo(4, 20);
+        path.lineTo(5.5, 15);
+        path.lineTo(16.5, 4);
+        path.lineTo(20, 7.5);
+        path.lineTo(9, 18.5);
+        path.closeSubpath();
+        path.moveTo(5.5, 15);
+        path.lineTo(9, 18.5);
+        path.moveTo(14, 6.5);
+        path.lineTo(17.5, 10);
+        p.drawPath(path);
+        {
+            QPainterPath lead; // the graphite point, filled
+            lead.moveTo(4, 20);
+            lead.lineTo(4.6, 17.9);
+            lead.lineTo(6.1, 19.4);
+            lead.closeSubpath();
+            p.setBrush(p.pen().color());
+            p.drawPath(lead);
+        }
+        return;
+    case IconId::Pen: // a nib, its slit and breather hole
+        path.moveTo(12, 21);
+        path.lineTo(6.5, 11);
+        path.lineTo(9, 4);
+        path.lineTo(15, 4);
+        path.lineTo(17.5, 11);
+        path.closeSubpath();
+        path.moveTo(12, 21);
+        path.lineTo(12, 13.5);
+        path.addEllipse(QPointF(12, 11.5), 1.5, 1.5);
+        break;
+    case IconId::Watercolor: // a drop, and the wash it spreads into
+        path.moveTo(12, 3);
+        path.cubicTo(15, 7.5, 17, 10, 17, 12.5);
+        path.cubicTo(17, 15.5, 14.8, 17.5, 12, 17.5);
+        path.cubicTo(9.2, 17.5, 7, 15.5, 7, 12.5);
+        path.cubicTo(7, 10, 9, 7.5, 12, 3);
+        path.closeSubpath();
+        path.moveTo(3.5, 21);
+        path.quadTo(7.5, 19, 12, 21);
+        path.quadTo(16.5, 23, 20.5, 21);
+        break;
+    case IconId::Airbrush: { // a nozzle and the spray it gives
+        path.moveTo(21, 9.5);
+        path.lineTo(13, 9.5);
+        path.lineTo(10.5, 11);
+        path.lineTo(13, 12.5);
+        path.lineTo(21, 12.5);
+        path.moveTo(17, 12.5);
+        path.lineTo(17, 18);
+        p.drawPath(path);
+        p.setBrush(p.pen().color());
+        p.setPen(Qt::NoPen);
+        for (const QPointF at : {QPointF(7.5, 11), QPointF(5, 8), QPointF(5, 14), QPointF(3, 11), QPointF(7, 5.5),
+                                 QPointF(7, 16.5), QPointF(2.5, 6.5), QPointF(2.5, 15.5)})
+            p.drawEllipse(at, 0.9, 0.9);
+        return;
+    }
+    case IconId::Decoration: // a star and two sparkles
+        for (int i = 0; i < 10; ++i) {
+            const double angle = -std::numbers::pi / 2 + i * std::numbers::pi / 5;
+            const double r = i % 2 ? 3.2 : 7.5;
+            const QPointF at(10 + r * std::cos(angle), 14 + r * std::sin(angle));
+            i == 0 ? path.moveTo(at) : path.lineTo(at);
+        }
+        path.closeSubpath();
+        path.moveTo(18.5, 2.5);
+        path.lineTo(18.5, 8.5);
+        path.moveTo(15.5, 5.5);
+        path.lineTo(21.5, 5.5);
+        path.moveTo(20, 13);
+        path.lineTo(20, 16);
+        path.moveTo(18.5, 14.5);
+        path.lineTo(21.5, 14.5);
+        break;
     case IconId::Play: { // a filled triangle
         path.moveTo(7, 4.5);
         path.lineTo(19, 12);

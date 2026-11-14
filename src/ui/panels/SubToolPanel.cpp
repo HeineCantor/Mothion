@@ -3,6 +3,10 @@
 #include "canvas/StrokeSession.h"
 #include "core/brush/DabGenerator.h"
 #include "tools/BrushLibrary.h"
+#include "tools/SubToolMemory.h"
+
+#include <QMenu>
+#include <QMessageBox>
 #include "canvas/TileQt.h"
 
 #include <QEvent>
@@ -240,10 +244,12 @@ public:
 
 } // namespace
 
-SubToolPanel::SubToolPanel(tools::ToolState *state, tools::BrushLibrary *library, QWidget *parent)
+SubToolPanel::SubToolPanel(tools::ToolState *state, tools::BrushLibrary *library, tools::SubToolMemory *memory,
+                           QWidget *parent)
     : QWidget(parent)
     , m_state(state)
     , m_library(library)
+    , m_memory(memory ? memory : new tools::SubToolMemory(state, library, {}, this))
     , m_list(new QListWidget(this))
     , m_empty(new QLabel(tr("No sub tools"), this))
 {
@@ -263,7 +269,7 @@ SubToolPanel::SubToolPanel(tools::ToolState *state, tools::BrushLibrary *library
     connect(m_list, &QListWidget::itemClicked, this, [this](QListWidgetItem *item) {
         const int row = m_list->row(item);
         m_selected[m_state->activeTool()] = row;
-        tools::applyPreset(*m_state, m_presets[row]);
+        m_memory->select(m_presets[row]); // a paint sub tool comes back as it was left
     });
     connect(m_state, &tools::ToolState::activeToolChanged, this, &SubToolPanel::showPresetsFor);
     connect(m_library, &tools::BrushLibrary::presetsChanged, this, [this] {
@@ -271,11 +277,37 @@ SubToolPanel::SubToolPanel(tools::ToolState *state, tools::BrushLibrary *library
         showPresetsFor(m_state->activeTool());
     });
 
-    // Start with the first brush preset applied, so the defaults are a real sub tool.
-    const auto brushPresets = tools::builtInPresets(tools::ToolId::Brush);
-    if (!brushPresets.isEmpty())
-        tools::applyPreset(*m_state, brushPresets.first());
+    // Each paint tool starts with its sub tool in use (SubToolMemory).
     showPresetsFor(m_state->activeTool());
+
+    // An imported brush can be moved to another category (right click).
+    m_list->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_list, &QWidget::customContextMenuRequested, this, [this](const QPoint &at) {
+        const int row = m_list->row(m_list->itemAt(at));
+        if (row < 0 || row >= m_presets.size() || m_presets[row].id.isEmpty())
+            return;
+        const tools::BrushPreset preset = m_presets[row];
+        QMenu menu(this);
+        // Back to what the sub tool starts with (size, opacity, curve, stabilization, corrections).
+        QAction *reset = menu.addAction(tr("Reset to default"));
+        reset->setEnabled(m_memory->isModified(preset));
+        connect(reset, &QAction::triggered, this, [this, preset] { m_memory->reset(preset); });
+        if (preset.storedFile.isEmpty()) {
+            menu.exec(m_list->viewport()->mapToGlobal(at));
+            return;
+        }
+        QMenu *move = menu.addMenu(tr("Move to"));
+        for (const tools::ToolId category : tools::kBrushTools) {
+            QAction *action = move->addAction(tools::ToolState::displayName(category));
+            action->setEnabled(category != preset.tool);
+            connect(action, &QAction::triggered, this, [this, preset, category] {
+                QString error;
+                if (!m_library->moveToCategory(preset, category, &error) && !error.isEmpty())
+                    QMessageBox::warning(this, tr("Move brush"), error);
+            });
+        }
+        menu.exec(m_list->viewport()->mapToGlobal(at));
+    });
 }
 
 void SubToolPanel::showPresetsFor(tools::ToolId tool)
@@ -307,6 +339,7 @@ void SubToolPanel::showPresetsFor(tools::ToolId tool)
     if (m_presets.isEmpty())
         return;
     int row = m_selected.count(tool) ? m_selected[tool] : 0;
+    const QString current = m_memory->current(tool); // a paint tool's sub tool in use
     for (int i = 0; i < m_presets.size(); ++i) { // what is in use, whoever set it
         const tools::BrushPreset &p = m_presets[i];
         if ((p.shapeKind && *p.shapeKind == m_state->shapeSettings().kind)
@@ -314,7 +347,7 @@ void SubToolPanel::showPresetsFor(tools::ToolId tool)
             || (p.liquifyMode && *p.liquifyMode == m_state->liquifySettings().mode)
             || (p.fillMode && *p.fillMode == m_state->fillSettings().mode
                 && (!p.fillAllLayers || *p.fillAllLayers == m_state->fillSettings().allLayers))
-            || (p.selectsTool && *p.selectsTool == tool))
+            || (p.selectsTool && *p.selectsTool == tool) || (!current.isEmpty() && p.id == current))
             row = i;
     }
     m_list->setCurrentRow(row);

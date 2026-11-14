@@ -21,13 +21,43 @@ QString BrushLibrary::storageFolder() const
     return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + QStringLiteral("/brushes");
 }
 
+namespace {
+
+// The folder name of each brush category, under brushes/.
+QString folderName(ToolId category)
+{
+    switch (category) {
+    case ToolId::Pencil: return QStringLiteral("pencil");
+    case ToolId::Pen: return QStringLiteral("pen");
+    case ToolId::Watercolor: return QStringLiteral("watercolor");
+    case ToolId::Airbrush: return QStringLiteral("airbrush");
+    case ToolId::Decoration: return QStringLiteral("decoration");
+    default: return QStringLiteral("brush");
+    }
+}
+
+} // namespace
+
+QString BrushLibrary::categoryFolder(ToolId category) const
+{
+    return storageFolder() + QLatin1Char('/') + folderName(ToolState::isBrushTool(category) ? category : ToolId::Brush);
+}
+
 void BrushLibrary::loadStored()
 {
-    const QDir dir(storageFolder());
-    const QStringList files = dir.entryList({QStringLiteral("*.sut")}, QDir::Files, QDir::Name);
-    for (const QString &file : files)
-        if (auto imported = tools::importSut(dir.filePath(file)))
-            m_imported << imported->preset;
+    auto load = [this](const QString &folder, ToolId category) {
+        const QDir dir(folder);
+        for (const QString &file : dir.entryList({QStringLiteral("*.sut")}, QDir::Files, QDir::Name))
+            if (auto imported = tools::importSut(dir.filePath(file))) {
+                imported->preset.tool = category;
+                imported->preset.storedFile = dir.filePath(file);
+                imported->preset.id = QStringLiteral("imported/") + file;
+                m_imported << imported->preset;
+            }
+    };
+    load(storageFolder(), ToolId::Brush); // from before the categories
+    for (const ToolId category : kBrushTools)
+        load(categoryFolder(category), category);
 }
 
 QList<BrushPreset> BrushLibrary::presets(ToolId tool) const
@@ -39,8 +69,10 @@ QList<BrushPreset> BrushLibrary::presets(ToolId tool) const
     return list;
 }
 
-bool BrushLibrary::importSut(const QString &path, QString *error, QStringList *warnings)
+bool BrushLibrary::importSut(const QString &path, ToolId category, QString *error, QStringList *warnings)
 {
+    if (!ToolState::isBrushTool(category))
+        category = ToolId::Brush;
     auto imported = tools::importSut(path, error);
     if (!imported)
         return false;
@@ -54,22 +86,55 @@ bool BrushLibrary::importSut(const QString &path, QString *error, QStringList *w
     }
     const QByteArray hash = QCryptographicHash::hash(in.readAll(), QCryptographicHash::Sha1).toHex().left(12);
     in.close();
-    QDir().mkpath(storageFolder());
-    const QString stored = storageFolder() + QLatin1Char('/') + QFileInfo(path).completeBaseName()
-                           + QLatin1Char('-') + QString::fromLatin1(hash) + QStringLiteral(".sut");
-    const bool known = QFileInfo::exists(stored);
-    if (!known && !QFile::copy(path, stored)) {
+    const QString name = QFileInfo(path).completeBaseName() + QLatin1Char('-') + QString::fromLatin1(hash)
+                         + QStringLiteral(".sut");
+    for (const BrushPreset &known : std::as_const(m_imported))
+        if (QFileInfo(known.storedFile).fileName() == name) { // already here, in whatever category
+            if (warnings)
+                *warnings = imported->warnings;
+            return true;
+        }
+    const QString folder = categoryFolder(category);
+    QDir().mkpath(folder);
+    const QString stored = folder + QLatin1Char('/') + name;
+    if (!QFileInfo::exists(stored) && !QFile::copy(path, stored)) {
         if (error)
-            *error = tr("Cannot copy the brush to %1").arg(storageFolder());
+            *error = tr("Cannot copy the brush to %1").arg(folder);
         return false;
     }
     if (warnings)
         *warnings = imported->warnings;
-    if (!known) {
-        m_imported << imported->preset;
-        emit presetsChanged();
-    }
+    imported->preset.tool = category;
+    imported->preset.storedFile = stored;
+    imported->preset.id = QStringLiteral("imported/") + name;
+    m_imported << imported->preset;
+    emit presetsChanged();
     return true;
+}
+
+bool BrushLibrary::moveToCategory(const BrushPreset &preset, ToolId category, QString *error)
+{
+    if (!ToolState::isBrushTool(category) || preset.storedFile.isEmpty())
+        return false;
+    for (BrushPreset &held : m_imported) {
+        if (held.storedFile != preset.storedFile)
+            continue;
+        if (held.tool == category)
+            return true;
+        const QString folder = categoryFolder(category);
+        QDir().mkpath(folder);
+        const QString moved = folder + QLatin1Char('/') + QFileInfo(held.storedFile).fileName();
+        if (!QFile::rename(held.storedFile, moved)) {
+            if (error)
+                *error = tr("Cannot move the brush to %1").arg(folder);
+            return false;
+        }
+        held.storedFile = moved;
+        held.tool = category;
+        emit presetsChanged();
+        return true;
+    }
+    return false;
 }
 
 } // namespace mothion::tools

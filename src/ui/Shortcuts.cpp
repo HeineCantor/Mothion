@@ -110,10 +110,13 @@ Shortcuts::Shortcuts()
         {ToolId::RectSelect, Qt::Key_M}, {ToolId::LassoSelect, Qt::Key_L}, {ToolId::Fill, Qt::Key_G},
         {ToolId::Hand, Qt::Key_H},       {ToolId::Zoom, Qt::Key_Z},       {ToolId::Move, Qt::Key_V},
         {ToolId::Puppet, Qt::Key_P},
+        // The other brush categories start with no key (one can be given in the settings).
+        {ToolId::Pencil, Qt::Key_unknown}, {ToolId::Pen, Qt::Key_unknown}, {ToolId::Watercolor, Qt::Key_unknown},
+        {ToolId::Airbrush, Qt::Key_unknown}, {ToolId::Decoration, Qt::Key_unknown},
     };
     for (const auto &t : toolKeys) {
         const QString name = t.tool == ToolId::RectSelect ? tr("Selection") : tools::ToolState::displayName(t.tool);
-        add(toolCommand(int(t.tool)), tools, name, {seq(t.k)});
+        add(toolCommand(int(t.tool)), tools, name, t.k == Qt::Key_unknown ? QList<QKeySequence>() : QList<QKeySequence>{seq(t.k)});
     }
     add(QStringLiteral("color.switch"), drawing, tr("Switch between the main and the secondary color"),
         {seq(Qt::Key_X)});
@@ -260,6 +263,11 @@ QString Shortcuts::toolCommand(int tool)
 {
     static const QHash<int, QString> names = {
         {int(tools::ToolId::Brush), QStringLiteral("tool.brush")},
+        {int(tools::ToolId::Pencil), QStringLiteral("tool.pencil")},
+        {int(tools::ToolId::Pen), QStringLiteral("tool.pen")},
+        {int(tools::ToolId::Watercolor), QStringLiteral("tool.watercolor")},
+        {int(tools::ToolId::Airbrush), QStringLiteral("tool.airbrush")},
+        {int(tools::ToolId::Decoration), QStringLiteral("tool.decoration")},
         {int(tools::ToolId::Eraser), QStringLiteral("tool.eraser")},
         {int(tools::ToolId::Eyedropper), QStringLiteral("tool.eyedropper")},
         {int(tools::ToolId::Blend), QStringLiteral("tool.blend")},

@@ -8,6 +8,7 @@
 #include "io/FrameExport.h"
 #include "io/ProjectFile.h"
 #include "tools/BrushLibrary.h"
+#include "tools/SubToolMemory.h"
 #include "tools/ColorSetLibrary.h"
 #include "tools/ToolState.h"
 #include "audio/AudioPlayer.h"
@@ -131,10 +132,16 @@ MainWindow::MainWindow(QWidget *parent)
 {
     // The strokes of vector layers name their brush: the library knows them (the ones imported too).
     m_toolState->setBrushResolver([library = m_brushes](const QString &name) -> tools::BrushDefinitionPtr {
-        for (const tools::ToolId tool : {tools::ToolId::Brush, tools::ToolId::Eraser})
+        auto find = [&](tools::ToolId tool) -> tools::BrushDefinitionPtr {
             for (const tools::BrushPreset &preset : library->presets(tool))
                 if (preset.brush && preset.brush->name == name)
                     return preset.brush;
+            return nullptr;
+        };
+        for (const tools::ToolId tool : tools::kBrushTools)
+            if (auto found = find(tool))
+                return found;
+        return find(tools::ToolId::Eraser);
         return nullptr;
     });
     // The vector eraser's mode is kept from one session to the next: as it was last set, and kept as it changes.
@@ -164,7 +171,9 @@ MainWindow::MainWindow(QWidget *parent)
     properties->setDocument(m_document); // for the keyframe options of Transform and Move
     WorkspacePanels panels;
     panels.tools = new ToolPalettePanel(m_toolState, this);
-    panels.subTools = new SubToolPanel(m_toolState, m_brushes, this);
+    // What each paint sub tool is set to is kept from one session to the next.
+    auto *subToolMemory = new tools::SubToolMemory(m_toolState, m_brushes, tools::SubToolMemory::defaultFile(), this);
+    panels.subTools = new SubToolPanel(m_toolState, m_brushes, subToolMemory, this);
     panels.toolProperties = properties;
     panels.toolPropertiesFooter = properties->footer();
     panels.brushSliders = new BrushSlidersPanel(m_toolState, this);
@@ -876,12 +885,16 @@ void MainWindow::importBrush()
     for (const QString &file : files) {
         QString error;
         QStringList warnings;
-        if (!m_brushes->importSut(file, &error, &warnings)) {
+        // Into the brush category shown (the one used last when another tool is active).
+        if (!m_brushes->importSut(file, m_toolState->brushTool(), &error, &warnings)) {
             QMessageBox::warning(this, tr("Import brush"), error);
             continue;
         }
         if (warnings.isEmpty())
-            statusBar()->showMessage(tr("Brush imported: %1").arg(QFileInfo(file).completeBaseName()), 4000);
+            statusBar()->showMessage(tr("Brush imported into %1: %2")
+                                         .arg(tools::ToolState::displayName(m_toolState->brushTool()),
+                                              QFileInfo(file).completeBaseName()),
+                                     4000);
         else
             QMessageBox::information(this, tr("Import brush"),
                                      tr("%1 imported. Not reproduced yet:\n• %2")

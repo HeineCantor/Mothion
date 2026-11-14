@@ -85,6 +85,8 @@ qt_add_library(mothion_gui STATIC
     tools/Preferences.h tools/Preferences.cpp
     tools/BrushDefinition.h
     tools/BrushPreset.h tools/BrushPreset.cpp
+    tools/BuiltInBrushes.h tools/BuiltInBrushes.cpp
+    tools/SubToolMemory.h tools/SubToolMemory.cpp
     tools/BrushLibrary.h tools/BrushLibrary.cpp
     tools/ColorSetLibrary.h tools/ColorSetLibrary.cpp
     tools/SutImporter.h tools/SutImporter.cpp

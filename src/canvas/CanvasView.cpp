@@ -566,7 +566,7 @@ void CanvasView::paintEvent(QPaintEvent *)
 QRectF CanvasView::brushOutlineRect() const
 {
     const bool eraser = m_pointerTool == InputTool::Eraser || m_toolState->activeTool() == ToolId::Eraser;
-    const double size = m_toolState->settings(eraser ? ToolId::Eraser : ToolId::Brush).size;
+    const double size = m_toolState->settings(eraser ? ToolId::Eraser : m_toolState->brushTool()).size;
     const double r = std::max(2.0, size * m_view.zoom() / 2.0);
     return {m_pointerPos.x() - r, m_pointerPos.y() - r, 2 * r, 2 * r};
 }
@@ -985,7 +985,7 @@ void CanvasView::beginStroke(const PenSample &sample)
             emit statusMessage(reason);
         return;
     }
-    const ToolId tool = m_eraseStroke && !transparentBrush ? ToolId::Eraser : ToolId::Brush;
+    const ToolId tool = m_eraseStroke && !transparentBrush ? ToolId::Eraser : m_toolState->brushTool();
     if (target->mask) // a mask holds what is hidden: the brush puts the layer back, the eraser hides it
         m_eraseStroke = !m_eraseStroke;
     const tools::BrushSettings settings = m_toolState->settings(tool);
@@ -1117,7 +1117,7 @@ void CanvasView::paintSnapGuide(QPainter &p) const
     if (guide.size() < 2)
         return;
     const QPointF to = guide.last();
-    const ToolId tool = m_eraseStroke ? ToolId::Eraser : ToolId::Brush;
+    const ToolId tool = m_eraseStroke ? ToolId::Eraser : m_toolState->brushTool();
     const double half = std::max(2.0, m_toolState->settings(tool).size / 2.0 * m_view.zoom()) + 2.0;
 
     p.save();
@@ -1354,7 +1354,7 @@ void CanvasView::paintStraightLinePreview(QPainter &p) const
         return;
     const QPointF from = m_view.documentToView().map(*m_lastPoint);
     const bool eraser = m_pointerTool == InputTool::Eraser || m_toolState->activeTool() == ToolId::Eraser;
-    const double size = m_toolState->settings(eraser ? ToolId::Eraser : ToolId::Brush).size;
+    const double size = m_toolState->settings(eraser ? ToolId::Eraser : m_toolState->brushTool()).size;
     QPainterPath line;
     line.moveTo(from);
     line.lineTo(m_pointerPos + QPointF(0.01, 0));

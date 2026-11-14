@@ -28,7 +28,12 @@ BrushDefinitionPtr roundBrush()
 QString ToolState::displayName(ToolId tool)
 {
     switch (tool) {
+    case ToolId::Pencil: return tr("Pencil");
+    case ToolId::Pen: return tr("Pen");
     case ToolId::Brush: return tr("Brush");
+    case ToolId::Watercolor: return tr("Watercolor");
+    case ToolId::Airbrush: return tr("Airbrush");
+    case ToolId::Decoration: return tr("Decoration");
     case ToolId::Eraser: return tr("Eraser");
     case ToolId::Hand: return tr("Hand");
     case ToolId::Zoom: return tr("Zoom");
@@ -52,6 +57,8 @@ void ToolState::setActiveTool(ToolId tool)
         return;
     m_previousTool = m_activeTool;
     m_activeTool = tool;
+    if (isBrushTool(tool))
+        m_brushTool = tool;
     emit activeToolChanged(tool);
 }
 

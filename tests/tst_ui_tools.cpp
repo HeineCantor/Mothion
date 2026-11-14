@@ -1,6 +1,9 @@
 // Tests for the UI layer: the canvas tools: move, selection, transform, fill, paste.
 
 #include "test_common.h"
+#include "tools/SubToolMemory.h"
+#include "tools/BrushLibrary.h"
+#include <QTemporaryDir>
 #include <numbers>
 #include <QElapsedTimer>
 
@@ -944,6 +947,88 @@ private slots:
 
 
     // Making, changing and clearing a selection are undo steps.
+    // Each paint sub tool keeps what it was set to: picked again, or its tool picked again, it comes back so; reset
+    // gives back its defaults; the file keeps it all for the next start.
+    void subToolsRememberTheirOptions()
+    {
+        tools::ToolState state;
+        tools::BrushLibrary library;
+        tools::SubToolMemory memory(&state, &library);
+        auto preset = [&](tools::ToolId tool, const QString &id) {
+            for (const tools::BrushPreset &p : library.presets(tool))
+                if (p.id == id)
+                    return p;
+            return tools::BrushPreset();
+        };
+        const tools::BrushPreset gpen = preset(tools::ToolId::Pen, QStringLiteral("pen/g-pen"));
+        const tools::BrushPreset stable = preset(tools::ToolId::Pen, QStringLiteral("pen/g-pen-stabilized"));
+        const tools::BrushPreset pen = preset(tools::ToolId::Pen, QStringLiteral("pen/pen"));
+        QVERIFY(!gpen.id.isEmpty() && !stable.id.isEmpty() && !pen.id.isEmpty());
+
+        // Every brush category starts with its first sub tool, and its own values in use.
+        QCOMPARE(memory.current(tools::ToolId::Pen), gpen.id);
+        QCOMPARE(memory.current(tools::ToolId::Pencil), QStringLiteral("pencil/pencil"));
+        QCOMPARE(state.settings(tools::ToolId::Pen).size, 9.0);
+
+        state.setActiveTool(tools::ToolId::Pen);
+        QCOMPARE(state.smoothing(), 0.5);
+        state.setSize(tools::ToolId::Pen, 20);
+        state.setSmoothing(0.3);
+        QVERIFY(memory.isModified(gpen));
+        memory.select(pen);
+        QCOMPARE(state.settings(tools::ToolId::Pen).size, 5.0);
+        QCOMPARE(state.smoothing(), 0.45);
+        memory.select(gpen);
+        QCOMPARE(state.settings(tools::ToolId::Pen).size, 20.0);
+        QCOMPARE(state.smoothing(), 0.3);
+
+        // The stabilized G-pen: a heavy stabilizer and a correction after the stroke of its own.
+        memory.select(stable);
+        QCOMPARE(state.smoothing(), 0.8);
+        QVERIFY(state.brush(tools::ToolId::Pen)->style.revision > 0);
+        QVERIFY(!memory.isModified(stable));
+
+        // Another category has its own stabilizer; coming back gives back the pen's.
+        state.setActiveTool(tools::ToolId::Pencil);
+        QCOMPARE(state.smoothing(), 0.2);
+        state.setActiveTool(tools::ToolId::Pen);
+        QCOMPARE(state.smoothing(), 0.8);
+        QCOMPARE(memory.current(tools::ToolId::Pen), stable.id);
+
+        // A correction after the stroke changed on the brush is the sub tool's too.
+        auto edited = std::make_shared<tools::BrushDefinition>(*state.brush(tools::ToolId::Pen));
+        edited->style.revision = 9;
+        state.setBrush(tools::ToolId::Pen, edited);
+        QVERIFY(memory.isModified(stable));
+        memory.select(pen);
+        memory.select(stable);
+        QCOMPARE(state.brush(tools::ToolId::Pen)->style.revision, 9);
+
+        memory.reset(gpen); // not in use: only forgotten
+        QVERIFY(!memory.isModified(gpen));
+        QCOMPARE(state.smoothing(), 0.8);
+        memory.reset(stable); // in use: its defaults come back
+        QCOMPARE(state.brush(tools::ToolId::Pen)->style.revision, stable.brush->style.revision);
+
+        // Kept in a file for the next start: the sub tool selected and what it was set to.
+        QTemporaryDir dir;
+        const QString file = dir.filePath(QStringLiteral("subtools.json"));
+        {
+            tools::ToolState first;
+            tools::SubToolMemory kept(&first, &library, file);
+            first.setActiveTool(tools::ToolId::Pen);
+            kept.select(pen);
+            first.setSize(tools::ToolId::Pen, 33);
+            first.setSmoothing(0.6);
+        } // written on destruction
+        tools::ToolState second;
+        second.setActiveTool(tools::ToolId::Pen);
+        tools::SubToolMemory read(&second, &library, file);
+        QCOMPARE(read.current(tools::ToolId::Pen), pen.id);
+        QCOMPARE(second.settings(tools::ToolId::Pen).size, 33.0);
+        QCOMPARE(second.smoothing(), 0.6);
+    }
+
     // Erase outside keeps what is selected and clears the rest; fill paints the selection; both one undo step.
     void eraseOutsideAndFillTheSelection()
     {

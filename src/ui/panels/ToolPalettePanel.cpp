@@ -171,8 +171,15 @@ ToolPalettePanel::ToolPalettePanel(tools::ToolState *state, QWidget *parent)
     };
     // The groups of the palette, top to bottom, a line between them.
     const std::vector<std::vector<Entry>> groups = {
-        {   // drawing
+        {   // the brush categories, as in Clip Studio
+            {ToolId::Pencil, IconId::Pencil},
+            {ToolId::Pen, IconId::Pen},
             {ToolId::Brush, IconId::Brush},
+            {ToolId::Watercolor, IconId::Watercolor},
+            {ToolId::Airbrush, IconId::Airbrush},
+            {ToolId::Decoration, IconId::Decoration},
+        },
+        {   // drawing
             {ToolId::Eraser, IconId::Eraser},
             {ToolId::Eyedropper, IconId::Eyedropper},
             {ToolId::Blend, IconId::Blend},

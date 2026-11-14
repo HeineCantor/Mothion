@@ -15,8 +15,14 @@ namespace mothion::tools {
 
 // The tools in the tool palette. Not to be confused with mothion::InputTool,
 // which is the *physical* end of the pen (tip / eraser / mouse).
-enum class ToolId { Brush, Eraser, Hand, Zoom, Move, RectSelect, LassoSelect, Puppet, Eyedropper, Fill, Transform, Blend, Liquify, Shape };
-inline constexpr int kToolCount = 14;
+// The brush categories (Pencil, Pen, Brush, Watercolor, Airbrush, Decoration) are tools of their own, as in Clip Studio:
+// each has its sub tools, its size and opacity, and its brush. New ids go at the end (settings are indexed by id).
+enum class ToolId { Brush, Eraser, Hand, Zoom, Move, RectSelect, LassoSelect, Puppet, Eyedropper, Fill, Transform, Blend, Liquify, Shape,
+                    Pencil, Pen, Watercolor, Airbrush, Decoration };
+inline constexpr int kToolCount = 19;
+// The brush categories, in the order of the tool palette.
+inline constexpr ToolId kBrushTools[] = {ToolId::Pencil, ToolId::Pen, ToolId::Brush, ToolId::Watercolor, ToolId::Airbrush,
+                                         ToolId::Decoration};
 
 // Puppet warp options (see puppet::PuppetRig).
 struct PuppetSettings
@@ -126,7 +132,13 @@ public:
     static constexpr double kMinSize = 1.0;   // brush diameter limits, document px
     static constexpr double kMaxSize = 2000.0;
 
-    static bool isPaintTool(ToolId tool) { return tool == ToolId::Brush || tool == ToolId::Eraser; }
+    // One of the brush categories (kBrushTools).
+    static bool isBrushTool(ToolId tool)
+    {
+        return tool == ToolId::Brush || tool == ToolId::Pencil || tool == ToolId::Pen || tool == ToolId::Watercolor
+               || tool == ToolId::Airbrush || tool == ToolId::Decoration;
+    }
+    static bool isPaintTool(ToolId tool) { return isBrushTool(tool) || tool == ToolId::Eraser; }
     // Tools that change the pixels of a layer (the selection tools, the eyedropper, the hand and the zoom do not).
     static bool editsPixels(ToolId tool)
     {
@@ -145,6 +157,9 @@ public:
     void setActiveTool(ToolId tool);
     // The tool active before the current one.
     ToolId previousTool() const { return m_previousTool; }
+    // The brush category the pen paints with: the active one, or the one used last (while erasing with the transparent
+    // color or measuring the brush outline under another tool).
+    ToolId brushTool() const { return m_brushTool; }
     // Selects `tool`, or, if it is already active, goes back to the previous
     // tool (the eraser shortcut: E to erase, E again to draw on).
     void toggleTool(ToolId tool);
@@ -278,6 +293,7 @@ private:
 
     ToolId m_activeTool = ToolId::Brush;
     ToolId m_previousTool = ToolId::Brush;
+    ToolId m_brushTool = ToolId::Brush;
     std::array<BrushSettings, kToolCount> m_settings;
     std::array<BrushDefinitionPtr, kToolCount> m_brushes;
     BrushResolver m_resolver;

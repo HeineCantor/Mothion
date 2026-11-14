@@ -1,13 +1,13 @@
 #include "tools/BrushPreset.h"
 
+#include "tools/BuiltInBrushes.h"
+
 namespace mothion::tools {
 
 namespace {
 
 // Curve shorthands (control points of PressureCurve).
 const PressureCurve kLinear;
-const PressureCurve kFirm({0.5f, 0.05f}, {0.9f, 0.6f});  // needs pressure to get wide
-const PressureCurve kTaper({0.65f, 0.0f}, {0.85f, 0.9f}); // thin hairlines, strong swell
 const PressureCurve kSteady({0.0f, 0.75f}, {0.25f, 1.0f}); // nearly constant width
 
 } // namespace
@@ -15,21 +15,25 @@ const PressureCurve kSteady({0.0f, 0.75f}, {0.25f, 1.0f}); // nearly constant wi
 QList<BrushPreset> builtInPresets(ToolId tool)
 {
     switch (tool) {
+    case ToolId::Pencil:
+    case ToolId::Pen:
     case ToolId::Brush:
-        return {
-            {QObject::tr("Pencil"), tool, 6.0, 0.85, kFirm, 0.2},
-            {QObject::tr("Pen"), tool, 5.0, 1.0, kLinear, 0.45},
-            {QObject::tr("Nib"), tool, 9.0, 1.0, kTaper, 0.5},
-            {QObject::tr("Marker"), tool, 14.0, 1.0, kSteady, 0.25},
-            {QObject::tr("Brush"), tool, 32.0, 0.7, kLinear, 0.15},
-            {QObject::tr("Fill"), tool, 80.0, 1.0, kSteady, 0.1},
-        };
+    case ToolId::Watercolor:
+    case ToolId::Airbrush:
+    case ToolId::Decoration:
+        return brushCategoryPresets(tool);
     case ToolId::Eraser:
-        return {
+    {
+        QList<BrushPreset> erasers = {
             {QObject::tr("Eraser"), tool, 30.0, 1.0, kSteady, 0.1},
             {QObject::tr("Fine eraser"), tool, 6.0, 1.0, kLinear, 0.2},
             {QObject::tr("Large eraser"), tool, 120.0, 1.0, kSteady, 0.0},
         };
+        const char *ids[] = {"eraser/eraser", "eraser/fine", "eraser/large"};
+        for (qsizetype i = 0; i < erasers.size(); ++i)
+            erasers[i].id = QLatin1String(ids[i]);
+        return erasers;
+    }
     case ToolId::RectSelect:
     case ToolId::LassoSelect: { // the selection tool's two shapes
         BrushPreset rectangle{QObject::tr("Rectangle"), tool};

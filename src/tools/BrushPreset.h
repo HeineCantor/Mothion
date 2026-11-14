@@ -37,6 +37,9 @@ struct BrushPreset
     }
 
     QString name;
+    // Names the sub tool for good (what it is set to is remembered by it, see SubToolMemory): "pen/g-pen" for a
+    // built-in one, "imported/<file>" for an imported one. Empty for the sub tools that only set a mode.
+    QString id;
     ToolId tool = ToolId::Brush;
     double size = 10.0;
     double opacity = 1.0;
@@ -44,6 +47,8 @@ struct BrushPreset
     double smoothing = 0.3;
     bool sharpCorners = false; // see ToolState::sharpCorners()
     BrushDefinitionPtr brush; // null = round brush
+    // An imported sub tool: the copy of its file that the library keeps (empty for a built-in one).
+    QString storedFile;
     // A fill sub tool: sets only the fill mode, none of the brush values above.
     std::optional<FillSettings::Mode> fillMode;
     // ... and, if set, where the area is looked for: all layers shown, or this layer only.
