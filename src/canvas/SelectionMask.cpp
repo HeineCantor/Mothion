@@ -55,6 +55,26 @@ int SelectionMask::at(int x, int y) const
     return coverage.constScanLine(y - bounds.y())[x - bounds.x()];
 }
 
+void fillByMask(doc::TiledImage &image, const SelectionMask &mask, doc::Pixel color, bool clear)
+{
+    if (mask.isEmpty())
+        return;
+    const QRect r = mask.bounds;
+    std::vector<doc::Pixel> pixels(std::size_t(r.width()) * std::size_t(r.height()));
+    image.read(r.x(), r.y(), r.width(), r.height(), pixels.data(), r.width());
+    const int alpha = int(color >> 24);
+    for (int y = 0; y < r.height(); ++y) {
+        const uchar *cov = mask.coverage.constScanLine(y);
+        for (int x = 0; x < r.width(); ++x) {
+            if (!cov[x])
+                continue;
+            doc::Pixel &p = pixels[std::size_t(y) * std::size_t(r.width()) + std::size_t(x)];
+            p = clear ? scaled(p, 255 - (cov[x] * alpha + 127) / 255) : over(p, scaled(color, cov[x]));
+        }
+    }
+    image.write(r.x(), r.y(), r.width(), r.height(), pixels.data(), r.width());
+}
+
 void splitByMask(const doc::TiledImage &image, const SelectionMask &mask, doc::TiledImage &inside,
                  doc::TiledImage &outside)
 {

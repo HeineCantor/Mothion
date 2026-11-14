@@ -3,6 +3,7 @@
 #include "canvas/FrameRenderer.h"
 #include "tools/Preferences.h"
 #include "canvas/SelectionMask.h"
+#include "canvas/SelectionGrow.h"
 #include "canvas/VectorRender.h"
 #include "canvas/TileQt.h"
 #include "core/document/commands/DrawingCommands.h"
@@ -26,6 +27,7 @@
 #include <QFileInfo>
 
 #include <algorithm>
+#include <cmath>
 #include <set>
 #include <functional>
 #include <vector>
@@ -2233,7 +2235,50 @@ void DocumentController::invertSelection()
     setSelection(page.subtracted(m_selection));
 }
 
-bool DocumentController::eraseSelection(QString *reason)
+bool DocumentController::growSelection(int pixels, QString *reason)
+{
+    if (!hasSelection()) {
+        if (reason)
+            *reason = tr("Nothing is selected");
+        return false;
+    }
+    if (pixels == 0)
+        return true;
+    // The page's edge counts as an edge too when shrinking (what lies outside it is never selected).
+    const QPainterPath area = canvas::grownSelection(m_selection, pixels);
+    if (area.boundingRect().width() < 1 || area.boundingRect().height() < 1) {
+        if (reason)
+            *reason = tr("The selection is too small to shrink that much");
+        return false;
+    }
+    setSelection(area);
+    return true;
+}
+
+bool DocumentController::fillSelection(const QColor &color, QString *reason)
+{
+    interruptStroke();
+    if (!hasSelection()) {
+        if (reason)
+            *reason = tr("Nothing is selected");
+        return false;
+    }
+    const auto target = beginPaint(true, reason);
+    if (!target)
+        return false;
+    const canvas::SelectionMask mask = canvas::SelectionMask::fromPath(m_selection);
+    const QColor tinted = target->tint(color);
+    const int alpha = tinted.alpha();
+    const doc::Pixel pixel = doc::Pixel(alpha) << 24 | doc::Pixel(tinted.red() * alpha / 255) << 16
+                             | doc::Pixel(tinted.green() * alpha / 255) << 8 | doc::Pixel(tinted.blue() * alpha / 255);
+    const doc::TiledImage before = *target->image;
+    canvas::fillByMask(*target->image, mask, pixel, target->mask);
+    notifyPainted(mask.bounds);
+    endPaint(before, doc::CommandKind::Fill);
+    return true;
+}
+
+bool DocumentController::eraseBySelection(bool insideIt, QString *reason)
 {
     interruptStroke();
     const QString nothing = tr("Nothing in the selection on this frame");
@@ -2248,35 +2293,40 @@ bool DocumentController::eraseSelection(QString *reason)
     const canvas::SelectionMask mask = canvas::SelectionMask::fromPath(m_selection);
     doc::TiledImage inside, outside;
     canvas::splitByMask(layer->image, mask, inside, outside);
-    // A vector layer's strokes are cut along the outline: what is outside stays.
+    if (!insideIt)
+        std::swap(inside, outside); // `inside` is what goes, `outside` what stays
+    // A vector layer's strokes are cut along the outline: the other side stays.
     const bool vector = layer->kind == doc::LayerKind::Vector;
-    std::vector<doc::VectorStroke> strokesOutside;
-    bool strokesInside = false;
+    std::vector<doc::VectorStroke> strokesKept;
+    bool strokesErased = false;
     if (vector)
         for (const doc::VectorStroke &stroke : layer->strokes) {
             canvas::SplitStroke split = canvas::splitStrokeByMask(stroke, mask);
-            strokesInside |= !split.inside.empty();
-            strokesOutside.insert(strokesOutside.end(), split.outside.begin(), split.outside.end());
+            const auto &erased = insideIt ? split.inside : split.outside;
+            const auto &kept = insideIt ? split.outside : split.inside;
+            strokesErased |= !erased.empty();
+            strokesKept.insert(strokesKept.end(), kept.begin(), kept.end());
         }
-    if (inside.isEmpty() && !strokesInside) {
+    if (inside.isEmpty() && !strokesErased) {
         if (reason)
-            *reason = nothing;
+            *reason = insideIt ? nothing : tr("Nothing outside the selection on this frame");
         return false;
     }
     const doc::DrawingId drawingId = currentDrawingId();
     const doc::TiledImage before = layer->image;
+    const QRect area = insideIt ? mask.bounds : boundsOf(before.tileCoords());
     layer->image = std::move(outside);
     std::vector<std::unique_ptr<doc::Command>> steps;
     if (auto paint = doc::PaintCommand::capture(m_currentCel, drawingId, m_currentLayer, before, layer->image))
         steps.push_back(std::move(paint));
     if (vector) {
         auto strokes = std::make_unique<doc::SetVectorStrokesCommand>(m_currentCel, drawingId, m_currentLayer,
-                                                                      layer->strokes, std::move(strokesOutside));
+                                                                      layer->strokes, std::move(strokesKept));
         strokes->apply(*m_document);
         steps.push_back(std::move(strokes));
     }
     m_history.pushApplied(std::make_unique<doc::GroupCommand>(doc::CommandKind::ClearLayer, std::move(steps)));
-    emit pixelsChanged(m_currentCel, drawingId, mask.bounds);
+    emit pixelsChanged(m_currentCel, drawingId, area);
     emit historyChanged();
     return true;
 }

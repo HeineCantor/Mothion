@@ -271,6 +271,38 @@ void drawGlyph(QPainter &p, IconId id)
             path.lineTo(t.map(QPointF(0, -8.5)));
         }
         break;
+    case IconId::ExpandSelection: // a small dashed square, arrows out of its corners
+    case IconId::ShrinkSelection: // ... into them
+        addDashedSquare(path, 8);
+        for (int k = 0; k < 4; ++k) {
+            const QTransform t = QTransform().translate(12, 12).rotate(90 * k).translate(-12, -12);
+            const QPointF tip = id == IconId::ExpandSelection ? QPointF(3, 3) : QPointF(6.5, 6.5);
+            const QPointF tail = id == IconId::ExpandSelection ? QPointF(6.5, 6.5) : QPointF(3, 3);
+            const QPointF along = (tip - tail) / std::hypot(tip.x() - tail.x(), tip.y() - tail.y());
+            const QPointF across(-along.y(), along.x());
+            path.moveTo(t.map(tail));
+            path.lineTo(t.map(tip));
+            path.moveTo(t.map(tip - 2.2 * along + 1.6 * across));
+            path.lineTo(t.map(tip));
+            path.lineTo(t.map(tip - 2.2 * along - 1.6 * across));
+        }
+        break;
+    case IconId::EraseOutsideSelection: // a dashed square, the burst outside it
+        addDashedSquare(path, 8);
+        for (int k = 0; k < 8; ++k) {
+            const QTransform t = QTransform().translate(12, 12).rotate(45 * k);
+            path.moveTo(t.map(QPointF(0, -7.5 - (k % 2) * 1.5)));
+            path.lineTo(t.map(QPointF(0, -10.5)));
+        }
+        break;
+    case IconId::FillSelection: { // a dashed square, solid inside
+        addDashedSquare(path);
+        p.drawPath(path);
+        p.setBrush(p.pen().color());
+        p.setPen(Qt::NoPen);
+        p.drawRect(QRectF(8, 8, 8, 8));
+        return;
+    }
     case IconId::CutToLayer: // scissors over a sheet
         path.addEllipse(QPointF(5.5, 17.5), 2.3, 2.3);
         path.addEllipse(QPointF(11.5, 17.5), 2.3, 2.3);

@@ -10,7 +10,7 @@ enum class IconId {
     Collapse, Expand, Float, Close,
     ZoomOut, ZoomFit, ZoomActual, RotateLeft, RotateRight, RotateReset,
     FlipHorizontal, FlipVertical, Eye, Lock, Add, Delete, ArrowUp, ArrowDown, Clear,
-    Deselect, InvertSelection, EraseSelection, CutToLayer, CopyToLayer, MergeLayers, MergeDown,
+    Deselect, InvertSelection, ExpandSelection, ShrinkSelection, EraseSelection, EraseOutsideSelection, FillSelection, CutToLayer, CopyToLayer, MergeLayers, MergeDown,
     Folder, Frame, PreviousFrame, NextFrame, Wrench, Play, Stop, Pause, Speaker, SpeakerOff, Camera, MaskAdd, MaskDelete, ClipLayer, Trajectory, Flag, PreviousMarker, NextMarker, Keyframe, AddLayer, AddPerspective, AddVector,
     // What a layer is, in its row (raster, vector, perspective), and the rasterize button.
     KindRaster, KindVector, KindPerspective, Rasterize,

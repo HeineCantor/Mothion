@@ -119,6 +119,7 @@ qt_add_library(mothion_gui STATIC
     canvas/Resample.h canvas/Resample.cpp
     canvas/AnimateTool.h canvas/AnimateTool.cpp
     canvas/SelectionMask.h canvas/SelectionMask.cpp
+    canvas/SelectionGrow.h canvas/SelectionGrow.cpp
     canvas/SelectionTool.h canvas/SelectionTool.cpp
     canvas/PuppetTool.h canvas/PuppetTool.cpp
     canvas/CanvasView.h canvas/CanvasView.cpp

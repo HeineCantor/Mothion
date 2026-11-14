@@ -39,19 +39,6 @@ doc::Pixel clearedBy(doc::Pixel pixel, int amount)
     return out;
 }
 
-// `fill` × `coverage` (0..255) over `pixel`, premultiplied.
-doc::Pixel over(doc::Pixel pixel, doc::Pixel fill, int coverage)
-{
-    doc::Pixel out = 0;
-    const int a = (int((fill >> 24) & 0xff) * coverage + 127) / 255;
-    for (int shift = 0; shift < 32; shift += 8) {
-        const int f = (int((fill >> shift) & 0xff) * coverage + 127) / 255;
-        const int p = int((pixel >> shift) & 0xff);
-        out |= doc::Pixel(f + (p * (255 - a) + 127) / 255) << shift;
-    }
-    return out;
-}
-
 } // namespace
 
 FillTool::FillTool(document::DocumentController *document, tools::ToolState *state, Frame frame,
@@ -130,15 +117,7 @@ void FillTool::fillLasso()
     const doc::TiledImage before = *target->image;
     const QRect box = mask.bounds;
     const doc::Pixel color = fillColor(target->tint(m_state->color()));
-    std::vector<doc::Pixel> pixels(std::size_t(box.width()) * std::size_t(box.height()));
-    target->image->read(box.x(), box.y(), box.width(), box.height(), pixels.data(), box.width());
-    for (int y = 0; y < box.height(); ++y)
-        for (int x = 0; x < box.width(); ++x)
-            if (const int coverage = mask.at(box.x() + x, box.y() + y)) {
-                doc::Pixel &p = pixels[std::size_t(y) * std::size_t(box.width()) + std::size_t(x)];
-                p = target->mask ? clearedBy(p, coverage * int(color >> 24) / 255) : over(p, color, coverage);
-            }
-    target->image->write(box.x(), box.y(), box.width(), box.height(), pixels.data(), box.width());
+    fillByMask(*target->image, mask, color, target->mask);
     m_document->notifyPainted(box);
     m_document->endPaint(before, doc::CommandKind::Fill);
 }

@@ -369,13 +369,20 @@ public:
     void clearSelection();
     // Selects what was not selected (all if nothing was).
     void invertSelection();
+    // Moves the selection's edge out (`pixels` > 0) or in (< 0) by that many pixels, rounding the corners it goes
+    // around; kept inside the page. One undo step. False, with `reason`, when nothing is selected or shrinking would
+    // leave nothing.
+    bool growSelection(int pixels, QString *reason = nullptr);
 
     // Work on the pixels of the current layer under the selection; each is
     // one undo step and keeps the selection. They return false, with
     // `reason` saying why, when there is no selection, nothing under it, or
     // the layer (or its cel) is hidden (or locked, for the ones that change it).
-    // Erases what is selected.
-    bool eraseSelection(QString *reason = nullptr);
+    // Erases what is selected; what is not selected.
+    bool eraseSelection(QString *reason = nullptr) { return eraseBySelection(true, reason); }
+    bool eraseOutsideSelection(QString *reason = nullptr) { return eraseBySelection(false, reason); }
+    // Fills what is selected with `color` (on a mask: shows the layer there). Not on a vector layer.
+    bool fillSelection(const QColor &color, QString *reason = nullptr);
     // Moves (cut) or copies what is selected to a new layer above the
     // current one, in the same drawing; the new layer becomes current.
     // Mirrors the selected pixels across the middle of the selection's box (the selection turns with them, so it still
@@ -612,6 +619,7 @@ private:
     doc::Layer *workLayer(bool changesIt, const QString &nothing, QString *reason, bool vectorOk = false);
     bool selectionToLayer(bool cut, QString *reason);
     bool flipSelection(bool horizontal, QString *reason);
+    bool eraseBySelection(bool inside, QString *reason);
     // The first key of a cel: where it turns around (the middle of what it shows).
     void clearTemporaryPose();
     doc::CelId m_tempPoseCel = doc::kNoId; // the cel that has a pose that is not a key (one at a time)

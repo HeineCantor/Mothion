@@ -1,6 +1,8 @@
 // Tests for the UI layer: the canvas tools: move, selection, transform, fill, paste.
 
 #include "test_common.h"
+#include <numbers>
+#include <QElapsedTimer>
 
 class TestUiTools : public QObject
 {
@@ -942,6 +944,101 @@ private slots:
 
 
     // Making, changing and clearing a selection are undo steps.
+    // Erase outside keeps what is selected and clears the rest; fill paints the selection; both one undo step.
+    void eraseOutsideAndFillTheSelection()
+    {
+        document::DocumentController controller;
+        QImage image(100, 10, QImage::Format_ARGB32);
+        image.fill(Qt::green);
+        controller.importImage(image, QStringLiteral("bar")); // x 910..1009, y 535..544
+        const doc::CelId bar = controller.currentCel();
+        auto pixel = [&](int x, int y) {
+            return controller.document().cel(bar)->drawingAt(0)->layers.front().image.pixel(x, y);
+        };
+        const doc::Pixel green = pixel(930, 540);
+        QString reason;
+        QVERIFY(!controller.eraseOutsideSelection(&reason)); // nothing selected
+        QVERIFY(!controller.fillSelection(Qt::red, &reason));
+
+        QPainterPath left;
+        left.addRect(900, 500, 60, 100); // the bar's left half
+        controller.setSelection(left);
+        QVERIFY(controller.eraseOutsideSelection());
+        QCOMPARE(pixel(930, 540), green);
+        QCOMPARE(qAlpha(pixel(990, 540)), 0);
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo clear"));
+        QVERIFY(!controller.eraseOutsideSelection(&reason)); // nothing left outside
+        QVERIFY(!reason.isEmpty());
+        controller.undo();
+        QCOMPARE(pixel(990, 540), green);
+
+        QVERIFY(controller.fillSelection(Qt::red));
+        QCOMPARE(QColor::fromRgba(pixel(930, 540)), QColor(Qt::red));
+        QCOMPARE(QColor::fromRgba(pixel(930, 520)), QColor(Qt::red)); // also where nothing was drawn
+        QCOMPARE(pixel(990, 540), green);
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo fill"));
+        controller.undo();
+        QCOMPARE(pixel(930, 540), green);
+    }
+
+    // Expand and shrink move the selection's edge by that many pixels, one undo step each; shrinking to nothing is
+    // refused.
+    void expandAndShrinkTheSelection()
+    {
+        document::DocumentController controller;
+        QString reason;
+        QVERIFY(!controller.growSelection(5, &reason)); // nothing selected
+        QPainterPath box;
+        box.addRect(100, 100, 50, 40);
+        controller.setSelection(box);
+        QVERIFY(controller.growSelection(10));
+        QRectF bounds = controller.selection().boundingRect();
+        QVERIFY(std::abs(bounds.left() - 90) < 0.5 && std::abs(bounds.right() - 160) < 0.5);
+        QVERIFY(std::abs(bounds.top() - 90) < 0.5 && std::abs(bounds.bottom() - 150) < 0.5);
+        QVERIFY(!controller.selection().contains(QPointF(91, 91))); // the corners are rounded
+        QVERIFY(controller.selection().contains(QPointF(95, 120)));
+        controller.undo();
+        QCOMPARE(controller.selection().boundingRect(), QRectF(100, 100, 50, 40));
+
+        QVERIFY(controller.growSelection(-10));
+        bounds = controller.selection().boundingRect();
+        QVERIFY(std::abs(bounds.left() - 110) < 0.5 && std::abs(bounds.right() - 140) < 0.5);
+        QVERIFY(std::abs(bounds.top() - 110) < 0.5 && std::abs(bounds.bottom() - 130) < 0.5);
+        QVERIFY(!controller.growSelection(-20, &reason)); // nothing would be left
+        QVERIFY(!reason.isEmpty());
+        QVERIFY(controller.hasSelection());
+
+        // A selection of the whole page shrinks from the page's edges too.
+        controller.selectAll();
+        QVERIFY(controller.growSelection(-10));
+        QVERIFY(std::abs(controller.selection().boundingRect().left() - 10) < 0.5);
+
+        // A hole (the page with a box taken away) closes up as the selection grows.
+        controller.setSelection(box);
+        controller.invertSelection();
+        QVERIFY(!controller.selection().contains(QPointF(125, 120)));
+        QVERIFY(controller.growSelection(15));
+        QVERIFY(controller.selection().contains(QPointF(110, 120)));
+        QVERIFY(!controller.selection().contains(QPointF(125, 120))); // 15 from the left edge, still inside the hole
+        QVERIFY(controller.selection().contains(QPointF(5, 5)));
+
+        // A lasso of thousands of points takes no longer than a simple one.
+        QPolygonF lasso;
+        for (int i = 0; i < 4000; ++i) {
+            const double t = 2 * std::numbers::pi * i / 4000, r = 300 + 40 * std::sin(17 * t) + (i % 7);
+            lasso << QPointF(960 + r * std::cos(t), 540 + r * std::sin(t));
+        }
+        QPainterPath wiggly;
+        wiggly.addPolygon(lasso);
+        controller.setSelection(wiggly);
+        QElapsedTimer timer;
+        timer.start();
+        QVERIFY(controller.growSelection(30));
+        QVERIFY(controller.growSelection(-50));
+        QVERIFY(timer.elapsed() < 3000);
+        QVERIFY(controller.selection().contains(QPointF(960, 540)));
+    }
+
     // Erase, cut and copy work on what is selected, each as one undo step.
     void selectionCommandsWorkOnTheSelectedPixels()
     {

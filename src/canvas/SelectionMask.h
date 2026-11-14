@@ -25,6 +25,10 @@ struct SelectionMask
 void splitByMask(const doc::TiledImage &image, const SelectionMask &mask, doc::TiledImage &inside,
                  doc::TiledImage &outside);
 
+// `color` (premultiplied) laid over `image` where the mask covers it, in proportion to the coverage; with `clear`,
+// the image is taken away there instead, by the color's alpha (what a fill does to a layer's mask).
+void fillByMask(doc::TiledImage &image, const SelectionMask &mask, doc::Pixel color, bool clear = false);
+
 // `top` drawn over `bottom` (premultiplied source-over), in place.
 void compositeOver(doc::TiledImage &bottom, const doc::TiledImage &top);
 

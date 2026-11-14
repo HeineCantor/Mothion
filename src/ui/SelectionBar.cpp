@@ -7,6 +7,7 @@
 
 #include <QEvent>
 #include <QHBoxLayout>
+#include <QInputDialog>
 #include <QToolButton>
 
 #include <algorithm>
@@ -54,8 +55,15 @@ SelectionBar::SelectionBar(canvas::CanvasView *canvas, document::DocumentControl
         ->setObjectName(QStringLiteral("deselect"));
     add(IconId::InvertSelection, tr("Invert selection"), [this] { m_document->invertSelection(); })
         ->setObjectName(QStringLiteral("invert"));
+    add(IconId::ExpandSelection, tr("Expand selection…"), [this] { grow(true); })
+        ->setObjectName(QStringLiteral("expand"));
+    add(IconId::ShrinkSelection, tr("Shrink selection…"), [this] { grow(false); })
+        ->setObjectName(QStringLiteral("shrink"));
     add(IconId::EraseSelection, tr("Erase the selected pixels"), [this] { runWithReason(&Controller::eraseSelection); })
         ->setObjectName(QStringLiteral("erase"));
+    add(IconId::EraseOutsideSelection, tr("Erase outside the selection"),
+        [this] { runWithReason(&Controller::eraseOutsideSelection); })
+        ->setObjectName(QStringLiteral("eraseOutside"));
     add(IconId::CutToLayer, tr("Cut to a new layer"), [this] { runWithReason(&Controller::cutSelectionToLayer); })
         ->setObjectName(QStringLiteral("cut"));
     add(IconId::CopyToLayer, tr("Copy to a new layer"), [this] { runWithReason(&Controller::copySelectionToLayer); })
@@ -63,6 +71,13 @@ SelectionBar::SelectionBar(canvas::CanvasView *canvas, document::DocumentControl
     add(IconId::Transform, tr("Transform (Ctrl+T)"),
         [toolState] { toolState->setActiveTool(tools::ToolId::Transform); })
         ->setObjectName(QStringLiteral("transform"));
+    add(IconId::FillSelection, tr("Fill the selection with the drawing color"), [this, toolState] {
+        QString reason;
+        const bool done = toolState->transparentSelected() ? m_document->eraseSelection(&reason)
+                                                           : m_document->fillSelection(toolState->color(), &reason);
+        if (!done && !reason.isEmpty())
+            emit statusMessage(reason);
+    })->setObjectName(QStringLiteral("fill"));
     add(IconId::FlipHorizontal, tr("Flip horizontally"), [this] { runWithReason(&Controller::flipSelectionHorizontally); })
         ->setObjectName(QStringLiteral("flipHorizontal"));
     add(IconId::FlipVertical, tr("Flip vertically"), [this] { runWithReason(&Controller::flipSelectionVertically); })
@@ -88,6 +103,19 @@ void SelectionBar::runWithReason(bool (document::DocumentController::*command)(Q
 {
     QString reason;
     if (!(m_document->*command)(&reason))
+        emit statusMessage(reason);
+}
+
+void SelectionBar::grow(bool out)
+{
+    bool ok = false;
+    const int pixels = QInputDialog::getInt(m_canvas->window(), out ? tr("Expand selection") : tr("Shrink selection"),
+                                            tr("Width (px):"), m_growPixels, 1, 1000, 1, &ok);
+    if (!ok)
+        return;
+    m_growPixels = pixels;
+    QString reason;
+    if (!m_document->growSelection(out ? pixels : -pixels, &reason) && !reason.isEmpty())
         emit statusMessage(reason);
 }
 
