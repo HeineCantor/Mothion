@@ -188,6 +188,32 @@ private slots:
         QVERIFY(!controller.setCelKey(doc::CelId(9999), 0, at(1, 1))); // no such cel
     }
 
+    // Several keys chosen together take one curve to the next key at once, one undo step; a key not there is let be.
+    void severalKeysTakeOneCurve()
+    {
+        document::DocumentController controller;
+        controller.setSceneLength(48);
+        const doc::CelId cel = controller.currentCel();
+        QVERIFY(controller.setCelKey(cel, 0, at(0, 0)));
+        QVERIFY(controller.setCelKey(cel, 12, at(100, 40)));
+        QVERIFY(controller.setCelKey(cel, 24, at(200, 0)));
+        using Ref = document::DocumentController::CelKeyRef;
+        const std::vector<Ref> keys{{cel, 0, doc::Channel::Position}, {cel, 12, doc::Channel::Position},
+                                    {cel, 12, doc::Channel::Rotation}, {cel, 30, doc::Channel::Position}};
+        QVERIFY(controller.setCelKeysEasing(keys, doc::Easing::hold()));
+        const doc::CelMotion *m = controller.celMotion(cel);
+        QVERIFY(m->keyAt(doc::Channel::Position, 0)->easing == doc::Easing::hold());
+        QVERIFY(m->keyAt(doc::Channel::Position, 12)->easing == doc::Easing::hold());
+        QVERIFY(m->keyAt(doc::Channel::Rotation, 12)->easing == doc::Easing::hold());
+        QVERIFY(!(m->keyAt(doc::Channel::Rotation, 0)->easing == doc::Easing::hold())); // not chosen
+        QVERIFY(!(m->keyAt(doc::Channel::Position, 24)->easing == doc::Easing::hold()));
+        QVERIFY(!controller.setCelKeysEasing(keys, doc::Easing::hold())); // nothing changes
+        controller.undo();
+        m = controller.celMotion(cel);
+        QVERIFY(!(m->keyAt(doc::Channel::Position, 0)->easing == doc::Easing::hold()));
+        QVERIFY(!(m->keyAt(doc::Channel::Position, 12)->easing == doc::Easing::hold()));
+    }
+
     // Reversed, the keys play backwards over the frames they span: every frame shows what the mirrored frame showed, the
     // curves turned around too; the channels keep in step; one undo step on a trajectory.
     void aTrajectoryIsReversed()

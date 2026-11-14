@@ -795,22 +795,41 @@ void TimelineView::showMotionMenu(const QPoint &globalPos, int celIndex, int fra
         if (!key && (!channel || *channel == c))
             key = motion.keyAt(c, frame);
     QMenu menu(this);
+    // On one of several keys chosen together: the curve and Delete are of them all.
+    const std::vector<document::DocumentController::CelKeyRef> chosen = chosenKeyRefs();
+    const bool together = key && keyChosen(id, frame, channel) && chosen.size() > 1;
     if (key) {
         QMenu *easing = menu.addMenu(tr("To the next key"));
         auto add = [&](const QString &text, const doc::Easing &e) {
-            QAction *action = easing->addAction(text, this, [this, id, frame, e, channel] {
-                m_document->setCelKeyEasing(id, frame, e, channel);
+            QAction *action = easing->addAction(text, this, [this, id, frame, e, channel, together, chosen] {
+                if (together)
+                    m_document->setCelKeysEasing(chosen, e);
+                else
+                    m_document->setCelKeyEasing(id, frame, e, channel);
             });
             action->setCheckable(true);
-            action->setChecked(key->easing == e);
+            bool all = key->easing == e;
+            if (together)
+                all = std::all_of(chosen.begin(), chosen.end(), [this, &e](const auto &k) {
+                    const doc::CelMotion *m = m_document->celMotion(k.cel);
+                    const doc::CelKey *ck = m ? m->keyAt(k.channel, k.frame) : nullptr;
+                    return ck && ck->easing == e;
+                });
+            action->setChecked(all);
         };
         add(tr("Linear"), doc::Easing::linear());
         add(tr("Hold"), doc::Easing::hold());
         add(tr("Ease in"), doc::Easing::easeIn());
         add(tr("Ease out"), doc::Easing::easeOut());
         add(tr("Ease in and out"), doc::Easing::easeInOut());
-        menu.addAction(channel ? tr("Delete keyframe") : tr("Delete keyframes"), this,
-                       [this, id, frame, channel] { m_document->removeCelKey(id, frame, channel); });
+        if (together)
+            menu.addAction(tr("Delete the chosen keyframes"), this, [this, chosen] {
+                clearKeySelection();
+                m_document->removeCelKeys(chosen);
+            });
+        else
+            menu.addAction(channel ? tr("Delete keyframe") : tr("Delete keyframes"), this,
+                           [this, id, frame, channel] { m_document->removeCelKey(id, frame, channel); });
     }
     if (channel) {
         if (!key)
@@ -845,7 +864,24 @@ void TimelineView::showMotionMenu(const QPoint &globalPos, int celIndex, int fra
     pasteAction->setShortcut(Shortcuts::instance().key(QStringLiteral("edit.paste")));
     pasteAction->setEnabled(!m_copiedKeys.empty());
     menu.addSeparator();
-    menu.addAction(tr("Delete all keyframes of the cel"), this, [this, id] { m_document->clearCelMotion(id); });
+    // The cels of the keys chosen together, when there are more than this one: all their keys.
+    std::set<doc::CelId> cels{id};
+    if (together)
+        for (const auto &k : chosen)
+            cels.insert(k.cel);
+    if (cels.size() > 1)
+        menu.addAction(tr("Delete all keyframes of the chosen cels"), this, [this, cels] {
+            std::vector<document::DocumentController::CelKeyRef> all;
+            for (const doc::CelId c : cels)
+                if (const doc::CelMotion *m = m_document->celMotion(c))
+                    for (doc::Channel ch : doc::kChannels)
+                        for (const doc::CelKey &k : m->keys(ch))
+                            all.push_back({c, k.frame, ch});
+            clearKeySelection();
+            m_document->removeCelKeys(all);
+        });
+    else
+        menu.addAction(tr("Delete all keyframes of the cel"), this, [this, id] { m_document->clearCelMotion(id); });
     menu.exec(globalPos);
 }
 

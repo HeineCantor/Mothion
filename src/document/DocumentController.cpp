@@ -1457,6 +1457,25 @@ bool DocumentController::removeCelKeys(const std::vector<CelKeyRef> &keys)
     return true;
 }
 
+bool DocumentController::setCelKeysEasing(const std::vector<CelKeyRef> &keys, const doc::Easing &easing)
+{
+    clearTemporaryPose();
+    std::map<doc::CelId, doc::CelMotion> motions;
+    for (const CelKeyRef &k : keys) {
+        const doc::Cel *cel = m_document->cel(k.cel);
+        if (!cel)
+            continue;
+        doc::CelMotion &motion = motions.try_emplace(k.cel, cel->motion()).first->second;
+        if (motion.keyAt(k.channel, k.frame))
+            motion.setEasing(k.channel, k.frame, easing);
+    }
+    auto command = motionsCommand(*m_document, motions);
+    if (!command)
+        return false;
+    execute(std::move(command));
+    return true;
+}
+
 bool DocumentController::movedKeyMotions(const std::vector<CelKeyRef> &keys, int delta,
                                          std::map<doc::CelId, doc::CelMotion> &motions) const
 {

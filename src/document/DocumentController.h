@@ -181,6 +181,8 @@ public:
         bool operator==(const CelKeyRef &) const = default;
     };
     bool removeCelKeys(const std::vector<CelKeyRef> &keys);
+    // The curve to the next key of all of them; false if none changes.
+    bool setCelKeysEasing(const std::vector<CelKeyRef> &keys, const doc::Easing &easing);
     // All of them `delta` frames on (or back): refused if one would go before the first frame or on a key that is not moved too.
     bool moveCelKeys(const std::vector<CelKeyRef> &keys, int delta);
     // While keys are dragged on the timeline: the motions the cels would have with `keys` moved `delta` frames (as
