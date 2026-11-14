@@ -43,9 +43,14 @@ public:
     // What is left, in order.
     std::vector<doc::VectorStroke> strokes() const;
     bool changed() const { return m_changed; }
-    // The area (document coordinates) whose strokes changed since the last call: it is to be drawn again, with the
-    // strokes that reach into it (see strokesIn()). Null if nothing changed.
+    // The area (document coordinates) where the strokes changed since the last call, near where they were cut: to be drawn
+    // again while the eraser goes on, with the strokes that reach into it (see strokesIn()). Null if nothing changed. A
+    // piece that is left may look a little otherwise away from its cut too (its tapers and its spacing are of its own
+    // length): changedArea() is all of it.
     QRectF takeDirty();
+    // All the area of the strokes that changed since the start (null if none): to be drawn again once, when the eraser
+    // is done.
+    QRectF changedArea() const { return m_hasChanged ? m_changedArea : QRectF(); }
     // The strokes, in order, whose line comes within the width of `area`.
     std::vector<doc::VectorStroke> strokesIn(const QRectF &area) const;
 
@@ -59,8 +64,11 @@ private:
     std::vector<doc::VectorStroke> m_original;
     std::vector<QRectF> m_originalBoxes;
     std::vector<Entry> m_left;
+    void addDirty(const QRectF &area);
     QRectF m_dirty;
     bool m_hasDirty = false;
+    QRectF m_changedArea;
+    bool m_hasChanged = false;
     bool m_changed = false;
 };
 

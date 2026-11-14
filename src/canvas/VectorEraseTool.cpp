@@ -69,10 +69,15 @@ void VectorEraseTool::eraseTo(const QPointF &to, bool pressed)
     s.state.erase({s.last, to}, radius, modeOf(m_toolState->vectorEraser().mode), pressed);
     s.last = to;
     const QRectF dirty = s.state.takeDirty();
-    if (dirty.isNull())
-        return;
-    // Only the area the cut strokes covered is drawn again, from the strokes that reach into it.
-    const QRect region = dirty.toAlignedRect().adjusted(-1, -1, 1, 1);
+    if (!dirty.isNull())
+        redraw(dirty);
+}
+
+void VectorEraseTool::redraw(const QRectF &area)
+{
+    // Only the area is drawn again, from the strokes that reach into it.
+    Session &s = *m_session;
+    const QRect region = area.toAlignedRect().adjusted(-1, -1, 1, 1);
     if (region.isEmpty())
         return;
     doc::TiledImage patch;
@@ -88,6 +93,9 @@ void VectorEraseTool::release(const QPointF &docPos, Qt::KeyboardModifiers modif
     if (!m_session)
         return;
     move(docPos, modifiers);
+    // While it went, only what was near the cuts was drawn again; now all of each stroke that changed, as it is.
+    if (const QRectF changed = m_session->state.changedArea(); !changed.isNull())
+        redraw(changed);
     Session s = std::move(*m_session);
     m_session.reset();
     if (!s.state.changed()) {

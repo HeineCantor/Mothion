@@ -100,6 +100,7 @@ QRect drawStrokes(doc::TiledImage &target, const std::vector<doc::VectorStroke> 
                                                     style.verticalThickness);
         stamper->setSecondaryColor(QColor::fromRgba(s.secondaryColor));
         StrokeSession session(target, std::move(stamper), s.opacity, s.erase, clip);
+        session.setDeferred(true); // (no mixing, no water edge: nothing reads the target while it is drawn)
         painted |= session.paintStroke(style, s.seed, s.points, s.cornerTips);
     }
     return painted;

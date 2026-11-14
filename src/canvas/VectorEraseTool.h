@@ -51,6 +51,8 @@ private:
     };
     // Takes away what the eraser covers going from the last point to `to`, and draws again only the area that changed.
     void eraseTo(const QPointF &to, bool pressed = false);
+    // Draws `area` of the layer again from the strokes as they are now.
+    void redraw(const QRectF &area);
 
     document::DocumentController *m_document;
     tools::ToolState *m_toolState;

@@ -166,6 +166,12 @@ std::vector<doc::VectorStroke> VectorEraseState::strokes() const
     return out;
 }
 
+void VectorEraseState::addDirty(const QRectF &area)
+{
+    m_dirty = m_hasDirty ? m_dirty.united(area) : area;
+    m_hasDirty = true;
+}
+
 QRectF VectorEraseState::takeDirty()
 {
     const QRectF dirty = m_hasDirty ? m_dirty : QRectF();
@@ -259,10 +265,12 @@ void VectorEraseState::erase(const std::vector<QPointF> &pathPoints, double radi
             continue;
         }
         m_changed = true;
-        m_dirty = m_hasDirty ? m_dirty.united(entry.box) : entry.box;
-        m_hasDirty = true;
-        if (mode == VectorEraseMode::WholeLine)
+        m_changedArea = m_hasChanged ? m_changedArea.united(entry.box) : entry.box;
+        m_hasChanged = true;
+        if (mode == VectorEraseMode::WholeLine) { // all of it goes
+            addDirty(entry.box);
             continue;
+        }
 
         // What goes, as stretches of positions along `q`.
         std::vector<std::pair<double, double>> gone;
@@ -322,6 +330,11 @@ void VectorEraseState::erase(const std::vector<QPointF> &pathPoints, double radi
             // The next stretch starts after this one (and past what went with it).
             i = std::max(last + 1, std::size_t(std::floor(to)) + 1);
         }
+
+        // Drawn again now: where it went, and the new ends of what stays (as far as its width reaches).
+        const double margin = stroke.size * 1.5 + 2.0;
+        for (const auto &g : gone)
+            addDirty(boundsOf(slice(q, g.first, g.second)).adjusted(-margin, -margin, margin, margin));
 
         // What stays: the pieces between the stretches that go.
         double cursor = 0.0;

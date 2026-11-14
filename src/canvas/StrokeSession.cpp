@@ -214,7 +214,8 @@ QRect StrokeSession::addDabs(std::span<const brush::BrushDab> dabs)
             }
         }
         m_touched.insert(c);
-        recomposeTile(c);
+        if (!m_deferred)
+            recomposeTile(c);
     }
     return bounds;
 }
@@ -246,7 +247,8 @@ QRect StrokeSession::addCornerTip(const brush::CornerTip &tip, const brush::Brus
             p.drawPolygon(quad);
         }
         m_touched.insert(c);
-        recomposeTile(c);
+        if (!m_deferred)
+            recomposeTile(c);
     }
     return bounds;
 }
@@ -258,7 +260,8 @@ QRect StrokeSession::paintStroke(const brush::BrushStyle &style, std::uint32_t s
     points = brush::finalPoints(style, std::move(points));
     brush::DabGenerator generator(style, seed);
     generator.setStrokeLength(brush::strokeLength(points));
-    return drawPoints(generator, points, cornerTips) | finish();
+    const QRect drawn = drawPoints(generator, points, cornerTips); // before finish(), which works on what is drawn
+    return drawn | finish();
 }
 
 QRect StrokeSession::drawPoints(brush::DabGenerator &generator, const std::vector<brush::BrushInput> &points,
@@ -340,6 +343,9 @@ QRect StrokeSession::restart()
 
 QRect StrokeSession::finish()
 {
+    if (m_deferred)
+        for (const doc::TileCoord &c : m_touched)
+            recomposeTile(c);
     if (!m_waterEdge.on || m_erase || m_touched.empty())
         return {};
     const double radius = std::max(1.0, m_waterEdge.radius);

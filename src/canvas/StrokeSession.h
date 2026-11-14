@@ -55,6 +55,9 @@ public:
     // painted or erased, with the outline's antialiased edge. An empty path
     // means no limit.
     void setSelection(const QPainterPath &area);
+    // The target is made only by finish() (not after each stretch of dabs): for a stroke drawn whole from its points,
+    // where nothing reads the target while it is drawn (no color mixing, no water edge).
+    void setDeferred(bool deferred) { m_deferred = deferred; }
 
     // Ribbon, mixing and water edge settings of the brush.
     void setStyle(const brush::BrushStyle &style);
@@ -101,6 +104,7 @@ private:
     const doc::TiledImage m_before;
     doc::TiledImage m_mask;
     std::unordered_set<doc::TileCoord, doc::TileCoordHash> m_touched;
+    bool m_deferred = false;
     std::shared_ptr<const DabStamper> m_stamper;
     double m_opacity;
     bool m_erase;
