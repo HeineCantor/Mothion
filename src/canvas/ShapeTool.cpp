@@ -124,8 +124,9 @@ RenderedShape renderShape(const ShapeSettings &settings, double thickness, const
     const bool filled = !open && settings.style != ShapeSettings::Style::Outline;
     const double reach = outline ? thickness : 0.0; // a mitered corner reaches past half the thickness
     const QPainterPath path = shapePath(settings, geometry);
-    const QRect area =
-        path.controlPointRect().adjusted(-reach, -reach, reach, reach).toAlignedRect().adjusted(-1, -1, 1, 1) & clip;
+    QRect area = path.controlPointRect().adjusted(-reach, -reach, reach, reach).toAlignedRect().adjusted(-1, -1, 1, 1);
+    if (!clip.isEmpty())
+        area &= clip;
     if (path.isEmpty() || area.isEmpty())
         return {};
 
@@ -291,9 +292,8 @@ ShapeGeometry ShapeTool::currentGeometry(bool withHover) const
 
 RenderedShape ShapeTool::render(const ShapeGeometry &geometry) const
 {
-    const doc::Document &d = m_document->document();
     return renderShape(m_state->shapeSettings(), m_state->settings(tools::ToolId::Shape).size, m_state->color(),
-                       m_state->inactiveColor(), geometry, QRect(0, 0, d.width(), d.height()));
+                       m_state->inactiveColor(), geometry, {}); // the canvas has no end
 }
 
 void ShapeTool::release(const QPointF &docPos, Qt::KeyboardModifiers modifiers)
@@ -345,7 +345,7 @@ void ShapeTool::draw(const ShapeGeometry &geometry)
 {
     const RenderedShape shape = render(geometry);
     if (shape.image.isNull())
-        return; // all of it outside the page
+        return; // nothing to draw
 
     QString reason;
     const auto target = m_document->beginPaint(true, &reason, true, true); // a vector layer keeps the outline
@@ -372,8 +372,7 @@ void ShapeTool::draw(const ShapeGeometry &geometry)
             }
             strokes = std::move(inside);
         }
-        const doc::Document &d = m_document->document();
-        const QRect painted = drawStrokes(*target->image, strokes, *m_state, QRect(0, 0, d.width(), d.height()));
+        const QRect painted = drawStrokes(*target->image, strokes, *m_state, {});
         for (doc::VectorStroke &stroke : strokes)
             m_document->attachStroke(std::move(stroke));
         m_document->notifyPainted(painted);

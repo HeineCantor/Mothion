@@ -30,15 +30,18 @@ void paintPerspective(QPainter &p, const perspective::Grid &grid);
 // bottom to top, each one the drawing it exposes at that frame. A drawing's
 // visible layers are composed together first, with their opacity and blend
 // mode, like a folder; the cel's opacity and blend mode then put the result
-// over the cels below. The result is a document-sized image the canvas
-// shows through its view transform.
+// over the cels below.
 //
-// render() can redo just a rectangle, so a stroke only recomposes the
-// tiles it touched.
+// The image is of an area of the document (the page, for export; what the canvas shows, which may lie out of the page as
+// the canvas has no end), at a scale (1, or a half, a quarter... to show it zoomed out without a picture too big for
+// memory). render() can redo just a rectangle, so a stroke only recomposes the tiles it touched.
 class FrameRenderer
 {
 public:
     const QImage &image() const { return m_image; }
+    // The part of the document the image is of, and how much smaller it is (1: a pixel for a pixel).
+    QRect area() const { return m_area; }
+    int step() const { return m_step; }
 
     // Without paper the frame starts transparent (PNG export).
     void setPaperVisible(bool visible) { m_paper = visible; }
@@ -54,13 +57,25 @@ public:
     // Only this cel is drawn (kNoId: all of them), to see what one cel makes of the frame by itself.
     void setOnlyCel(doc::CelId cel) { m_only = cel; }
 
-    // Whole frame (frame changed, cels changed, document resized...).
+    // The whole page, a pixel for a pixel (frame changed, cels changed, document resized...).
     void renderAll(const doc::Document &doc, int frame);
+    // The image made of `area`, a pixel of it for `step` × `step` of the document (a power of two; the area is put on
+    // whole steps): what it shares with the image there was is kept when the step is the same, the rest is drawn.
+    void setArea(const doc::Document &doc, int frame, const QRect &area, int step = 1);
+    // Draws all of the area again.
+    void renderArea(const doc::Document &doc, int frame) { render(doc, frame, m_area); }
     // Only `rect` (document coordinates).
     void render(const doc::Document &doc, int frame, const QRect &rect);
 
 private:
+    // Where the visible cels show something on the frame (posed as they are).
+    QRect contentBounds(const doc::Document &doc, int frame) const;
+    // `rect` of the document drawn on `target`, whose pixel (0, 0) is the document's `origin` (a pixel for a pixel).
+    void compose(QImage &target, const QPoint &origin, const doc::Document &doc, int frame, const QRect &rect) const;
+
     QImage m_image;
+    QRect m_area;
+    int m_step = 1;
     bool m_paper = true;
     bool m_guides = true;
     ResampleFilter m_filter = ResampleFilter::Bilinear;

@@ -72,8 +72,7 @@ void VectorEraseTool::eraseTo(const QPointF &to, bool pressed)
     if (dirty.isNull())
         return;
     // Only the area the cut strokes covered is drawn again, from the strokes that reach into it.
-    const doc::Document &d = m_document->document();
-    const QRect region = dirty.toAlignedRect().adjusted(-1, -1, 1, 1) & workArea(QRect(0, 0, d.width(), d.height()));
+    const QRect region = dirty.toAlignedRect().adjusted(-1, -1, 1, 1);
     if (region.isEmpty())
         return;
     doc::TiledImage patch;
@@ -107,8 +106,7 @@ void VectorEraseTool::cancel()
     Session s = std::move(*m_session);
     m_session.reset();
     *s.target.image = s.before;
-    const doc::Document &d = m_document->document();
-    m_document->notifyPainted(QRect(0, 0, d.width(), d.height()));
+    m_document->notifyPainted(document::kWholeCanvas);
     m_document->cancelPaint();
 }
 

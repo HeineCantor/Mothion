@@ -318,24 +318,130 @@ QRect visibleBounds(const doc::Drawing &drawing, bool guides)
 
 void FrameRenderer::renderAll(const doc::Document &doc, int frame)
 {
-    const QSize size(doc.width(), doc.height());
-    if (m_image.size() != size)
-        m_image = QImage(size, QImage::Format_ARGB32_Premultiplied);
-    render(doc, frame, m_image.rect());
+    const QRect page(0, 0, doc.width(), doc.height());
+    if (m_area != page || m_step != 1) {
+        m_area = page;
+        m_step = 1;
+        m_image = QImage(page.size(), QImage::Format_ARGB32_Premultiplied);
+    }
+    render(doc, frame, m_area);
+}
+
+namespace {
+
+// `r` grown out to whole steps.
+QRect onSteps(const QRect &r, int step)
+{
+    if (step <= 1 || r.isEmpty())
+        return r;
+    auto down = [step](int v) { return v >= 0 ? v / step * step : -((-v + step - 1) / step) * step; };
+    const int left = down(r.left()), top = down(r.top());
+    const int right = down(r.right()) + step, bottom = down(r.bottom()) + step;
+    return QRect(QPoint(left, top), QPoint(right - 1, bottom - 1));
+}
+
+} // namespace
+
+void FrameRenderer::setArea(const doc::Document &doc, int frame, const QRect &wanted, int step)
+{
+    step = std::max(1, step);
+    const QRect area = onSteps(wanted, step);
+    if (area == m_area && step == m_step)
+        return;
+    QImage image(area.size() / step, QImage::Format_ARGB32_Premultiplied);
+    QRect kept;
+    if (step == m_step && !m_image.isNull()) {
+        kept = area & m_area;
+        if (!kept.isEmpty()) {
+            QPainter p(&image);
+            p.setCompositionMode(QPainter::CompositionMode_Source);
+            p.drawImage((kept.topLeft() - area.topLeft()) / step, m_image,
+                        QRect((kept.topLeft() - m_area.topLeft()) / step, kept.size() / step));
+        }
+    }
+    m_image = std::move(image);
+    m_area = area;
+    m_step = step;
+    if (kept.isEmpty()) {
+        render(doc, frame, area);
+        return;
+    }
+    // What was not there before: the bands above, below, left and right of what is kept.
+    render(doc, frame, QRect(QPoint(area.left(), area.top()), QPoint(area.right(), kept.top() - 1)));
+    render(doc, frame, QRect(QPoint(area.left(), kept.bottom() + 1), QPoint(area.right(), area.bottom())));
+    render(doc, frame, QRect(QPoint(area.left(), kept.top()), QPoint(kept.left() - 1, kept.bottom())));
+    render(doc, frame, QRect(QPoint(kept.right() + 1, kept.top()), QPoint(area.right(), kept.bottom())));
 }
 
 void FrameRenderer::render(const doc::Document &doc, int frame, const QRect &rect)
 {
-    const QRect area = rect & m_image.rect();
+    const QRect area = onSteps(rect & m_area, m_step);
+    if (area.isEmpty())
+        return;
+    if (m_step == 1) {
+        compose(m_image, m_area.topLeft(), doc, frame, area);
+        return;
+    }
+    // Zoomed out: drawn a pixel for a pixel a piece at a time, each piece made smaller into the image; a piece with nothing
+    // drawn on it is only the paper.
+    const QRect content = contentBounds(doc, frame);
+    const int piece = std::max(1024, m_step * 64);
+    QImage full;
+    QPainter out(&m_image);
+    out.setCompositionMode(QPainter::CompositionMode_Source);
+    out.setRenderHint(QPainter::SmoothPixmapTransform);
+    for (int y = area.top(); y <= area.bottom(); y += piece) {
+        for (int x = area.left(); x <= area.right(); x += piece) {
+            const QRect part = QRect(x, y, piece, piece) & area;
+            if (!part.intersects(content)) {
+                out.fillRect(QRectF(QPointF(part.topLeft() - m_area.topLeft()) / m_step, QSizeF(part.size()) / m_step),
+                             m_paper ? QColor::fromRgba(doc.paperColor()) : QColor(Qt::transparent));
+                continue;
+            }
+            if (full.size() != part.size())
+                full = QImage(part.size(), QImage::Format_ARGB32_Premultiplied);
+            compose(full, part.topLeft(), doc, frame, part);
+            out.drawImage(QRectF(QPointF(part.topLeft() - m_area.topLeft()) / m_step, QSizeF(part.size()) / m_step), full);
+        }
+    }
+}
+
+QRect FrameRenderer::contentBounds(const doc::Document &doc, int frame) const
+{
+    QRect bounds;
+    for (int i = 0; i < doc.celCount(); ++i) {
+        const doc::Cel &cel = doc.celAt(i);
+        if ((m_only != doc::kNoId && cel.id() != m_only) || cel.properties().trajectory || !cel.properties().visible)
+            continue;
+        const doc::Drawing *drawing = cel.drawingAt(frame);
+        if (!drawing)
+            continue;
+        const QRect own = drawingBounds(*drawing, m_guides);
+        if (own.isEmpty())
+            continue;
+        const bool animated = !cel.motion().isEmpty() && cel.id() != m_asDrawn;
+        const doc::CelPose pose = animated ? cel.motion().poseAt(frame) : doc::CelPose{};
+        const doc::Matrix2x3 follow = cel.id() != m_asDrawn ? doc.followMatrix(cel, frame) : doc::Matrix2x3{};
+        const doc::Matrix2x3 m = pose.matrix(cel.motion().pivotX, cel.motion().pivotY).then(follow);
+        bounds |= QTransform(m.a, m.b, m.c, m.d, m.e, m.f).mapRect(QRectF(own)).toAlignedRect().adjusted(-3, -3, 3, 3);
+    }
+    return bounds;
+}
+
+void FrameRenderer::compose(QImage &target, const QPoint &origin, const doc::Document &doc, int frame,
+                            const QRect &rect) const
+{
+    const QRect area = rect & QRect(origin, target.size());
     if (area.isEmpty())
         return;
 
-    QPainter p(&m_image);
+    QPainter p(&target);
+    p.translate(-origin);
     p.setClipRect(area);
     p.setCompositionMode(QPainter::CompositionMode_Source);
     p.fillRect(area, m_paper ? QColor::fromRgba(doc.paperColor()) : QColor(Qt::transparent));
+    const QRect limit = area.translated(-origin); // in the target's pixels
 
-    const std::vector<doc::TileCoord> tiles = tilesIn(area);
     for (int i = 0; i < doc.celCount(); ++i) {
         const doc::Cel &cel = doc.celAt(i);
         if (m_only != doc::kNoId && cel.id() != m_only)
@@ -373,11 +479,15 @@ void FrameRenderer::render(const doc::Document &doc, int frame, const QRect &rec
                                  & drawingBounds(*drawing, m_guides);
             if (source.isEmpty())
                 continue;
+            // Only where it lands (not all of the area: the canvas has no end, and a piece is often small on it).
+            const QRect dest = forward.mapRect(QRectF(source)).toAlignedRect().adjusted(-2, -2, 2, 2) & area;
+            if (dest.isEmpty())
+                continue;
             const QImage content = composeDrawing(*drawing, source, m_guides);
             QImage moved;
-            const QTransform toArea = forward * QTransform::fromTranslate(-area.x(), -area.y());
+            const QTransform toArea = forward * QTransform::fromTranslate(-dest.x(), -dest.y());
             if (m_filter == ResampleFilter::Bilinear || m_filter == ResampleFilter::Nearest) {
-                moved = QImage(area.size(), QImage::Format_ARGB32_Premultiplied);
+                moved = QImage(dest.size(), QImage::Format_ARGB32_Premultiplied);
                 moved.fill(Qt::transparent);
                 QPainter mp(&moved);
                 mp.setRenderHint(QPainter::SmoothPixmapTransform, m_filter != ResampleFilter::Nearest);
@@ -385,29 +495,34 @@ void FrameRenderer::render(const doc::Document &doc, int frame, const QRect &rec
                 mp.drawImage(source.topLeft(), content);
             } else {
                 moved = resampleTransformed(content, QTransform::fromTranslate(source.x(), source.y()) * toArea,
-                                            area.size(), m_filter);
+                                            dest.size(), m_filter);
             }
             if (doc::needsSoftwareBlend(props.blend)) {
-                blendImage(m_image, area.topLeft(), area, moved, opacity, props.blend);
+                blendImage(target, dest.topLeft() - origin, limit, moved, opacity, props.blend);
             } else {
                 p.setOpacity(opacity);
                 p.setCompositionMode(compositionFor(props.blend));
-                p.drawImage(area.topLeft(), moved);
+                p.drawImage(dest.topLeft(), moved);
             }
             continue;
         }
+        // Only where the drawing has pixels: what is not there leaves what is below as it is.
+        const QRect cover = area & drawingBounds(*drawing, m_guides);
+        if (cover.isEmpty())
+            continue;
         if (shown == 1 && only->properties.blend == doc::BlendMode::Normal && !only->properties.clipped) {
             // A lone normal layer over transparency is itself: no folder needed.
-            drawLayer(p, m_image, QPoint(0, 0), area, *only, tiles, opacity * only->properties.opacity, props.blend);
+            drawLayer(p, target, origin, limit, *only, tilesIn(cover), opacity * only->properties.opacity, props.blend);
             continue;
         }
         if (doc::needsSoftwareBlend(props.blend)) {
-            blendImage(m_image, area.topLeft(), area, composeDrawing(*drawing, area, m_guides), opacity, props.blend);
+            blendImage(target, cover.topLeft() - origin, limit, composeDrawing(*drawing, cover, m_guides), opacity,
+                       props.blend);
             continue;
         }
         p.setOpacity(opacity);
         p.setCompositionMode(compositionFor(props.blend));
-        p.drawImage(area.topLeft(), composeDrawing(*drawing, area, m_guides));
+        p.drawImage(cover.topLeft(), composeDrawing(*drawing, cover, m_guides));
     }
 }
 

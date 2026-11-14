@@ -24,6 +24,7 @@ constexpr auto kUndoSteps = "undoSteps";
 constexpr auto kMousePressure = "mousePressure";
 constexpr auto kAutosave = "autosaveMinutes";
 constexpr auto kVectorEraserMode = "vectorEraserMode";
+constexpr auto kOutsideScene = "outsideScenePercent";
 
 QString path(const char *key)
 {
@@ -57,6 +58,16 @@ Preferences::Preferences()
     m_mousePressure = std::clamp(settings.value(path(kMousePressure), 100).toInt(), 10, 100);
     m_autosaveMinutes = std::clamp(settings.value(path(kAutosave), kDefaultAutosaveMinutes).toInt(), 0, 120);
     m_vectorEraserMode = std::clamp(settings.value(path(kVectorEraserMode), 0).toInt(), 0, 3);
+    m_outsideScene = std::clamp(settings.value(path(kOutsideScene), 100).toInt(), 0, 100);
+}
+
+void Preferences::setOutsideScenePercent(int percent)
+{
+    percent = std::clamp(percent, 0, 100);
+    if (percent == m_outsideScene)
+        return;
+    m_outsideScene = percent;
+    save(kOutsideScene, percent);
 }
 
 void Preferences::save(const char *key, const QVariant &value)
@@ -208,6 +219,7 @@ void Preferences::resetAll()
     setBrushOutline(true);
     setTransformFilter(2);
     setAutosaveMinutes(kDefaultAutosaveMinutes);
+    setOutsideScenePercent(100);
 }
 
 } // namespace mothion::tools

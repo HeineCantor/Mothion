@@ -21,15 +21,21 @@ namespace mothion::canvas {
 // behind what is already drawn there, in the drawing at the current layer and frame (made if the frame is
 // empty), as one undo step. The area is found in the current layer or in
 // the frame as shown, by the tool's fill settings, and kept inside the
-// selection if there is one.
+// selection if there is one. The canvas has no end: an area that does not close stops where the canvas is seen.
 //
 // In lasso mode (FillSettings::Mode::Lasso) a drag draws an outline instead,
 // shown open while drawn; the release fills its inside, over what is there.
 class FillTool : public CanvasTool
 {
 public:
-    // The frame as shown, for areas found in all layers.
-    using Frame = std::function<const QImage &()>;
+    // Where the fill around `seed` may reach (the part of the canvas seen, in the cel's own place), and, if `withImage`,
+    // the frame as shown there (premultiplied, the size of the area), for areas found in all layers.
+    struct Shown
+    {
+        QRect area;
+        QImage image;
+    };
+    using Frame = std::function<Shown(const QPoint &seed, bool withImage)>;
 
     FillTool(document::DocumentController *document, tools::ToolState *state, Frame frame,
              std::function<void(const QString &)> status);

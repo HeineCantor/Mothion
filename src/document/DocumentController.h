@@ -20,6 +20,9 @@
 
 namespace mothion::document {
 
+// All of the canvas (it has no end), for a change that may be anywhere: whoever draws keeps to what it shows.
+inline constexpr QRect kWholeCanvas(-(1 << 28), -(1 << 28), 1 << 29, 1 << 29);
+
 // The bridge between the Qt-free document model and the UI.
 //
 // It owns the Document and its History, keeps what is current (cel, frame,
@@ -367,9 +370,8 @@ public:
     // step: see endPaint().
     const QPainterPath &selection() const { return m_selection; }
     bool hasSelection() const { return !m_selection.isEmpty(); }
-    // By default the selection is kept inside the page (what lies outside is never drawn); a pasted image bigger than
-    // the page is selected whole (`clipToPage` false), so it can be moved to bring any part of it onto the page.
-    void setSelection(const QPainterPath &area, bool clipToPage = true);
+    // Not kept to the page: the canvas has no end (Select All and Invert are of the page, the scene's frame).
+    void setSelection(const QPainterPath &area);
     void selectAll();
     void clearSelection();
     // Selects what was not selected (all if nothing was).

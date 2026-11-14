@@ -1,6 +1,7 @@
 #pragma once
 
 #include "canvas/CanvasTool.h"
+#include "canvas/FillTool.h"
 #include "canvas/FrameRenderer.h"
 #include "canvas/NavigationGesture.h"
 #include "canvas/CameraGizmo.h"
@@ -17,6 +18,7 @@
 #include "core/brush/StrokeShaper.h"
 #include "core/brush/VelocityMeter.h"
 
+#include <QRegion>
 #include <QWidget>
 
 #include <map>
@@ -59,8 +61,9 @@ public:
     CanvasView(tools::ToolState *toolState, document::DocumentController *document, QWidget *parent = nullptr);
 
     const ViewTransform &view() const { return m_view; }
-    // The document pixels as displayed (for thumbnails such as the navigator).
-    const QImage &documentImage() const { return m_frame.image(); }
+    // The page (the scene's frame) as shown, a pixel for a pixel (for thumbnails such as the navigator). Drawn when asked
+    // for, if it changed since.
+    const QImage &documentImage() const;
     // The selection outline's ants march: black and white dashes swap at
     // regular intervals while there is a selection. 0 or 1.
     int selectionAntsPhase() const { return m_antsPhase; }
@@ -201,8 +204,15 @@ private:
     doc::Matrix2x3 celPose() const;
     bool celIsPosed() const;
     QPointF toCel(const QPointF &page) const;
-    // The frame as the current cel's own pixels lie on it (the frame itself if the cel is not moved).
-    const QImage &frameInCel();
+    // For the fill around `seed` (in the cel's own place): the part of the canvas seen, as the current cel's own pixels
+    // lie on it, and the frame shown there (if `withImage`).
+    FillTool::Shown fillShown(const QPoint &seed, bool withImage) const;
+    // The part of the document the canvas shows (all of the widget, turned and zoomed as it is).
+    QRect visibleDocumentRect() const;
+    // `area` of the frame as shown, a pixel for a pixel.
+    QImage frameArea(const QRect &area) const;
+    // The image the canvas is drawn from covers what is seen, at a size fit for the zoom (drawn again if not).
+    void syncFrameArea();
     // The tool that takes the pen in the cel's own place (the Transform and Move tools of a posed cel, and the dropper, take it
     // as it is shown).
     bool toolWorksInCel(const CanvasTool *tool) const;
@@ -236,8 +246,13 @@ private:
         bool moved = false;    // it has gone far enough to be a drag
     };
     std::optional<Flip> m_flip;
-    FrameRenderer m_frame;
-    QImage m_frameInCel; // (see frameInCel())
+    FrameRenderer m_frame;          // what the canvas shows (see syncFrameArea())
+    QRegion m_frameStale;           // the part of it out of sight not drawn again since the frame changed
+    mutable FrameRenderer m_page;   // the page, for documentImage()
+    mutable QRect m_pageStale;      // the part of it to draw again
+    mutable bool m_pageMade = false;
+    mutable QImage m_pageImage;     // what documentImage() gives: m_page's, or a copy of m_frame's when it holds the page
+    mutable bool m_pageFromFrame = false;
     std::optional<StrokeSession> m_stroke; // set while a stroke is in progress
     std::unique_ptr<CanvasTool> m_moveTool;
     std::unique_ptr<CanvasTool> m_rectSelectTool;
@@ -293,7 +308,7 @@ private:
     bool m_shiftHeld = false;
     bool m_placingLine = false;         // the stroke in progress is that line: full pressure, no stabilizer
     bool picksColor() const;
-    // The frame's color at a document point, invalid off the sheet.
+    // The frame's color at a document point (out of the sheet too: the canvas has no end).
     QColor colorAt(const QPointF &docPos) const;
     bool *panKeyFlag(int key); // the flag of a pan key, nullptr for other keys
     bool m_fittedOnce = false;

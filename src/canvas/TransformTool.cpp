@@ -509,9 +509,9 @@ void TransformTool::renderParts(bool onlyLive)
     m_rough = rough || (m_drag.has_value() && std::any_of(s.parts.begin(), s.parts.end(),
                                                          [](const Part &p) { return p.vector; }));
     const doc::Document &d = m_document->document();
-    // Where the pixels land: not cut to the page, what lies out of it (a layer moved partly out of the canvas) comes
-    // along. Only so far around the page, to keep a big scale from asking for a picture that does not fit memory.
-    const QRect reach = workArea(QRect(0, 0, d.width(), d.height()));
+    // Where the pixels land: not cut to the page (the canvas has no end). Only so far around the page and what is
+    // transformed, to keep a big scale from asking for a picture that does not fit memory.
+    const QRect reach = workArea(QRect(0, 0, d.width(), d.height()) | s.box);
     const QRect now = s.transform.mapRect(QRectF(s.box)).toAlignedRect().adjusted(-1, -1, 1, 1) & reach;
     std::vector<Part *> todo, drawnAgain;
     bool skipped = false;

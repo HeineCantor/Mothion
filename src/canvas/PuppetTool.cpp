@@ -146,13 +146,11 @@ void PuppetTool::render()
     const bool dragging = m_draggingPins || m_localDrag;
     for (Part &part : s.parts) {
         if (part.vector && !dragging) {
-            const doc::Document &d = m_document->document();
-            const QRect page = workArea(QRect(0, 0, d.width(), d.height())); // out of the canvas too
             doc::TiledImage result;
             std::vector<doc::VectorStroke> shown = part.restStrokes; // what stays, then what is warped
             for (doc::VectorStroke &stroke : warpedStrokes(part.strokes, *s.rig))
                 shown.push_back(std::move(stroke));
-            drawStrokes(result, shown, *m_toolState, page);
+            drawStrokes(result, shown, *m_toolState, {}); // the canvas has no end
             *part.image = std::move(result);
             continue;
         }
@@ -166,8 +164,7 @@ void PuppetTool::render()
     }
     QRect now(x, y, w, h);
     if (std::any_of(s.parts.begin(), s.parts.end(), [](const Part &p) { return p.vector.has_value(); })) {
-        const doc::Document &d = m_document->document();
-        now |= QRect(0, 0, d.width(), d.height()); // strokes drawn again may land anywhere
+        now = document::kWholeCanvas; // strokes drawn again may land anywhere
     }
     m_document->notifyPainted(s.shown | now);
     s.shown = now;

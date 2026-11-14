@@ -99,10 +99,6 @@ void FillTool::fillLasso()
     area.closeSubpath();
     if (m_document->hasSelection())
         area = area.intersected(m_document->selection());
-    const doc::Document &d = m_document->document();
-    QPainterPath page;
-    page.addRect(0, 0, d.width(), d.height());
-    area = area.intersected(page);
     const SelectionMask mask = SelectionMask::fromPath(area);
     if (mask.isEmpty())
         return;
@@ -124,11 +120,14 @@ void FillTool::fillLasso()
 
 void FillTool::fillAround(const QPointF &docPos)
 {
-    const doc::Document &d = m_document->document();
-    const int w = d.width(), h = d.height();
     const int seedX = int(std::floor(docPos.x())), seedY = int(std::floor(docPos.y()));
-    if (seedX < 0 || seedY < 0 || seedX >= w || seedY >= h)
+    const tools::FillSettings settings = m_state->fillSettings();
+    // Where to look for the area: this layer, or everything shown; only as far as the canvas is seen.
+    const Shown shown = m_frame(QPoint(seedX, seedY), settings.allLayers);
+    const QRect area = shown.area;
+    if (!area.contains(seedX, seedY))
         return;
+    const int w = area.width(), h = area.height();
     const SelectionMask selection = SelectionMask::fromPath(m_document->selection());
     if (m_document->hasSelection() && selection.at(seedX, seedY) == 0)
         return m_status(QObject::tr("Click inside the selection to fill it"));
@@ -142,20 +141,17 @@ void FillTool::fillAround(const QPointF &docPos)
     }
     const doc::TiledImage before = *target->image;
 
-    // Where to look for the area: this layer, or everything shown.
-    const tools::FillSettings settings = m_state->fillSettings();
     std::vector<doc::Pixel> source(std::size_t(w) * std::size_t(h));
-    const QImage &frame = m_frame();
-    if (settings.allLayers && frame.size() == QSize(w, h)
-        && frame.format() == QImage::Format_ARGB32_Premultiplied) {
+    const QImage &frame = shown.image;
+    if (settings.allLayers && frame.size() == area.size() && frame.format() == QImage::Format_ARGB32_Premultiplied) {
         for (int y = 0; y < h; ++y) {
             const auto *line = reinterpret_cast<const doc::Pixel *>(frame.constScanLine(y));
             std::copy_n(line, w, source.begin() + std::ptrdiff_t(y) * w);
         }
     } else {
-        before.read(0, 0, w, h, source.data(), w);
+        before.read(area.x(), area.y(), w, h, source.data(), w);
     }
-    fill::Region region = fill::floodRegion(source.data(), w, h, seedX, seedY, settings.tolerance);
+    fill::Region region = fill::floodRegion(source.data(), w, h, seedX - area.x(), seedY - area.y(), settings.tolerance);
     fill::grow(region, settings.expand);
     if (region.isEmpty()) {
         m_document->cancelPaint();
@@ -164,13 +160,13 @@ void FillTool::fillAround(const QPointF &docPos)
 
     // The color behind what is there, inside the area (and the selection).
     const doc::Pixel color = fillColor(target->tint(m_state->color()));
-    const QRect box(QPoint(region.left, region.top), QPoint(region.right, region.bottom));
+    const QRect box = QRect(QPoint(region.left, region.top), QPoint(region.right, region.bottom)).translated(area.topLeft());
     std::vector<doc::Pixel> pixels(std::size_t(box.width()) * std::size_t(box.height()));
     target->image->read(box.x(), box.y(), box.width(), box.height(), pixels.data(), box.width());
     for (int y = 0; y < box.height(); ++y) {
         for (int x = 0; x < box.width(); ++x) {
             const int dx = box.x() + x, dy = box.y() + y;
-            int coverage = region.at(dx, dy);
+            int coverage = region.at(dx - area.x(), dy - area.y());
             if (m_document->hasSelection())
                 coverage = coverage * selection.at(dx, dy) / 255;
             doc::Pixel &p = pixels[std::size_t(y) * std::size_t(box.width()) + std::size_t(x)];

@@ -334,9 +334,9 @@ private slots:
         rect.release({300.5, 300}, Qt::NoModifier);
         QVERIFY(!controller.hasSelection());
 
-        rect.press({-100, -100}, Qt::NoModifier); // clipped to the page
+        rect.press({-100, -100}, Qt::NoModifier); // not cut to the page: the canvas has no end
         rect.release({10, 10}, Qt::NoModifier);
-        QCOMPARE(controller.selection().boundingRect(), QRectF(0, 0, 10, 10));
+        QCOMPARE(controller.selection().boundingRect(), QRectF(-100, -100, 110, 110));
 
         canvas::SelectionTool lasso(&controller, canvas::SelectionTool::Shape::Lasso);
         lasso.press({100, 100}, Qt::NoModifier);
@@ -463,9 +463,9 @@ private slots:
         auto pixel = [&](int x, int y) { return cel.drawingAt(0)->layers.front().image.pixel(x, y); };
         canvas::FrameRenderer frame;
         QStringList messages;
-        canvas::FillTool tool(&controller, &state, [&]() -> const QImage & {
+        canvas::FillTool tool(&controller, &state, [&](const QPoint &, bool) {
             frame.renderAll(controller.document(), controller.currentFrame());
-            return frame.image();
+            return canvas::FillTool::Shown{frame.area(), frame.image()};
         }, [&](const QString &text) { messages << text; });
 
         state.setColor(QColor(255, 0, 0));
@@ -738,9 +738,9 @@ private slots:
         QVERIFY(color != lines);
 
         canvas::FrameRenderer frame;
-        canvas::FillTool tool(&controller, &state, [&]() -> const QImage & {
+        canvas::FillTool tool(&controller, &state, [&](const QPoint &, bool) {
             frame.renderAll(controller.document(), controller.currentFrame());
-            return frame.image();
+            return canvas::FillTool::Shown{frame.area(), frame.image()};
         }, [](const QString &) {});
         auto pixel = [&](int x, int y) {
             for (const doc::Layer &l : controller.currentDrawing()->layers)
@@ -780,7 +780,7 @@ private slots:
         state.setColor(Qt::blue);
 
         canvas::FrameRenderer frame;
-        canvas::FillTool tool(&controller, &state, [&]() -> const QImage & { return frame.image(); },
+        canvas::FillTool tool(&controller, &state, [&](const QPoint &, bool) { return canvas::FillTool::Shown{frame.area(), frame.image()}; },
                               [](const QString &) {});
         tool.press({100, 100}, Qt::NoModifier);
         QVERIFY(tool.isActive());

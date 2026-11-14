@@ -26,6 +26,7 @@
 #include <QMouseEvent>
 #include <QMenu>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPixmap>
 #include <QWindow>
 #include <QRandomGenerator>
@@ -107,7 +108,8 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
     setAttribute(Qt::WA_OpaquePaintEvent);
     const doc::Document &d = m_document->document();
     m_view.setDocumentSize(QSizeF(d.width(), d.height()));
-    m_frame.renderAll(d, m_document->currentFrame());
+    // (the frame shown is drawn at the first paint, for the part of the canvas seen: see syncFrameArea())
+    connect(&Preferences::instance(), &Preferences::changed, this, qOverload<>(&QWidget::update)); // out of the scene
 
     using document::DocumentController;
     connect(m_document, &DocumentController::pixelsChanged, this,
@@ -186,7 +188,7 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
     m_eyedropperTool =
         std::make_unique<EyedropperTool>(m_toolState, [this](const QPointF &docPos) { return colorAt(docPos); });
     m_fillTool = std::make_unique<FillTool>(
-        m_document, m_toolState, [this]() -> const QImage & { return frameInCel(); },
+        m_document, m_toolState, [this](const QPoint &seed, bool withImage) { return fillShown(seed, withImage); },
         [this](const QString &text) { emit statusMessage(text); });
     m_blendTool = std::make_unique<BlendTool>(m_document, m_toolState,
                                               [this](const QString &text) { emit statusMessage(text); });
@@ -508,22 +510,60 @@ void CanvasView::viewWasChanged()
 void CanvasView::paintEvent(QPaintEvent *)
 {
     QPainter p(this);
-    // The desk around the sheet: a step away from the window colour, in either theme.
-    const QColor window = palette().color(QPalette::Window);
-    p.fillRect(rect(), window.lightness() < 128 ? window.lighter(135) : window.darker(115));
+    syncFrameArea();
+    // The paper goes on all over the canvas (it has no end); the size of the project is the frame of the scene.
+    const doc::Document &d = m_document->document();
+    const QRectF page(0, 0, d.width(), d.height());
+    const QColor paper = QColor::fromRgba(d.paperColor());
 
     // Smooth scaling only when zoomed out; nearest-neighbour shows real pixels up close.
     p.setRenderHint(QPainter::SmoothPixmapTransform, m_view.zoom() < 2.0);
-    if (qAlpha(m_document->document().paperColor()) < 255) { // a see-through paper: squares behind the sheet
-        const QRectF sheet = m_view.documentToView().mapRect(QRectF(0, 0, m_document->document().width(),
-                                                                    m_document->document().height()));
-        ui::paintCheckerboard(p, sheet.intersected(QRectF(rect())));
-    }
+    if (paper.alpha() < 255) // a see-through paper: squares behind it
+        ui::paintCheckerboard(p, QRectF(rect()));
     p.save();
     p.setTransform(m_view.documentToView());
-    p.drawImage(QPointF(0, 0), m_frame.image()); // paper included
+    // Only the part of the image seen (the rest is out of the widget).
+    const QRect have = m_frame.area();
+    const int st = m_frame.step();
+    const QRect seenArea = visibleDocumentRect().adjusted(-2, -2, 2, 2) & have;
+    const QRect source(QPoint((seenArea.left() - have.left()) / st, (seenArea.top() - have.top()) / st),
+                       QPoint((seenArea.right() - have.left()) / st, (seenArea.bottom() - have.top()) / st));
+    const QRectF shown(have.left() + source.left() * st, have.top() + source.top() * st, source.width() * st,
+                       source.height() * st);
+    const double outside = Preferences::instance().outsideScenePercent() / 100.0;
+    if (outside >= 1.0) {
+        p.drawImage(shown, m_frame.image(), source); // paper included
+    } else {
+        // Out of the scene's frame: the paper, and what is drawn on it as faint as chosen (not at all: hidden).
+        QPainterPath out;
+        out.addRect(shown);
+        QPainterPath in;
+        in.addRect(page);
+        p.setClipPath(out.subtracted(in));
+        p.fillRect(shown, paper);
+        if (outside > 0.0) {
+            p.setOpacity(outside);
+            p.drawImage(shown, m_frame.image(), source);
+            p.setOpacity(1.0);
+        }
+        p.setClipRect(page);
+        p.drawImage(shown, m_frame.image(), source);
+        p.setClipping(false);
+    }
     paintOnionSkin(p);
     p.restore();
+    // The scene's frame: a line around the page, dark and light so that it shows on any paper.
+    {
+        p.save();
+        p.setRenderHint(QPainter::Antialiasing);
+        const QPolygonF frame = m_view.documentToView().map(page);
+        p.setBrush(Qt::NoBrush);
+        p.setPen(QPen(QColor(255, 255, 255, 140), 3.0));
+        p.drawPolygon(frame);
+        p.setPen(QPen(QColor(0, 0, 0, 200), 1.0));
+        p.drawPolygon(frame);
+        p.restore();
+    }
 
     p.save();
     if (celIsPosed()) { // a selection is of the cel's own place: through the pose
@@ -601,20 +641,103 @@ doc::Matrix2x3 CanvasView::celPose() const
     return m_document->celPoseAt(cel->id(), m_document->currentFrame()).matrix(cel->motion().pivotX, cel->motion().pivotY).then(follow);
 }
 
-const QImage &CanvasView::frameInCel()
+QRect CanvasView::visibleDocumentRect() const
 {
-    // What is shown, seen from the cel's own pixels (where the fill looks for the area to fill, and the pen works): the
-    // frame is as it is on the page, the cel is moved on it.
-    if (!celIsPosed())
-        return m_frame.image();
-    const doc::Matrix2x3 back = celPose().inverted();
-    m_frameInCel = QImage(m_frame.image().size(), QImage::Format_ARGB32_Premultiplied);
-    m_frameInCel.fill(Qt::transparent);
-    QPainter p(&m_frameInCel);
+    return m_view.viewToDocument().mapRect(QRectF(rect())).toAlignedRect();
+}
+
+QImage CanvasView::frameArea(const QRect &area) const
+{
+    if (m_frame.step() == 1 && m_frame.area().contains(area) && !m_frameStale.intersects(area))
+        return m_frame.image().copy(area.translated(-m_frame.area().topLeft()));
+    FrameRenderer renderer;
+    renderer.setArea(m_document->document(), m_document->currentFrame(), area);
+    return renderer.image();
+}
+
+FillTool::Shown CanvasView::fillShown(const QPoint &seed, bool withImage) const
+{
+    // The page, and the part of the canvas seen (not more than so far around the seed, however far out it is zoomed: the
+    // fill looks at every pixel of it).
+    constexpr int kReach = 4096;
+    const doc::Document &d = m_document->document();
+    const bool posed = celIsPosed();
+    const doc::Matrix2x3 pose = posed ? celPose() : doc::Matrix2x3{};
+    const QTransform forward(pose.a, pose.b, pose.c, pose.d, pose.e, pose.f); // the cel's place to the page
+    const QPoint seedOnPage = forward.map(QPointF(seed)).toPoint();
+    const QRect seen = visibleDocumentRect() & QRect(seedOnPage - QPoint(kReach, kReach), QSize(2 * kReach, 2 * kReach));
+    const QRect onPage = seen | QRect(0, 0, d.width(), d.height());
+    const QTransform back = forward.inverted();
+    FillTool::Shown shown;
+    shown.area = posed ? back.mapRect(QRectF(onPage)).toAlignedRect() : onPage;
+    if (!withImage)
+        return shown;
+    // What is shown, seen from the cel's own pixels: the frame is as it is on the page, the cel is moved on it.
+    const QRect pageArea = posed ? forward.mapRect(QRectF(shown.area)).toAlignedRect().adjusted(-2, -2, 2, 2) : onPage;
+    const QImage frame = frameArea(pageArea);
+    if (!posed) {
+        shown.image = frame;
+        return shown;
+    }
+    shown.image = QImage(shown.area.size(), QImage::Format_ARGB32_Premultiplied);
+    shown.image.fill(Qt::transparent);
+    QPainter p(&shown.image);
     p.setRenderHint(QPainter::SmoothPixmapTransform);
-    p.setWorldTransform(QTransform(back.a, back.b, back.c, back.d, back.e, back.f));
-    p.drawImage(QPointF(0, 0), m_frame.image());
-    return m_frameInCel;
+    p.setWorldTransform(QTransform::fromTranslate(pageArea.x(), pageArea.y()) * back
+                        * QTransform::fromTranslate(-shown.area.x(), -shown.area.y()));
+    p.drawImage(QPointF(0, 0), frame);
+    return shown;
+}
+
+const QImage &CanvasView::documentImage() const
+{
+    const doc::Document &d = m_document->document();
+    const QRect page(0, 0, d.width(), d.height());
+    if (m_pageMade && m_pageStale.isEmpty() && m_pageImage.size() == page.size())
+        return m_pageImage;
+    if (m_frame.step() == 1 && m_frame.area().contains(page) && !m_frameStale.intersects(page)) {
+        // The canvas shows all of the page as it is: no need to draw it again.
+        m_pageImage = m_frame.image().copy(page.translated(-m_frame.area().topLeft()));
+        m_pageFromFrame = true;
+    } else {
+        if (!m_pageMade || m_pageFromFrame || m_page.area() != page)
+            m_page.renderAll(d, m_document->currentFrame());
+        else
+            m_page.render(d, m_document->currentFrame(), m_pageStale);
+        m_pageImage = m_page.image();
+        m_pageFromFrame = false;
+    }
+    m_pageMade = true;
+    m_pageStale = QRect();
+    return m_pageImage;
+}
+
+void CanvasView::syncFrameArea()
+{
+    // A pixel of the image for one of the screen or more: zoomed out, a pixel of it is 2, 4... of the document a side.
+    const double zoom = m_view.zoom();
+    int step = 1;
+    while (step < 64 && zoom * step * 2 <= 1.0 + 1e-9)
+        step *= 2;
+    const QRect seen = visibleDocumentRect();
+    if (seen.isEmpty())
+        return;
+    const QRect have = m_frame.area();
+    const auto size = [](const QRect &r) { return qint64(r.width()) * qint64(r.height()); };
+    syncCelAsDrawn();
+    if (step != m_frame.step() || !have.contains(seen) || size(have) > 4 * size(seen)) {
+        // Some more all around, so that a pan draws only now and then (and then only what comes into the image).
+        const int mx = seen.width() / 4 + 64, my = seen.height() / 4 + 64;
+        const int oldStep = m_frame.step();
+        m_frame.setArea(m_document->document(), m_document->currentFrame(), seen.adjusted(-mx, -my, mx, my), step);
+        // What comes new is drawn; what is kept may still be out of date.
+        m_frameStale = step == oldStep ? m_frameStale & QRegion(have & m_frame.area()) : QRegion();
+    }
+    // What comes into sight that was left when the frame changed.
+    const QRegion due = m_frameStale & QRegion(seen);
+    for (const QRect &r : due)
+        m_frame.render(m_document->document(), m_document->currentFrame(), r);
+    m_frameStale -= due;
 }
 
 bool CanvasView::celIsPosed() const
@@ -687,9 +810,14 @@ void CanvasView::syncAnimateTool()
 void CanvasView::renderWholeFrame()
 {
     syncCelAsDrawn();
-    m_frame.renderAll(m_document->document(), m_document->currentFrame());
+    // What is seen now; the rest of the image when it comes into sight (a frame changed while scrubbing, say).
+    const QRect seen = visibleDocumentRect() & m_frame.area();
+    m_frame.render(m_document->document(), m_document->currentFrame(), seen);
+    m_frameStale = QRegion(m_frame.area()) - QRegion(seen);
+    const doc::Document &d = m_document->document();
+    m_pageStale = QRect(0, 0, d.width(), d.height());
     update();
-    emit documentChanged(m_frame.image().rect());
+    emit documentChanged(m_pageStale);
     emit transformChanged(); // the box of a cel moved by its keys follows the frame
 }
 
@@ -698,6 +826,8 @@ void CanvasView::renderDocumentRect(const QRect &docRect)
     // Re-composing all layers of the rect is correct whichever layer changed.
     syncCelAsDrawn();
     m_frame.render(m_document->document(), m_document->currentFrame(), docRect);
+    m_frameStale -= QRegion(docRect & m_frame.area());
+    m_pageStale |= docRect & QRect(0, 0, m_document->document().width(), m_document->document().height());
     updateDocumentRect(docRect);
 }
 
@@ -1008,10 +1138,8 @@ void CanvasView::beginStroke(const PenSample &sample)
     auto stamper = std::make_shared<DabStamper>(target->tint(m_toolState->color()), style.hardness, definition->tips,
                                                 style.verticalThickness);
     stamper->setSecondaryColor(target->tint(m_toolState->inactiveColor()));
-    const doc::Document &d = m_document->document();
     m_strokeImage = target->image;
-    m_stroke.emplace(*target->image, std::move(stamper), settings.opacity, m_eraseStroke,
-                     QRect(0, 0, d.width(), d.height()));
+    m_stroke.emplace(*target->image, std::move(stamper), settings.opacity, m_eraseStroke); // the canvas has no end
     if (m_document->hasSelection())
         m_stroke->setSelection(m_document->selection()); // paint or erase only inside it
     m_stroke->setStyle(style);
@@ -1592,9 +1720,11 @@ bool CanvasView::picksColor() const
 
 QColor CanvasView::colorAt(const QPointF &docPos) const
 {
-    const QImage &frame = m_frame.image();
     const QPoint p(int(std::floor(docPos.x())), int(std::floor(docPos.y())));
-    return frame.rect().contains(p) ? frame.pixelColor(p) : QColor();
+    const doc::Document &d = m_document->document();
+    if (QRect(0, 0, d.width(), d.height()).contains(p))
+        return documentImage().pixelColor(p);
+    return frameArea(QRect(p, QSize(1, 1))).pixelColor(0, 0); // out of the page: the canvas goes on
 }
 
 bool *CanvasView::panKeyFlag(int key)

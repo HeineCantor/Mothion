@@ -42,7 +42,7 @@ ShapeGeometry shapeGeometry(tools::ShapeSettings::Kind kind, const QPointF &star
 
 // The shape drawn at full strength in the main color (the outline) and the
 // secondary one (the fill under an outline), over transparent pixels, clipped
-// to `clip`. The image is empty if nothing of it lies inside; `origin` is
+// to `clip` (empty: no limit). The image is empty if nothing of it lies inside; `origin` is
 // where its top left lies in the document.
 struct RenderedShape
 {

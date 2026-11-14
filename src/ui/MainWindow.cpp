@@ -476,6 +476,28 @@ void MainWindow::createMenus()
     m_viewMenu->addSeparator();
     m_viewMenu->addActions(m_rotateActions);
     m_viewMenu->addSeparator();
+    // What is drawn out of the scene's frame (the canvas has no end): as inside, fainter, or hidden.
+    {
+        QMenu *outside = m_viewMenu->addMenu(tr("Outside the scene"));
+        auto *choices = new QActionGroup(outside);
+        for (const int percent : {100, 75, 50, 25, 0}) {
+            QAction *choice = outside->addAction(percent == 100 ? tr("Shown")
+                                                 : percent == 0 ? tr("Hidden")
+                                                                : tr("%1% opacity").arg(percent));
+            choice->setCheckable(true);
+            choice->setData(percent);
+            choices->addAction(choice);
+            connect(choice, &QAction::triggered, this,
+                    [percent] { tools::Preferences::instance().setOutsideScenePercent(percent); });
+        }
+        auto sync = [choices] {
+            for (QAction *choice : choices->actions())
+                choice->setChecked(choice->data().toInt() == tools::Preferences::instance().outsideScenePercent());
+        };
+        sync();
+        connect(&tools::Preferences::instance(), &tools::Preferences::changed, choices, sync);
+    }
+    m_viewMenu->addSeparator();
     QAction *debug = m_viewMenu->addAction(tr("Input debug overlay"));
     debug->setCheckable(true);
     keymap.bind(debug, QStringLiteral("view.debugOverlay"), Qt::ApplicationShortcut); // also from a floating panel

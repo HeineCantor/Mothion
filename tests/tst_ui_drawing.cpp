@@ -167,6 +167,59 @@ private slots:
 
     // The brush on a vector layer paints its pixels and keeps the stroke (its points and how to draw them again), both
     // in one undo step; the eraser keeps its strokes too, marked as erasing. The tools that work on pixels are refused.
+    // The canvas has no end: the size of the project is only the frame of the scene. A stroke goes on past the page, on a
+    // cel moved by its keys too (where its own pixels lie out of the page while it is shown inside); the fill of an
+    // area that does not close stops where the canvas is seen.
+    void theCanvasHasNoEnd()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(500, 400);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 4, "Line").command);
+        const int W = d.width();
+        auto pixel = [&](int x, int y) {
+            return controller.currentDrawing()->layer(controller.currentLayer())->image.pixel(x, y);
+        };
+        const QTransform toView = canvas.view().documentToView();
+        const QRectF seen = canvas.view().viewToDocument().mapRect(QRectF(canvas.rect()));
+        QVERIFY(seen.right() > W + 20); // some of the canvas out of the page is seen
+        auto stroke = [&](const QPointF &from, const QPointF &to) {
+            state.setActiveTool(tools::ToolId::Brush);
+            QTest::mousePress(&canvas, Qt::LeftButton, {}, toView.map(from).toPoint());
+            for (int i = 1; i <= 20; ++i)
+                QTest::mouseMove(&canvas, toView.map(from + (to - from) * i / 20.0).toPoint());
+            QTest::mouseRelease(&canvas, Qt::LeftButton, {}, toView.map(to).toPoint());
+        };
+        state.setSize(tools::ToolId::Brush, 20);
+        const double outX = (W + seen.right()) / 2;
+        stroke(QPointF(W - 100, 300), QPointF(seen.right() - 4, 300));
+        QVERIFY(qAlpha(pixel(int(outX), 300)) > 100); // past the page
+
+        // Moved 300 to the left by its keys: drawn on the page's right edge, its own pixels are 300 further right.
+        doc::CelPose left;
+        left.x = -300;
+        QVERIFY(controller.setCelKey(controller.currentCel(), 0, left));
+        QCoreApplication::processEvents();
+        stroke(QPointF(W - 100, 600), QPointF(seen.right() - 4, 600));
+        QVERIFY(qAlpha(pixel(int(outX) + 300, 600)) > 100);
+        QVERIFY(controller.clearCelMotion(controller.currentCel()));
+
+        // A fill out of the page, on an area that does not close: as far as the canvas is seen, not further.
+        state.setActiveTool(tools::ToolId::Fill);
+        tools::FillSettings fill = state.fillSettings();
+        fill.allLayers = false;
+        state.setFillSettings(fill);
+        const QPoint click = toView.map(QPointF(outX, 900)).toPoint();
+        QTest::mouseClick(&canvas, Qt::LeftButton, {}, click);
+        QVERIFY(qAlpha(pixel(int(outX), 900)) > 200);
+        QVERIFY(qAlpha(pixel(100, 1000)) > 200);                    // the page too
+        QCOMPARE(qAlpha(pixel(int(seen.right()) + 300, 900)), 0);   // not past what is seen
+    }
+
     void aStrokeOnAVectorLayerIsKept()
     {
         tools::ToolState state;
@@ -358,7 +411,7 @@ private slots:
             const double y0 = layer().strokes.front().points.front().y;
             QPainterPath area;
             area.addRect(0, 0, midX, d.height());
-            controller.setSelection(area, true);
+            controller.setSelection(area);
             canvas::MoveTool selected(&controller, [](const QString &) {});
             selected.press(QPointF(minX, y0), Qt::NoModifier);
             QVERIFY(selected.isActive());
@@ -385,7 +438,7 @@ private slots:
         QPainterPath left; // the left half of the stroke
         const double midX = layer().strokes.front().points[15].x;
         left.addRect(0, 0, midX, d.height());
-        controller.setSelection(left, true);
+        controller.setSelection(left);
         QVERIFY(controller.copySelectionToLayer(&why));
         QCOMPARE(controller.currentDrawing()->layers.size(), std::size_t(3));
         QCOMPARE(layer().kind, doc::LayerKind::Vector);
@@ -877,7 +930,7 @@ private slots:
 
         QPainterPath left;
         left.addRect(0, 0, midX, d.height());
-        controller.setSelection(left, true);
+        controller.setSelection(left);
         state.setActiveTool(tools::ToolId::Transform);
         canvas::TransformTool tool(&controller, &state, [](const QString &) {}, [] {});
         tool.setDeferredRendering(false);
@@ -993,7 +1046,7 @@ private slots:
 
         QPainterPath left;
         left.addRect(0, 0, midX, d.height());
-        controller.setSelection(left, true);
+        controller.setSelection(left);
         canvas::PuppetTool tool(&controller, &state, [](const QString &) {}, [] {});
         tool.press(QPointF(quarter.x, quarter.y), Qt::NoModifier);
         QVERIFY(tool.isActive());
@@ -1310,7 +1363,7 @@ private slots:
         // Erase the left half: what is kept lies on the right.
         QPainterPath left;
         left.addRect(0, 0, midX, d.height());
-        controller.setSelection(left, true);
+        controller.setSelection(left);
         QString why;
         QVERIFY(controller.eraseSelection(&why));
         QVERIFY(!layer().strokes.empty());
@@ -1324,7 +1377,7 @@ private slots:
         // Flip the left half upside down: its strokes go across the middle of the selection.
         QPainterPath box;
         box.addRect(0, 0, midX, 1000);
-        controller.setSelection(box, true);
+        controller.setSelection(box);
         QVERIFY(controller.flipSelectionVertically(&why));
         int flipped = 0;
         for (const doc::VectorStroke &piece : layer().strokes)
@@ -1420,7 +1473,7 @@ private slots:
         state.setActiveTool(tools::ToolId::Brush);
         QPainterPath elsewhere;
         elsewhere.addRect(0, 0, 10, 10);
-        controller.setSelection(elsewhere, true); // the pen paints only inside it
+        controller.setSelection(elsewhere); // the pen paints only inside it
         QVERIFY(!controller.currentDrawing());
         const QPoint p = canvas.view().documentToView().map(QPointF(960, 540)).toPoint();
         QTest::mousePress(&canvas, Qt::LeftButton, {}, p);

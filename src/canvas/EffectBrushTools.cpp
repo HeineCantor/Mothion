@@ -80,14 +80,10 @@ std::vector<doc::Pixel> EffectBrushTool::read(const QRect &area) const
 
 void EffectBrushTool::write(const QRect &area, const std::vector<doc::Pixel> &pixels)
 {
-    const doc::Document &d = m_document->document();
-    const QRect inside = area.intersected(QRect(0, 0, d.width(), d.height()));
-    if (inside.isEmpty())
+    if (area.isEmpty())
         return;
-    const doc::Pixel *first = pixels.data() + std::ptrdiff_t(inside.y() - area.y()) * area.width()
-                              + (inside.x() - area.x());
-    m_image->write(inside.x(), inside.y(), inside.width(), inside.height(), first, area.width());
-    m_dirty |= inside;
+    m_image->write(area.x(), area.y(), area.width(), area.height(), pixels.data(), area.width()); // the canvas has no end
+    m_dirty |= area;
 }
 
 void EffectBrushTool::press(const QPointF &docPos, Qt::KeyboardModifiers)
@@ -158,8 +154,7 @@ void EffectBrushTool::cancel()
     *m_image = m_before;
     m_image = nullptr;
     m_before = {};
-    const doc::Document &d = m_document->document();
-    m_document->notifyPainted(QRect(0, 0, d.width(), d.height()));
+    m_document->notifyPainted(document::kWholeCanvas);
     m_document->cancelPaint();
 }
 

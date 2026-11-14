@@ -63,6 +63,11 @@ public:
     int vectorEraserMode() const { return m_vectorEraserMode; }
     void setVectorEraserMode(int mode);
 
+    // How what is drawn out of the scene's frame (the canvas has no end; the size of the project is the frame of the
+    // scene) shows on the canvas, in %: 100 as inside, 0 hidden.
+    int outsideScenePercent() const { return m_outsideScene; }
+    void setOutsideScenePercent(int percent);
+
     // Minutes between the autosaves of a project that has unsaved work (0: no autosave).
     int autosaveMinutes() const { return m_autosaveMinutes; }
     void setAutosaveMinutes(int minutes);
@@ -102,6 +107,7 @@ private:
     int m_mousePressure = 100;
     int m_autosaveMinutes = kDefaultAutosaveMinutes;
     int m_vectorEraserMode = 0;
+    int m_outsideScene = 100;
 };
 
 } // namespace mothion::tools

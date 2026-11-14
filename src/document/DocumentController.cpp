@@ -709,7 +709,7 @@ bool DocumentController::previewLayerProperties(const LayerRef &ref, const doc::
     if (!layer)
         return false;
     layer->properties = properties;
-    emit pixelsChanged(ref.cel, ref.drawing, QRect(0, 0, m_document->width(), m_document->height()));
+    emit pixelsChanged(ref.cel, ref.drawing, kWholeCanvas);
     return true;
 }
 
@@ -720,7 +720,7 @@ bool DocumentController::previewCelProperties(doc::CelId id, const doc::CelPrope
         return false;
     cel->setProperties(properties);
     // The cel's looks change what the whole frame shows.
-    emit pixelsChanged(id, doc::kNoId, QRect(0, 0, m_document->width(), m_document->height()));
+    emit pixelsChanged(id, doc::kNoId, kWholeCanvas);
     return true;
 }
 
@@ -2219,12 +2219,9 @@ bool DocumentController::clearCurrentLayer(QString *reason)
     return true;
 }
 
-void DocumentController::setSelection(const QPainterPath &area, bool clipToPage)
+void DocumentController::setSelection(const QPainterPath &area)
 {
-    // Kept inside the document: what lies outside is never drawn.
-    QPainterPath page;
-    page.addRect(0, 0, m_document->width(), m_document->height());
-    QPainterPath clipped = area.isEmpty() ? QPainterPath() : clipToPage ? area.intersected(page) : area;
+    QPainterPath clipped = area;
     if (clipped.boundingRect().isEmpty())
         clipped = QPainterPath();
     if (clipped == m_selection)
@@ -2275,7 +2272,6 @@ bool DocumentController::growSelection(int pixels, QString *reason)
     }
     if (pixels == 0)
         return true;
-    // The page's edge counts as an edge too when shrinking (what lies outside it is never selected).
     const QPainterPath area = canvas::grownSelection(m_selection, pixels);
     if (area.boundingRect().width() < 1 || area.boundingRect().height() < 1) {
         if (reason)
@@ -2426,7 +2422,7 @@ bool DocumentController::flipSelection(bool horizontal, QString *reason)
             *reason = nothing;
         return false;
     }
-    setSelection(across.map(m_selection), false);
+    setSelection(across.map(m_selection));
     notifyPainted(box);
     endPaint(before, doc::CommandKind::Flip);
     return true;
@@ -2595,7 +2591,7 @@ bool DocumentController::pasteImage(const QImage &image, std::optional<QPoint> o
     notifyPainted(area & QRect(0, 0, d.width(), d.height()));
     QPainterPath selected;
     selected.addRect(area);
-    setSelection(selected, false);
+    setSelection(selected);
     endPaint(before, doc::CommandKind::Paste);
     return true;
 }
