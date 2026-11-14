@@ -5,9 +5,12 @@
 #include "document/DocumentController.h"
 
 #include <QPointF>
+#include <QPolygonF>
 #include <QTransform>
 
 #include <optional>
+#include <set>
+#include <vector>
 
 class QPainter;
 
@@ -32,6 +35,10 @@ class ViewTransform;
 // What a drag changes goes by the rules of the cel's keys (CelMotion): into the key of the channel on the current frame, or,
 // on a frame without one, as a pose that goes with the frame until it is made a key; a trajectory with no key at all gets its
 // first one from the first drag. The drag is one undo step.
+//
+// The path's keys can be chosen several at once with the selection tools (a box or a lasso drawn on the canvas while the
+// path is shown: Shift adds to the keys chosen, Alt takes away); a chosen key dragged takes the others with it, each moved
+// as far on the page. A key clicked alone is chosen alone (with Shift, added).
 class TrajectoryGizmo
 {
 public:
@@ -43,7 +50,7 @@ public:
     bool editable() const;
     // It shows (as editable() but a locked trajectory is shown too).
     bool shown() const;
-    bool isDragging() const { return m_drag.has_value(); }
+    bool isDragging() const { return m_drag.has_value() || m_marquee.has_value(); }
     Handle hovered() const { return m_hovered; }
 
     Handle handleAt(const QPointF &docPos, const ViewTransform &view) const;
@@ -56,8 +63,16 @@ public:
     // A point of the document that grabs `handle`; for tests.
     std::optional<QPointF> handlePoint(Handle handle, const ViewTransform &view) const;
 
-    // A press on a handle starts a drag (true); elsewhere nothing (false).
-    bool press(const QPointF &docPos, const ViewTransform &view);
+    // A press on a handle starts a drag (true); elsewhere nothing (false). On a key, Shift adds it to the keys chosen.
+    bool press(const QPointF &docPos, const ViewTransform &view, Qt::KeyboardModifiers modifiers = {});
+    // A box (`lasso` false) or a lasso drawn from `docPos` to choose the path's keys inside it; false if no path's keys
+    // can be chosen (no path shown, or it is locked). Shift adds to the keys chosen, Alt takes away, else they are replaced
+    // (a click on nothing chooses none).
+    bool beginMarquee(const QPointF &docPos, bool lasso, Qt::KeyboardModifiers modifiers);
+    bool marqueeActive() const { return m_marquee.has_value(); }
+    // The position keys chosen on the path shown (their frames); empty when its trajectory is another.
+    std::set<int> chosenKeys() const;
+    void clearChosenKeys() { m_chosen.clear(); }
     void move(const QPointF &docPos, Qt::KeyboardModifiers modifiers = {});
     void release(const QPointF &docPos);
     // A drag cut short: the trajectory as it was.
@@ -101,6 +116,8 @@ private:
         std::optional<QPointF> parentCenter; // view coordinates, of the parent's circle, if it follows one
     };
     std::optional<Shape> shape(const ViewTransform &view) const;
+    // The area of the marquee being drawn, in document coordinates.
+    QPolygonF marqueeArea() const;
     Handle circleHandleAt(const QPointF &docPos, const ViewTransform &view) const;
 
     document::DocumentController *m_document;
@@ -125,6 +142,25 @@ private:
         double turned = 0;        // degrees so far
     };
     std::optional<Drag> m_drag;
+    // The keys moved along with the one dragged (a key drag with several chosen): where each was, as the press found it.
+    struct Follower
+    {
+        int frame = 0;
+        QPointF centerDoc;
+        doc::Matrix2x3 parentsBack;
+        doc::CelPose start;
+    };
+    std::vector<Follower> m_followers;
+    // The keys chosen, of the trajectory m_chosenCel.
+    doc::CelId m_chosenCel = doc::kNoId;
+    std::set<int> m_chosen;
+    struct Marquee
+    {
+        bool lasso = false;
+        QPolygonF points; // document coordinates: the two corners of a box, or the lasso's points
+        Qt::KeyboardModifiers modifiers;
+    };
+    std::optional<Marquee> m_marquee;
 };
 
 } // namespace mothion::canvas

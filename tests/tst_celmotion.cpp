@@ -22,6 +22,7 @@
 #include <QtTest>
 
 #include <cmath>
+#include <set>
 
 using namespace mothion;
 
@@ -773,6 +774,71 @@ private slots:
         QVERIFY2(qAbs(controller.celPoseAt(id, 0).scaleX - 2.0) < 0.1, qPrintable(QString::number(controller.celPoseAt(id, 0).scaleX)));
         controller.undo(); // each drag one step
         QVERIFY(qAbs(controller.celPoseAt(id, 0).scaleX - 1.0) < 0.01);
+    }
+
+    // While the path is shown the selection tools choose its keys (a box, a lasso; Shift adds, Alt takes away), and a
+    // chosen key dragged takes the others with it, as far on the page, in one undo step.
+    void pathKeysAreChosenAndMovedTogether()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        controller.setSceneLength(30);
+        controller.addTrajectory();
+        const doc::CelId trajectory = controller.currentCel();
+        QVERIFY(controller.setCelKey(trajectory, 2, at(0, 0)));
+        QVERIFY(controller.setCelKey(trajectory, 12, at(200, 100)));
+        QVERIFY(controller.setCelKey(trajectory, 22, at(400, 0)));
+        controller.addCel();
+        const doc::CelId follower = controller.currentCel();
+        QVERIFY(controller.setTrajectoryParent(follower, trajectory));
+
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(900, 520);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        state.setTrajectoryMode(true);
+        const canvas::TrajectoryGizmo &gizmo = canvas.trajectoryGizmo();
+        const QTransform toView = canvas.view().documentToView();
+        auto screen = [&](double x, double y) { return toView.map(QPointF(x, y)).toPoint(); };
+        const double px = controller.document().cel(trajectory)->motion().pivotX;
+        const double py = controller.document().cel(trajectory)->motion().pivotY;
+        auto drag = [&](QPoint from, std::vector<QPoint> through, Qt::KeyboardModifiers modifiers = {}) {
+            QTest::mousePress(&canvas, Qt::LeftButton, modifiers, from);
+            for (const QPoint &p : through)
+                QTest::mouseMove(&canvas, p);
+            QTest::mouseRelease(&canvas, Qt::LeftButton, modifiers, through.empty() ? from : through.back());
+        };
+
+        // A box round the keys of frames 12 and 22.
+        state.setActiveTool(tools::ToolId::RectSelect);
+        drag(screen(px + 140, py - 60), {screen(px + 300, py + 60), screen(px + 440, py + 140)});
+        QCOMPARE(gizmo.chosenKeys(), (std::set<int>{12, 22}));
+        QVERIFY(!controller.hasSelection()); // no pixels selected
+
+        // The key of 12 dragged: 22 goes with it, 2 stays; one undo step.
+        drag(screen(px + 200, py + 100), {screen(px + 230, py + 120), screen(px + 260, py + 140)});
+        auto near = [&](int frame, double x, double y) {
+            const doc::CelPose p = controller.celPoseAt(trajectory, frame);
+            return qAbs(p.x - x) < 3 && qAbs(p.y - y) < 3;
+        };
+        QVERIFY(near(12, 260, 140));
+        QVERIFY(near(22, 460, 40));
+        QVERIFY(near(2, 0, 0));
+        controller.undo();
+        QVERIFY(near(12, 200, 100) && near(22, 400, 0));
+
+        // A lasso with Alt takes 22 away; Shift and a click on 2 adds it.
+        state.setActiveTool(tools::ToolId::LassoSelect);
+        drag(screen(px + 360, py - 40), {screen(px + 440, py - 40), screen(px + 440, py + 40), screen(px + 360, py + 40)},
+             Qt::AltModifier);
+        QCOMPARE(gizmo.chosenKeys(), (std::set<int>{12}));
+        drag(screen(px, py), {}, Qt::ShiftModifier);
+        QCOMPARE(gizmo.chosenKeys(), (std::set<int>{2, 12}));
+        // A key clicked alone is chosen alone; a click on nothing chooses none.
+        drag(screen(px + 400, py), {});
+        QCOMPARE(gizmo.chosenKeys(), (std::set<int>{22}));
+        drag(screen(px + 100, py + 300), {});
+        QVERIFY(gizmo.chosenKeys().empty());
     }
 
     // The whole path of a trajectory is shown on the page, from its first key to its last: while the trajectory is the

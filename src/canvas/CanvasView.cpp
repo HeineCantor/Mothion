@@ -813,10 +813,14 @@ void CanvasView::handleSample(const PenSample &sample)
             m_gesture.begin(mode, QPointF(sample.x, sample.y), m_view);
         } else if (sample.tipDown() && m_cameraGizmo.press(docPos, m_view)) {
             update(); // the camera selected: its frame or a handle, whatever the tool
-        } else if (sample.tipDown() && m_trajectoryGizmo.press(docPos, m_view)) {
+        } else if (sample.tipDown() && m_trajectoryGizmo.press(docPos, m_view, modifiers)) {
             update(); // the circle of the trajectory cel selected: its middle, its arrow or its edge, whatever the tool
         } else if (sample.tipDown() && m_gizmo.press(docPos, m_view)) {
             update(); // a handle of the perspective layer, whatever the tool
+        } else if (sample.tipDown() && m_trajectoryGizmo.pathShown()
+                   && (m_toolState->activeTool() == ToolId::RectSelect || m_toolState->activeTool() == ToolId::LassoSelect)
+                   && m_trajectoryGizmo.beginMarquee(docPos, m_toolState->activeTool() == ToolId::LassoSelect, modifiers)) {
+            update(); // while a path is shown the selection tools choose its keys, to move them together
         } else if (sample.tipDown() && m_trajectoryGizmo.pathShown()
                    && (sample.tool == InputTool::Eraser || ToolState::hasSize(m_toolState->activeTool())
                        || m_toolState->activeTool() == ToolId::Fill)) {

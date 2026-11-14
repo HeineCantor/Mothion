@@ -3,6 +3,7 @@
 #include "canvas/ViewTransform.h"
 
 #include <QLineF>
+#include <QPainterPath>
 #include <QPainter>
 #include <QPolygonF>
 
@@ -155,7 +156,39 @@ std::optional<QPointF> TrajectoryGizmo::handlePoint(Handle handle, const ViewTra
     return view.mapToDocument(at);
 }
 
-bool TrajectoryGizmo::press(const QPointF &docPos, const ViewTransform &view)
+std::set<int> TrajectoryGizmo::chosenKeys() const
+{
+    const doc::Cel *trajectory = pathTrajectory();
+    if (!trajectory || trajectory->id() != m_chosenCel)
+        return {};
+    std::set<int> keys;
+    const doc::CelMotion &motion = motionOf(*trajectory);
+    for (int frame : m_chosen)
+        if (motion.keyAt(doc::Channel::Position, frame)) // one taken away or moved since is not chosen any more
+            keys.insert(frame);
+    return keys;
+}
+
+bool TrajectoryGizmo::beginMarquee(const QPointF &docPos, bool lasso, Qt::KeyboardModifiers modifiers)
+{
+    if (m_drag || !pathEditable())
+        return false;
+    m_marquee = Marquee{lasso, QPolygonF{docPos, docPos}, modifiers};
+    if (!lasso)
+        m_marquee->points.resize(2); // the two corners
+    return true;
+}
+
+QPolygonF TrajectoryGizmo::marqueeArea() const
+{
+    if (!m_marquee)
+        return {};
+    if (m_marquee->lasso)
+        return m_marquee->points;
+    return QPolygonF(QRectF(m_marquee->points[0], m_marquee->points[1]).normalized());
+}
+
+bool TrajectoryGizmo::press(const QPointF &docPos, const ViewTransform &view, Qt::KeyboardModifiers modifiers)
 {
     if (!editable() && !pathEditable())
         return false;
@@ -178,6 +211,26 @@ bool TrajectoryGizmo::press(const QPointF &docPos, const ViewTransform &view)
         m_hovered = handle;
         m_hoverKey = frame;
         m_drag = d;
+        // The keys chosen: a key not among them is chosen alone (with Shift, added); the others chosen go with it.
+        std::set<int> chosen = chosenKeys();
+        if (!chosen.contains(frame)) {
+            if (!(modifiers & Qt::ShiftModifier))
+                chosen.clear();
+            chosen.insert(frame);
+        }
+        m_chosenCel = d.cel;
+        m_chosen = chosen;
+        m_followers.clear();
+        for (int other : chosen) {
+            if (other == frame)
+                continue;
+            Follower f;
+            f.frame = other;
+            f.centerDoc = pathPoint(*trajectory, other);
+            f.parentsBack = m_document->document().trajectoryParentMatrix(d.cel, other).inverted();
+            f.start = m_document->celPoseAt(d.cel, other);
+            m_followers.push_back(f);
+        }
         return true;
     }
     const std::optional<Shape> s = shape(view);
@@ -206,6 +259,13 @@ bool TrajectoryGizmo::press(const QPointF &docPos, const ViewTransform &view)
 
 void TrajectoryGizmo::move(const QPointF &docPos, Qt::KeyboardModifiers modifiers)
 {
+    if (m_marquee) {
+        if (m_marquee->lasso)
+            m_marquee->points << docPos;
+        else
+            m_marquee->points[1] = docPos;
+        return;
+    }
     if (!m_drag)
         return;
     const Drag &d = *m_drag;
@@ -255,11 +315,53 @@ void TrajectoryGizmo::move(const QPointF &docPos, Qt::KeyboardModifiers modifier
     }
     case Handle::None: return;
     }
+    if (d.handle == Handle::Key && !m_followers.empty()) {
+        // The other keys chosen move as far on the page, each through what the parents do on its own frame.
+        const doc::CelMotion &motion = m_document->document().cel(d.cel)->motion();
+        std::vector<document::DocumentController::CelPoseChange> changes{{d.cel, d.frame, pose, channels}};
+        for (const Follower &f : m_followers) {
+            const QPointF target = f.centerDoc + (docPos - d.press);
+            double lx = 0, ly = 0;
+            f.parentsBack.map(target.x(), target.y(), lx, ly);
+            doc::CelPose moved = f.start;
+            moved.x = lx - motion.pivotX;
+            moved.y = ly - motion.pivotY;
+            changes.push_back({d.cel, f.frame, moved, channels});
+        }
+        m_document->previewCelPoses(changes);
+        return;
+    }
     m_document->previewCelPose(d.cel, d.frame, pose, channels);
 }
 
 void TrajectoryGizmo::release(const QPointF &docPos)
 {
+    if (m_marquee) {
+        move(docPos);
+        const Marquee marquee = *m_marquee;
+        const QPolygonF area = marqueeArea();
+        m_marquee.reset();
+        const doc::Cel *trajectory = pathTrajectory();
+        if (!trajectory)
+            return;
+        std::set<int> chosen = chosenKeys();
+        if (!(marquee.modifiers & (Qt::ShiftModifier | Qt::AltModifier)))
+            chosen.clear();
+        QPainterPath inside;
+        inside.addPolygon(area);
+        inside.closeSubpath();
+        for (const doc::CelKey &key : motionOf(*trajectory).keys(doc::Channel::Position)) {
+            if (!inside.contains(pathPoint(*trajectory, key.frame)))
+                continue;
+            if (marquee.modifiers & Qt::AltModifier)
+                chosen.erase(key.frame);
+            else
+                chosen.insert(key.frame);
+        }
+        m_chosenCel = trajectory->id();
+        m_chosen = chosen;
+        return;
+    }
     if (!m_drag)
         return;
     move(docPos);
@@ -270,6 +372,7 @@ void TrajectoryGizmo::release(const QPointF &docPos)
 
 void TrajectoryGizmo::cancel()
 {
+    m_marquee.reset();
     if (!m_drag)
         return;
     const Drag d = *m_drag;
@@ -377,10 +480,11 @@ void TrajectoryGizmo::paintPath(QPainter &painter, const ViewTransform &view) co
     }
     // The keys: a dot each (the ones of the position are dragged; a key of only the rotation or scale is a small ring).
     const bool editable = pathEditable();
+    const std::set<int> chosen = chosenKeys();
     for (int f : motionOf(*trajectory).keyFrames()) {
         const QPointF at = toView.map(pathPoint(*trajectory, f));
         if (motionOf(*trajectory).keyAt(doc::Channel::Position, f)) {
-            const bool picked = editable && keyFrame() == f;
+            const bool picked = editable && (keyFrame() == f || chosen.contains(f));
             painter.setPen(QPen(Qt::white, 1.8));
             painter.setBrush(picked ? QColor(40, 110, 230) : accent);
             painter.drawEllipse(at, picked ? 6.0 : 5.0, picked ? 6.0 : 5.0);
@@ -389,6 +493,15 @@ void TrajectoryGizmo::paintPath(QPainter &painter, const ViewTransform &view) co
             painter.setBrush(Qt::NoBrush);
             painter.drawEllipse(at, 3.0, 3.0);
         }
+    }
+    // The box or lasso being drawn to choose keys.
+    if (m_marquee) {
+        const QPolygonF area = toView.map(marqueeArea());
+        painter.setBrush(QColor(40, 110, 230, 30));
+        painter.setPen(QPen(Qt::white, 1.0));
+        painter.drawPolygon(area);
+        painter.setPen(QPen(QColor(40, 110, 230), 1.0, Qt::DashLine));
+        painter.drawPolygon(area);
     }
     painter.restore();
 }
