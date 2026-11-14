@@ -1596,6 +1596,18 @@ bool DocumentController::clearCelMotion(doc::CelId id)
     return true;
 }
 
+bool DocumentController::reverseCelMotion(doc::CelId id)
+{
+    const doc::Cel *cel = m_document->cel(id);
+    if (!cel || cel->motion().keyFrames().size() < 2)
+        return false;
+    doc::CelMotion turned = cel->motion().reversed();
+    if (turned == cel->motion())
+        return false;
+    execute(std::make_unique<doc::SetCelMotionCommand>(id, std::move(turned)));
+    return true;
+}
+
 bool DocumentController::setMarker(int frame, const QString &name)
 {
     if (frame < 0)

@@ -187,6 +187,59 @@ private slots:
         QVERIFY(!controller.setCelKey(doc::CelId(9999), 0, at(1, 1))); // no such cel
     }
 
+    // Reversed, the keys play backwards over the frames they span: every frame shows what the mirrored frame showed, the
+    // curves turned around too; the channels keep in step; one undo step on a trajectory.
+    void aTrajectoryIsReversed()
+    {
+        doc::CelMotion motion;
+        motion.pivotX = 5;
+        motion.setKey(doc::Channel::Position, 4, at(0, 0), doc::Easing::easeIn());
+        motion.setKey(doc::Channel::Position, 10, at(60, 30), doc::Easing::linear());
+        motion.setKey(doc::Channel::Position, 20, at(100, -20));
+        motion.setKey(doc::Channel::Opacity, 8, at(0, 0, 0, 1, 0.2));
+        motion.setKey(doc::Channel::Opacity, 16, at(0, 0, 0, 1, 1.0));
+        const doc::CelMotion back = motion.reversed();
+        QCOMPARE(back.pivotX, 5.0);
+        QCOMPARE(back.keyFrames(), (std::vector<int>{4, 8, 14, 16, 20}));
+        for (int f = 0; f <= 26; ++f) { // also before and after the keys
+            const int mirrored = std::clamp(24 - f, 0, 30);
+            const doc::CelPose a = back.interpolatedAt(f), b = motion.interpolatedAt(mirrored);
+            QVERIFY2(std::abs(a.x - b.x) < 1e-6 && std::abs(a.y - b.y) < 1e-6 && std::abs(a.opacity - b.opacity) < 1e-6,
+                     qPrintable(QStringLiteral("frame %1").arg(f)));
+        }
+        // Twice is as it was (the curves up to rounding: 1 − (1 − 0.42) is not quite 0.42 in doubles).
+        const doc::CelMotion twice = back.reversed();
+        for (doc::Channel c : doc::kChannels) {
+            QCOMPARE(twice.keys(c).size(), motion.keys(c).size());
+            for (std::size_t i = 0; i < motion.keys(c).size(); ++i) {
+                const doc::CelKey &a = twice.keys(c)[i], &b = motion.keys(c)[i];
+                QCOMPARE(a.frame, b.frame);
+                QCOMPARE(a.pose, b.pose);
+                QCOMPARE(a.easing.kind, b.easing.kind);
+                QVERIFY(std::abs(a.easing.x1 - b.easing.x1) < 1e-12 && std::abs(a.easing.y1 - b.easing.y1) < 1e-12
+                        && std::abs(a.easing.x2 - b.easing.x2) < 1e-12 && std::abs(a.easing.y2 - b.easing.y2) < 1e-12);
+            }
+        }
+        const doc::Easing out = back.keyAt(doc::Channel::Position, 14)->easing; // the ease in, turned around
+        const doc::Easing easeOut = doc::Easing::easeOut();
+        QVERIFY(out.kind == easeOut.kind && std::abs(out.x1 - easeOut.x1) < 1e-12 && std::abs(out.y1 - easeOut.y1) < 1e-12
+                && std::abs(out.x2 - easeOut.x2) < 1e-12 && std::abs(out.y2 - easeOut.y2) < 1e-12);
+
+        document::DocumentController controller;
+        controller.setSceneLength(30);
+        controller.addTrajectory();
+        const doc::CelId path = controller.currentCel();
+        QVERIFY(controller.setCelKey(path, 2, at(0, 0)));
+        QVERIFY(!controller.reverseCelMotion(path)); // one key: nothing to turn around
+        QVERIFY(controller.setCelKey(path, 12, at(100, 50)));
+        QVERIFY(controller.reverseCelMotion(path));
+        QCOMPARE(controller.celPoseAt(path, 2), at(100, 50));
+        QCOMPARE(controller.celPoseAt(path, 12), at(0, 0));
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo keyframes"));
+        controller.undo();
+        QCOMPARE(controller.celPoseAt(path, 2), at(0, 0));
+    }
+
     // A cel that follows a trajectory is drawn where the trajectory takes it, on top of its own keys; and only a trajectory
     // can be followed. One undo step; a trajectory that goes lets the cel go.
     void aCelFollowsATrajectory()

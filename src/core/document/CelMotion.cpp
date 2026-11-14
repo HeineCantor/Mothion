@@ -217,6 +217,36 @@ bool CelMotion::removeKeysAt(int frame)
     return any;
 }
 
+CelMotion CelMotion::reversed() const
+{
+    CelMotion out;
+    out.pivotX = pivotX;
+    out.pivotY = pivotY;
+    const std::vector<int> frames = keyFrames();
+    if (frames.empty())
+        return out;
+    const int span = frames.front() + frames.back();
+    // The curve of a segment run backwards: E'(u) = 1 − E(1 − u).
+    auto turned = [](const Easing &e) {
+        return e.kind == Easing::Kind::Bezier ? Easing::bezier(1 - e.x2, 1 - e.y2, 1 - e.x1, 1 - e.y1) : e;
+    };
+    for (int c = 0; c < kChannelCount; ++c) {
+        const std::vector<CelKey> &keys = m_keys[std::size_t(c)];
+        std::vector<CelKey> &into = out.m_keys[std::size_t(c)];
+        into.reserve(keys.size());
+        // Last first: the key that was i goes from its frame to the one of key i − 1, along that segment turned around.
+        for (std::size_t i = keys.size(); i-- > 0;) {
+            CelKey key = keys[i];
+            key.frame = span - keys[i].frame;
+            // The new last key's curve leads nowhere: it keeps the one the old last key had, so that turned around
+            // twice the motion is as it was.
+            key.easing = i > 0 ? turned(keys[i - 1].easing) : keys.back().easing;
+            into.push_back(key);
+        }
+    }
+    return out;
+}
+
 bool CelMotion::moveKeysAt(int from, int to)
 {
     to = std::max(0, to);

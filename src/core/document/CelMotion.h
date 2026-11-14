@@ -86,6 +86,10 @@ public:
     bool setEasingAll(int frame, const Easing &easing);
     bool removeKeysAt(int frame);
     bool moveKeysAt(int from, int to);
+    // The same motion played backwards over the frames it spans: a key at frame f goes to first + last − f (first and
+    // last of all the channels together, so they stay in step), and each curve is turned around (an ease in becomes an
+    // ease out), so that the way there is the way back. The pivot stays.
+    CelMotion reversed() const;
 
     // A value of a channel the cel has on one frame that is not a key (yet): what the Transform and Move tools leave on a
     // frame with no key of the channel. It shows (poseAt answers it there, over what the keys say) but is not part of the

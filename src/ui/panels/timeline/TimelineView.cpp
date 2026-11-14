@@ -2123,6 +2123,10 @@ void TimelineView::contextMenuEvent(QContextMenuEvent *event)
             m_document->setCelKey(celId, frame, m_document->celPoseAt(celId, frame));
         });
         key->setEnabled(!m_document->celMotion(celId)->hasKeyAt(frame));
+        menu.addSeparator();
+        // Its keys played backwards over the same frames (the curves turned around too).
+        QAction *reverse = menu.addAction(tr("Reverse Trajectory"), this, [this, celId] { m_document->reverseCelMotion(celId); });
+        reverse->setEnabled(m_document->celMotion(celId)->keyFrames().size() >= 2);
         menu.exec(event->globalPos());
         return;
     }

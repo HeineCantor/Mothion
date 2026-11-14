@@ -238,6 +238,9 @@ public:
     void cancelCelPose(doc::CelId cel, const doc::CelMotion &before);
     // Takes all the keys of the cel away (it stands still, as drawn).
     bool clearCelMotion(doc::CelId cel);
+    // The cel's keys played backwards over the frames they span (see doc::CelMotion::reversed()): one undo step. False
+    // if it has fewer than two keyframes (nothing to turn around).
+    bool reverseCelMotion(doc::CelId cel);
     // Markers on the timeline (frame -> name; see doc::Document::markers()). Each change is one undo step.
     const std::map<int, std::string> &markers() const { return m_document->markers(); }
     // A marker on `frame` (>= 0) with this name; renames the one that is there. False if nothing changes.
