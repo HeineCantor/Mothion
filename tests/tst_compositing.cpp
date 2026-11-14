@@ -210,6 +210,46 @@ private slots:
         QCOMPARE(runNode(type, clear, {{"luminance", 100}, {"chroma", 100}}), clear);
     }
 
+    // The noise is added to a picture of its own on all the cores: an input in straight colors (or none, the gray it
+    // makes) must not be shared with what the node writes, or each core would copy it for itself while the others
+    // write in it (a crash on Windows, in the Compositing window).
+    void sensorNoiseLeavesItsInputAlone()
+    {
+        QImage straight(1024, 768, QImage::Format_ARGB32);
+        straight.fill(QColor(128, 128, 128));
+        const QImage before = straight.copy();
+        Graph g;
+        const NodeId frame = g.addNode(QStringLiteral("frame"));
+        const NodeId noise = g.addNode(QStringLiteral("sensornoise"));
+        const NodeId out = g.addNode(QStringLiteral("output"));
+        g.connect(frame, 0, noise, 0);
+        g.connect(noise, 0, out, 0);
+        g.setParam(noise, QStringLiteral("luminance"), 60);
+        QImage first;
+        for (int run = 0; run < 5; ++run) {
+            Evaluator evaluator;
+            EvalContext context;
+            context.frame = straight;
+            const QImage result = evaluator.evaluate(g, context);
+            QCOMPARE(straight, before);
+            if (run == 0)
+                first = result;
+            QCOMPARE(result, first); // every row has its noise, every time
+        }
+        // With nothing wired in, the gray it makes for itself.
+        Graph alone;
+        const NodeId lone = alone.addNode(QStringLiteral("sensornoise"));
+        const NodeId end = alone.addNode(QStringLiteral("output"));
+        alone.connect(lone, 0, end, 0);
+        alone.setParam(lone, QStringLiteral("luminance"), 60);
+        for (int run = 0; run < 5; ++run) {
+            Evaluator evaluator;
+            EvalContext context;
+            context.frame = before;
+            QVERIFY(!evaluator.evaluate(alone, context).isNull());
+        }
+    }
+
     // One Glow node over `input`, on a page of color `paper`.
     static QImage runGlow(const QImage &input, const QVariantMap &settings, QRgb paper = 0xffffffff)
     {

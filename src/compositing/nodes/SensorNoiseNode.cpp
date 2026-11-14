@@ -48,8 +48,12 @@ QImage SensorNoiseNode::process(const QList<QImage> &inputs, const QVariantMap &
     if (luminance <= 0.0f && chroma <= 0.0f)
         return image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
 
+    // The picture made its own here, once: `image` may still share its pixels with the input (already in straight
+    // colors) or with `base`, and scanLine() on each core would then copy them for itself while the others write.
+    uchar *const pixels = image.bits();
+    const qsizetype stride = image.bytesPerLine();
     parallelFor(image.height(), [&](int y) {
-        QRgb *row = reinterpret_cast<QRgb *>(image.scanLine(y));
+        QRgb *row = reinterpret_cast<QRgb *>(pixels + y * stride);
         for (int x = 0; x < image.width(); ++x) {
             const QRgb px = row[x];
             if (qAlpha(px) == 0)
