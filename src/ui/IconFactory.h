@@ -15,7 +15,7 @@ enum class IconId {
     // What a layer is, in its row (raster, vector, perspective), and the rasterize button.
     KindRaster, KindVector, KindPerspective, Rasterize,
     // The timeline bar: a new frame (a frame with a plus) and the onion skin (an onion).
-    NewFrame, Onion,
+    NewFrame, Onion, NewCel, NewTrajectory,
 };
 
 // Provisional icons, drawn in code as simple line art on a 24x24 grid.

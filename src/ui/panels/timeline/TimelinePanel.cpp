@@ -351,7 +351,9 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
 
 QLayout *TimelinePanel::celBar()
 {
-    auto *add = celButton(IconId::Add, QStringLiteral("celAdd"), tr("New cel above the current one"), this);
+    auto *add = celButton(IconId::NewCel, QStringLiteral("celAdd"), tr("New cel above the current one"), this);
+    auto *addTrajectory = celButton(IconId::NewTrajectory, QStringLiteral("trajectoryAdd"),
+                                    tr("New trajectory cel above the current one"), this);
     auto *remove = celButton(IconId::Delete, QStringLiteral("celRemove"), tr("Delete the current cel"), this);
     auto *up = celButton(IconId::ArrowUp, QStringLiteral("celUp"), tr("Move the current cel up"), this);
     auto *down = celButton(IconId::ArrowDown, QStringLiteral("celDown"), tr("Move the current cel down"), this);
@@ -374,8 +376,7 @@ QLayout *TimelinePanel::celBar()
     auto *row = new QHBoxLayout;
     row->setContentsMargins(4, 0, 4, 2);
     row->setSpacing(4);
-    row->addWidget(new QLabel(tr("Cel"), this));
-    for (QWidget *w : std::initializer_list<QWidget *>{add, remove, up, down})
+    for (QWidget *w : std::initializer_list<QWidget *>{add, addTrajectory, remove, up, down})
         row->addWidget(w);
     row->addSpacing(8);
     row->addWidget(blend);
@@ -404,12 +405,7 @@ QLayout *TimelinePanel::celBar()
         m_document->execute(doc::makeSetCelProperties(m_document->document(), cel->id(), p));
     };
     connect(add, &QToolButton::clicked, m_document, &DocumentController::addCel);
-    // The arrow next to the plus: a standard cel or a trajectory cel.
-    auto *kinds = new QMenu(add);
-    kinds->addAction(tr("Cel"), m_document, &DocumentController::addCel);
-    kinds->addAction(tr("Trajectory Cel"), m_document, &DocumentController::addTrajectory);
-    add->setMenu(kinds);
-    add->setPopupMode(QToolButton::MenuButtonPopup);
+    connect(addTrajectory, &QToolButton::clicked, m_document, &DocumentController::addTrajectory);
     connect(remove, &QToolButton::clicked, this, [this] {
         if (m_document->document().celCount() > 1) // keep at least one
             m_document->execute(std::make_unique<doc::RemoveCelCommand>(m_document->currentCel()));

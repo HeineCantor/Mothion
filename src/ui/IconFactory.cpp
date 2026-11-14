@@ -414,16 +414,6 @@ void drawGlyph(QPainter &p, IconId id)
         path.arcTo(QRectF(8.5, 4.5, 7, 7), 180, -180);
         path.lineTo(15.5, 11);
         break;
-    case IconId::Folder: // a cel: a folder with a tab
-        path.moveTo(3.5, 7);
-        path.lineTo(3.5, 18.5);
-        path.lineTo(20.5, 18.5);
-        path.lineTo(20.5, 8.5);
-        path.lineTo(11, 8.5);
-        path.lineTo(9, 5.5);
-        path.lineTo(3.5, 5.5);
-        path.closeSubpath();
-        break;
     case IconId::Camera: // a film camera: the body and its lens
         path.addRect(QRectF(3.5, 7.5, 12, 9));
         path.moveTo(15.5, 10.5);
@@ -542,6 +532,38 @@ void drawGlyph(QPainter &p, IconId id)
         path.addRect(QRectF(6.5, 9, 6, 8));
         for (double y : {7.5, 13.0, 18.5})
             path.addRect(QRectF(4.5, y - 1, 1, 2));
+        path.moveTo(19, 3.5);
+        path.lineTo(19, 9.5);
+        path.moveTo(16, 6.5);
+        path.lineTo(22, 6.5);
+        break;
+    case IconId::Folder: // a cel: a folder with a tab at both top corners and a row of holes along its top
+    case IconId::NewCel: // (and the same with a plus, to make one)
+        path.moveTo(2.5, 20);
+        path.lineTo(2.5, 6);
+        path.lineTo(5.5, 6);
+        path.lineTo(7, 8.5);
+        path.lineTo(11, 8.5);
+        path.lineTo(12.5, 6);
+        path.lineTo(15.5, 6);
+        path.lineTo(15.5, 20);
+        path.closeSubpath();
+        for (double x : {5.0, 7.0, 9.0, 11.0, 13.0})
+            path.addEllipse(QPointF(x, 12), 0.7, 0.7);
+        if (id == IconId::NewCel) {
+            path.moveTo(19.5, 12.5);
+            path.lineTo(19.5, 18.5);
+            path.moveTo(16.5, 15.5);
+            path.lineTo(22.5, 15.5);
+        }
+        break;
+    case IconId::NewTrajectory: // the trajectory's circle and arrow, with a plus
+        path.addEllipse(QPointF(9.5, 14.5), 6.5, 6.5);
+        path.moveTo(9.5, 14.5);
+        path.lineTo(15, 9);
+        path.moveTo(15, 12);
+        path.lineTo(15, 9);
+        path.lineTo(12, 9);
         path.moveTo(19, 3.5);
         path.lineTo(19, 9.5);
         path.moveTo(16, 6.5);

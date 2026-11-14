@@ -960,14 +960,12 @@ private slots:
         auto *add = panel.findChild<QToolButton *>(QStringLiteral("celAdd"));
         auto *up = panel.findChild<QToolButton *>(QStringLiteral("celUp"));
         auto *down = panel.findChild<QToolButton *>(QStringLiteral("celDown"));
-        QVERIFY(add && up && down && add->menu());
-        QAction *trajectory = nullptr;
-        for (QAction *action : add->menu()->actions())
-            if (action->text() == QStringLiteral("Trajectory Cel"))
-                trajectory = action;
-        QVERIFY(trajectory);
+        auto *trajectory = panel.findChild<QToolButton *>(QStringLiteral("trajectoryAdd"));
+        QVERIFY(add && up && down && trajectory && !add->menu() && !trajectory->menu());
+        QVERIFY(!panel.findChild<QToolButton *>(QStringLiteral("celAdd"))->icon().isNull());
+        QVERIFY(!trajectory->icon().isNull());
         const doc::Document &d = controller.document();
-        trajectory->trigger();
+        trajectory->click();
         QVERIFY(d.cel(controller.currentCel())->properties().trajectory);
         QCOMPARE(d.celCount(), 2);
         controller.addCel();
