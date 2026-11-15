@@ -354,6 +354,11 @@ Press **F12** to open the input debug overlay. Check the following:
 
 ## Licenses
 
-Qt is used under LGPL v3 with dynamic linking. The project has no GPL dependencies.
+Mothion is free software under the GNU General Public License, version 3 or later (see `LICENSE`); so is the Blender
+add-on in `blender/mothion_link`.
+
+Qt is used under LGPL v3 with dynamic linking. Eigen is MPL-2.0, the Montserrat font is under the SIL Open Font License.
+The Windows downloads also carry `ffmpeg.exe` (GPL v3, a program of its own that the video export runs) and the
+Microsoft C++ runtime; their licenses and sources are listed in the `licenses` folder that comes with them.
 
 Icons, names and graphics are original to Mothion. Icons are drawn in code in `IconFactory`.

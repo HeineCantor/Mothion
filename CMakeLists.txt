@@ -25,7 +25,7 @@ option(MOTHION_ENABLE_WINTAB "Allow switching the Windows tablet backend to Wint
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets Multimedia) # Multimedia: decoding and playing the audio track
 qt_standard_project_setup()
 
-# Qt is LGPL: it must be linked dynamically so the application can stay closed source.
+# Qt is LGPL: it is linked dynamically, so the Qt DLLs handed out with Mothion can be replaced with another build.
 get_target_property(_mothion_qt_type Qt6::Core TYPE)
 if(_mothion_qt_type STREQUAL "STATIC_LIBRARY")
     message(FATAL_ERROR "Mothion must link Qt dynamically (LGPL). Use a shared Qt build.")
