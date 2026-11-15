@@ -354,6 +354,15 @@ public:
     // is within the page is kept. One undo step. The new cel's id, or kNoId (with `reason` saying why).
     doc::CelId rasterCel(doc::CelId cel, QString *reason = nullptr);
 
+    // A whole cel (its drawings, its timing, its keys and its looks) kept to be pasted; cutCel() also takes it away, as
+    // deleteCel() does (false for the last cel: a document keeps one). pasteCel() puts what was kept as a new cel above
+    // the current one (new ids, the same name), and makes it current; kNoId if nothing was kept. One undo step each.
+    void copyCel(doc::CelId cel);
+    bool cutCel(doc::CelId cel);
+    bool deleteCel(doc::CelId cel);
+    bool canPasteCel() const { return m_copiedCel != nullptr; }
+    doc::CelId pasteCel();
+
     // Erases every pixel of the current layer, as one undo step. Returns
     // false, with `reason` saying why, when there is nothing to clear or the
     // layer (or its cel) is hidden or locked.
@@ -659,6 +668,7 @@ private:
     doc::LayerId m_currentLayer = doc::kNoId;
     std::string m_currentLayerName; // looked for when the drawing changes
     QPainterPath m_selection;
+    std::shared_ptr<const doc::Cel> m_copiedCel; // (see copyCel())
     std::vector<LayerRef> m_layerSelection;
     std::vector<doc::CelId> m_celSelection; // (see celSelection())
     std::vector<doc::Layer> m_copiedLayers; // bottom to top

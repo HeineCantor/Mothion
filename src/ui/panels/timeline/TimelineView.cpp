@@ -2112,6 +2112,53 @@ bool TimelineView::event(QEvent *event)
     return QAbstractScrollArea::event(event);
 }
 
+void TimelineView::addCelActions(QMenu &menu, const doc::Cel &cel)
+{
+    const doc::CelId celId = cel.id();
+    // What the cel shows, keys and all, as plain pictures in a new cel.
+    QAction *raster = menu.addAction(tr("Raster into new Cel"), this, [this, celId] { m_document->rasterCel(celId); });
+    raster->setEnabled(!cel.timing().exposures().empty());
+    // A cel that is no trajectory can follow one: what it does comes on top of the cel's own keys.
+    if (!cel.properties().trajectory) {
+        QMenu *follow = menu.addMenu(tr("Follow trajectory"));
+        const doc::Document &doc = m_document->document();
+        const doc::Cel *followed = doc.followedTrajectory(cel);
+        QAction *none = follow->addAction(tr("None"), this, [this, celId] { m_document->setTrajectoryParent(celId, doc::kNoId); });
+        none->setCheckable(true);
+        none->setChecked(!followed);
+        bool any = false;
+        for (int i = doc.celCount() - 1; i >= 0; --i) {
+            const doc::Cel &t = doc.celAt(i);
+            if (!t.properties().trajectory)
+                continue;
+            any = true;
+            const doc::CelId id = t.id();
+            QAction *action = follow->addAction(QString::fromStdString(t.properties().name), this,
+                                                [this, celId, id] { m_document->setTrajectoryParent(celId, id); });
+            action->setCheckable(true);
+            action->setChecked(followed && followed->id() == id);
+        }
+        follow->setEnabled(any);
+    }
+}
+
+void TimelineView::showCelMenu(const QPoint &globalPos, const doc::Cel &cel)
+{
+    const doc::CelId celId = cel.id();
+    QMenu menu(this);
+    addCelActions(menu, cel);
+    menu.addSeparator();
+    const bool more = m_document->document().celCount() > 1; // a document keeps one cel
+    menu.addAction(tr("Copy Cel"), this, [this, celId] { m_document->copyCel(celId); });
+    menu.addAction(tr("Cut Cel"), this, [this, celId] { m_document->cutCel(celId); })->setEnabled(more);
+    QAction *paste = menu.addAction(tr("Paste Cel"), this, [this] { m_document->pasteCel(); });
+    paste->setToolTip(tr("As a new cel above this one"));
+    paste->setEnabled(m_document->canPasteCel());
+    menu.addAction(tr("Delete Cel"), this, [this, celId] { m_document->deleteCel(celId); })->setEnabled(more);
+    menu.setToolTipsVisible(true);
+    menu.exec(globalPos);
+}
+
 void TimelineView::contextMenuEvent(QContextMenuEvent *event)
 {
     if (event->pos().y() < m_metrics.rulerHeight && event->pos().x() >= m_metrics.headerWidth) {
@@ -2131,8 +2178,16 @@ void TimelineView::contextMenuEvent(QContextMenuEvent *event)
         return;
     }
     const int row = rowAt(event->pos().y());
-    if (row < 0 || event->pos().x() < m_metrics.headerWidth)
+    if (row < 0)
         return;
+    if (event->pos().x() < m_metrics.headerWidth) { // on the cel itself (its name): what is done to the whole cel
+        if (isLinkRow(row) || isMotionRow(row))
+            return;
+        const doc::Cel &cel = m_document->document().celAt(celIndexForRow(row));
+        m_document->setCurrentCel(cel.id());
+        showCelMenu(event->globalPos(), cel);
+        return;
+    }
     const int frame = frameAt(event->pos().x());
     if (isLinkRow(row))
         return; // a reference only
@@ -2220,31 +2275,7 @@ void TimelineView::contextMenuEvent(QContextMenuEvent *event)
                        });
     }
     menu.addSeparator();
-    // What the cel shows, keys and all, as plain pictures in a new cel.
-    QAction *raster = menu.addAction(tr("Raster into new Cel"), this, [this, celId] { m_document->rasterCel(celId); });
-    raster->setEnabled(!cel.timing().exposures().empty());
-    // A cel that is no trajectory can follow one: what it does comes on top of the cel's own keys.
-    if (!cel.properties().trajectory) {
-        QMenu *follow = menu.addMenu(tr("Follow trajectory"));
-        const doc::Document &doc = m_document->document();
-        const doc::Cel *followed = doc.followedTrajectory(cel);
-        QAction *none = follow->addAction(tr("None"), this, [this, celId] { m_document->setTrajectoryParent(celId, doc::kNoId); });
-        none->setCheckable(true);
-        none->setChecked(!followed);
-        bool any = false;
-        for (int i = doc.celCount() - 1; i >= 0; --i) {
-            const doc::Cel &t = doc.celAt(i);
-            if (!t.properties().trajectory)
-                continue;
-            any = true;
-            const doc::CelId id = t.id();
-            QAction *action = follow->addAction(QString::fromStdString(t.properties().name), this,
-                                                [this, celId, id] { m_document->setTrajectoryParent(celId, id); });
-            action->setCheckable(true);
-            action->setChecked(followed && followed->id() == id);
-        }
-        follow->setEnabled(any);
-    }
+    addCelActions(menu, cel);
     menu.addSeparator();
     QAction *copy = menu.addAction(tr("Copy frames"), this, &TimelineView::copyFrames);
     copy->setShortcut(Shortcuts::instance().key(QStringLiteral("edit.copy")));

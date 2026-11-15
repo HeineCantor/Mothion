@@ -24,6 +24,58 @@ private slots:
 
     // Autoplay plays the frames in a loop, the slider following; Play stops
     // it, the slider picks a frame, the speed sets the pace.
+    // A whole cel is copied, cut, pasted (a new cel above the current one, with new ids: drawings, timing and keys as they
+    // were) and deleted, one undo step each; the last cel stays.
+    void aCelIsCopiedCutPastedAndDeleted()
+    {
+        document::DocumentController controller;
+        controller.setSceneLength(24);
+        doc::Document &d = controller.documentForCommands();
+        const doc::CelId first = controller.currentCel();
+        controller.execute(doc::makeNewDrawing(d, first, 0, 4, "A").command);
+        controller.execute(doc::makeNewDrawing(d, first, 4, 2, "B").command);
+        QVERIFY(controller.setCelKey(first, 0, doc::CelPose{}));
+        QVERIFY(!controller.canPasteCel());
+        QVERIFY(!controller.deleteCel(first)); // the only one
+        QVERIFY(!controller.cutCel(first));
+
+        controller.copyCel(first);
+        QVERIFY(controller.canPasteCel());
+        const doc::CelId pasted = controller.pasteCel();
+        QVERIFY(pasted != doc::kNoId && pasted != first);
+        QCOMPARE(d.celCount(), 2);
+        QCOMPARE(d.indexOf(pasted), d.indexOf(first) + 1); // above it
+        QCOMPARE(controller.currentCel(), pasted);
+        const doc::Cel &a = *d.cel(first);
+        const doc::Cel &b = *d.cel(pasted);
+        QCOMPARE(b.properties().name, a.properties().name);
+        QCOMPARE(b.drawings().size(), a.drawings().size());
+        QVERIFY(b.motion() == a.motion());
+        for (int f = 0; f < 8; ++f) {
+            QCOMPARE(bool(b.drawingAt(f)), bool(a.drawingAt(f)));
+            if (a.drawingAt(f)) {
+                QCOMPARE(b.drawingAt(f)->name, a.drawingAt(f)->name);
+                QVERIFY(b.drawingAt(f)->id != a.drawingAt(f)->id);
+                QVERIFY(b.drawingAt(f)->layers.front().id != a.drawingAt(f)->layers.front().id);
+            }
+        }
+        controller.undo();
+        QCOMPARE(d.celCount(), 1);
+        controller.redo();
+        QCOMPARE(d.celCount(), 2);
+
+        QVERIFY(controller.cutCel(first));
+        QCOMPARE(d.celCount(), 1);
+        QVERIFY(!d.cel(first));
+        const doc::CelId back = controller.pasteCel(); // what was cut, again
+        QCOMPARE(d.celCount(), 2);
+        QCOMPARE(d.cel(back)->drawings().size(), std::size_t(2));
+        QVERIFY(controller.deleteCel(back));
+        QCOMPARE(d.celCount(), 1);
+        controller.undo();
+        QCOMPARE(d.celCount(), 2);
+    }
+
     void autoplayLoopsTheAnimation()
     {
         document::DocumentController controller;

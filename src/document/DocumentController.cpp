@@ -2106,6 +2106,63 @@ doc::CelId DocumentController::rasterCel(doc::CelId celId, QString *reason)
         name, celId, {});
 }
 
+void DocumentController::copyCel(doc::CelId celId)
+{
+    if (const doc::Cel *cel = m_document->cel(celId))
+        m_copiedCel = std::make_shared<const doc::Cel>(*cel); // its pixels shared, copied only when written
+}
+
+bool DocumentController::deleteCel(doc::CelId celId)
+{
+    if (!m_document->cel(celId) || m_document->celCount() <= 1)
+        return false;
+    execute(std::make_unique<doc::RemoveCelCommand>(celId));
+    return true;
+}
+
+bool DocumentController::cutCel(doc::CelId celId)
+{
+    if (!m_document->cel(celId) || m_document->celCount() <= 1)
+        return false;
+    copyCel(celId);
+    return deleteCel(celId);
+}
+
+doc::CelId DocumentController::pasteCel()
+{
+    if (!m_copiedCel)
+        return doc::kNoId;
+    doc::Document &d = *m_document;
+    doc::CelProperties properties = m_copiedCel->properties();
+    if (properties.parent != doc::kNoId && !d.cel(properties.parent))
+        properties.parent = doc::kNoId; // the trajectory it followed is gone
+    auto cel = std::make_unique<doc::Cel>(d.allocateCelId(), properties);
+    const doc::CelId id = cel->id();
+    // New ids for its drawings and layers (a layer the same through the drawings stays so).
+    std::map<doc::DrawingId, doc::DrawingId> drawings;
+    std::map<doc::LayerId, doc::LayerId> layers;
+    for (const auto &[old, drawing] : m_copiedCel->drawings()) {
+        doc::Drawing copy = drawing;
+        copy.id = d.allocateDrawingId();
+        drawings[old] = copy.id;
+        for (doc::Layer &layer : copy.layers) {
+            auto [it, fresh] = layers.try_emplace(layer.id, doc::kNoId);
+            if (fresh)
+                it->second = d.allocateLayerId();
+            layer.id = it->second;
+        }
+        cel->addDrawing(std::move(copy));
+    }
+    for (const doc::Exposure &e : m_copiedCel->timing().exposures())
+        if (const auto it = drawings.find(e.drawing); it != drawings.end())
+            cel->timing().setExposure(e.start, e.length, it->second);
+    cel->setMotion(m_copiedCel->motion());
+    const int below = d.indexOf(m_currentCel);
+    execute(std::make_unique<doc::AddCelCommand>(std::move(cel), below < 0 ? d.celCount() : below + 1));
+    setCurrentCel(id);
+    return id;
+}
+
 std::optional<DocumentController::PerspectiveLayerInfo> DocumentController::perspectiveLayerById(doc::LayerId id) const
 {
     if (id == doc::kNoId)

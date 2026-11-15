@@ -15,6 +15,8 @@
 #include <optional>
 #include <vector>
 
+class QMenu;
+
 namespace mothion::document {
 class DocumentController;
 }
@@ -171,6 +173,10 @@ private:
     void paintMotionHeader(QPainter &p, int celIndex, int row) const;
     void paintFoldArrow(QPainter &p, const QRect &r, bool folded) const;
     void showMotionMenu(const QPoint &globalPos, int celIndex, int frame, std::optional<doc::Channel> channel);
+    // What is done to a whole cel: Raster into new Cel, Follow trajectory (for the menus of its frames and of the cel).
+    void addCelActions(QMenu &menu, const doc::Cel &cel);
+    // The menu of the cel itself (a right click on its name): those, and copy, cut, paste and delete of the cel.
+    void showCelMenu(const QPoint &globalPos, const doc::Cel &cel);
     int rowAt(int y) const;              // -1 outside the rows
     int frameAt(int x) const;
     // The eye and lock toggles in a row's header.

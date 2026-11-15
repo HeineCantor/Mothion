@@ -36,6 +36,13 @@ AddCelCommand::AddCelCommand(Document &doc, int index, CelProperties properties)
 {
 }
 
+AddCelCommand::AddCelCommand(std::unique_ptr<Cel> cel, int index)
+    : m_id(cel->id())
+    , m_index(index)
+    , m_cel(std::move(cel))
+{
+}
+
 ChangeSet AddCelCommand::apply(Document &doc)
 {
     if (m_cel)

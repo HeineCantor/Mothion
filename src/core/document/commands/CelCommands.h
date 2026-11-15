@@ -14,6 +14,8 @@ class AddCelCommand : public Command
 {
 public:
     AddCelCommand(Document &doc, int index, CelProperties properties);
+    // A cel made already (its id, and those of its drawings and layers, allocated in the document), put at `index`.
+    AddCelCommand(std::unique_ptr<Cel> cel, int index);
 
     CelId celId() const { return m_id; }
 
