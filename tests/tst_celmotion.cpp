@@ -865,6 +865,18 @@ private slots:
         QCOMPARE(gizmo.chosenKeys(), (std::set<int>{22}));
         drag(screen(px + 100, py + 300), {});
         QVERIFY(gizmo.chosenKeys().empty());
+
+        // As on the timeline: Ctrl+click adds a key or takes it away (nothing moved), Shift+click adds those from the one
+        // last clicked.
+        drag(screen(px, py), {});
+        drag(screen(px + 400, py), {}, Qt::ControlModifier);
+        QCOMPARE(gizmo.chosenKeys(), (std::set<int>{2, 22}));
+        drag(screen(px, py), {}, Qt::ControlModifier);
+        QCOMPARE(gizmo.chosenKeys(), (std::set<int>{22}));
+        QVERIFY(near(2, 0, 0) && near(22, 400, 0));
+        drag(screen(px, py), {});
+        drag(screen(px + 400, py), {}, Qt::ShiftModifier);
+        QCOMPARE(gizmo.chosenKeys(), (std::set<int>{2, 12, 22}));
     }
 
     // The whole path of a trajectory is shown on the page, from its first key to its last: while the trajectory is the

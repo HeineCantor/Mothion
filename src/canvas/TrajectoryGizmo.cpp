@@ -198,6 +198,36 @@ bool TrajectoryGizmo::press(const QPointF &docPos, const ViewTransform &view, Qt
     if (handle == Handle::Key) { // a key of the path, dragged along the page: its position follows the pen
         const doc::Cel *trajectory = pathTrajectory();
         const int frame = *keyAt(docPos, view);
+        // The keys chosen, as on the timeline: a click chooses the key alone (one among several chosen keeps them, to drag
+        // them together); Ctrl adds it or takes it away; Shift adds the keys from the one last clicked to it.
+        std::set<int> chosen = chosenKeys();
+        if (m_chosenCel != trajectory->id())
+            m_anchorKey = -1;
+        if (modifiers & Qt::ControlModifier) {
+            if (chosen.contains(frame)) {
+                chosen.erase(frame);
+                m_chosenCel = trajectory->id();
+                m_chosen = chosen;
+                return true; // taken away: nothing to drag
+            }
+            chosen.insert(frame);
+            m_anchorKey = frame;
+        } else if (modifiers & Qt::ShiftModifier) {
+            const doc::CelMotion &motion = motionOf(*trajectory);
+            if (m_anchorKey >= 0 && motion.keyAt(doc::Channel::Position, m_anchorKey)) {
+                const int from = std::min(m_anchorKey, frame), to = std::max(m_anchorKey, frame);
+                for (const doc::CelKey &key : motion.keys(doc::Channel::Position))
+                    if (key.frame >= from && key.frame <= to)
+                        chosen.insert(key.frame);
+            } else {
+                chosen.insert(frame);
+                m_anchorKey = frame;
+            }
+        } else {
+            if (!chosen.contains(frame))
+                chosen = {frame};
+            m_anchorKey = frame;
+        }
         Drag d;
         d.handle = handle;
         d.cel = trajectory->id();
@@ -211,13 +241,7 @@ bool TrajectoryGizmo::press(const QPointF &docPos, const ViewTransform &view, Qt
         m_hovered = handle;
         m_hoverKey = frame;
         m_drag = d;
-        // The keys chosen: a key not among them is chosen alone (with Shift, added); the others chosen go with it.
-        std::set<int> chosen = chosenKeys();
-        if (!chosen.contains(frame)) {
-            if (!(modifiers & Qt::ShiftModifier))
-                chosen.clear();
-            chosen.insert(frame);
-        }
+        // The others chosen go with it.
         m_chosenCel = d.cel;
         m_chosen = chosen;
         m_followers.clear();

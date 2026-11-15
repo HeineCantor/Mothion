@@ -38,7 +38,8 @@ class ViewTransform;
 //
 // The path's keys can be chosen several at once with the selection tools (a box or a lasso drawn on the canvas while the
 // path is shown: Shift adds to the keys chosen, Alt takes away); a chosen key dragged takes the others with it, each moved
-// as far on the page. A key clicked alone is chosen alone (with Shift, added).
+// as far on the page. A key clicked is chosen alone; Ctrl+click adds it or takes it away, Shift+click adds the keys from the
+// one last clicked to it (as on the timeline).
 class TrajectoryGizmo
 {
 public:
@@ -63,7 +64,8 @@ public:
     // A point of the document that grabs `handle`; for tests.
     std::optional<QPointF> handlePoint(Handle handle, const ViewTransform &view) const;
 
-    // A press on a handle starts a drag (true); elsewhere nothing (false). On a key, Shift adds it to the keys chosen.
+    // A press on a handle starts a drag (true); elsewhere nothing (false). On a key, the keys chosen change as the class says
+    // (a Ctrl+click that takes one away is true too, with no drag).
     bool press(const QPointF &docPos, const ViewTransform &view, Qt::KeyboardModifiers modifiers = {});
     // A box (`lasso` false) or a lasso drawn from `docPos` to choose the path's keys inside it; false if no path's keys
     // can be chosen (no path shown, or it is locked). Shift adds to the keys chosen, Alt takes away, else they are replaced
@@ -154,6 +156,7 @@ private:
     // The keys chosen, of the trajectory m_chosenCel.
     doc::CelId m_chosenCel = doc::kNoId;
     std::set<int> m_chosen;
+    int m_anchorKey = -1; // the key last clicked (not with Shift), where a Shift+click chooses from
     struct Marquee
     {
         bool lasso = false;
