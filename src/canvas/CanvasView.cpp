@@ -257,6 +257,12 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
     });
     // Trajectory mode: the path of the trajectory is shown and its keys dragged (and nothing is drawn meanwhile).
     m_trajectoryGizmo.setPathVisible(m_toolState->trajectoryMode());
+    // The Transform tool: a box round the keys chosen on the path, to move, turn and scale them together.
+    m_trajectoryGizmo.setKeyBoxEnabled(m_toolState->activeTool() == ToolId::Transform);
+    connect(m_toolState, &ToolState::activeToolChanged, this, [this] {
+        m_trajectoryGizmo.setKeyBoxEnabled(m_toolState->activeTool() == ToolId::Transform);
+        update();
+    });
     connect(m_document, &DocumentController::motionPreviewChanged, this, [this] { update(); }); // keys dragged on the timeline
     connect(m_toolState, &ToolState::trajectoryModeChanged, this, [this](bool on) {
         m_trajectoryGizmo.setPathVisible(on);
@@ -1751,11 +1757,15 @@ void CanvasView::focusOutEvent(QFocusEvent *event)
 
 void CanvasView::updateGizmoCursor()
 {
-    if (m_trajectoryGizmo.hovered() != TrajectoryGizmo::Handle::None && !panKeyHeld())
-        setCursor(m_trajectoryGizmo.hovered() == TrajectoryGizmo::Handle::Move || m_trajectoryGizmo.hovered() == TrajectoryGizmo::Handle::Key
-                      ? Qt::SizeAllCursor
-                  : m_trajectoryGizmo.hovered() == TrajectoryGizmo::Handle::Rotate ? turnCursor()
-                                                                                    : Qt::SizeFDiagCursor);
+    using H = TrajectoryGizmo::Handle;
+    const H hovered = m_trajectoryGizmo.hovered();
+    if (hovered == H::BoxScale && !panKeyHeld()) {
+        const QLineF grip = m_trajectoryGizmo.scaleGripLine(m_view);
+        setCursor(resizeCursor(m_view.documentToView().map(grip.p1()), m_view.documentToView().map(grip.p2())));
+    } else if (hovered != H::None && !panKeyHeld())
+        setCursor(hovered == H::Move || hovered == H::Key || hovered == H::BoxMove ? Qt::SizeAllCursor
+                  : hovered == H::Rotate || hovered == H::BoxRotate              ? turnCursor()
+                                                                                 : Qt::SizeFDiagCursor);
     else if ((m_gizmo.hovered() != PerspectiveGizmo::Handle::None || m_cameraGizmo.hovered() != CameraGizmo::Handle::None)
         && !panKeyHeld())
         setCursor(Qt::PointingHandCursor);

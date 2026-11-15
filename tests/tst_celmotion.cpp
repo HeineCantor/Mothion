@@ -1789,6 +1789,61 @@ private slots:
         QTest::keyClick(panel.view(), Qt::Key_Delete);
         QCOMPARE(controller.celMotion(trajectory)->keyFrames(), std::vector<int>{12});
     }
+
+    // With the Transform tool and keys chosen on the path, a box round them moves (and scales) them together; one undo
+    // step a drag.
+    void theTransformToolMovesAndScalesTheChosenPathKeys()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        controller.setSceneLength(30);
+        controller.addTrajectory();
+        const doc::CelId trajectory = controller.currentCel();
+        QVERIFY(controller.setCelKey(trajectory, 2, at(0, 0)));
+        QVERIFY(controller.setCelKey(trajectory, 12, at(200, 100)));
+        QVERIFY(controller.setCelKey(trajectory, 22, at(400, 0)));
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(900, 520);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        state.setTrajectoryMode(true);
+        state.setActiveTool(tools::ToolId::Transform);
+        controller.setCurrentFrame(0); // the circle on the key of 2, away from the box
+        const canvas::TrajectoryGizmo &gizmo = canvas.trajectoryGizmo();
+        const QTransform toView = canvas.view().documentToView();
+        const double px = controller.document().cel(trajectory)->motion().pivotX;
+        const double py = controller.document().cel(trajectory)->motion().pivotY;
+        auto screen = [&](QPointF p) { return toView.map(p).toPoint(); };
+        auto drag = [&](QPoint from, QPoint to, Qt::KeyboardModifiers modifiers = {}) {
+            QTest::mousePress(&canvas, Qt::LeftButton, modifiers, from);
+            QTest::mouseMove(&canvas, (from + to) / 2);
+            QTest::mouseMove(&canvas, to);
+            QTest::mouseRelease(&canvas, Qt::LeftButton, modifiers, to);
+        };
+        auto near = [&](int frame, double x, double y) {
+            const doc::CelPose p = controller.celPoseAt(trajectory, frame);
+            return qAbs(p.x - x) < 3 && qAbs(p.y - y) < 3;
+        };
+        drag(screen({px + 200, py + 100}), screen({px + 200, py + 100}));
+        QVERIFY(!gizmo.keyBoxShown()); // one key: no box
+        drag(screen({px + 400, py}), screen({px + 400, py}), Qt::ControlModifier);
+        QCOMPARE(gizmo.chosenKeys(), (std::set<int>{12, 22}));
+        QVERIFY(gizmo.keyBoxShown());
+
+        // Inside the box: both move as far, 2 stays.
+        drag(screen({px + 300, py + 50}), screen({px + 350, py + 80}));
+        QVERIFY(near(12, 250, 130) && near(22, 450, 30) && near(2, 0, 0));
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo keyframes"));
+        controller.undo();
+        QVERIFY(near(12, 200, 100) && near(22, 400, 0));
+
+        // Its right side, out twice as far from the left one: twice as wide.
+        const QRectF box = gizmo.keyBox(canvas.view());
+        const double left = box.left();
+        drag(screen({box.right(), box.center().y()}), screen({left + 2 * box.width(), box.center().y()}));
+        const double x12 = left + 2 * (px + 200 - left) - px, x22 = left + 2 * (px + 400 - left) - px;
+        QVERIFY(near(12, x12, 100) && near(22, x22, 0));
+    }
 };
 
 QTEST_MAIN(TestCelMotion)

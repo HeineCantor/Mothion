@@ -115,7 +115,89 @@ TrajectoryGizmo::Handle TrajectoryGizmo::handleAt(const QPointF &docPos, const V
     const Handle onCircle = circleHandleAt(docPos, view);
     if (onCircle != Handle::None)
         return onCircle;
-    return pathEditable() && keyAt(docPos, view) ? Handle::Key : Handle::None;
+    if (pathEditable() && keyAt(docPos, view))
+        return Handle::Key;
+    int grip = -1;
+    return boxHandleAt(docPos, view, &grip);
+}
+
+bool TrajectoryGizmo::keyBoxShown() const
+{
+    return m_keyBoxEnabled && pathEditable() && chosenKeys().size() >= 2;
+}
+
+QRectF TrajectoryGizmo::keyBox(const ViewTransform &view) const
+{
+    const doc::Cel *trajectory = pathTrajectory();
+    if (!trajectory)
+        return {};
+    double left = 1e18, top = 1e18, right = -1e18, bottom = -1e18;
+    for (int frame : chosenKeys()) {
+        const QPointF p = pathPoint(*trajectory, frame);
+        left = std::min(left, p.x());
+        top = std::min(top, p.y());
+        right = std::max(right, p.x());
+        bottom = std::max(bottom, p.y());
+    }
+    if (left > right)
+        return {};
+    QRectF box(QPointF(left, top), QPointF(right, bottom));
+    // Room round the keys (their dots stay theirs to take), and a box that is not too thin to take on screen.
+    const double px = 1.0 / std::max(1e-6, view.zoom());
+    box.adjust(-14 * px, -14 * px, 14 * px, 14 * px);
+    const double least = 40 * px;
+    if (box.width() < least)
+        box.adjust(-(least - box.width()) / 2, 0, (least - box.width()) / 2, 0);
+    if (box.height() < least)
+        box.adjust(0, -(least - box.height()) / 2, 0, (least - box.height()) / 2);
+    return box;
+}
+
+QPointF TrajectoryGizmo::gripPoint(const QRectF &box, int grip)
+{
+    switch (grip) {
+    case 0: return box.topLeft();
+    case 1: return box.topRight();
+    case 2: return box.bottomRight();
+    case 3: return box.bottomLeft();
+    case 4: return {box.center().x(), box.top()};
+    case 5: return {box.right(), box.center().y()};
+    case 6: return {box.center().x(), box.bottom()};
+    default: return {box.left(), box.center().y()};
+    }
+}
+
+TrajectoryGizmo::Handle TrajectoryGizmo::boxHandleAt(const QPointF &docPos, const ViewTransform &view, int *grip) const
+{
+    *grip = -1;
+    if (!keyBoxShown())
+        return Handle::None;
+    const QRectF box = keyBox(view);
+    const QTransform toView = view.documentToView();
+    const QPointF at = toView.map(docPos);
+    for (int g = 0; g < 8; ++g)
+        if (QLineF(at, toView.map(gripPoint(box, g))).length() <= kGrab) {
+            *grip = g;
+            return Handle::BoxScale;
+        }
+    const QPolygonF onScreen = toView.map(QPolygonF(box));
+    if (onScreen.containsPoint(at, Qt::OddEvenFill))
+        return Handle::BoxMove;
+    // Just outside it: turns.
+    double nearest = 1e18;
+    for (int i = 0; i < 4; ++i)
+        nearest = std::min(nearest, distanceToSegment(at, onScreen[i], onScreen[(i + 1) % 4]));
+    return nearest <= 28.0 ? Handle::BoxRotate : Handle::None;
+}
+
+QLineF TrajectoryGizmo::scaleGripLine(const ViewTransform &view) const
+{
+    const QRectF box = m_drag && m_drag->grip >= 0 ? m_drag->box : keyBox(view);
+    const int grip = m_drag && m_drag->grip >= 0 ? m_drag->grip : m_hoverGrip;
+    if (grip < 0 || box.isNull())
+        return {};
+    const QTransform t = m_drag ? m_boxTransform : QTransform();
+    return QLineF(t.map(box.center()), t.map(gripPoint(box, grip)));
 }
 
 TrajectoryGizmo::Handle TrajectoryGizmo::circleHandleAt(const QPointF &docPos, const ViewTransform &view) const
@@ -200,6 +282,33 @@ bool TrajectoryGizmo::press(const QPointF &docPos, const ViewTransform &view, Qt
     if (!editable() && !pathEditable())
         return false;
     const Handle handle = handleAt(docPos, view);
+    if (handle == Handle::BoxMove || handle == Handle::BoxRotate || handle == Handle::BoxScale) {
+        // The box round the chosen keys: all of them go where it takes them.
+        const doc::Cel *trajectory = pathTrajectory();
+        Drag d;
+        d.handle = handle;
+        d.cel = trajectory->id();
+        d.before = trajectory->motion();
+        d.press = docPos;
+        d.toView = view.documentToView();
+        d.box = keyBox(view);
+        boxHandleAt(docPos, view, &d.grip);
+        d.centerDoc = d.box.center();
+        d.lastAngle = std::atan2(docPos.y() - d.centerDoc.y(), docPos.x() - d.centerDoc.x());
+        m_followers.clear();
+        for (int frame : chosenKeys()) {
+            Follower f;
+            f.frame = frame;
+            f.centerDoc = pathPoint(*trajectory, frame);
+            f.parentsBack = m_document->document().trajectoryParentMatrix(d.cel, frame).inverted();
+            f.start = m_document->celPoseAt(d.cel, frame);
+            m_followers.push_back(f);
+        }
+        m_hovered = handle;
+        m_boxTransform = QTransform();
+        m_drag = d;
+        return true;
+    }
     if (handle == Handle::None || (handle != Handle::Key && !editable()))
         return false;
     if (handle == Handle::Key) { // a key of the path, dragged along the page: its position follows the pen
@@ -297,6 +406,10 @@ void TrajectoryGizmo::move(const QPointF &docPos, Qt::KeyboardModifiers modifier
     }
     if (!m_drag)
         return;
+    if (m_drag->handle == Handle::BoxMove || m_drag->handle == Handle::BoxRotate || m_drag->handle == Handle::BoxScale) {
+        moveKeyBox(docPos, modifiers);
+        return;
+    }
     const Drag &d = *m_drag;
     doc::CelPose pose = d.start;
     std::vector<doc::Channel> channels;
@@ -363,6 +476,62 @@ void TrajectoryGizmo::move(const QPointF &docPos, Qt::KeyboardModifiers modifier
     m_document->previewCelPose(d.cel, d.frame, pose, channels);
 }
 
+void TrajectoryGizmo::moveKeyBox(const QPointF &docPos, Qt::KeyboardModifiers modifiers)
+{
+    Drag &d = *m_drag;
+    const QPointF c = d.box.center();
+    QTransform t;
+    switch (d.handle) {
+    case Handle::BoxMove: t = QTransform::fromTranslate(docPos.x() - d.press.x(), docPos.y() - d.press.y()); break;
+    case Handle::BoxRotate: {
+        const double angle = std::atan2(docPos.y() - c.y(), docPos.x() - c.x());
+        double step = angle - d.lastAngle;
+        while (step > std::numbers::pi)
+            step -= 2 * std::numbers::pi;
+        while (step < -std::numbers::pi)
+            step += 2 * std::numbers::pi;
+        d.turned += step / kRadians;
+        d.lastAngle = angle;
+        double degrees = d.turned;
+        if (modifiers & Qt::ShiftModifier)
+            degrees = std::round(degrees / kRotateSnap) * kRotateSnap;
+        t.translate(c.x(), c.y());
+        t.rotate(degrees);
+        t.translate(-c.x(), -c.y());
+        break;
+    }
+    case Handle::BoxScale: {
+        // From the opposite corner (or side), as far as the pen takes the handle.
+        const int opposite = d.grip < 4 ? (d.grip + 2) % 4 : 4 + (d.grip - 4 + 2) % 4;
+        const QPointF anchor = gripPoint(d.box, opposite);
+        const QPointF handle = gripPoint(d.box, d.grip);
+        const bool sideX = d.grip == 5 || d.grip == 7, sideY = d.grip == 4 || d.grip == 6;
+        double sx = sideY || std::abs(handle.x() - anchor.x()) < 1e-9 ? 1.0 : (docPos.x() - anchor.x()) / (handle.x() - anchor.x());
+        double sy = sideX || std::abs(handle.y() - anchor.y()) < 1e-9 ? 1.0 : (docPos.y() - anchor.y()) / (handle.y() - anchor.y());
+        if ((modifiers & Qt::ShiftModifier) && d.grip < 4)
+            sx = sy = std::abs(sx) > std::abs(sy) ? sx : sy;
+        t.translate(anchor.x(), anchor.y());
+        t.scale(sx, sy);
+        t.translate(-anchor.x(), -anchor.y());
+        break;
+    }
+    default: return;
+    }
+    m_boxTransform = t;
+    const doc::CelMotion &motion = m_document->document().cel(d.cel)->motion();
+    std::vector<document::DocumentController::CelPoseChange> changes;
+    for (const Follower &f : m_followers) {
+        const QPointF target = t.map(f.centerDoc);
+        double lx = 0, ly = 0;
+        f.parentsBack.map(target.x(), target.y(), lx, ly);
+        doc::CelPose moved = f.start;
+        moved.x = lx - motion.pivotX;
+        moved.y = ly - motion.pivotY;
+        changes.push_back({d.cel, f.frame, moved, {doc::Channel::Position}});
+    }
+    m_document->previewCelPoses(changes);
+}
+
 void TrajectoryGizmo::release(const QPointF &docPos)
 {
     if (m_marquee) {
@@ -395,6 +564,7 @@ void TrajectoryGizmo::release(const QPointF &docPos)
     move(docPos);
     const Drag d = *m_drag;
     m_drag.reset();
+    m_boxTransform = QTransform();
     m_document->finishCelPose(d.cel, d.before); // one undo step (none for a pose that stays only on the frame)
 }
 
@@ -405,6 +575,7 @@ void TrajectoryGizmo::cancel()
         return;
     const Drag d = *m_drag;
     m_drag.reset();
+    m_boxTransform = QTransform();
     m_document->cancelCelPose(d.cel, d.before);
 }
 
@@ -412,10 +583,14 @@ bool TrajectoryGizmo::hover(const QPointF &docPos, const ViewTransform &view)
 {
     const Handle now = editable() || pathEditable() ? handleAt(docPos, view) : Handle::None;
     const int key = now == Handle::Key ? keyAt(docPos, view).value_or(-1) : -1;
-    if (now == m_hovered && key == m_hoverKey)
+    int grip = -1;
+    if (now == Handle::BoxScale)
+        boxHandleAt(docPos, view, &grip);
+    if (now == m_hovered && key == m_hoverKey && grip == m_hoverGrip)
         return false;
     m_hovered = now;
     m_hoverKey = key;
+    m_hoverGrip = grip;
     return true;
 }
 
@@ -528,6 +703,25 @@ void TrajectoryGizmo::paintPath(QPainter &painter, const ViewTransform &view) co
             painter.setPen(QPen(accent.darker(120), 1.6));
             painter.setBrush(Qt::NoBrush);
             painter.drawEllipse(at, 3.0, 3.0);
+        }
+    }
+    // The box round the chosen keys (Transform tool), as the drag takes it.
+    const bool boxDrag = m_drag && (m_drag->handle == Handle::BoxMove || m_drag->handle == Handle::BoxRotate
+                             || m_drag->handle == Handle::BoxScale);
+    if (boxDrag || keyBoxShown()) {
+        const QRectF box = boxDrag ? m_drag->box : keyBox(view);
+        const QTransform t = (boxDrag ? m_boxTransform : QTransform()) * toView;
+        const QColor blue(40, 110, 230);
+        painter.setBrush(Qt::NoBrush);
+        painter.setPen(QPen(Qt::white, 3.0));
+        painter.drawPolygon(t.map(QPolygonF(box)));
+        painter.setPen(QPen(blue, 1.4, Qt::DashLine));
+        painter.drawPolygon(t.map(QPolygonF(box)));
+        painter.setPen(QPen(blue, 1.4));
+        painter.setBrush(Qt::white);
+        for (int g = 0; g < 8; ++g) {
+            const QPointF at = t.map(gripPoint(box, g));
+            painter.drawRect(QRectF(at.x() - 4, at.y() - 4, 8, 8));
         }
     }
     // The box or lasso being drawn to choose keys.

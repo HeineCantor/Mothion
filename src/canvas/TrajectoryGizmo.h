@@ -4,7 +4,9 @@
 #include "core/document/Ids.h"
 #include "document/DocumentController.h"
 
+#include <QLineF>
 #include <QPointF>
+#include <QRectF>
 #include <QPolygonF>
 #include <QTransform>
 
@@ -40,10 +42,16 @@ class ViewTransform;
 // path is shown: Shift adds to the keys chosen, Alt takes away); a chosen key dragged takes the others with it, each moved
 // as far on the page. A key clicked is chosen alone; Ctrl+click adds it or takes it away, Shift+click adds the keys from the
 // one last clicked to it (as on the timeline).
+//
+// With the Transform tool and two or more keys chosen, a box goes round them with eight handles, as the Transform tool's
+// round pixels: inside it moves them, a corner scales them (Shift keeps the proportions), a side scales them one way, just
+// outside it turns them round its middle (Shift: 15° steps). Each key's position goes where the box takes it on the page
+// (through what the parents do on its frame); each drag is one undo step.
 class TrajectoryGizmo
 {
 public:
-    enum class Handle { None, Move, Rotate, Scale, Key }; // Key: a key's dot on the path (see paintPath())
+    // Key: a key's dot on the path (see paintPath()); Box*: the box round the chosen keys (Transform tool).
+    enum class Handle { None, Move, Rotate, Scale, Key, BoxMove, BoxRotate, BoxScale };
 
     explicit TrajectoryGizmo(document::DocumentController *document);
 
@@ -93,6 +101,13 @@ public:
     const doc::CelMotion &motionOf(const doc::Cel &cel) const;
     // Trajectory mode (ToolState::trajectoryMode()): the path is shown, and its keys dragged, only while it is on.
     void setPathVisible(bool on) { m_pathVisible = on; }
+    // The Transform tool is chosen: the box round the chosen keys shows (when two or more are chosen).
+    void setKeyBoxEnabled(bool on) { m_keyBoxEnabled = on; }
+    bool keyBoxShown() const;
+    // The box round the chosen keys (document coordinates; a little room round them, and not too small on screen).
+    QRectF keyBox(const ViewTransform &view) const;
+    // Of the box's scale handle under the pointer (or dragged): from the middle of the box to it, in the page (for its cursor).
+    QLineF scaleGripLine(const ViewTransform &view) const;
     bool pathShown() const { return pathTrajectory() != nullptr; }
     // Where the trajectory's middle is on `frame` (document coordinates).
     QPointF pathPoint(const doc::Cel &trajectory, int frame) const;
@@ -142,7 +157,16 @@ private:
         double pressDistance = 1; // the pen's screen distance from the middle at the press
         double lastAngle = 0;     // radians, of the pen around the middle
         double turned = 0;        // degrees so far
+        int grip = -1;            // of the key box: its handle (corners 0-3 from the top left round, sides 4-7 from the top)
+        QRectF box;               // of the key box: as at the press (document coordinates)
     };
+    bool m_keyBoxEnabled = false;
+    int m_hoverGrip = -1;          // the key box's scale handle under the pointer
+    QTransform m_boxTransform;     // what the drag of the key box does so far (document coordinates)
+    // The handle of the key box under `docPos` (BoxScale with `grip` set, BoxMove, BoxRotate or None).
+    Handle boxHandleAt(const QPointF &docPos, const ViewTransform &view, int *grip) const;
+    static QPointF gripPoint(const QRectF &box, int grip);
+    void moveKeyBox(const QPointF &docPos, Qt::KeyboardModifiers modifiers);
     std::optional<Drag> m_drag;
     // The keys moved along with the one dragged (a key drag with several chosen): where each was, as the press found it.
     struct Follower
