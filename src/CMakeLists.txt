@@ -221,7 +221,10 @@ qt_add_resources(mothion_gui "mothion_addon"
 )
 # Tablet backend selection: Wintab needs Qt's private GUI API, Windows only.
 if(WIN32 AND MOTHION_ENABLE_WINTAB)
-    find_package(Qt6 REQUIRED COMPONENTS GuiPrivate)
+    # Qt 6.9 and later keep the private API in a package of its own; before, Gui brings Qt6::GuiPrivate with it.
+    if(NOT TARGET Qt6::GuiPrivate)
+        find_package(Qt6 REQUIRED COMPONENTS GuiPrivate)
+    endif()
     target_sources(mothion_gui PRIVATE input/TabletBackend_wintab.cpp)
     target_link_libraries(mothion_gui PRIVATE Qt6::GuiPrivate)
 else()
