@@ -43,4 +43,7 @@ else
     # A change the build had nothing to do for leaves the executable's date behind: mark it as current.
     touch "$exe"
 fi
+# Under XWayland (xcb) the pen moves the one pointer: on Wayland it has its own, and a pen button the compositor turns
+# into a mouse click lands where the mouse was left. QT_QPA_PLATFORM set beforehand wins (e.g. wayland).
+export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-xcb}"
 exec "$exe"
