@@ -25,7 +25,7 @@ struct ShortcutCommand
 // choices are kept on top of them (QSettings, "shortcuts/<id>") and win. The places that run a command
 // (menu actions, the tools' keys, a panel's own) ask for it by id with bind(), and follow the changes.
 //
-// Not here: keys that are held while something is done (Space and Tab to pan, Shift for a straight line,
+// Not here: keys that are held while something is done (Tab to pan, Shift for a straight line,
 // Alt for the eyedropper) and the keys a tool takes while it is open (Enter, Esc, Delete, the arrows).
 class Shortcuts : public QObject
 {

@@ -143,7 +143,7 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
     connect(m_player, &TimelinePlayer::playingChanged, play, showPlaying);
     auto *playKey = new QShortcut(this);
     Shortcuts::instance().bind(playKey, QStringLiteral("anim.playPause"));
-    playKey->setContext(Qt::WidgetWithChildrenShortcut); // only with the focus in the timeline: on the canvas Space pans
+    playKey->setContext(Qt::ApplicationShortcut); // wherever the focus is (typing a space in a text field types it)
     connect(playKey, &QShortcut::activated, m_player, &TimelinePlayer::toggle);
 
     auto *prev = new QToolButton(this);

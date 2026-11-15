@@ -161,7 +161,7 @@ private:
     void noteDevice(const QPointingDevice *device);
 
     // Which navigation a press should start, given the active tool, the held
-    // keys (Space or Tab + Ctrl/Shift) and the buttons. None means "paint".
+    // keys (Tab + Ctrl/Shift) and the buttons. None means "paint".
     NavigationGesture::Mode navigationModeFor(const PenSample &sample) const;
 
     void beginStroke(const PenSample &sample);
@@ -297,9 +297,8 @@ private:
     QRect m_paintedOutline;
     InputTool m_pointerTool = InputTool::Mouse;
     // Held keys that turn the pen into the hand (Ctrl: zoom, Shift: rotate).
-    bool m_spaceHeld = false;
     bool m_tabHeld = false;
-    bool panKeyHeld() const { return m_spaceHeld || m_tabHeld; }
+    bool panKeyHeld() const { return m_tabHeld; }
     // Alt held with a paint tool: the pen picks colors instead.
     bool m_altHeld = false;
     std::optional<QPointF> m_lastPoint; // where the last stroke ended, document coordinates

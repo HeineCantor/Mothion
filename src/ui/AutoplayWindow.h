@@ -63,6 +63,7 @@ protected:
     void showEvent(QShowEvent *event) override;
     void hideEvent(QHideEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
+    bool event(QEvent *event) override; // Space is this window's play, not the timeline's
 
 private:
     void showFrame(int frame);

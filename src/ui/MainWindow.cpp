@@ -1403,7 +1403,7 @@ void MainWindow::exportVideo()
 
 namespace {
 
-// Where a typed space or tab belongs to the text, not to the canvas.
+// Where a typed tab belongs to the text, not to the canvas.
 bool isTextEntry(const QWidget *widget)
 {
     for (; widget; widget = widget->parentWidget())
@@ -1442,13 +1442,13 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
         break;
     }
 
-    // The pan keys (Space, Tab) are for the canvas wherever the focus is,
+    // The pan key (Tab) is for the canvas wherever the focus is,
     // unless typing: after picking a brush from a list, say, holding Tab
     // must pan at the first touch, not move the focus around the panel.
     if (event->type() == QEvent::KeyPress && watched != m_canvas && !QApplication::activePopupWidget()) {
         const int key = static_cast<QKeyEvent *>(event)->key();
         auto *widget = qobject_cast<QWidget *>(watched);
-        if ((key == Qt::Key_Space || key == Qt::Key_Tab) && widget && isPartOf(widget, this) && !isTextEntry(widget)) {
+        if (key == Qt::Key_Tab && widget && isPartOf(widget, this) && !isTextEntry(widget)) {
             m_canvas->setFocus(Qt::OtherFocusReason);
             QApplication::sendEvent(m_canvas, event);
             return true;
