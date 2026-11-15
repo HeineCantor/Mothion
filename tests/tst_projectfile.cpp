@@ -860,6 +860,16 @@ private slots:
         const QImage empty = io::renderOutputFrame(d, 0, false);
         QVERIFY(isPaper(empty, 50, 50) && isPaper(empty, 5, 5));
         QCOMPARE(qAlpha(io::renderOutputFrame(d, 0, true).pixel(50, 50)), 0);
+        // What is drawn there (the canvas has no end) is seen, as close or as far as the camera is.
+        for (int y = 40; y < 60; ++y)
+            for (int x = -60; x < -40; ++x)
+                drawing.layers[0].image.setPixel(x, y, kRed);
+        const QImage beyond = io::renderOutputFrame(d, 0, false);
+        QVERIFY(isRed(beyond, 50, 50) && isPaper(beyond, 5, 5));
+        away.setKey(0, {-50, 50, 0.25, 0}); // far: the sheet is drawn smaller first
+        d.setCamera(away);
+        const QImage distant = io::renderOutputFrame(d, 0, false);
+        QVERIFY(isRed(distant, 50, 50) && isPaper(distant, 45, 45) && isRed(distant, 70, 50)); // the left half of the page, at 50..62
 
         // Turned: the camera a quarter clockwise puts the left half of the sheet at the bottom of the picture.
         doc::Camera turned;

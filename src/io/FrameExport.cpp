@@ -79,16 +79,24 @@ QImage renderFrame(const doc::Document &document, int frame, bool transparent)
 
 QImage applyCamera(const QImage &sheet, const doc::CameraPose &pose, QRgb background)
 {
-    QImage out(sheet.size(), QImage::Format_ARGB32_Premultiplied);
+    return applyCamera(sheet, QRect(QPoint(0, 0), sheet.size()), 1, sheet.size(), pose, background);
+}
+
+QImage applyCamera(const QImage &sheet, const QRect &area, int step, QSize pictureSize, const doc::CameraPose &pose,
+                   QRgb background)
+{
+    QImage out(pictureSize, QImage::Format_ARGB32_Premultiplied);
     out.fill(QColor::fromRgba(background)); // as a color: the alpha of the paper is its own, not premultiplied
-    const doc::Matrix2x3 m = pose.sheetToPicture(sheet.width(), sheet.height());
-    QTransform toPicture(m.a, m.b, m.c, m.d, m.e, m.f);
-    // Far out the sheet is brought down to about the picture's size first (an average of the pixels), or the
+    const doc::Matrix2x3 m = pose.sheetToPicture(pictureSize.width(), pictureSize.height());
+    // A pixel of the image to the sheet, then the sheet to the picture.
+    QTransform toPicture = QTransform::fromScale(step, step) * QTransform::fromTranslate(area.left(), area.top())
+                           * QTransform(m.a, m.b, m.c, m.d, m.e, m.f);
+    // Far out the image is brought down to about the picture's size first (an average of the pixels), or the
     // resampling would pick some of them and the picture would shimmer.
     QImage source = sheet;
-    if (pose.zoom > 0 && pose.zoom < 0.75) {
-        const double f = pose.zoom;
-        source = sheet.scaled(QSize(std::max(1, int(sheet.width() * f)), std::max(1, int(sheet.height() * f))),
+    const double zoom = pose.zoom * step; // picture pixels for a pixel of the image
+    if (zoom > 0 && zoom < 0.75) {
+        source = sheet.scaled(QSize(std::max(1, int(sheet.width() * zoom)), std::max(1, int(sheet.height() * zoom))),
                               Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
         toPicture = QTransform::fromScale(sheet.width() / double(source.width()), sheet.height() / double(source.height()))
                     * toPicture;
@@ -100,16 +108,43 @@ QImage applyCamera(const QImage &sheet, const doc::CameraPose &pose, QRgb backgr
     return out;
 }
 
+QRect cameraArea(const doc::CameraPose &pose, int width, int height)
+{
+    double left = 1e18, top = 1e18, right = -1e18, bottom = -1e18;
+    for (const auto &corner : pose.frame(width, height)) {
+        left = std::min(left, corner[0]);
+        top = std::min(top, corner[1]);
+        right = std::max(right, corner[0]);
+        bottom = std::max(bottom, corner[1]);
+    }
+    const int margin = 2 * cameraStep(pose);
+    return QRectF(QPointF(left, top), QPointF(right, bottom)).toAlignedRect().adjusted(-margin, -margin, margin, margin);
+}
+
+int cameraStep(const doc::CameraPose &pose)
+{
+    int step = 1;
+    while (step < 8 && pose.zoom > 0 && pose.zoom * step * 2 <= 1.0)
+        step *= 2;
+    return step;
+}
+
 QImage renderOutputFrame(const doc::Document &document, int frame, bool transparent)
 {
-    QImage sheet = renderFrame(document, frame, transparent);
     const auto &camera = document.camera();
     if (!camera || !camera->visible || camera->isEmpty())
-        return sheet;
+        return renderFrame(document, frame, transparent);
     const doc::CameraPose pose = camera->poseAt(frame);
     if (pose == doc::CameraPose::wholeSheet(document.width(), document.height()))
-        return sheet; // looking at all of it: nothing to resample
-    return applyCamera(sheet, pose, transparent ? QRgb(0) : document.paperColor());
+        return renderFrame(document, frame, transparent); // looking at all of it: nothing to resample
+    // What the camera sees, which may lie out of the page (the canvas has no end).
+    canvas::FrameRenderer renderer;
+    renderer.setPaperVisible(!transparent);
+    renderer.setGuidesVisible(false);
+    renderer.setResampleFilter(canvas::ResampleFilter::Bicubic);
+    renderer.setArea(document, frame, cameraArea(pose, document.width(), document.height()), cameraStep(pose));
+    return applyCamera(renderer.image(), renderer.area(), renderer.step(), QSize(document.width(), document.height()),
+                       pose, transparent ? QRgb(0) : document.paperColor());
 }
 
 namespace {

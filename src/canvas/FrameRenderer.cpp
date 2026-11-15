@@ -342,15 +342,18 @@ QRect onSteps(const QRect &r, int step)
 
 } // namespace
 
-void FrameRenderer::setArea(const doc::Document &doc, int frame, const QRect &wanted, int step)
+void FrameRenderer::setArea(const doc::Document &doc, int frame, const QRect &wanted, int step, bool keep)
 {
     step = std::max(1, step);
     const QRect area = onSteps(wanted, step);
-    if (area == m_area && step == m_step)
+    if (area == m_area && step == m_step) {
+        if (!keep)
+            render(doc, frame, area);
         return;
+    }
     QImage image(area.size() / step, QImage::Format_ARGB32_Premultiplied);
     QRect kept;
-    if (step == m_step && !m_image.isNull()) {
+    if (keep && step == m_step && !m_image.isNull()) {
         kept = area & m_area;
         if (!kept.isEmpty()) {
             QPainter p(&image);

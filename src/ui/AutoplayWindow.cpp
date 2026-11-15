@@ -470,22 +470,36 @@ void AutoplayWindow::showFrame(int frame)
     std::vector<doc::DrawingId> shown = exposedAt(m_frame);
     // A drawing held over frames is not drawn again, unless its cel is moved differently on this one (its keys).
     std::vector<doc::CelPose> poses = posesAt(m_frame);
+    // Through the camera, if the project has one that is on; else the whole sheet, as it is. The camera may look past
+    // the page (the canvas has no end): what it sees is rendered.
+    const doc::Document &d = m_document->document();
+    const doc::CameraPose pose = m_document->cameraPoseAt(m_frame);
+    const bool camera = pose != doc::CameraPose::wholeSheet(d.width(), d.height());
+    const QRect page(0, 0, d.width(), d.height());
+    const QRect area = camera ? io::cameraArea(pose, d.width(), d.height()) : page;
+    const int step = camera ? io::cameraStep(pose) : 1;
     if (m_stale || shown != m_shown || poses != m_shownPoses) {
-        m_renderer.renderAll(m_document->document(), m_frame);
+        if (camera)
+            m_renderer.setArea(d, m_frame, area, step, false); // nothing kept: the last picture was of another frame
+        else
+            m_renderer.renderAll(d, m_frame);
         m_shown = std::move(shown);
         m_shownPoses = std::move(poses);
         m_stale = false;
+    } else if (camera) {
+        m_renderer.setArea(d, m_frame, area, step); // the same frame's picture: only what the camera newly sees is drawn
+    } else if (m_renderer.area() != page || m_renderer.step() != 1) {
+        m_renderer.renderAll(d, m_frame);
     }
-    // Through the camera, if the project has one that is on; else the whole sheet, as it is.
-    const doc::Document &d = m_document->document();
-    const doc::CameraPose pose = m_document->cameraPoseAt(m_frame);
     auto *picture = static_cast<FramePicture *>(m_picture);
-    if (pose == doc::CameraPose::wholeSheet(d.width(), d.height())) {
-        picture->setImage(&m_renderer.image());
+    if (!camera) {
+        m_shownImage = &m_renderer.image();
     } else {
-        m_output = io::applyCamera(m_renderer.image(), pose, d.paperColor());
-        picture->setImage(&m_output);
+        m_output = io::applyCamera(m_renderer.image(), m_renderer.area(), m_renderer.step(), page.size(), pose,
+                                   d.paperColor());
+        m_shownImage = &m_output;
     }
+    picture->setImage(m_shownImage);
     m_picture->update();
 }
 

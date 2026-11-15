@@ -61,7 +61,8 @@ public:
     void renderAll(const doc::Document &doc, int frame);
     // The image made of `area`, a pixel of it for `step` × `step` of the document (a power of two; the area is put on
     // whole steps): what it shares with the image there was is kept when the step is the same, the rest is drawn.
-    void setArea(const doc::Document &doc, int frame, const QRect &area, int step = 1);
+    // Without `keep` all of it is drawn (another frame).
+    void setArea(const doc::Document &doc, int frame, const QRect &area, int step = 1, bool keep = true);
     // Draws all of the area again.
     void renderArea(const doc::Document &doc, int frame) { render(doc, frame, m_area); }
     // Only `rect` (document coordinates).

@@ -55,7 +55,7 @@ public:
     void setLoopRange(int first, int last);
     bool isPlaying() const;
     double fps() const;
-    const QImage &image() const { return m_renderer.image(); } // the frame shown
+    const QImage &image() const { return m_shownImage ? *m_shownImage : m_renderer.image(); } // the frame shown
 
     static const QList<double> &speeds(); // the choices, in fps
 
@@ -85,6 +85,7 @@ private:
     QPointer<audio::AudioPlayer> m_audio; // may go before the window (both are the main window's children)
     canvas::FrameRenderer m_renderer;
     QImage m_output; // the frame seen through the camera, when the project has one
+    const QImage *m_shownImage = nullptr; // the renderer's image or m_output
     QWidget *m_picture;
     QSlider *m_slider;
     QLabel *m_position;

@@ -35,6 +35,14 @@ QImage renderFrame(const doc::Document &document, int frame, bool transparent);
 // carried over it (moved, turned, zoomed with a smooth resampling). Where the camera looks past the sheet's edge
 // `background` shows (the paper's color, or transparency).
 QImage applyCamera(const QImage &sheet, const doc::CameraPose &pose, QRgb background);
+// The same from a picture of a part of the sheet (the canvas has no end: the camera may look past the page): `sheet` is
+// of `area` (sheet coordinates), a pixel of it for `step` × `step` of the sheet; the picture is `pictureSize`.
+QImage applyCamera(const QImage &sheet, const QRect &area, int step, QSize pictureSize, const doc::CameraPose &pose,
+                   QRgb background);
+// What a sheet of `width` × `height` the camera at `pose` sees, with a margin for the resampling (sheet coordinates).
+QRect cameraArea(const doc::CameraPose &pose, int width, int height);
+// How much smaller the sheet can be rendered for the camera at `pose` (a power of two: 1 unless it looks from far).
+int cameraStep(const doc::CameraPose &pose);
 
 // The picture over white, opaque: for what has no alpha (JPEG, video), when the paper is see-through or the picture
 // has parts that are.
