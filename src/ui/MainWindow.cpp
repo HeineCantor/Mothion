@@ -1289,6 +1289,7 @@ void MainWindow::exportFrames()
     const doc::Document &d = m_document->document();
     const QString name = m_filePath.isEmpty() ? QString() : QFileInfo(m_filePath).completeBaseName();
     ExportDialog dialog(m_document->currentFrame(), d.frameCount(), name, !d.compositing().nodes.empty(), this);
+    dialog.setPlayRange(m_document->playRangeFirst(), m_document->playRangeLast());
     if (dialog.exec() != QDialog::Accepted)
         return;
 
@@ -1376,6 +1377,7 @@ void MainWindow::exportVideo()
     const doc::Document &d = m_document->document();
     const QString name = m_filePath.isEmpty() ? QString() : QFileInfo(m_filePath).completeBaseName();
     VideoExportDialog dialog(d.frameCount(), !d.compositing().nodes.empty(), name, this);
+    dialog.setPlayRange(m_document->playRangeFirst(), m_document->playRangeLast());
     if (dialog.exec() != QDialog::Accepted)
         return;
 

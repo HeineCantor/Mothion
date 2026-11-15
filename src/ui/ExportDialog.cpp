@@ -156,6 +156,20 @@ io::ExportOptions ExportDialog::options() const
     return o;
 }
 
+void ExportDialog::setPlayRange(int first, int last)
+{
+    first = std::clamp(first, 0, kMaxFrame - 1);
+    last = std::clamp(last, first, kMaxFrame - 1);
+    {
+        const QSignalBlocker blockFrom(m_from), blockTo(m_to);
+        m_from->setValue(first + 1);
+        m_to->setValue(last + 1);
+    }
+    if (m_range->checkedId() != CurrentFrame && (first != 0 || last != m_frameCount - 1))
+        m_range->button(CustomRange)->setChecked(true);
+    updateSummary();
+}
+
 int ExportDialog::firstFrame() const
 {
     switch (m_range->checkedId()) {

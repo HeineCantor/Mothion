@@ -49,7 +49,7 @@ VideoExportDialog::VideoExportDialog(int frameCount, bool hasCompositing, const 
     pathRow->addWidget(browseButton);
 
     m_whole = new QRadioButton(tr("Whole scene (1–%1)").arg(frameCount), this);
-    auto *custom = new QRadioButton(tr("Frames"), this);
+    auto *custom = m_custom = new QRadioButton(tr("Frames"), this);
     m_whole->setChecked(true);
     m_from = new QSpinBox(this);
     m_to = new QSpinBox(this);
@@ -148,6 +148,16 @@ io::VideoOptions VideoExportDialog::options() const
     options.codec = io::VideoCodec(m_format->currentData().toInt());
     options.withoutPaper = io::videoHasAlpha(options.codec) && m_withoutPaper->isChecked();
     return options;
+}
+
+void VideoExportDialog::setPlayRange(int first, int last)
+{
+    first = std::clamp(first, 0, kMaxFrame - 1);
+    last = std::clamp(last, first, kMaxFrame - 1);
+    m_from->setValue(first + 1);
+    m_to->setMinimum(m_from->value());
+    m_to->setValue(last + 1);
+    (first != 0 || last != m_frameCount - 1 ? m_custom : m_whole)->setChecked(true);
 }
 
 int VideoExportDialog::firstFrame() const

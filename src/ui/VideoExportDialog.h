@@ -26,6 +26,8 @@ public:
 
     QString path() const;
     io::VideoOptions options() const;
+    // The Timeline's From and To (0-based, both included): the frames offered, chosen when they are not the whole scene.
+    void setPlayRange(int first, int last);
     int firstFrame() const; // 0-based, inclusive
     int lastFrame() const;
 
@@ -38,6 +40,7 @@ private:
     int m_frameCount;
     QLineEdit *m_path = nullptr;
     QRadioButton *m_whole = nullptr;
+    QRadioButton *m_custom = nullptr;
     QSpinBox *m_from = nullptr;
     QSpinBox *m_to = nullptr;
     QComboBox *m_format = nullptr;

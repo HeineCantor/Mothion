@@ -29,6 +29,9 @@ public:
 
     QString path() const;
     io::ExportOptions options() const;
+    // The Timeline's From and To (0-based, both included): the frames offered. When they are not the whole scene and
+    // the whole scene or some frames were chosen last, those frames are chosen.
+    void setPlayRange(int first, int last);
     int firstFrame() const; // 0-based, inclusive
     int lastFrame() const;
     bool isSequence() const { return lastFrame() > firstFrame(); }

@@ -129,6 +129,36 @@ private slots:
     }
 
 
+    // The export dialogs offer the Timeline's From and To, and choose them when they are not the whole scene (the frames
+    // dialog keeps a remembered current frame).
+    void exportDialogsOfferTheTimelineRange()
+    {
+        QSettings().setValue(QStringLiteral("export/range"), 1); // the whole scene, last time
+        ui::ExportDialog frames(4, 120, QStringLiteral("walk"));
+        frames.setPlayRange(9, 47);
+        QCOMPARE(frames.firstFrame(), 9);
+        QCOMPARE(frames.lastFrame(), 47);
+        ui::ExportDialog whole(4, 120, QStringLiteral("walk"));
+        whole.setPlayRange(0, 119);
+        QCOMPARE(whole.firstFrame(), 0);
+        QCOMPARE(whole.lastFrame(), 119);
+        QSettings().setValue(QStringLiteral("export/range"), 0); // the current frame, last time
+        ui::ExportDialog current(4, 120, QStringLiteral("walk"));
+        current.setPlayRange(9, 47);
+        QCOMPARE(current.firstFrame(), 4);
+        QCOMPARE(current.lastFrame(), 4);
+
+        ui::VideoExportDialog video(120, false, QStringLiteral("scene"));
+        QCOMPARE(video.lastFrame(), 119);
+        video.setPlayRange(9, 47);
+        QCOMPARE(video.firstFrame(), 9);
+        QCOMPARE(video.lastFrame(), 47);
+        ui::VideoExportDialog videoWhole(120, false, QStringLiteral("scene"));
+        videoWhole.setPlayRange(0, 119);
+        QCOMPARE(videoWhole.firstFrame(), 0);
+        QCOMPARE(videoWhole.lastFrame(), 119);
+    }
+
     // The file name follows the chosen format; whatever the remembered
     // choices, the frames asked for stay within what the dialog offers.
     void exportDialogKeepsNameAndFormatInStep()
