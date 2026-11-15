@@ -58,7 +58,7 @@ jobs:
       - name: Configure
         run: >
           cmake -S . -B build-release -G "Visual Studio 17 2022" -A x64
-          -DMOTHION_VERSION=${{ steps.version.outputs.version }}
+          "-DMOTHION_VERSION=${{ steps.version.outputs.version }}"
           -DMOTHION_BUILD_TESTS=ON
           -DMOTHION_BUILD_DEVTOOLS=OFF
           -DMOTHION_ENABLE_WINTAB=ON
