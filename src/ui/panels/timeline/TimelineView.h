@@ -46,6 +46,9 @@ namespace mothion::ui {
 //    undo step on release;
 //  - right click: new frame, clear frame, split frame, insert inbetween,
 //    insert/remove frames, delete frame;
+//  - S with keys of motion chosen: they are spread out or drawn in from the current frame (the red cursor), as far
+//    as the pointer goes from it or nearer to it, or as many times as a number typed says (2: twice as far); a click
+//    or Enter makes it (one undo step), Esc or a right click drops it;
 //  - Left/Right: frame, Up/Down: cel.
 //
 // Everything is custom-painted in one widget so the ruler, names and cells
@@ -112,6 +115,7 @@ protected:
     void keyPressEvent(QKeyEvent *event) override;
     void contextMenuEvent(QContextMenuEvent *event) override;
     bool event(QEvent *event) override; // Ctrl+C / V here are the timeline's, for blocks
+    void focusOutEvent(QFocusEvent *event) override;
 
 private:
     int m_roomLeft = 0; // pixels of scroll before frame 1 and past the last frame, grown as the scroll nears them
@@ -301,6 +305,24 @@ private:
     bool m_keysNewer = false; // the keys copied are what Paste puts, not the blocks
     void copyKeys();
     bool pasteKeys();
+    // The chosen keys being scaled in time from the current frame (S; see the class's comment).
+    struct KeyScale
+    {
+        std::vector<document::DocumentController::CelKeyRef> keys;
+        int pivot = 0;
+        double reference = 1; // how far from the cursor, in pixels (signed), the pointer is at for the keys as they are
+        double pointer = 1;   // the factor the pointer gives
+        QString typed;        // a number typed, which is the factor instead
+        bool fits = true;     // false: two keys would land on one frame (or before the first): it would be refused
+        double factor() const;
+    };
+    std::optional<KeyScale> m_keyScale;
+    bool m_dropContextMenu = false; // the right click that dropped a scale opens no menu
+    void startKeyScale();
+    void updateKeyScale(); // the preview, after the factor changed
+    void finishKeyScale(bool apply);
+    double cursorX() const; // the middle of the current frame, in the viewport
+    void paintKeyScale(QPainter &p) const;
     struct MarkerDrag
     {
         int from = 0; // the marker's frame

@@ -1476,14 +1476,14 @@ bool DocumentController::setCelKeysEasing(const std::vector<CelKeyRef> &keys, co
     return true;
 }
 
-bool DocumentController::movedKeyMotions(const std::vector<CelKeyRef> &keys, int delta,
+bool DocumentController::movedKeyMotions(const std::vector<CelKeyRef> &keys, const std::function<int(int)> &to,
                                          std::map<doc::CelId, doc::CelMotion> &motions) const
 {
-    std::vector<std::pair<CelKeyRef, doc::CelKey>> lifted; // taken out of their motions, to be put back `delta` on
+    std::vector<std::pair<CelKeyRef, doc::CelKey>> lifted; // taken out of their motions, to be put back where they go
     for (const CelKeyRef &k : keys) {
         const doc::Cel *cel = m_document->cel(k.cel);
         const doc::CelKey *key = cel ? cel->motion().keyAt(k.channel, k.frame) : nullptr;
-        if (!key || k.frame + delta < 0)
+        if (!key || to(k.frame) < 0)
             return false;
         motions.try_emplace(k.cel, cel->motion());
         lifted.push_back({k, *key});
@@ -1492,9 +1492,9 @@ bool DocumentController::movedKeyMotions(const std::vector<CelKeyRef> &keys, int
         motions.at(k.cel).removeKey(k.channel, k.frame);
     for (const auto &[k, key] : lifted) {
         doc::CelMotion &motion = motions.at(k.cel);
-        if (motion.keyAt(k.channel, k.frame + delta)) // a key that stays (or moved there already): a place taken
+        if (motion.keyAt(k.channel, to(k.frame))) // a key that stays (or moved there already): a place taken
             return false;
-        motion.setKey(k.channel, k.frame + delta, key.pose, key.easing);
+        motion.setKey(k.channel, to(k.frame), key.pose, key.easing);
     }
     return true;
 }
@@ -1505,7 +1505,7 @@ bool DocumentController::moveCelKeys(const std::vector<CelKeyRef> &keys, int del
         return false;
     clearTemporaryPose();
     std::map<doc::CelId, doc::CelMotion> motions;
-    if (!movedKeyMotions(keys, delta, motions))
+    if (!movedKeyMotions(keys, [delta](int f) { return f + delta; }, motions))
         return false;
     auto command = motionsCommand(*m_document, motions);
     if (!command)
@@ -1517,12 +1517,43 @@ bool DocumentController::moveCelKeys(const std::vector<CelKeyRef> &keys, int del
 void DocumentController::previewKeyMove(const std::vector<CelKeyRef> &keys, int delta)
 {
     std::map<doc::CelId, doc::CelMotion> motions;
-    if (delta == 0 || !movedKeyMotions(keys, delta, motions))
+    if (delta == 0 || !movedKeyMotions(keys, [delta](int f) { return f + delta; }, motions))
         motions.clear(); // nothing moved (or refused): the keys as they are
+    previewMotions(std::move(motions));
+}
+
+void DocumentController::previewMotions(std::map<doc::CelId, doc::CelMotion> motions)
+{
     if (motions.empty() && m_keyPreview.empty())
         return;
     m_keyPreview = std::move(motions);
     emit motionPreviewChanged();
+}
+
+int DocumentController::scaledKeyFrame(int frame, int pivot, double factor)
+{
+    return pivot + int(std::lround((frame - pivot) * factor));
+}
+
+bool DocumentController::scaleCelKeys(const std::vector<CelKeyRef> &keys, int pivot, double factor)
+{
+    clearTemporaryPose();
+    std::map<doc::CelId, doc::CelMotion> motions;
+    if (!(factor >= 0) || !movedKeyMotions(keys, [=](int f) { return scaledKeyFrame(f, pivot, factor); }, motions))
+        return false;
+    auto command = motionsCommand(*m_document, motions);
+    if (!command)
+        return false; // all where they were
+    execute(std::move(command));
+    return true;
+}
+
+void DocumentController::previewKeyScale(const std::vector<CelKeyRef> &keys, int pivot, double factor)
+{
+    std::map<doc::CelId, doc::CelMotion> motions;
+    if (!(factor >= 0) || !movedKeyMotions(keys, [=](int f) { return scaledKeyFrame(f, pivot, factor); }, motions))
+        motions.clear();
+    previewMotions(std::move(motions));
 }
 
 void DocumentController::clearKeyMovePreview()

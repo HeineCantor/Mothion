@@ -1672,6 +1672,71 @@ private slots:
         button->click();
         QVERIFY(controller.celMotion(cel)->isEmpty());
     }
+
+    // S over the timeline with keys chosen scales them in time from the red cursor: a number typed is the factor, Enter
+    // makes it (one undo step), Esc drops it; two keys on one frame are refused.
+    void theChosenKeysAreScaledFromTheCursor()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        controller.setSceneLength(40);
+        const doc::CelId cel = controller.currentCel();
+        QVERIFY(controller.setCelKey(cel, 4, at(0, 0)));
+        QVERIFY(controller.setCelKey(cel, 8, at(50, 0)));
+        QVERIFY(controller.setCelKey(cel, 12, at(100, 0)));
+        ui::TimelinePanel panel(&controller, &state);
+        panel.resize(900, 260);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        ui::TimelineView *view = panel.view();
+        ui::TimelineMetrics m;
+        const int motionY = m.rowY(1) + m.rowHeight / 2;
+        auto diamond = [&](int frame) { return QPoint(m.frameX(frame) + m.frameWidth / 2, motionY); };
+        auto *vp = view->viewport();
+        QTest::mouseClick(vp, Qt::LeftButton, {}, diamond(4));
+        QTest::mouseClick(vp, Qt::LeftButton, Qt::ControlModifier, diamond(8));
+        QTest::mouseClick(vp, Qt::LeftButton, Qt::ControlModifier, diamond(12));
+        controller.setCurrentFrame(4);
+        view->setFocus();
+        auto frames = [&] { return controller.celMotion(cel)->keyFrames(); };
+        const std::vector<int> before{4, 8, 12};
+        QCOMPARE(frames(), before);
+
+        QTest::keyClick(view, Qt::Key_S);
+        QTest::keyClick(view, Qt::Key_2);
+        QCOMPARE(frames(), before); // only shown until it is made
+        QTest::keyClick(view, Qt::Key_Return);
+        QCOMPARE(frames(), (std::vector<int>{4, 12, 20}));
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo keyframes"));
+
+        // Still chosen where they went: half as far again.
+        QTest::keyClick(view, Qt::Key_S);
+        QTest::keyClicks(view, QStringLiteral("0.5"));
+        QTest::keyClick(view, Qt::Key_Return);
+        QCOMPARE(frames(), before);
+
+        // Esc drops it.
+        QTest::keyClick(view, Qt::Key_S);
+        QTest::keyClick(view, Qt::Key_3);
+        QTest::keyClick(view, Qt::Key_Escape);
+        QCOMPARE(frames(), before);
+
+        // All on the cursor's frame: refused, nothing changes.
+        QTest::keyClick(view, Qt::Key_S);
+        QTest::keyClick(view, Qt::Key_0);
+        QTest::keyClick(view, Qt::Key_Return);
+        QCOMPARE(frames(), before);
+
+        // From another frame: the keys go away from it, on both sides.
+        controller.setCurrentFrame(8);
+        QTest::keyClick(view, Qt::Key_S);
+        QTest::keyClick(view, Qt::Key_2);
+        QTest::keyClick(view, Qt::Key_Return);
+        QCOMPARE(frames(), (std::vector<int>{0, 8, 16}));
+        controller.undo();
+        QCOMPARE(frames(), before);
+    }
+
 };
 
 QTEST_MAIN(TestCelMotion)

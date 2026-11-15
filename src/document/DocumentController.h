@@ -193,6 +193,12 @@ public:
     // edit is made. A move that would be refused (a place taken) shows nothing moved. clearKeyMovePreview() ends it.
     void previewKeyMove(const std::vector<CelKeyRef> &keys, int delta);
     void clearKeyMovePreview();
+    // All of them spread out (or drawn in) from the frame `pivot`, `factor` times as far from it as they are (to the
+    // nearest frame; 2: twice the distance). Refused (false) as moveCelKeys() would be, or if two would land on one frame.
+    bool scaleCelKeys(const std::vector<CelKeyRef> &keys, int pivot, double factor);
+    static int scaledKeyFrame(int frame, int pivot, double factor);
+    // The same, shown as previewKeyMove() shows a move (clearKeyMovePreview() ends it).
+    void previewKeyScale(const std::vector<CelKeyRef> &keys, int pivot, double factor);
     // The motion of `cel` as it would be with the keys moved, or nullptr when none is being previewed.
     const doc::CelMotion *previewedMotion(doc::CelId cel) const;
     // What was copied: a key with its curve, where it was relative to the first copied (`offset`), and the cel it came from.
@@ -660,8 +666,11 @@ private:
     int m_currentFrame = 0;
     std::optional<FloatingPaste> m_floating;
     std::map<doc::CelId, doc::CelMotion> m_keyPreview;
-    // The motions of the cels with `keys` moved `delta` frames; false if that is refused.
-    bool movedKeyMotions(const std::vector<CelKeyRef> &keys, int delta, std::map<doc::CelId, doc::CelMotion> &motions) const;
+    // The motions of the cels with `keys` moved, each to the frame `to` gives for its own; false if that is refused (a
+    // key before the first frame, or on a key that is not moved, or two on one frame of a channel).
+    bool movedKeyMotions(const std::vector<CelKeyRef> &keys, const std::function<int(int)> &to,
+                         std::map<doc::CelId, doc::CelMotion> &motions) const;
+    void previewMotions(std::map<doc::CelId, doc::CelMotion> motions);
     std::vector<doc::VectorStroke> m_copiedStrokes;
     bool m_layerChosen = true;
     bool m_cameraSelected = false;

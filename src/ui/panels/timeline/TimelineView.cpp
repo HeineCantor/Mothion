@@ -10,6 +10,7 @@
 
 #include <QActionGroup>
 #include <QApplication>
+#include <QCursor>
 #include <QClipboard>
 #include <QContextMenuEvent>
 #include <QGuiApplication>
@@ -22,6 +23,7 @@
 #include <QWheelEvent>
 
 #include <algorithm>
+#include <utility>
 #include <cmath>
 #include <limits>
 
@@ -484,6 +486,9 @@ void TimelineView::paintEvent(QPaintEvent *)
     p.setClipRect(QRect(0, m.rulerHeight, vp.width(), vp.height() - m.rulerHeight));
     paintSelection(p);
     p.restore();
+
+    if (m_keyScale)
+        paintKeyScale(p);
 }
 
 void TimelineView::paintSelection(QPainter &p) const
@@ -772,14 +777,20 @@ void TimelineView::paintMotionRow(QPainter &p, int celIndex, int row) const
                                  || (m_chosenKeys.size() > 1 && chosen));
         if (dragged)
             frame += m_motionDrag->to - m_motionDrag->from; // the chosen ones go together
+        const bool scaled = m_keyScale && chosen;
+        if (scaled)
+            frame = document::DocumentController::scaledKeyFrame(keyFrame, m_keyScale->pivot, m_keyScale->factor());
         // The key of a channel alone shows chosen on its channel's row and on the "Keyframes" one; a click on the latter
         // chooses the keys of the frame, on every row.
         const int cx = m.frameX(frame) + m.frameWidth / 2;
         const int r = keyFrame == current || dragged || chosen ? 7 : 5;
+        if (scaled && !m_keyScale->fits)
+            p.setOpacity(0.5); // where they would go, but they cannot
         const QPolygon diamond({QPoint(cx, midY - r), QPoint(cx + r, midY), QPoint(cx, midY + r), QPoint(cx - r, midY)});
         p.setPen(QPen(chosen || keyFrame == current ? Qt::white : ink.darker(170), chosen ? 2 : 1));
-        p.setBrush(dragged ? ink.lighter(130) : ink);
+        p.setBrush(dragged || scaled ? ink.lighter(130) : ink);
         p.drawPolygon(diamond);
+        p.setOpacity(1.0);
     }
     p.restore();
 }
@@ -1450,6 +1461,11 @@ void TimelineView::scrubTo(const QPoint &pos, bool selectCel)
 
 void TimelineView::mousePressEvent(QMouseEvent *event)
 {
+    if (m_keyScale) { // a click makes the scale, another button drops it
+        m_dropContextMenu = event->button() == Qt::RightButton;
+        finishKeyScale(event->button() == Qt::LeftButton);
+        return;
+    }
     if (event->button() != Qt::LeftButton || event->position().x() < m_metrics.headerWidth) {
         // In a header: the toggles, or the cel made current.
         if (event->button() == Qt::LeftButton && inCameraRow(int(event->position().y()))) {
@@ -1696,6 +1712,12 @@ void TimelineView::dropFrames()
 void TimelineView::mouseMoveEvent(QMouseEvent *event)
 {
     const QPoint pos = event->position().toPoint();
+    if (m_keyScale) {
+        m_keyScale->pointer = std::max(0.0, (pos.x() - cursorX()) / m_keyScale->reference);
+        if (m_keyScale->typed.isEmpty())
+            updateKeyScale();
+        return;
+    }
     if (m_volumeBefore) {
         m_document->previewAudioVolume(audioVolumeAt(pos.x()));
         return;
@@ -2108,6 +2130,11 @@ bool TimelineView::event(QEvent *event)
             event->accept();
             return true;
         }
+        // S with keys chosen is the timeline's (elsewhere it is a tool's); while scaling, every key is.
+        if (m_keyScale || (key->key() == Qt::Key_S && key->modifiers() == Qt::NoModifier && !m_chosenKeys.empty())) {
+            event->accept();
+            return true;
+        }
     }
     return QAbstractScrollArea::event(event);
 }
@@ -2161,6 +2188,12 @@ void TimelineView::showCelMenu(const QPoint &globalPos, const doc::Cel &cel)
 
 void TimelineView::contextMenuEvent(QContextMenuEvent *event)
 {
+    if (std::exchange(m_dropContextMenu, false))
+        return;
+    if (m_keyScale) {
+        finishKeyScale(false);
+        return;
+    }
     if (event->pos().y() < m_metrics.rulerHeight && event->pos().x() >= m_metrics.headerWidth) {
         const int frame = frameAt(event->pos().x());
         if (frame >= 0)
@@ -2309,6 +2342,28 @@ void TimelineView::wheelEvent(QWheelEvent *event)
 
 void TimelineView::keyPressEvent(QKeyEvent *event)
 {
+    if (m_keyScale) {
+        const QString text = event->text();
+        if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
+            finishKeyScale(true);
+        } else if (event->key() == Qt::Key_Escape) {
+            finishKeyScale(false);
+        } else if (event->key() == Qt::Key_Backspace) {
+            m_keyScale->typed.chop(1);
+            updateKeyScale();
+        } else if (text.size() == 1 && (text[0].isDigit() || text[0] == u'.' || text[0] == u',')) {
+            if (!(text[0].isDigit() || !m_keyScale->typed.contains(u'.')))
+                return; // one point
+            m_keyScale->typed += text[0].isDigit() ? text[0] : QChar(u'.');
+            updateKeyScale();
+        }
+        return; // nothing else while scaling
+    }
+    if (event->key() == Qt::Key_S && event->modifiers() == Qt::NoModifier && !event->isAutoRepeat()
+        && !m_chosenKeys.empty() && !m_motionDrag) {
+        startKeyScale();
+        return;
+    }
     // Copy and paste of blocks: the window's keys for those commands (see event()).
     const Shortcuts &keymap = Shortcuts::instance();
     if (keymap.matches(QStringLiteral("edit.copy"), event)) {
@@ -2369,6 +2424,96 @@ void TimelineView::keyPressEvent(QKeyEvent *event)
         break;
     default: QAbstractScrollArea::keyPressEvent(event); return;
     }
+}
+
+void TimelineView::focusOutEvent(QFocusEvent *event)
+{
+    if (m_keyScale)
+        finishKeyScale(false); // the keys go to another panel: the scale is dropped
+    QAbstractScrollArea::focusOutEvent(event);
+}
+
+double TimelineView::KeyScale::factor() const
+{
+    if (typed.isEmpty())
+        return pointer;
+    bool ok = false;
+    const double value = typed.toDouble(&ok);
+    return ok ? value : pointer;
+}
+
+double TimelineView::cursorX() const
+{
+    return m_metrics.frameX(m_document->currentFrame()) + m_metrics.frameWidth / 2.0;
+}
+
+void TimelineView::startKeyScale()
+{
+    KeyScale scale;
+    scale.keys = chosenKeyRefs();
+    if (scale.keys.empty()) {
+        QApplication::beep();
+        return;
+    }
+    scale.pivot = m_document->currentFrame();
+    // Where the pointer is now leaves the keys as they are; not too near the cursor, or a little move would be a lot.
+    const double minimum = 4.0 * m_metrics.frameWidth;
+    const double from = viewport()->mapFromGlobal(QCursor::pos()).x() - cursorX();
+    scale.reference = std::abs(from) >= minimum ? from : (from < 0 ? -minimum : minimum);
+    scale.pointer = std::abs(from) >= minimum ? 1.0 : std::max(0.0, from / scale.reference);
+    m_keyScale = std::move(scale);
+    viewport()->setCursor(Qt::SizeHorCursor);
+    updateKeyScale();
+}
+
+void TimelineView::updateKeyScale()
+{
+    const double factor = m_keyScale->factor();
+    m_document->previewKeyScale(m_keyScale->keys, m_keyScale->pivot, factor);
+    // The preview shows nothing moved when it would be refused.
+    m_keyScale->fits = factor == 1.0 || m_document->previewedMotion(m_keyScale->keys.front().cel) != nullptr;
+    viewport()->update();
+}
+
+void TimelineView::finishKeyScale(bool apply)
+{
+    const KeyScale scale = std::move(*m_keyScale);
+    m_keyScale.reset();
+    m_document->clearKeyMovePreview();
+    viewport()->unsetCursor();
+    if (apply) {
+        const double factor = scale.factor();
+        if (m_document->scaleCelKeys(scale.keys, scale.pivot, factor)) {
+            for (ChosenKey &k : m_chosenKeys)
+                k.frame = document::DocumentController::scaledKeyFrame(k.frame, scale.pivot, factor);
+            if (m_selectedKey)
+                m_selectedKey->second = document::DocumentController::scaledKeyFrame(m_selectedKey->second, scale.pivot, factor);
+        } else if (!scale.fits) {
+            QApplication::beep(); // two keys on one frame: refused
+        }
+    }
+    viewport()->update();
+}
+
+void TimelineView::paintKeyScale(QPainter &p) const
+{
+    const KeyScale &s = *m_keyScale;
+    const QString factor = s.typed.isEmpty() ? QString::number(s.pointer, 'f', 2) : s.typed;
+    QString text = tr("Scale keys ×%1 from frame %2 · move the pointer or type a number · Enter or click: apply · Esc: cancel")
+                       .arg(factor)
+                       .arg(s.pivot + 1);
+    if (!s.fits)
+        text += tr(" · two keys would land on one frame");
+    const QFontMetrics fm(font());
+    const QRect box(m_metrics.headerWidth + 6, viewport()->height() - fm.height() - 10,
+                    std::min(fm.horizontalAdvance(text) + 12, viewport()->width() - m_metrics.headerWidth - 12), fm.height() + 6);
+    p.save();
+    p.setPen(Qt::NoPen);
+    p.setBrush(QColor(0, 0, 0, 190));
+    p.drawRoundedRect(box, 4, 4);
+    p.setPen(s.fits ? QColor(Qt::white) : QColor(255, 140, 140));
+    p.drawText(box.adjusted(6, 0, -6, 0), Qt::AlignVCenter | Qt::AlignLeft, fm.elidedText(text, Qt::ElideRight, box.width() - 12));
+    p.restore();
 }
 
 } // namespace mothion::ui
