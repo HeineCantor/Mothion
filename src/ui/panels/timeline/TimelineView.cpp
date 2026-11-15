@@ -11,6 +11,7 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QCursor>
+#include <QPainterPath>
 #include <QClipboard>
 #include <QContextMenuEvent>
 #include <QGuiApplication>
@@ -42,6 +43,111 @@ constexpr int kExtraFrames = 24;      // shown past the last exposure, room to k
 
 constexpr int kAudioRowHeight = 44; // the waveform wants more than a cel's row
 constexpr int kMinAudioFrames = 4;   // the block's width until the length of the sound is known
+
+// How a key shows the way it goes, on each side: its right half the curve to the next key, its left half the curve
+// that comes to it from the one before (none: pointed, as linear).
+enum class KeyHalf { Pointed, Round, Square };
+
+KeyHalf halfFor(const std::optional<doc::Easing> &easing)
+{
+    if (!easing)
+        return KeyHalf::Pointed;
+    switch (easing->kind) {
+    case doc::Easing::Kind::Hold: return KeyHalf::Square;
+    case doc::Easing::Kind::Bezier: return KeyHalf::Round;
+    case doc::Easing::Kind::Linear: break;
+    }
+    return KeyHalf::Pointed;
+}
+
+// A key's mark at `c`, `r` out from it: pointed (linear), round (a curve), square (held), a half for each side.
+QPainterPath keyShape(QPointF c, double r, KeyHalf left, KeyHalf right)
+{
+    const QRectF round(c.x() - r, c.y() - r, 2 * r, 2 * r);
+    const double s = 0.75 * r; // a square half is a little narrower, or it would look bigger than the others
+    QPainterPath path(QPointF(c.x(), c.y() - r));
+    switch (right) {
+    case KeyHalf::Pointed: path.lineTo(c.x() + r, c.y()); path.lineTo(c.x(), c.y() + r); break;
+    case KeyHalf::Round: path.arcTo(round, 90, -180); break;
+    case KeyHalf::Square:
+        path.lineTo(c.x() + s, c.y() - r);
+        path.lineTo(c.x() + s, c.y() + r);
+        path.lineTo(c.x(), c.y() + r);
+        break;
+    }
+    switch (left) {
+    case KeyHalf::Pointed: path.lineTo(c.x() - r, c.y()); path.lineTo(c.x(), c.y() - r); break;
+    case KeyHalf::Round: path.arcTo(round, 270, -180); break;
+    case KeyHalf::Square:
+        path.lineTo(c.x() - s, c.y() + r);
+        path.lineTo(c.x() - s, c.y() - r);
+        path.lineTo(c.x(), c.y() - r);
+        break;
+    }
+    path.closeSubpath();
+    return path;
+}
+
+// The way from the key at `from` to the next at `to`, at height `y`: a line, with a tick at each frame between them
+// where the curve has got to by then (a spacing chart: close together where it goes slowly). A hold has none.
+void paintSegment(QPainter &p, const TimelineMetrics &m, int from, int to, int y, const doc::Easing &easing,
+                  const QColor &ink)
+{
+    if (easing.kind == doc::Easing::Kind::Hold || to <= from)
+        return;
+    const double x0 = m.frameX(from) + m.frameWidth / 2.0, x1 = m.frameX(to) + m.frameWidth / 2.0;
+    p.setPen(QPen(ink, 1.5));
+    p.drawLine(QPointF(x0, y), QPointF(x1, y));
+    if (m.frameWidth < 4)
+        return; // too close together to read: the shapes of the keys say it
+    p.setPen(QPen(ink, 1.2, Qt::SolidLine, Qt::FlatCap));
+    const int n = to - from;
+    for (int k = 1; k < n; ++k) {
+        const double x = x0 + (x1 - x0) * easing.apply(double(k) / n);
+        p.drawLine(QPointF(x, y - 3.5), QPointF(x, y + 3.5));
+    }
+}
+
+// The curve of a channel from its key at `frame` to the next one (none if it has no key there, or none after it).
+std::optional<doc::Easing> outgoing(const doc::CelMotion &motion, doc::Channel channel, int frame, int *next = nullptr)
+{
+    const auto &keys = motion.keys(channel);
+    for (std::size_t i = 0; i + 1 < keys.size(); ++i)
+        if (keys[i].frame == frame) {
+            if (next)
+                *next = keys[i + 1].frame;
+            return keys[i].easing;
+        }
+    return std::nullopt;
+}
+
+// The curve that comes to the channel's key at `frame` from the one before (none if it is not there, or is the first).
+std::optional<doc::Easing> incoming(const doc::CelMotion &motion, doc::Channel channel, int frame)
+{
+    const auto &keys = motion.keys(channel);
+    for (std::size_t i = 1; i < keys.size(); ++i)
+        if (keys[i].frame == frame)
+            return keys[i - 1].easing;
+    return std::nullopt;
+}
+
+// Of the channels (one, or all of them): the curve they all have, if they have the same (else none).
+template <typename Of>
+std::optional<doc::Easing> sameCurve(std::optional<doc::Channel> only, Of of)
+{
+    std::optional<doc::Easing> found;
+    for (doc::Channel c : doc::kChannels) {
+        if (only && *only != c)
+            continue;
+        const std::optional<doc::Easing> e = of(c);
+        if (!e)
+            continue;
+        if (found && !(*found == *e))
+            return std::nullopt; // they differ
+        found = e;
+    }
+    return found;
+}
 
 } // namespace
 
@@ -753,19 +859,28 @@ void TimelineView::paintMotionRow(QPainter &p, int celIndex, int row) const
     const QColor ink = motionColor();
     const auto channel = channelOfRow(row);
     // A channel's row: its keys, joined where one goes to the next; the "Keyframes" row: a diamond where any has one.
-    std::vector<int> frames;
-    if (channel) {
-        const auto &keys = cel.motion().keys(*channel);
-        for (std::size_t i = 0; i < keys.size(); ++i) {
-            frames.push_back(keys[i].frame);
-            if (i + 1 < keys.size() && keys[i].easing.kind != doc::Easing::Kind::Hold) {
-                p.setPen(QPen(ink.darker(110), 1.5));
-                p.drawLine(m.frameX(keys[i].frame) + m.frameWidth / 2, midY, m.frameX(keys[i + 1].frame) + m.frameWidth / 2, midY);
-            }
-        }
-    } else {
-        frames = cel.motion().keyFrames();
+    // The way to the next key: a line with the spacing of the curve on it (on "Keyframes", where the channels that go
+    // from one key to the next all take the same curve).
+    const doc::CelMotion &motion = cel.motion();
+    const std::vector<int> frames = channel ? [&] {
+        std::vector<int> f;
+        for (const doc::CelKey &k : motion.keys(*channel))
+            f.push_back(k.frame);
+        return f;
+    }() : motion.keyFrames();
+    p.save();
+    p.setRenderHint(QPainter::Antialiasing);
+    for (std::size_t i = 0; i + 1 < frames.size(); ++i) {
+        const int from = frames[i], to = frames[i + 1];
+        const auto curve = sameCurve(channel, [&](doc::Channel c) -> std::optional<doc::Easing> {
+            int next = -1;
+            const auto e = outgoing(motion, c, from, &next);
+            return e && next == to ? e : std::nullopt;
+        });
+        if (curve)
+            paintSegment(p, m, from, to, midY, *curve, ink.darker(110));
     }
+    p.restore();
     const int current = m_document->currentFrame();
     p.save(); // (the diamonds' brush must not stay on the painter: the rows drawn after this one would be filled with it)
     p.setRenderHint(QPainter::Antialiasing);
@@ -786,10 +901,11 @@ void TimelineView::paintMotionRow(QPainter &p, int celIndex, int row) const
         const int r = keyFrame == current || dragged || chosen ? 7 : 5;
         if (scaled && !m_keyScale->fits)
             p.setOpacity(0.5); // where they would go, but they cannot
-        const QPolygon diamond({QPoint(cx, midY - r), QPoint(cx + r, midY), QPoint(cx, midY + r), QPoint(cx - r, midY)});
+        const KeyHalf left = halfFor(sameCurve(channel, [&](doc::Channel c) { return incoming(motion, c, keyFrame); }));
+        const KeyHalf right = halfFor(sameCurve(channel, [&](doc::Channel c) { return outgoing(motion, c, keyFrame); }));
         p.setPen(QPen(chosen || keyFrame == current ? Qt::white : ink.darker(170), chosen ? 2 : 1));
         p.setBrush(dragged || scaled ? ink.lighter(130) : ink);
-        p.drawPolygon(diamond);
+        p.drawPath(keyShape(QPointF(cx, midY), r, left, right));
         p.setOpacity(1.0);
     }
     p.restore();
@@ -911,27 +1027,25 @@ void TimelineView::paintCamera(QPainter &p) const
     const QColor red(235, 55, 55);
     const QColor ink = camera->visible ? red : QColor(150, 150, 150);
     const int midY = top + m.rowHeight / 2;
-    // A line from a key to the next, unless the first holds.
+    // A line from a key to the next with the spacing of its curve, unless the first holds.
     const auto &keys = camera->keys();
-    for (std::size_t i = 0; i + 1 < keys.size(); ++i) {
-        if (keys[i].easing.kind == doc::Easing::Kind::Hold)
-            continue;
-        p.setPen(QPen(ink, 1.5));
-        p.drawLine(m.frameX(keys[i].frame) + m.frameWidth / 2, midY, m.frameX(keys[i + 1].frame) + m.frameWidth / 2, midY);
-    }
-    const int current = m_document->currentFrame();
     p.setRenderHint(QPainter::Antialiasing);
-    for (const doc::CameraKey &key : keys) {
+    for (std::size_t i = 0; i + 1 < keys.size(); ++i)
+        paintSegment(p, m, keys[i].frame, keys[i + 1].frame, midY, keys[i].easing, ink);
+    const int current = m_document->currentFrame();
+    for (std::size_t i = 0; i < keys.size(); ++i) {
+        const doc::CameraKey &key = keys[i];
         int frame = key.frame;
         const bool dragged = m_cameraDrag && m_cameraDrag->from == frame;
         if (dragged)
             frame = m_cameraDrag->to;
         const int cx = m.frameX(frame) + m.frameWidth / 2;
         const int r = key.frame == current || dragged ? 7 : 5;
-        const QPolygon diamond({QPoint(cx, midY - r), QPoint(cx + r, midY), QPoint(cx, midY + r), QPoint(cx - r, midY)});
+        const KeyHalf left = halfFor(i > 0 ? std::optional(keys[i - 1].easing) : std::nullopt);
+        const KeyHalf right = halfFor(i + 1 < keys.size() ? std::optional(key.easing) : std::nullopt);
         p.setPen(QPen(key.frame == current ? Qt::white : ink.darker(150), 1));
         p.setBrush(dragged ? ink.lighter(130) : ink);
-        p.drawPolygon(diamond);
+        p.drawPath(keyShape(QPointF(cx, midY), r, left, right));
     }
     p.setRenderHint(QPainter::Antialiasing, false);
 }

@@ -466,16 +466,24 @@ void TrajectoryGizmo::paintPath(QPainter &painter, const ViewTransform &view) co
         painter.setPen(QPen(faint, 1.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
         painter.drawPolyline(line);
     }
-    // A dot on each frame (when there is room for them), and a bigger one on each key.
-    if (step == 1) {
-        double gap = 1e9; // on screen, between two frames
-        if (line.size() > 1)
-            gap = QLineF(line[0], line[1]).length();
+    // A tick across the path on each frame (when there is room for them), as on a spacing chart: close together where
+    // it goes slowly; a dot on each key.
+    if (step == 1 && line.size() > 1) {
+        const double gap = QLineF(line[0], line[1]).length(); // on screen, between two frames
         if (gap >= 5.0) {
-            painter.setPen(QPen(QColor(255, 255, 255, 190), 0.8)); // a hair of white round each, to read on any picture
-            painter.setBrush(faint);
-            for (const QPointF &p : line)
-                painter.drawEllipse(p, 2.1, 2.1);
+            QVector<QLineF> ticks;
+            QPointF normal(0, -1); // a frame where it stands still keeps the way of the one before
+            for (qsizetype i = 0; i < line.size(); ++i) {
+                const QPointF along = line[std::min(i + 1, line.size() - 1)] - line[std::max<qsizetype>(i - 1, 0)];
+                const double length = std::hypot(along.x(), along.y());
+                if (length > 1e-6)
+                    normal = QPointF(-along.y(), along.x()) / length;
+                ticks << QLineF(line[i] - normal * 4.5, line[i] + normal * 4.5);
+            }
+            painter.setPen(QPen(QColor(255, 255, 255, 200), 3.4, Qt::SolidLine, Qt::FlatCap)); // to read on any picture
+            painter.drawLines(ticks);
+            painter.setPen(QPen(faint, 1.6, Qt::SolidLine, Qt::FlatCap));
+            painter.drawLines(ticks);
         }
     }
     // The keys: a dot each (the ones of the position are dragged; a key of only the rotation or scale is a small ring).

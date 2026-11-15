@@ -81,7 +81,7 @@ public:
 
     void paint(QPainter &painter, const ViewTransform &view) const;
     // The whole path of the trajectory on the page, from its first key to its last: a line through where its middle is on
-    // each frame, a dot on each frame and a bigger one on each key. Shown while the current cel is a trajectory, or follows
+    // each frame, a tick across it on each frame (a spacing chart) and a dot on each key. Shown while the current cel is a trajectory, or follows
     // one (the path is that trajectory's). Painted under the circle.
     void paintPath(QPainter &painter, const ViewTransform &view) const;
     // The trajectory whose path is shown: the current cel if it is one, or the one it follows; nullptr for none (or the
