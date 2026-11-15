@@ -163,6 +163,23 @@ TimelineView::TimelineView(DocumentController *document, QWidget *parent)
         m_blocksNewer = false;
         m_keysNewer = false;
     });
+    // The keys of a path chosen on the canvas are chosen here too (all the keys of their frames, as on the "Keyframes"
+    // row), to scale them, copy them, delete them...
+    connect(m_document, &DocumentController::pathKeysChosen, this,
+            [this](doc::CelId cel, const std::vector<int> &frames, int clicked) {
+                if (m_keyScale)
+                    finishKeyScale(false);
+                if (frames.empty()) {
+                    clearKeySelection();
+                } else {
+                    m_chosenKeys.clear();
+                    for (int frame : frames)
+                        m_chosenKeys.push_back({cel, frame, std::nullopt});
+                    m_selectedKey = std::make_pair(cel, clicked >= 0 ? clicked : frames.back());
+                    m_selectedChannel.reset();
+                }
+                viewport()->update();
+            });
     connect(m_document, &DocumentController::structureChanged, this, &TimelineView::onStructureChanged);
     connect(m_document, &DocumentController::currentFrameChanged, this, [this](int frame) {
         ensureFrameVisible(frame);

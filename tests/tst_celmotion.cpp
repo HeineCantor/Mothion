@@ -1749,6 +1749,46 @@ private slots:
         QCOMPARE(frames(), before);
     }
 
+    // The keys of a path chosen on the canvas are chosen on the timeline too: Delete there takes them away.
+    void pathKeysChosenOnTheCanvasAreChosenOnTheTimeline()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        controller.setSceneLength(30);
+        controller.addTrajectory();
+        const doc::CelId trajectory = controller.currentCel();
+        QVERIFY(controller.setCelKey(trajectory, 2, at(0, 0)));
+        QVERIFY(controller.setCelKey(trajectory, 12, at(200, 100)));
+        QVERIFY(controller.setCelKey(trajectory, 22, at(400, 0)));
+
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(900, 520);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        ui::TimelinePanel panel(&controller, &state);
+        panel.resize(900, 260);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        state.setTrajectoryMode(true);
+        const QTransform toView = canvas.view().documentToView();
+        const double px = controller.document().cel(trajectory)->motion().pivotX;
+        const double py = controller.document().cel(trajectory)->motion().pivotY;
+        auto screen = [&](double x, double y) { return toView.map(QPointF(x, y)).toPoint(); };
+        auto click = [&](QPoint at, Qt::KeyboardModifiers modifiers = {}) {
+            QTest::mousePress(&canvas, Qt::LeftButton, modifiers, at);
+            QTest::mouseRelease(&canvas, Qt::LeftButton, modifiers, at);
+        };
+        controller.setCurrentFrame(17); // the circle away from the keys clicked
+        click(screen(px, py));
+        click(screen(px + 400, py), Qt::ControlModifier);
+        QCOMPARE(canvas.trajectoryGizmo().chosenKeys(), (std::set<int>{2, 22}));
+
+        QVERIFY(panel.view()->selectedKey().has_value());
+        QCOMPARE(panel.view()->selectedKey()->second, 22);
+        panel.view()->setFocus();
+        QTest::keyClick(panel.view(), Qt::Key_Delete);
+        QCOMPARE(controller.celMotion(trajectory)->keyFrames(), std::vector<int>{12});
+    }
 };
 
 QTEST_MAIN(TestCelMotion)

@@ -592,6 +592,9 @@ signals:
     void motionChanged();
     // The preview of keys being dragged changed (see previewKeyMove()).
     void motionPreviewChanged();
+    // The keys of a trajectory's path were chosen on the canvas (by their frames; `clicked` the one clicked, or -1): the
+    // timeline chooses them too (all the keys of those frames).
+    void pathKeysChosen(doc::CelId cel, const std::vector<int> &frames, int clicked);
     // The camera was selected, or another row was (see cameraSelected()).
     void cameraSelectionChanged();
     // Pixels of (a layer of) `drawing` changed in `rect` (document coordinates).

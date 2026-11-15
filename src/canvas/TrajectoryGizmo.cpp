@@ -156,6 +156,13 @@ std::optional<QPointF> TrajectoryGizmo::handlePoint(Handle handle, const ViewTra
     return view.mapToDocument(at);
 }
 
+void TrajectoryGizmo::setChosen(doc::CelId cel, const std::set<int> &frames, int clicked)
+{
+    m_chosenCel = cel;
+    m_chosen = frames;
+    emit m_document->pathKeysChosen(cel, std::vector<int>(frames.begin(), frames.end()), clicked);
+}
+
 std::set<int> TrajectoryGizmo::chosenKeys() const
 {
     const doc::Cel *trajectory = pathTrajectory();
@@ -206,8 +213,7 @@ bool TrajectoryGizmo::press(const QPointF &docPos, const ViewTransform &view, Qt
         if (modifiers & Qt::ControlModifier) {
             if (chosen.contains(frame)) {
                 chosen.erase(frame);
-                m_chosenCel = trajectory->id();
-                m_chosen = chosen;
+                setChosen(trajectory->id(), chosen);
                 return true; // taken away: nothing to drag
             }
             chosen.insert(frame);
@@ -242,8 +248,7 @@ bool TrajectoryGizmo::press(const QPointF &docPos, const ViewTransform &view, Qt
         m_hoverKey = frame;
         m_drag = d;
         // The others chosen go with it.
-        m_chosenCel = d.cel;
-        m_chosen = chosen;
+        setChosen(d.cel, chosen, frame);
         m_followers.clear();
         for (int other : chosen) {
             if (other == frame)
@@ -382,8 +387,7 @@ void TrajectoryGizmo::release(const QPointF &docPos)
             else
                 chosen.insert(key.frame);
         }
-        m_chosenCel = trajectory->id();
-        m_chosen = chosen;
+        setChosen(trajectory->id(), chosen);
         return;
     }
     if (!m_drag)

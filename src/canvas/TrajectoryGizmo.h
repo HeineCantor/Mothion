@@ -74,7 +74,7 @@ public:
     bool marqueeActive() const { return m_marquee.has_value(); }
     // The position keys chosen on the path shown (their frames); empty when its trajectory is another.
     std::set<int> chosenKeys() const;
-    void clearChosenKeys() { m_chosen.clear(); }
+    void clearChosenKeys() { setChosen(m_chosenCel, {}); }
     void move(const QPointF &docPos, Qt::KeyboardModifiers modifiers = {});
     void release(const QPointF &docPos);
     // A drag cut short: the trajectory as it was.
@@ -156,6 +156,8 @@ private:
     // The keys chosen, of the trajectory m_chosenCel.
     doc::CelId m_chosenCel = doc::kNoId;
     std::set<int> m_chosen;
+    // The keys chosen now, told to the timeline (through the document) so it chooses them too.
+    void setChosen(doc::CelId cel, const std::set<int> &frames, int clicked = -1);
     int m_anchorKey = -1; // the key last clicked (not with Shift), where a Shift+click chooses from
     struct Marquee
     {
