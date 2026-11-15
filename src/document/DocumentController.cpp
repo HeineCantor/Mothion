@@ -2497,7 +2497,11 @@ bool DocumentController::flipSelection(bool horizontal, QString *reason)
         QImage area(box.size(), QImage::Format_ARGB32_Premultiplied);
         inside.read(box.x(), box.y(), box.width(), box.height(), reinterpret_cast<doc::Pixel *>(area.bits()),
                     area.bytesPerLine() / 4);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 9, 0)
         const QImage mirrored = area.flipped(horizontal ? Qt::Horizontal : Qt::Vertical);
+#else
+        const QImage mirrored = area.mirrored(horizontal, !horizontal); // flipped() is Qt 6.9's
+#endif
         doc::TiledImage piece;
         piece.write(box.x(), box.y(), box.width(), box.height(),
                     reinterpret_cast<const doc::Pixel *>(mirrored.constBits()), mirrored.bytesPerLine() / 4);
