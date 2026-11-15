@@ -1,7 +1,15 @@
 cmake_minimum_required(VERSION 3.21)
 
+# The version shown (About, the window); a release sets it from its tag (v1.2.0 -> 1.2.0, see .github/workflows/release.yml).
+# Only its leading numbers go to project(): a tag like v1.2.0-beta1 is shown whole.
+set(MOTHION_VERSION "0.1.0" CACHE STRING "The version of Mothion")
+string(REGEX MATCH "^[0-9]+(\\.[0-9]+)*" _mothion_numeric_version "${MOTHION_VERSION}")
+if(NOT _mothion_numeric_version)
+    message(FATAL_ERROR "MOTHION_VERSION must start with a number, e.g. 1.2.0 (it is \"${MOTHION_VERSION}\")")
+endif()
+
 project(Mothion
-    VERSION 0.1.0
+    VERSION ${_mothion_numeric_version}
     DESCRIPTION "2D frame-by-frame animation (prototype)"
     LANGUAGES CXX)
 

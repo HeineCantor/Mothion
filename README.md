@@ -10,6 +10,20 @@ Mothion currently supports layers, drawings and Harmony-style exposure timing, w
 
 This is still an homemade project, made with love and moths in our hearts, so enjoy and tell us how to improve this :D
 
+## Download
+
+Windows builds are on the [Releases](https://github.com/HeineCantor/Mothion/releases) page:
+
+- `Mothion-<version>-windows-x64-setup.exe` installs Mothion (Start menu, `.moth` files open with it, uninstaller);
+- `Mothion-<version>-windows-x64.zip` runs as it is extracted, with nothing to install.
+
+Both carry everything Mothion needs, ffmpeg for the video export included. They are not signed, so the first time
+Windows may say "Windows protected your PC": click **More info → Run anyway**.
+
+A release is made by pushing a tag `v<version>` (`git tag v0.2.0 && git push origin v0.2.0`): the
+[Release workflow](.github/workflows/release.yml) builds and tests Mothion on Windows, and publishes both files. The
+version the program shows is the tag's; a tag with a dash (`v0.2.0-beta1`) makes a pre-release.
+
 ## Build
 
 ### Requirements

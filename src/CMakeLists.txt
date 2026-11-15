@@ -238,7 +238,7 @@ mothion_set_warnings(mothion_gui)
 # mothion: the executable, just main().
 # ---------------------------------------------------------------------------
 qt_add_executable(mothion WIN32 MACOSX_BUNDLE app/main.cpp)
-target_compile_definitions(mothion PRIVATE MOTHION_VERSION="${PROJECT_VERSION}")
+target_compile_definitions(mothion PRIVATE MOTHION_VERSION="${MOTHION_VERSION}")
 target_link_libraries(mothion PRIVATE mothion_gui)
 if(WIN32)
     target_link_libraries(mothion_gui PRIVATE dbghelp) # the minidump a crash writes

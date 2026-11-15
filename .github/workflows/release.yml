@@ -1,0 +1,169 @@
+# A tag v<version> pushed (git tag v0.2.0 && git push origin v0.2.0) builds Mothion for Windows and publishes a GitHub
+# Release with it: Mothion-<version>-windows-x64-setup.exe, the installer (installer/mothion.iss), and
+# Mothion-<version>-windows-x64.zip, which runs as it is extracted (Qt, the C++ runtime and ffmpeg are in both). The version the program shows is the tag's (see MOTHION_VERSION in CMakeLists.txt). A tag with a dash
+# (v0.2.0-beta1) makes a pre-release. Run again by hand (Actions > Release > Run workflow) on a tag, it replaces the files.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'The tag to release (e.g. v0.2.0); it must exist already'
+        required: true
+
+permissions:
+  contents: write # to make the release
+
+env:
+  QT_VERSION: 6.8.3
+  # ffmpeg for File > Export video, next to mothion.exe (where Mothion looks first). Gyan's "essentials" build: GPL-3,
+  # with libx264 and libvpx; its source is at https://ffmpeg.org/releases/ffmpeg-7.1.1.tar.xz.
+  FFMPEG_VERSION: 7.1.1
+  FFMPEG_URL: https://github.com/GyanD/codexffmpeg/releases/download/7.1.1/ffmpeg-7.1.1-essentials_build.zip
+  FFMPEG_SHA256: 04861d3339c5ebe38b56c19a15cf2c0cc97f5de4fa8910e4d47e5e6404e4a2d4
+
+jobs:
+  windows:
+    name: Windows x64
+    runs-on: windows-2022
+
+    steps:
+      - name: Find the tag and the version
+        id: version
+        shell: bash
+        run: |
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+          numeric="${tag#v}"; echo "numeric=${numeric%%-*}" >> "$GITHUB_OUTPUT"
+          if [[ "$tag" == *-* ]]; then echo "prerelease=--prerelease" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Check out the tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.version.outputs.tag }}
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          modules: qtmultimedia
+          cache: true
+
+      - name: Configure
+        run: >
+          cmake -S . -B build-release -G "Visual Studio 17 2022" -A x64
+          -DMOTHION_VERSION=${{ steps.version.outputs.version }}
+          -DMOTHION_BUILD_TESTS=ON
+          -DMOTHION_BUILD_DEVTOOLS=OFF
+          -DMOTHION_ENABLE_WINTAB=ON
+
+      - name: Build
+        run: cmake --build build-release --config Release --parallel
+
+      - name: Test
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QT_ASSUME_STDERR_HAS_CONSOLE: 1
+        run: ctest --test-dir build-release -C Release --output-on-failure --parallel 4
+
+      - name: Put the program together
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '${{ steps.version.outputs.version }}'
+          $name = "Mothion-$version-windows-x64"
+          $dir = Join-Path $PWD "dist\$name"
+          $licenses = Join-Path $dir 'licenses'
+          New-Item -ItemType Directory -Force $dir, $licenses | Out-Null
+
+          $exe = Get-ChildItem build-release -Recurse -Filter mothion.exe | Where-Object { $_.FullName -match '\\Release\\' } |
+              Select-Object -First 1
+          if (-not $exe) { throw 'mothion.exe was not built' }
+          Copy-Item $exe.FullName $dir
+
+          # Qt's DLLs and plugins.
+          & "$env:QT_ROOT_DIR\bin\windeployqt.exe" --release --no-translations --no-system-dxc-compiler `
+              --no-system-d3d-compiler --no-compiler-runtime --verbose 0 (Join-Path $dir 'mothion.exe')
+          if ($LASTEXITCODE -ne 0) { throw 'windeployqt failed' }
+
+          # The C++ runtime's DLLs beside it, so nothing has to be installed first.
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          $crt = Get-ChildItem "$vs\VC\Redist\MSVC\*\x64\Microsoft.VC143.CRT" -Directory | Sort-Object FullName |
+              Select-Object -Last 1
+          if (-not $crt) { throw 'the C++ runtime was not found' }
+          Copy-Item "$($crt.FullName)\*.dll" $dir
+
+          # ffmpeg, checked against its hash.
+          $zip = Join-Path $env:RUNNER_TEMP 'ffmpeg.zip'
+          Invoke-WebRequest $env:FFMPEG_URL -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash -ne $env:FFMPEG_SHA256) { throw 'ffmpeg: the download is not the one expected' }
+          Expand-Archive $zip (Join-Path $env:RUNNER_TEMP 'ffmpeg')
+          $ff = Get-ChildItem (Join-Path $env:RUNNER_TEMP 'ffmpeg') -Directory | Select-Object -First 1
+          Copy-Item "$($ff.FullName)\bin\ffmpeg.exe" $dir
+          Copy-Item "$($ff.FullName)\LICENSE" (Join-Path $licenses 'ffmpeg-LICENSE.txt')
+
+          # The licenses of what goes with it.
+          if (Test-Path LICENSE) { Copy-Item LICENSE (Join-Path $dir 'LICENSE.txt') }
+          Copy-Item resources\fonts\Montserrat-OFL.txt (Join-Path $licenses 'Montserrat-OFL.txt')
+          Invoke-WebRequest https://www.gnu.org/licenses/lgpl-3.0.txt -OutFile (Join-Path $licenses 'LGPL-3.0.txt')
+          Invoke-WebRequest https://www.gnu.org/licenses/gpl-3.0.txt -OutFile (Join-Path $licenses 'GPL-3.0.txt')
+          @"
+          Mothion $version comes with programs and libraries made by others, each under its own license:
+
+          - Qt $env:QT_VERSION (the Qt*.dll files and the plugin folders), The Qt Company, under the GNU LGPL 3.0
+            (LGPL-3.0.txt, GPL-3.0.txt). Mothion uses Qt's DLLs as they are: they can be replaced with another build of
+            the same version. Source: https://download.qt.io/archive/qt/
+          - FFmpeg $env:FFMPEG_VERSION (ffmpeg.exe), the build of https://www.gyan.dev/ffmpeg/builds/, under the GNU GPL 3.0
+            (ffmpeg-LICENSE.txt). It is a program of its own, which Mothion runs to export videos.
+            Source: https://ffmpeg.org/releases/ffmpeg-$env:FFMPEG_VERSION.tar.xz
+          - Eigen 3.4 (built into mothion.exe), under the Mozilla Public License 2.0. Source: https://eigen.tuxfamily.org
+          - Montserrat (the font of the splash screen), under the SIL Open Font License 1.1 (Montserrat-OFL.txt).
+          - The Microsoft Visual C++ runtime (msvcp140*.dll, vcruntime140*.dll, concrt140.dll), redistributed as
+            Microsoft allows.
+          "@ | Set-Content (Join-Path $licenses 'THIRD-PARTY.txt') -Encoding utf8
+
+          Compress-Archive -Path $dir -DestinationPath "dist\$name.zip"
+          "ZIP=dist\$name.zip" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "PROGRAM_DIR=$dir" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "PROGRAM_NAME=$name" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Make the installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+              choco install innosetup --no-progress -y
+              if ($LASTEXITCODE -ne 0) { throw 'Inno Setup could not be installed' }
+          }
+          & $iscc /Q "/DAppVersion=${{ steps.version.outputs.version }}" "/DNumericVersion=${{ steps.version.outputs.numeric }}" `
+              "/DSourceDir=$env:PROGRAM_DIR" "/DOutputDir=$PWD\dist" "/DOutputName=$env:PROGRAM_NAME-setup" installer\mothion.iss
+          if ($LASTEXITCODE -ne 0) { throw 'the installer was not made' }
+          "SETUP=dist\$env:PROGRAM_NAME-setup.exe" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Publish the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ steps.version.outputs.tag }}"
+          cat > notes.md <<'EOF'
+          **Windows:** download `Mothion-…-windows-x64-setup.exe` and run it (Start menu, `.moth` files open with
+          Mothion, uninstall from Windows' settings); or download `Mothion-…-windows-x64.zip`, extract it anywhere and
+          start `mothion.exe`. Nothing else needs installing (ffmpeg, for exporting videos, is in both).
+
+          The program is not signed: the first time, Windows may say "Windows protected your PC". Click
+          **More info → Run anyway**.
+          EOF
+          if gh release view "$tag" > /dev/null 2>&1; then
+            gh release upload "$tag" "$SETUP" "$ZIP" --clobber
+          else
+            gh release create "$tag" "$SETUP" "$ZIP" --title "Mothion ${{ steps.version.outputs.version }}" \
+              --notes-file notes.md --generate-notes ${{ steps.version.outputs.prerelease }}
+          fi
