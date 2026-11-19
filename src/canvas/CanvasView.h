@@ -211,6 +211,9 @@ private:
     // For the fill around `seed` (in the cel's own place): the part of the canvas seen, as the current cel's own pixels
     // lie on it, and the frame shown there (if `withImage`).
     FillTool::Shown fillShown(const QPoint &seed, bool withImage) const;
+    // While the symmetry is on, the transforms of the copies of what is begun at `pageStart` (page coordinates), in the
+    // current cel's own coordinates (it may be posed); the stroke itself not among them. Empty while it is off.
+    std::vector<QTransform> symmetryCopies(const QPointF &pageStart) const;
     // The part of the document the canvas shows (all of the widget, turned and zoomed as it is).
     QRect visibleDocumentRect() const;
     // `area` of the frame as shown, a pixel for a pixel.

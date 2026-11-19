@@ -57,11 +57,12 @@ doc::Pixel clearedBy(doc::Pixel pixel, int amount)
 } // namespace
 
 FillTool::FillTool(document::DocumentController *document, tools::ToolState *state, Frame frame,
-                   std::function<void(const QString &)> status)
+                   std::function<void(const QString &)> status, Copies copies)
     : m_document(document)
     , m_state(state)
     , m_frame(std::move(frame))
     , m_status(std::move(status))
+    , m_copies(std::move(copies))
 {
 }
 
@@ -112,6 +113,13 @@ void FillTool::fillLasso()
     QPainterPath area;
     area.addPolygon(m_lasso);
     area.closeSubpath();
+    if (m_copies) // the outline's copies round the symmetry's axes too
+        for (const QTransform &t : m_copies(m_lasso.first())) {
+            QPainterPath copy;
+            copy.addPolygon(t.map(m_lasso));
+            copy.closeSubpath();
+            area = area.united(copy);
+        }
     if (m_document->hasSelection())
         area = area.intersected(m_document->selection());
     const SelectionMask mask = SelectionMask::fromPath(area);
@@ -166,9 +174,50 @@ void FillTool::fillAround(const QPointF &docPos)
     } else {
         before.read(area.x(), area.y(), w, h, source.data(), w);
     }
-    fill::Region region = fill::floodRegion(source.data(), w, h, seedX - area.x(), seedY - area.y(), settings.tolerance);
-    const fill::Region clicked = region; // the area itself, before it grows under the lines round it
-    fill::grow(region, settings.expand);
+    // The area round the click, and round each point its copies fall on while the symmetry is on, all found in the
+    // drawing as it is before any of them is filled: what each covers (grown under the lines round it), and the area
+    // itself (`clicked`).
+    std::vector<QPoint> seeds{QPoint(seedX, seedY)};
+    if (m_copies)
+        for (const QTransform &t : m_copies(docPos)) {
+            const QPointF at = t.map(docPos);
+            seeds.emplace_back(int(std::floor(at.x())), int(std::floor(at.y())));
+        }
+    fill::Region region;
+    region.width = w;
+    region.height = h;
+    region.mask.assign(std::size_t(w) * std::size_t(h), 0);
+    std::vector<std::uint8_t> clicked(std::size_t(w) * std::size_t(h), 0);
+    for (std::size_t i = 0; i < seeds.size(); ++i) {
+        const QPoint seed = seeds[i] - area.topLeft();
+        if (seed.x() < 0 || seed.y() < 0 || seed.x() >= w || seed.y() >= h)
+            continue;
+        if (i > 0 && m_document->hasSelection() && selection.at(seeds[i].x(), seeds[i].y()) == 0)
+            continue; // a copy out of the selection
+        if (clicked[std::size_t(seed.y()) * std::size_t(w) + std::size_t(seed.x())])
+            continue; // in an area found already
+        fill::Region one = fill::floodRegion(source.data(), w, h, seed.x(), seed.y(), settings.tolerance);
+        if (one.isEmpty())
+            continue;
+        for (int y = one.top; y <= one.bottom; ++y)
+            for (int x = one.left; x <= one.right; ++x)
+                if (one.at(x, y))
+                    clicked[std::size_t(y) * std::size_t(w) + std::size_t(x)] = 255;
+        fill::grow(one, settings.expand);
+        for (int y = one.top; y <= one.bottom; ++y)
+            for (int x = one.left; x <= one.right; ++x) {
+                std::uint8_t &m = region.mask[std::size_t(y) * std::size_t(w) + std::size_t(x)];
+                m = std::max(m, one.at(x, y));
+            }
+        if (region.isEmpty()) {
+            region.left = one.left, region.top = one.top, region.right = one.right, region.bottom = one.bottom;
+        } else {
+            region.left = std::min(region.left, one.left);
+            region.top = std::min(region.top, one.top);
+            region.right = std::max(region.right, one.right);
+            region.bottom = std::max(region.bottom, one.bottom);
+        }
+    }
     if (region.isEmpty()) {
         m_document->cancelPaint();
         return;
@@ -191,7 +240,7 @@ void FillTool::fillAround(const QPointF &docPos)
                 continue;
             if (target->mask)
                 p = clearedBy(p, coverage * int(color >> 24) / 255);
-            else if (clicked.at(dx - area.x(), dy - area.y()))
+            else if (clicked[std::size_t(dy - area.y()) * std::size_t(w) + std::size_t(dx - area.x())])
                 p = over(p, color, coverage);
             else
                 p = behind(p, color, coverage);

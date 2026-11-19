@@ -896,6 +896,74 @@ private slots:
         QVERIFY2(canvasWidest > 1.9, qPrintable(QString::number(canvasWidest)));
     }
 
+    // The fill goes round the symmetry's axes too, in one undo step: the bucket fills the area each copy of the click
+    // falls in (found as the drawing has it there), the lasso the copies of its outline.
+    void symmetryFillsRoundTheAxes()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(500, 400);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        // Two boxes either side of the upright axis (the page's middle, x 960), the right one wider.
+        QImage boxes(400, 200, QImage::Format_ARGB32); // at 760..1159, 440..639
+        boxes.fill(Qt::transparent);
+        {
+            QPainter p(&boxes);
+            p.setPen(QPen(Qt::black, 4));
+            p.drawRect(20, 20, 140, 160);  // 780..920
+            p.drawRect(220, 20, 170, 160); // 980..1150
+        }
+        controller.importImage(boxes, QStringLiteral("boxes"));
+        QCoreApplication::processEvents();
+        auto pixel = [&](int x, int y) { return controller.currentDrawing()->layers.front().image.pixel(x, y); };
+        tools::SymmetrySettings symmetry;
+        symmetry.on = true;
+        state.setSymmetry(symmetry);
+        state.setActiveTool(tools::ToolId::Fill);
+        state.setColor(QColor(255, 0, 0));
+        const QTransform toView = canvas.view().documentToView();
+
+        QTest::mouseClick(&canvas, Qt::LeftButton, {}, toView.map(QPointF(850, 540)).toPoint());
+        QCOMPARE(pixel(850, 540), doc::Pixel(0xffff0000u));
+        QCOMPARE(pixel(1070, 540), doc::Pixel(0xffff0000u)); // the copy: in the right box
+        QCOMPARE(pixel(1140, 540), doc::Pixel(0xffff0000u)); // all of it, though it is wider
+        QCOMPARE(qAlpha(pixel(950, 540)), 0);                // between them: no
+        QCOMPARE(qAlpha(pixel(700, 540)), 0);
+        controller.undo(); // one step
+        QCOMPARE(qAlpha(pixel(850, 540)), 0);
+        QCOMPARE(qAlpha(pixel(1070, 540)), 0);
+
+        // Off: only the box clicked.
+        symmetry.on = false;
+        state.setSymmetry(symmetry);
+        QTest::mouseClick(&canvas, Qt::LeftButton, {}, toView.map(QPointF(850, 540)).toPoint());
+        QCOMPARE(pixel(850, 540), doc::Pixel(0xffff0000u));
+        QCOMPARE(qAlpha(pixel(1070, 540)), 0);
+        controller.undo();
+
+        // The lasso: its outline and the outline's copy.
+        symmetry.on = true;
+        state.setSymmetry(symmetry);
+        tools::FillSettings lasso = state.fillSettings();
+        lasso.mode = tools::FillSettings::Mode::Lasso;
+        state.setFillSettings(lasso);
+        const QPointF corners[] = {{300, 200}, {400, 200}, {400, 300}, {300, 300}};
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, toView.map(corners[0]).toPoint());
+        for (const QPointF &c : corners)
+            for (int k = 1; k <= 5; ++k)
+                QTest::mouseMove(&canvas, toView.map(c).toPoint() + QPoint(k % 2, 0));
+        QTest::mouseMove(&canvas, toView.map(corners[0]).toPoint());
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, toView.map(corners[0]).toPoint());
+        QVERIFY(qAlpha(pixel(350, 250)) > 0);
+        QVERIFY(qAlpha(pixel(1920 - 350, 250)) > 0); // mirrored
+        QCOMPARE(qAlpha(pixel(960, 250)), 0);
+        controller.undo();
+        QCOMPARE(qAlpha(pixel(1920 - 350, 250)), 0);
+    }
+
+
     // With the symmetry on, a stroke is drawn again round the axes, in the same undo step: mirrored on a raster layer;
     // on a vector layer each copy is a stroke of its own.
     void symmetryDrawsTheStrokeRoundTheAxes()

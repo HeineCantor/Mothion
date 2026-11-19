@@ -302,7 +302,7 @@ recover the work; a copy older than the project's file is dropped without asking
 | Move | Drag the drawing or selected area. Shift constrains movement to one axis. |
 | Selection | Drag a rectangle (Shift for square) or use the lasso. Click to deselect. Ctrl+A selects all; Ctrl+D deselects. |
 | Puppet warp | Click to add pins, drag to deform. Alt+click or Delete removes a pin. Enter applies; Esc cancels. Mesh options are in Tool properties. |
-| Symmetry | The Symmetry button above the canvas, or the checkbox in the brush's properties (with the kind: bilateral, vertical, both, rotate, rotate with mirror, tile, half drop). Drag the axes' center or knob (Shift: 15° steps), Ctrl+drag with a brush to bring the center there, double-click the center to put it back. The axes are saved with the project. |
+| Symmetry | The Symmetry button above the canvas, or the checkbox in the brush's properties (with the kind: bilateral, vertical, both, rotate, rotate with mirror, tile, half drop). Brushes, the eraser and the fill (bucket and lasso) work round the axes. Drag the axes' center or knob (Shift: 15° steps), Ctrl+drag with a brush to bring the center there, double-click the center to put it back. The axes are saved with the project. |
 | Pan | Space or Tab + drag, middle mouse button, pen side button or Hand tool. |
 | Zoom | Mouse wheel, Space/Tab+Ctrl+drag, Zoom tool, Ctrl++ / Ctrl+- / Ctrl+0 (fit). |
 | Rotate | Shift+wheel, Space/Tab+Shift+drag, Ctrl+, / Ctrl+. / Ctrl+/ (reset). |

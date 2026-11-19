@@ -5,8 +5,10 @@
 
 #include <QImage>
 #include <QPolygonF>
+#include <QTransform>
 
 #include <functional>
+#include <vector>
 
 namespace mothion::document {
 class DocumentController;
@@ -25,6 +27,10 @@ namespace mothion::canvas {
 //
 // In lasso mode (FillSettings::Mode::Lasso) a drag draws an outline instead,
 // shown open while drawn; the release fills its inside, over what is there.
+//
+// While the symmetry is on (see `copies`), the fill is made round the axes too, in the same undo step: the bucket also
+// fills the areas at the points the click's copies fall on (each found as the drawing has it there), the lasso the
+// copies of its outline.
 class FillTool : public CanvasTool
 {
 public:
@@ -36,9 +42,11 @@ public:
         QImage image;
     };
     using Frame = std::function<Shown(const QPoint &seed, bool withImage)>;
+    // The transforms of the symmetry's copies of a fill begun at a point of the cel (none while it is off).
+    using Copies = std::function<std::vector<QTransform>(const QPointF &celPos)>;
 
     FillTool(document::DocumentController *document, tools::ToolState *state, Frame frame,
-             std::function<void(const QString &)> status);
+             std::function<void(const QString &)> status, Copies copies = {});
 
     void press(const QPointF &docPos, Qt::KeyboardModifiers modifiers) override;
     void move(const QPointF &docPos, Qt::KeyboardModifiers modifiers) override;
@@ -58,6 +66,7 @@ private:
     tools::ToolState *m_state;
     Frame m_frame;
     std::function<void(const QString &)> m_status;
+    Copies m_copies;
 };
 
 } // namespace mothion::canvas

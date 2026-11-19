@@ -192,7 +192,15 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
         std::make_unique<EyedropperTool>(m_toolState, [this](const QPointF &docPos) { return colorAt(docPos); });
     m_fillTool = std::make_unique<FillTool>(
         m_document, m_toolState, [this](const QPoint &seed, bool withImage) { return fillShown(seed, withImage); },
-        [this](const QString &text) { emit statusMessage(text); });
+        [this](const QString &text) { emit statusMessage(text); },
+        [this](const QPointF &celPos) {
+            QPointF onPage = celPos; // the copies by where the fill begins on the page (a tile's cell)
+            if (celIsPosed()) {
+                const doc::Matrix2x3 m = celPose();
+                onPage = QTransform(m.a, m.b, m.c, m.d, m.e, m.f).map(celPos);
+            }
+            return symmetryCopies(onPage);
+        });
     m_blendTool = std::make_unique<BlendTool>(m_document, m_toolState,
                                               [this](const QString &text) { emit statusMessage(text); });
     m_liquifyTool = std::make_unique<LiquifyTool>(m_document, m_toolState,
@@ -668,6 +676,27 @@ QImage CanvasView::frameArea(const QRect &area) const
     FrameRenderer renderer;
     renderer.setArea(m_document->document(), m_document->currentFrame(), area);
     return renderer.image();
+}
+
+std::vector<QTransform> CanvasView::symmetryCopies(const QPointF &pageStart) const
+{
+    const tools::SymmetrySettings symmetry = m_toolState->symmetry();
+    if (!symmetry.on)
+        return {};
+    const doc::Document &d = m_document->document();
+    const std::vector<QTransform> transforms = symmetryTransforms(
+        symmetry, m_document->symmetryCenter(), m_document->symmetryAngle(), QSizeF(d.width(), d.height()), pageStart);
+    // The axes are the page's: on a posed cel, from its place to the page, the copy, and back.
+    QTransform pose;
+    if (celIsPosed()) {
+        const doc::Matrix2x3 m = celPose();
+        pose = QTransform(m.a, m.b, m.c, m.d, m.e, m.f);
+    }
+    const QTransform poseBack = pose.inverted();
+    std::vector<QTransform> out;
+    for (std::size_t i = 1; i < transforms.size(); ++i)
+        out.push_back(pose * transforms[i] * poseBack);
+    return out;
 }
 
 FillTool::Shown CanvasView::fillShown(const QPoint &seed, bool withImage) const
@@ -1182,23 +1211,11 @@ void CanvasView::beginStroke(const PenSample &sample)
     // The copies round the symmetry's axes: the axes are on the page, the stroke's points in the cel (which its pose
     // may move), so each copy's transform goes out to the page and back.
     m_symmetryCopies.clear();
-    if (const tools::SymmetrySettings symmetry = m_toolState->symmetry(); symmetry.on) {
-        const doc::Document &d = m_document->document();
-        const std::vector<QTransform> transforms =
-            symmetryTransforms(symmetry, m_document->symmetryCenter(), m_document->symmetryAngle(),
-                               QSizeF(d.width(), d.height()), m_view.mapToDocument(QPointF(sample.x, sample.y)));
-        QTransform pose;
-        if (celIsPosed()) {
-            const doc::Matrix2x3 m = celPose();
-            pose = QTransform(m.a, m.b, m.c, m.d, m.e, m.f);
-        }
-        const QTransform poseBack = pose.inverted();
-        for (std::size_t i = 1; i < transforms.size(); ++i) {
-            SymmetryCopy copy;
-            copy.transform = pose * transforms[i] * poseBack;
-            copy.dabs.emplace(style, m_seed);
-            m_symmetryCopies.push_back(std::move(copy));
-        }
+    for (const QTransform &transform : symmetryCopies(m_view.mapToDocument(QPointF(sample.x, sample.y)))) {
+        SymmetryCopy copy;
+        copy.transform = transform;
+        copy.dabs.emplace(style, m_seed);
+        m_symmetryCopies.push_back(std::move(copy));
     }
     m_points.clear();
     m_drawnPoints = 0;
