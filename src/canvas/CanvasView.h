@@ -91,6 +91,8 @@ public:
     void finishPuppet(bool apply);
     QRectF shapeBounds() const;
     bool shapeCanFinish() const;
+    // Ctrl+A with Correct line and a stroke chosen: all its anchors; false otherwise (the document's Select all then).
+    bool selectAllInTool();
     void finishShape(bool apply);
 
     // Undo and redo inside an edit left open by the active tool (the drags

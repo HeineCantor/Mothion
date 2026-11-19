@@ -546,6 +546,71 @@ private slots:
         QCOMPARE(layer().strokes.size(), std::size_t(1));
     }
 
+    // Correct line: Shift+click chooses the anchors from the one clicked last to this one, Ctrl+click one more or takes
+    // it away, Ctrl+A (Select all, with the tool) every anchor of the stroke chosen.
+    void correctLineChoosesRangesAndAllAnchors()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(500, 400);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 4, "Line").command);
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Vector));
+        QCoreApplication::processEvents();
+
+        state.setActiveTool(tools::ToolId::Brush); // a zigzag: an anchor at each turn
+        const QPoint start = canvas.view().documentToView().map(QPointF(800, 540)).toPoint();
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, start);
+        for (int i = 1; i <= 120; ++i)
+            QTest::mouseMove(&canvas, start + QPoint(i, (i / 20) % 2 ? 20 - i % 20 : i % 20));
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, start + QPoint(120, 0));
+        QCOMPARE(controller.currentDrawing()->layer(controller.currentLayer())->strokes.size(), std::size_t(1));
+
+        state.setActiveTool(tools::ToolId::VectorPoint);
+        canvas::VectorPointTool points(&controller, &state, [](const QString &) {});
+        points.setViewZoom(canvas.view().zoom());
+        auto click = [&](const QPointF &at, Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+            points.press(at, modifiers);
+            if (points.isActive())
+                points.release(at, modifiers);
+        };
+        QVERIFY(!points.chooseAllAnchors()); // no stroke chosen yet
+        const doc::VectorStroke &stroke = controller.currentDrawing()->layer(controller.currentLayer())->strokes[0];
+        const brush::BrushInput &first = stroke.points.front();
+        click(QPointF(first.x, first.y));
+        QCOMPARE(points.chosenStroke(), 0);
+        const int count = int(points.anchors().size());
+        QVERIFY2(count >= 5, qPrintable(QString::number(count)));
+
+        click(*points.anchorPoint(1));
+        QCOMPARE(points.chosenAnchors(), std::set<int>({1}));
+        click(*points.anchorPoint(3), Qt::ShiftModifier);
+        QCOMPARE(points.chosenAnchors(), std::set<int>({1, 2, 3}));
+        click(*points.anchorPoint(0), Qt::ShiftModifier); // from the same anchor, the other way
+        QCOMPARE(points.chosenAnchors(), std::set<int>({0, 1}));
+        click(*points.anchorPoint(4), Qt::ControlModifier);
+        QCOMPARE(points.chosenAnchors(), std::set<int>({0, 1, 4}));
+        click(*points.anchorPoint(1), Qt::ControlModifier); // taken away
+        QCOMPARE(points.chosenAnchors(), std::set<int>({0, 4}));
+        click(*points.anchorPoint(2), Qt::ShiftModifier); // from the anchor Ctrl+clicked last
+        QCOMPARE(points.chosenAnchors(), std::set<int>({1, 2}));
+
+        QVERIFY(points.chooseAllAnchors());
+        QCOMPARE(int(points.chosenAnchors().size()), count);
+
+        // Through the canvas: Select all with the tool chooses the anchors, not an area of the page.
+        const QPoint onFirst = canvas.view().documentToView().map(QPointF(first.x, first.y)).toPoint();
+        QTest::mouseClick(&canvas, Qt::LeftButton, {}, onFirst);
+        QVERIFY(canvas.selectAllInTool());
+        QVERIFY(!controller.hasSelection());
+        state.setActiveTool(tools::ToolId::Brush);
+        QVERIFY(!canvas.selectAllInTool());
+    }
+
+
     // Correct line: a click chooses a stroke of the vector layer; on its line a press adds a control point and the
     // drag bends the line (the pixels drawn again), Alt+click takes the point away, the width and the corner change
     // at a point, and a click cuts the line. Each change is one undo step.

@@ -486,7 +486,11 @@ void MainWindow::createMenus()
     edit->addSeparator();
     edit->addAction(m_clearAction);
     edit->addSeparator();
-    keymap.bind(edit->addAction(tr("Select all"), m_document, &document::DocumentController::selectAll),
+    keymap.bind(edit->addAction(tr("Select all"), this,
+                                [this] {
+                                    if (!m_canvas->selectAllInTool()) // Correct line: the anchors of its stroke
+                                        m_document->selectAll();
+                                }),
                 QStringLiteral("edit.selectAll"));
     keymap.bind(edit->addAction(tr("Deselect"), m_document, &document::DocumentController::clearSelection),
                 QStringLiteral("edit.deselect"));

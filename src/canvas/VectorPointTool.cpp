@@ -9,6 +9,7 @@
 #include <QPainter>
 #include <QPainterPath>
 
+#include <algorithm>
 #include <cmath>
 
 namespace mothion::canvas {
@@ -64,6 +65,7 @@ void VectorPointTool::refresh() const
     m_chosen->stroke = now;
     m_chosen->anchors = controlPoints(now, kTolerance / m_zoom);
     m_chosen->chosen.clear();
+    m_chosen->pivot = -1;
 }
 
 int VectorPointTool::anchorAt(const QPointF &docPos) const
@@ -117,6 +119,19 @@ void VectorPointTool::choose(int index)
     m_chosen = std::move(c);
 }
 
+bool VectorPointTool::chooseAllAnchors()
+{
+    if (m_edit)
+        return true; // a drag goes on: nothing else now
+    refresh();
+    if (!m_chosen || m_chosen->anchors.empty())
+        return false;
+    m_chosen->chosen.clear();
+    for (int k = 0; k < int(m_chosen->anchors.size()); ++k)
+        m_chosen->chosen.insert(k);
+    return true;
+}
+
 int VectorPointTool::chosenStroke() const
 {
     refresh();
@@ -157,9 +172,18 @@ void VectorPointTool::press(const QPointF &docPos, Qt::KeyboardModifiers modifie
     const int anchor = anchorAt(docPos);
 
     if (anchor >= 0) {
-        if (modifiers & Qt::ShiftModifier) { // more anchors chosen, or one taken away
+        if (modifiers & Qt::ShiftModifier) { // the anchors from the one clicked last to this one
+            const int from = m_chosen->pivot >= 0 ? m_chosen->pivot : anchor;
+            m_chosen->chosen.clear();
+            for (int k = std::min(from, anchor); k <= std::max(from, anchor); ++k)
+                m_chosen->chosen.insert(k);
+            m_chosen->pivot = from;
+            return;
+        }
+        if (modifiers & Qt::ControlModifier) { // one more anchor chosen, or one taken away
             if (!m_chosen->chosen.erase(anchor))
                 m_chosen->chosen.insert(anchor);
+            m_chosen->pivot = anchor;
             return;
         }
         if (mode == Mode::Move && (modifiers & Qt::AltModifier)) {
@@ -180,6 +204,7 @@ void VectorPointTool::press(const QPointF &docPos, Qt::KeyboardModifiers modifie
         if (mode == Mode::Move || mode == Mode::Width) {
             if (!m_chosen->chosen.count(anchor))
                 m_chosen->chosen = {anchor};
+            m_chosen->pivot = anchor;
             if (beginEdit(mode == Mode::Move ? Edit::Kind::Move : Edit::Kind::Width))
                 m_edit->press = docPos;
             return;
@@ -212,6 +237,7 @@ void VectorPointTool::press(const QPointF &docPos, Qt::KeyboardModifiers modifie
             m_chosen->stroke = m_edit->start;
             m_chosen->anchors = m_edit->anchors;
             m_chosen->chosen = {k};
+            m_chosen->pivot = k;
             m_edit->press = docPos;
             return;
         }

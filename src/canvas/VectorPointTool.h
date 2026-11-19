@@ -27,9 +27,10 @@ namespace mothion::canvas {
 // VectorPoints.h), changed one by one. A click on a stroke chooses it, and its anchors show on it (a round dot for a
 // smooth one, a square for a corner); then, by the mode of the tool's properties (tools::VectorPointSettings):
 //
-//  - Move: an anchor dragged takes the line with it (the anchors chosen go together: Shift+click chooses more, or
-//    takes one away); a press on the line between them adds an anchor there, which the drag moves; Alt+click on an
-//    anchor takes it away (the line is laid smooth again there, or cut short at an end);
+//  - Move: an anchor dragged takes the line with it (the anchors chosen go together: Shift+click chooses those from
+//    the anchor clicked last to this one, Ctrl+click chooses one more or takes it away, Ctrl+A chooses them all); a
+//    press on the line between them adds an anchor there, which the drag moves; Alt+click on an anchor takes it away
+//    (the line is laid smooth again there, or cut short at an end);
 //  - Width: an anchor dragged up makes the line wider round it, down thinner (the anchors chosen together);
 //  - Corner: a click on an anchor makes it a corner, or smooth again (the angle rounded);
 //  - Cut: a click on the line cuts it in two there.
@@ -55,6 +56,8 @@ public:
     int chosenStroke() const;
     std::vector<int> anchors() const;
     std::set<int> chosenAnchors() const;
+    // Ctrl+A: every anchor of the stroke chosen; false if no stroke is chosen.
+    bool chooseAllAnchors();
     // Where anchor `k` of the stroke chosen is (document coordinates); for tests.
     std::optional<QPointF> anchorPoint(int k) const;
 
@@ -73,6 +76,7 @@ private:
         doc::VectorStroke stroke; // as it is in the layer
         std::vector<int> anchors;
         std::set<int> chosen; // positions in `anchors`
+        int pivot = -1;       // the anchor clicked last: where a Shift+click's range starts
     };
     struct Edit
     {

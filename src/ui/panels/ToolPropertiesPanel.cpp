@@ -350,10 +350,11 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
     auto updateVectorPointHelp = [this, vectorPointHelp] {
         const QString help[] = {
             tr("Click a stroke of a vector layer to show its control points. Drag a point to bend the line; Shift+click "
-               "chooses more points to move together. Click the line to add a point, Alt+click a point to take it "
+               "chooses the points from the one clicked last, Ctrl+click one more, Ctrl+A all of them, to move "
+               "together. Click the line to add a point, Alt+click a point to take it "
                "away."),
-            tr("Drag a control point up to make the line wider round it, down to make it thinner (Shift+click chooses "
-               "more points)."),
+            tr("Drag a control point up to make the line wider round it, down to make it thinner (Shift+click, Ctrl+click "
+               "and Ctrl+A choose more points)."),
             tr("Click a control point to make it a corner (square), or smooth again (round)."),
             tr("Click the line of the chosen stroke to cut it in two there."),
         };

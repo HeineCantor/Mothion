@@ -1726,6 +1726,15 @@ QRectF CanvasView::shapeBounds() const
     return static_cast<const ShapeTool *>(m_shapeTool.get())->pendingBounds();
 }
 
+bool CanvasView::selectAllInTool()
+{
+    if (m_toolState->activeTool() != ToolId::VectorPoint
+        || !static_cast<VectorPointTool *>(m_vectorPointTool.get())->chooseAllAnchors())
+        return false;
+    update();
+    return true;
+}
+
 bool CanvasView::shapeCanFinish() const
 {
     return static_cast<const ShapeTool *>(m_shapeTool.get())->canFinish();
