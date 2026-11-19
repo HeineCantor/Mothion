@@ -233,6 +233,9 @@ std::optional<QPointF> TrajectoryGizmo::handlePoint(Handle handle, const ViewTra
         break;
     }
     case Handle::Key:
+    case Handle::BoxMove:
+    case Handle::BoxRotate:
+    case Handle::BoxScale:
     case Handle::None: return std::nullopt;
     }
     return view.mapToDocument(at);
@@ -455,6 +458,9 @@ void TrajectoryGizmo::move(const QPointF &docPos, Qt::KeyboardModifiers modifier
         channels = {doc::Channel::Scale};
         break;
     }
+    case Handle::BoxMove: // the key box's drags went to moveKeyBox() above
+    case Handle::BoxRotate:
+    case Handle::BoxScale:
     case Handle::None: return;
     }
     if (d.handle == Handle::Key && !m_followers.empty()) {
