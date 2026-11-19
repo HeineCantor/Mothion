@@ -160,6 +160,9 @@ private:
     bool m_autosaveDirty = false; // the project changed since the last copy
     int m_autosaveWaits = 0;      // times the copy was put off for the user's drawing
     QElapsedTimer m_lastInput;
+    // Space was pressed with the pointer over the canvas: until it is let go it pans there, and does not play.
+    bool m_spacePans = false;
+    bool pointerOverCanvas() const;
 };
 
 } // namespace mothion::ui

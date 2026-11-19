@@ -55,6 +55,7 @@
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
+#include <QCursor>
 #include <QClipboard>
 #include <QTreeWidget>
 #include <QCloseEvent>
@@ -1460,6 +1461,11 @@ bool isPartOf(const QWidget *widget, const QWidget *window)
 
 } // namespace
 
+bool MainWindow::pointerOverCanvas() const
+{
+    return m_canvas->isVisible() && QApplication::widgetAt(QCursor::pos()) == m_canvas;
+}
+
 bool MainWindow::eventFilter(QObject *watched, QEvent *event)
 {
     switch (event->type()) { // the user is working: an autosave waits for a pause
@@ -1472,6 +1478,40 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
         break;
     default:
         break;
+    }
+
+    // Space: with the pointer over the canvas it is held to pan it (as Tab), wherever the focus is; over anything else
+    // it plays and pauses the timeline (its shortcut). Typing a space in a text field types it.
+    if ((event->type() == QEvent::ShortcutOverride || event->type() == QEvent::KeyPress
+         || event->type() == QEvent::KeyRelease)
+        && static_cast<QKeyEvent *>(event)->key() == Qt::Key_Space) {
+        auto *key = static_cast<QKeyEvent *>(event);
+        auto *widget = qobject_cast<QWidget *>(watched);
+        if (widget && !QApplication::activePopupWidget() && isPartOf(widget, this) && !isTextEntry(widget)) {
+            if (event->type() == QEvent::ShortcutOverride) {
+                if (m_spacePans || pointerOverCanvas()) {
+                    event->accept(); // no play: it comes as a key press
+                    return true;
+                }
+            } else if (event->type() == QEvent::KeyPress) {
+                if (!key->isAutoRepeat() && pointerOverCanvas())
+                    m_spacePans = true;
+                if (m_spacePans && watched != m_canvas) {
+                    if (!key->isAutoRepeat()) {
+                        m_canvas->setFocus(Qt::OtherFocusReason);
+                        QApplication::sendEvent(m_canvas, event);
+                    }
+                    return true; // the repeats of a Space held after the pointer left the canvas: nothing
+                }
+            } else if (m_spacePans) {
+                if (!key->isAutoRepeat())
+                    m_spacePans = false;
+                if (watched != m_canvas) {
+                    QApplication::sendEvent(m_canvas, event);
+                    return true;
+                }
+            }
+        }
     }
 
     // The pan key (Tab) is for the canvas wherever the focus is,

@@ -874,7 +874,7 @@ void CanvasView::tabletEvent(QTabletEvent *event)
     // (and those synthesized mouse events may be compressed).
     event->accept();
     // An accepted pen press is not a click to Qt: take the focus ourselves,
-    // or keys like Tab keep going to the panel clicked last.
+    // or keys like Space and Tab keep going to the panel clicked last.
     if (event->type() == QEvent::TabletPress && !hasFocus())
         setFocus(Qt::MouseFocusReason);
     noteDevice(event->pointingDevice());
@@ -1824,6 +1824,7 @@ QColor CanvasView::colorAt(const QPointF &docPos) const
 bool *CanvasView::panKeyFlag(int key)
 {
     switch (key) {
+    case Qt::Key_Space: return &m_spaceHeld;
     case Qt::Key_Tab: return &m_tabHeld;
     default: return nullptr;
     }
@@ -1837,7 +1838,7 @@ void CanvasView::focusOutEvent(QFocusEvent *event)
         updateStraightLine();
     }
     if (panKeyHeld() || m_altHeld) {
-        m_tabHeld = m_altHeld = false;
+        m_spaceHeld = m_tabHeld = m_altHeld = false;
         updateCursor();
     }
     QWidget::focusOutEvent(event);

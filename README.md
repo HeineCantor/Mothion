@@ -303,9 +303,9 @@ recover the work; a copy older than the project's file is dropped without asking
 | Selection | Drag a rectangle (Shift for square) or use the lasso. Click to deselect. Ctrl+A selects all; Ctrl+D deselects. |
 | Puppet warp | Click to add pins, drag to deform. Alt+click or Delete removes a pin. Enter applies; Esc cancels. Mesh options are in Tool properties. |
 | Symmetry | The Symmetry button above the canvas, or the checkbox in the brush's properties (with the kind: bilateral, vertical, both, rotate, rotate with mirror, tile, half drop). Drag the axes' center or knob (Shift: 15° steps), Ctrl+drag with a brush to bring the center there, double-click the center to put it back. The axes are saved with the project. |
-| Pan | Tab + drag, middle mouse button, pen side button or Hand tool. |
-| Zoom | Mouse wheel, Tab+Ctrl+drag, Zoom tool, Ctrl++ / Ctrl+- / Ctrl+0 (fit). |
-| Rotate | Shift+wheel, Tab+Shift+drag, Ctrl+, / Ctrl+. / Ctrl+/ (reset). |
+| Pan | Tab + drag, Space + drag (pointer over the canvas), middle mouse button, pen side button or Hand tool. |
+| Zoom | Mouse wheel, Tab/Space+Ctrl+drag, Zoom tool, Ctrl++ / Ctrl+- / Ctrl+0 (fit). |
+| Rotate | Shift+wheel, Tab/Space+Shift+drag, Ctrl+, / Ctrl+. / Ctrl+/ (reset). |
 | Undo / Redo | Ctrl+Z / Ctrl+Shift+Z or Ctrl+Y. History is limited to 500 steps or 1 GB. |
 | Input debug overlay | F12 |
 | Timeline | Click or drag to select frame/layer. Arrow keys navigate; Home/End go to the first/last frame. Ctrl+wheel changes frame zoom. |
