@@ -100,6 +100,9 @@ private:
     // Transform: how the pixels are read when they are scaled or turned (tools::Preferences::transformFilter()).
     QWidget *m_transformControls = nullptr;
     QComboBox *m_transformFilter = nullptr;
+    // Correct line: what it does to the control points (tools::VectorPointSettings::Mode).
+    QWidget *m_vectorPointControls = nullptr;
+    QComboBox *m_vectorPointMode = nullptr;
     // Animate: the pose of the current cel on the current frame, and its key (auto-key: a field edited makes it).
     void syncAnimateFromDocument();
     document::DocumentController *m_document = nullptr;

@@ -28,6 +28,8 @@ struct VectorStroke
     bool cornerTips = true;           // sharp corners keep a point
     bool startCorrectedAfter = false; // the start is corrected after the stroke, not tapered live
     std::vector<brush::BrushInput> points; // before brush::finalPoints()
+
+    bool operator==(const VectorStroke &) const = default;
 };
 
 } // namespace mothion::doc

@@ -112,6 +112,7 @@ Shortcuts::Shortcuts()
         // The other brush categories start with no key (one can be given in the settings).
         {ToolId::Pencil, Qt::Key_unknown}, {ToolId::Pen, Qt::Key_unknown}, {ToolId::Watercolor, Qt::Key_unknown},
         {ToolId::Airbrush, Qt::Key_unknown}, {ToolId::Decoration, Qt::Key_unknown},
+        {ToolId::VectorPoint, Qt::Key_unknown},
     };
     for (const auto &t : toolKeys) {
         const QString name = t.tool == ToolId::RectSelect ? tr("Selection") : tools::ToolState::displayName(t.tool);
@@ -279,6 +280,7 @@ QString Shortcuts::toolCommand(int tool)
         {int(tools::ToolId::Zoom), QStringLiteral("tool.zoom")},
         {int(tools::ToolId::Move), QStringLiteral("tool.move")},
         {int(tools::ToolId::Puppet), QStringLiteral("tool.puppet")},
+        {int(tools::ToolId::VectorPoint), QStringLiteral("tool.correctLine")},
     };
     return names.value(tool);
 }

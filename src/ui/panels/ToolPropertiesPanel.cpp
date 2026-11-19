@@ -26,6 +26,7 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 
+#include <algorithm>
 #include <cmath>
 
 namespace mothion::ui {
@@ -281,6 +282,45 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
     layout->addWidget(m_shapeControls);
     // The filter of the transform (as in Krita's): bicubic by default, Lanczos3 for making a small picture bigger, nearest
     // neighbor for pixel art. The choice is kept (Preferences), and is taken up at once by a transform that is open.
+    // Correct line: what a press on the control points of a vector stroke does, and how.
+    m_vectorPointControls = new QWidget(this);
+    m_vectorPointMode = new QComboBox(m_vectorPointControls);
+    m_vectorPointMode->setObjectName(QStringLiteral("vectorPointMode"));
+    m_vectorPointMode->addItem(tr("Move control points"));
+    m_vectorPointMode->addItem(tr("Line width"));
+    m_vectorPointMode->addItem(tr("Corner"));
+    m_vectorPointMode->addItem(tr("Cut line"));
+    auto *vectorPointHelp = new QLabel(m_vectorPointControls);
+    vectorPointHelp->setWordWrap(true);
+    vectorPointHelp->setForegroundRole(QPalette::PlaceholderText);
+    auto updateVectorPointHelp = [this, vectorPointHelp] {
+        const QString help[] = {
+            tr("Click a stroke of a vector layer to show its control points. Drag a point to bend the line; Shift+click "
+               "chooses more points to move together. Click the line to add a point, Alt+click a point to take it "
+               "away."),
+            tr("Drag a control point up to make the line wider round it, down to make it thinner (Shift+click chooses "
+               "more points)."),
+            tr("Click a control point to make it a corner (square), or smooth again (round)."),
+            tr("Click the line of the chosen stroke to cut it in two there."),
+        };
+        vectorPointHelp->setText(help[std::clamp(m_vectorPointMode->currentIndex(), 0, 3)]);
+    };
+    auto *vectorPointForm = new QFormLayout(m_vectorPointControls);
+    vectorPointForm->setContentsMargins(0, 0, 0, 0);
+    vectorPointForm->addRow(tr("Process"), m_vectorPointMode);
+    vectorPointForm->addRow(vectorPointHelp);
+    layout->addWidget(m_vectorPointControls);
+    connect(m_vectorPointMode, &QComboBox::activated, this, [this](int index) {
+        m_state->setVectorPoints({static_cast<tools::VectorPointSettings::Mode>(index)});
+    });
+    auto syncVectorPoints = [this, updateVectorPointHelp] {
+        const QSignalBlocker block(m_vectorPointMode);
+        m_vectorPointMode->setCurrentIndex(int(m_state->vectorPoints().mode));
+        updateVectorPointHelp();
+    };
+    connect(m_state, &ToolState::vectorPointsChanged, this, syncVectorPoints);
+    syncVectorPoints();
+
     m_transformControls = new QWidget(this);
     m_transformFilter = new QComboBox(m_transformControls);
     m_transformFilter->setObjectName(QStringLiteral("transformFilter"));
@@ -448,8 +488,9 @@ void ToolPropertiesPanel::syncFromState()
     const bool transform = tool == ToolId::Transform;
     const bool effect = tool == ToolId::Blend || tool == ToolId::Liquify;
     const bool shape = tool == ToolId::Shape;
+    const bool vectorPoints = tool == ToolId::VectorPoint;
     const bool movesCel = m_state->movesTheCel();
-    const bool brush = !puppet && !fill && !transform && !effect && !shape && !movesCel;
+    const bool brush = !puppet && !fill && !transform && !effect && !shape && !vectorPoints && !movesCel;
     m_brushControls->setVisible(brush);
     if (m_footer->parentWidget() != this) // in a dock: shown with the brush options
         m_footer->setVisible(brush);
@@ -460,6 +501,7 @@ void ToolPropertiesPanel::syncFromState()
     syncEffectFromState();
     m_transformHelp->setVisible(transform);
     m_transformControls->setVisible(transform);
+    m_vectorPointControls->setVisible(vectorPoints);
     m_animateControls->setVisible(movesCel);
     m_transformHelp->setVisible(transform && !movesCel);
     m_puppetControls->setVisible(puppet);

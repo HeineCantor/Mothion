@@ -3,6 +3,7 @@
 #include "test_common.h"
 #include "canvas/VectorErase.h"
 #include "canvas/VectorEraseTool.h"
+#include "canvas/VectorPointTool.h"
 #include "canvas/VectorRender.h"
 
 class TestUiDrawing : public QObject
@@ -543,6 +544,247 @@ private slots:
         controller.undo();
         controller.redo();
         QCOMPARE(layer().strokes.size(), std::size_t(1));
+    }
+
+    // Correct line: a click chooses a stroke of the vector layer; on its line a press adds a control point and the
+    // drag bends the line (the pixels drawn again), Alt+click takes the point away, the width and the corner change
+    // at a point, and a click cuts the line. Each change is one undo step.
+    void correctLineChangesTheControlPointsOfAStroke()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(500, 400);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 4, "Line").command);
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Vector));
+        QCoreApplication::processEvents();
+        auto layer = [&]() -> const doc::Layer & { return *controller.currentDrawing()->layer(controller.currentLayer()); };
+
+        state.setActiveTool(tools::ToolId::Brush);
+        const QPoint start = canvas.view().documentToView().map(QPointF(900, 540)).toPoint();
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, start);
+        for (int i = 1; i <= 60; ++i)
+            QTest::mouseMove(&canvas, start + QPoint(i, 0));
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, start + QPoint(60, 0));
+        QCOMPARE(layer().strokes.size(), std::size_t(1));
+        const doc::VectorStroke drawn = layer().strokes[0];
+        const double lineY = drawn.points.front().y;
+        const QPointF middle((drawn.points.front().x + drawn.points.back().x) / 2.0, lineY);
+        const QPointF raised = middle + QPointF(0, -40);
+
+        state.setActiveTool(tools::ToolId::VectorPoint);
+        canvas::VectorPointTool tool(&controller, &state, [](const QString &) {});
+        tool.setViewZoom(canvas.view().zoom());
+        auto click = [&](const QPointF &at, Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+            tool.press(at, modifiers);
+            if (tool.isActive())
+                tool.release(at, modifiers);
+        };
+
+        // A click away from it chooses nothing; on it, the stroke, with its ends among its anchors.
+        click(middle + QPointF(0, 200));
+        QCOMPARE(tool.chosenStroke(), -1);
+        click(middle);
+        QCOMPARE(tool.chosenStroke(), 0);
+        QVERIFY(tool.anchors().size() >= 2);
+        QCOMPARE(tool.anchors().front(), 0);
+        QCOMPARE(tool.anchors().back(), int(drawn.points.size()) - 1);
+        QCOMPARE(layer().strokes[0], drawn); // choosing changes nothing
+
+        // A press on the line adds a point there, the drag takes the line up with it.
+        tool.press(middle, Qt::NoModifier);
+        QVERIFY(tool.isActive());
+        tool.move(raised, Qt::NoModifier);
+        tool.release(raised, Qt::NoModifier);
+        QVERIFY(!tool.isActive());
+        double highest = lineY;
+        for (const brush::BrushInput &in : layer().strokes[0].points)
+            highest = std::min(highest, in.y);
+        QVERIFY(std::abs(highest - raised.y()) < 1.0);
+        QCOMPARE(layer().strokes[0].points.front().y, lineY); // the ends stay
+        QCOMPARE(layer().strokes[0].points.back().y, lineY);
+        QVERIFY(qAlpha(layer().image.pixel(int(raised.x()), int(raised.y()))) > 100); // drawn again where it went
+        QCOMPARE(qAlpha(layer().image.pixel(int(middle.x()), int(middle.y()))), 0);
+        controller.undo();
+        QCOMPARE(layer().strokes[0], drawn);
+        QVERIFY(qAlpha(layer().image.pixel(int(middle.x()), int(middle.y()))) > 100);
+        controller.redo();
+        QVERIFY(qAlpha(layer().image.pixel(int(raised.x()), int(raised.y()))) > 100);
+
+        // The point added is an anchor of the stroke still: Alt+click takes it away, and the line is straight again.
+        const std::vector<int> anchors = tool.anchors();
+        int top = -1;
+        for (int k = 0; k < int(anchors.size()); ++k)
+            if (tool.anchorPoint(k) && QLineF(*tool.anchorPoint(k), raised).length() < 1.0)
+                top = k;
+        QVERIFY(top > 0);
+        click(raised, Qt::AltModifier);
+        for (const brush::BrushInput &in : layer().strokes[0].points)
+            QVERIFY(std::abs(in.y - lineY) < 0.5);
+        controller.undo();
+
+        // Wider round a point dragged up in Line width mode: in the stroke's points, and in the pixels drawn.
+        auto thickness = [&] {
+            int n = 0;
+            for (int y = int(raised.y()) - 60; y <= int(raised.y()) + 60; ++y)
+                n += qAlpha(layer().image.pixel(int(raised.x()), y)) > 128 ? 1 : 0;
+            return n;
+        };
+        const int thin = thickness();
+        QVERIFY(thin > 0);
+        state.setVectorPoints({tools::VectorPointSettings::Mode::Width});
+        tool.press(raised, Qt::NoModifier);
+        QVERIFY(tool.isActive());
+        tool.move(raised + QPointF(0, -80 / canvas.view().zoom()), Qt::NoModifier); // 80 px up on screen: twice
+        tool.release(raised + QPointF(0, -80 / canvas.view().zoom()), Qt::NoModifier);
+        double widest = 0;
+        for (const brush::BrushInput &in : layer().strokes[0].points)
+            widest = std::max(widest, in.sizeScale);
+        QVERIFY(std::abs(widest - 2.0) < 1e-6);
+        QVERIFY2(thickness() >= thin * 3 / 2, qPrintable(QStringLiteral("%1 -> %2").arg(thin).arg(thickness())));
+        controller.undo();
+
+        // A corner, and smooth again.
+        state.setVectorPoints({tools::VectorPointSettings::Mode::Corner});
+        click(raised);
+        const int topIndex = tool.anchors()[std::size_t(top)];
+        QVERIFY(layer().strokes[0].points[std::size_t(topIndex)].corner);
+        controller.undo();
+        QVERIFY(!layer().strokes[0].points[std::size_t(topIndex)].corner);
+
+        // Cut where the line is clicked: two strokes, which meet there.
+        state.setVectorPoints({tools::VectorPointSettings::Mode::Cut});
+        const doc::VectorStroke bent = layer().strokes[0];
+        const brush::BrushInput &at = bent.points[bent.points.size() / 4];
+        click(QPointF(at.x, at.y));
+        QCOMPARE(layer().strokes.size(), std::size_t(2));
+        const brush::BrushInput &end = layer().strokes[0].points.back();
+        const brush::BrushInput &begin = layer().strokes[1].points.front();
+        QCOMPARE(QPointF(end.x, end.y), QPointF(begin.x, begin.y));
+        QCOMPARE(layer().strokes[0].points.size() + layer().strokes[1].points.size(), bent.points.size() + 1);
+        controller.undo();
+        QCOMPARE(layer().strokes.size(), std::size_t(1));
+        QCOMPARE(layer().strokes[0], bent);
+
+        // The same through the canvas, with the tool chosen: a click chooses the stroke, a drag on its line bends it.
+        state.setVectorPoints({tools::VectorPointSettings::Mode::Move});
+        controller.undo(); // the line straight again
+        QCOMPARE(layer().strokes[0], drawn);
+        const QTransform toView = canvas.view().documentToView();
+        const QPoint onLine = toView.map(middle).toPoint();
+        QTest::mouseClick(&canvas, Qt::LeftButton, {}, onLine);
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, onLine);
+        for (int i = 1; i <= 10; ++i) {
+            QTest::mouseMove(&canvas, onLine + QPoint(0, -2 * i));
+            canvas.repaint(); // the canvas drawn while the drag goes on (the tool's overlay with it)
+        }
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, onLine + QPoint(0, -20));
+        double canvasHighest = lineY;
+        for (const brush::BrushInput &in : layer().strokes[0].points)
+            canvasHighest = std::min(canvasHighest, in.y);
+        QVERIFY(canvasHighest < lineY - 10.0 / canvas.view().zoom());
+
+        // Line width through the canvas: the point raised a moment ago dragged up.
+        state.setVectorPoints({tools::VectorPointSettings::Mode::Width});
+        double topY = lineY;
+        QPointF topPoint;
+        for (const brush::BrushInput &in : layer().strokes[0].points)
+            if (in.y < topY) {
+                topY = in.y;
+                topPoint = QPointF(in.x, in.y);
+            }
+        const QPoint grip = toView.map(topPoint).toPoint();
+        QTest::mouseMove(&canvas, grip);
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, grip);
+        for (int i = 1; i <= 20; ++i) {
+            QTest::mouseMove(&canvas, grip + QPoint(0, -4 * i));
+            canvas.repaint();
+        }
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, grip + QPoint(0, -80));
+        double canvasWidest = 0;
+        for (const brush::BrushInput &in : layer().strokes[0].points)
+            canvasWidest = std::max(canvasWidest, in.sizeScale);
+        QVERIFY2(canvasWidest > 1.9, qPrintable(QString::number(canvasWidest)));
+    }
+
+    // While a control point is dragged only the stroke is drawn again, between the pixels of the strokes under and
+    // over it: what comes out is what drawing all the strokes again gives, with an erasing stroke over it too.
+    void correctLineDrawsTheLayerAsTheStrokesDo()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(500, 400);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 4, "Line").command);
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Vector));
+        QCoreApplication::processEvents();
+        auto layer = [&]() -> const doc::Layer & { return *controller.currentDrawing()->layer(controller.currentLayer()); };
+
+        // Three strokes across one another: a vertical one, a horizontal one (the one corrected), a diagonal one.
+        state.setActiveTool(tools::ToolId::Brush);
+        state.setSize(tools::ToolId::Brush, 12);
+        const QPoint c = canvas.view().documentToView().map(QPointF(960, 540)).toPoint();
+        auto draw = [&](QPoint from, QPoint step) {
+            QTest::mousePress(&canvas, Qt::LeftButton, {}, from);
+            for (int i = 1; i <= 40; ++i)
+                QTest::mouseMove(&canvas, from + step * i);
+            QTest::mouseRelease(&canvas, Qt::LeftButton, {}, from + step * 40);
+        };
+        draw(c + QPoint(0, -40), QPoint(0, 2));
+        draw(c + QPoint(-40, 0), QPoint(2, 0));
+        draw(c + QPoint(-30, -30), QPoint(1, 2));
+        QCOMPARE(layer().strokes.size(), std::size_t(3));
+
+        auto drawnAgain = [&] {
+            doc::TiledImage fresh;
+            canvas::drawStrokes(fresh, layer().strokes, state, QRect());
+            return fresh;
+        };
+        auto same = [&](const doc::TiledImage &a, const doc::TiledImage &b) {
+            const QRect area = canvas.view().viewToDocument().mapRect(QRectF(c - QPoint(80, 80), QSize(160, 160))).toAlignedRect();
+            int differ = 0;
+            for (int y = area.top(); y <= area.bottom(); ++y)
+                for (int x = area.left(); x <= area.right(); ++x) {
+                    const QRgb p = a.pixel(x, y), q = b.pixel(x, y);
+                    if (std::abs(qAlpha(p) - qAlpha(q)) > 1 || std::abs(qRed(p) - qRed(q)) > 1)
+                        ++differ;
+                }
+            return differ;
+        };
+
+        state.setActiveTool(tools::ToolId::VectorPoint);
+        canvas::VectorPointTool tool(&controller, &state, [](const QString &) {});
+        tool.setViewZoom(canvas.view().zoom());
+        const doc::VectorStroke &line = layer().strokes[1];
+        const QPointF middle(line.points[line.points.size() / 2].x, line.points[line.points.size() / 2].y);
+        auto drag = [&](QPointF to) {
+            tool.press(middle, Qt::NoModifier); // chooses the topmost stroke there: the diagonal one passes elsewhere
+            if (!tool.isActive()) {
+                tool.press(middle, Qt::NoModifier);
+            }
+            QVERIFY(tool.isActive());
+            for (int i = 1; i <= 5; ++i)
+                tool.move(middle + (to - middle) * (i / 5.0), Qt::NoModifier);
+            tool.release(to, Qt::NoModifier);
+        };
+        drag(middle + QPointF(0, 60));
+        QCOMPARE(tool.chosenStroke(), 1);
+        QVERIFY(layer().strokes[1].points[line.points.size() / 2].y > middle.y() + 50);
+        QCOMPARE(same(layer().image, drawnAgain()), 0);
+        controller.undo();
+
+        // The diagonal one an eraser's stroke: drawn again after the stroke, not laid over it.
+        doc::Layer *editable = d.layer(controller.currentCel(), controller.currentDrawing()->id, controller.currentLayer());
+        editable->strokes[2].erase = true;
+        editable->image = drawnAgain();
+        drag(middle + QPointF(0, 60));
+        QCOMPARE(same(layer().image, drawnAgain()), 0);
     }
 
     // What lies out of the canvas is moved with the rest by the Transform tool, not cut off.

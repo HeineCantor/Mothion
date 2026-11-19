@@ -47,6 +47,7 @@ QString ToolState::displayName(ToolId tool)
     case ToolId::Blend: return tr("Blend");
     case ToolId::Liquify: return tr("Liquify");
     case ToolId::Shape: return tr("Shape");
+    case ToolId::VectorPoint: return tr("Correct line");
     }
     return {};
 }
@@ -272,6 +273,14 @@ void ToolState::setPerspectiveSnapLayer(doc::LayerId layer)
         return;
     m_snapLayer = layer;
     emit perspectiveSnapChanged();
+}
+
+void ToolState::setVectorPoints(const VectorPointSettings &settings)
+{
+    if (settings == m_vectorPoints)
+        return;
+    m_vectorPoints = settings;
+    emit vectorPointsChanged();
 }
 
 void ToolState::setVectorEraser(const VectorEraserSettings &settings)

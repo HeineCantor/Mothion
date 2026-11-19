@@ -1,6 +1,7 @@
 #include "canvas/FrameRenderer.h"
 #include "canvas/Resample.h"
 #include "canvas/StrokeSession.h"
+#include "canvas/VectorPoints.h"
 #include "core/brush/DabGenerator.h"
 #include "canvas/ViewTransform.h"
 #include "core/document/Document.h"
@@ -27,6 +28,19 @@ ViewTransform makeView()
 }
 
 bool near(const QPointF &a, const QPointF &b) { return QLineF(a, b).length() < 1e-6; }
+
+// A stroke along x from 0 to 2 * (n - 1), a point every 2 px, at y 0, pressure 0.5.
+doc::VectorStroke straightStroke(int n)
+{
+    doc::VectorStroke s;
+    for (int i = 0; i < n; ++i) {
+        brush::BrushInput in;
+        in.x = 2.0 * i;
+        in.pressure = 0.5;
+        s.points.push_back(in);
+    }
+    return s;
+}
 
 } // namespace
 
@@ -605,6 +619,146 @@ private:
         brush::DabGenerator gen(roundStyle(radius));
         session.addDabs(gen.begin(point(a.x(), a.y())));
         session.addDabs(gen.continueTo(point(b.x(), b.y())));
+    }
+private slots:
+    // The anchors of a stroke: its ends, its corners, and the points where the path bends past the tolerance.
+    void controlPointsKeepTheEndsCornersAndBends()
+    {
+        doc::VectorStroke line = straightStroke(51);
+        QCOMPARE(controlPoints(line, 1.0), (std::vector<int>{0, 50}));
+        line.points[20].corner = true;
+        QCOMPARE(controlPoints(line, 1.0), (std::vector<int>{0, 20, 50}));
+        doc::VectorStroke bent = straightStroke(51); // an L: up from the middle on
+        for (int i = 26; i <= 50; ++i) {
+            bent.points[std::size_t(i)].x = 50.0;
+            bent.points[std::size_t(i)].y = -2.0 * (i - 25);
+        }
+        QCOMPARE(controlPoints(bent, 1.0), (std::vector<int>{0, 25, 50}));
+        QCOMPARE(controlPoints(doc::VectorStroke{}, 1.0), std::vector<int>());
+    }
+
+    // An anchor moved takes the points round it along, less and less towards the anchors beside it, which stay; round
+    // a smooth anchor what is near goes along as a whole, round a corner the line bends at once. Pressure stays.
+    void movingAnAnchorBendsTheLineRoundIt()
+    {
+        const doc::VectorStroke line = straightStroke(51);
+        const std::vector<int> anchors{0, 25, 50};
+        const std::vector<QPointF> offsets{{}, {0, 20}, {}};
+        const doc::VectorStroke smooth = movedAnchors(line, anchors, offsets);
+        QCOMPARE(smooth.points[25].y, 20.0);
+        QCOMPARE(smooth.points[0].y, 0.0);
+        QCOMPARE(smooth.points[50].y, 0.0);
+        QVERIFY(smooth.points[24].y > 19.8);                                   // along with it as a whole
+        QVERIFY(std::abs(smooth.points[13].y - 10.0) < 1.5);                   // halfway, half as far
+        QCOMPARE(smooth.points[24].x, line.points[24].x);                      // only up
+        QCOMPARE(smooth.points[30].pressure, 0.5);
+        doc::VectorStroke corner = line;
+        corner.points[25].corner = true;
+        const doc::VectorStroke bent = movedAnchors(corner, anchors, offsets);
+        // Towards the corner the line lets go at once: less of it goes along than round a smooth anchor.
+        QVERIFY(std::abs(bent.points[24].y - 20.0 * anchorWeight(0.96, false, true)) < 1e-9);
+        QVERIFY(bent.points[24].y < smooth.points[24].y - 0.5);
+        QCOMPARE(anchorWeight(0.5, false, false), 0.5);
+        QCOMPARE(anchorWeight(0.25, true, true), 0.25);
+        QCOMPARE(movedAnchors(line, anchors, {{}, {}, {}}), line); // nothing moved: the same stroke
+    }
+
+    // The width at an anchor, and less and less towards the anchors beside it.
+    void theWidthChangesRoundAnAnchor()
+    {
+        const doc::VectorStroke line = straightStroke(51);
+        const doc::VectorStroke wide = scaledWidths(line, {0, 25, 50}, {1.0, 2.0, 1.0});
+        QCOMPARE(wide.points[25].sizeScale, 2.0);
+        QCOMPARE(wide.points[0].sizeScale, 1.0);
+        QCOMPARE(wide.points[50].sizeScale, 1.0);
+        QVERIFY(wide.points[12].sizeScale > 1.3 && wide.points[12].sizeScale < 1.7);
+        QVERIFY(strokeReach(wide).height() > strokeReach(line).height());
+    }
+
+    // An anchor added on the line: a point of it when one is near, else a point put in; the anchors put right.
+    void anAnchorIsAddedOnTheLine()
+    {
+        doc::VectorStroke two = straightStroke(2); // from (0, 0) to (2, 0)
+        two.points[1].x = 100;
+        std::vector<int> anchors{0, 1};
+        const auto place = nearestPlace(two, QPointF(40, 5));
+        QVERIFY(place);
+        QCOMPARE(place->segment, 0);
+        QCOMPARE(place->distance, 5.0);
+        QCOMPARE(addAnchor(two, anchors, *place, 1.0), 1);
+        QCOMPARE(two.points.size(), std::size_t(3));
+        QCOMPARE(two.points[1].x, 40.0);
+        QCOMPARE(anchors, (std::vector<int>{0, 1, 2}));
+
+        doc::VectorStroke dense = straightStroke(51);
+        std::vector<int> denseAnchors{0, 50};
+        QCOMPARE(addAnchor(dense, denseAnchors, *nearestPlace(dense, QPointF(40.4, 3)), 1.0), 1);
+        QCOMPARE(dense.points.size(), std::size_t(51)); // the point at 40 was near enough
+        QCOMPARE(denseAnchors, (std::vector<int>{0, 20, 50}));
+    }
+
+    // An anchor taken away: inside, the line is laid smooth again between the anchors beside it; at an end, the line
+    // is cut short to the next one; two anchors are the fewest.
+    void anAnchorIsTakenAway()
+    {
+        std::vector<int> anchors{0, 25, 50};
+        doc::VectorStroke bent = movedAnchors(straightStroke(51), anchors, {{}, {0, 20}, {}});
+        QVERIFY(removeAnchor(bent, anchors, 1));
+        QCOMPARE(anchors, (std::vector<int>{0, 50}));
+        for (const brush::BrushInput &in : bent.points)
+            QVERIFY(std::abs(in.y) < 1e-9); // straight between the two ends left
+        QCOMPARE(bent.points.size(), std::size_t(51));
+        QVERIFY(!removeAnchor(bent, anchors, 0));
+
+        doc::VectorStroke line = straightStroke(51);
+        std::vector<int> three{0, 20, 50};
+        QVERIFY(removeAnchor(line, three, 0));
+        QCOMPARE(line.points.front().x, 40.0);
+        QCOMPARE(three, (std::vector<int>{0, 30}));
+        QCOMPARE(line.points.size(), std::size_t(31));
+        std::vector<int> again{0, 10, 30};
+        QVERIFY(removeAnchor(line, again, 2));
+        QCOMPARE(line.points.back().x, 60.0);
+        QCOMPARE(line.points.size(), std::size_t(11));
+    }
+
+    // A corner made smooth rounds the angle: the line passes through the anchor without turning there.
+    void aCornerMadeSmoothIsRounded()
+    {
+        doc::VectorStroke bent = straightStroke(51); // an L
+        for (int i = 26; i <= 50; ++i) {
+            bent.points[std::size_t(i)].x = 50.0;
+            bent.points[std::size_t(i)].y = -2.0 * (i - 25);
+        }
+        const std::vector<int> anchors{0, 25, 50};
+        toggleCorner(bent, anchors, 1);
+        QVERIFY(bent.points[25].corner);
+        QCOMPARE(bent.points[24].y, 0.0); // made a corner: the line stays
+        toggleCorner(bent, anchors, 1);
+        QVERIFY(!bent.points[25].corner);
+        QCOMPARE(bent.points[25].x, 50.0); // the anchor stays
+        QCOMPARE(bent.points[25].y, 0.0);
+        // The angle is rounded: the line goes through the anchor without turning there.
+        const QLineF in(QPointF(bent.points[24].x, bent.points[24].y), QPointF(bent.points[25].x, bent.points[25].y));
+        const QLineF out(QPointF(bent.points[25].x, bent.points[25].y), QPointF(bent.points[26].x, bent.points[26].y));
+        const double turn = std::min(in.angleTo(out), 360.0 - in.angleTo(out));
+        QVERIFY2(turn < 15.0, qPrintable(QString::number(turn)));
+    }
+
+    // A stroke cut in two: the pieces share the point of the cut and keep the stroke's brush; not at an end.
+    void aStrokeIsCutInTwo()
+    {
+        doc::VectorStroke line = straightStroke(51);
+        line.brush = "G-pen";
+        line.seed = 7;
+        const auto pieces = cutStroke(line, *nearestPlace(line, QPointF(31, 2)), 0.5);
+        QVERIFY(pieces);
+        QCOMPARE(pieces->first.points.back().x, 31.0);
+        QCOMPARE(pieces->second.points.front().x, 31.0);
+        QCOMPARE(pieces->first.points.size() + pieces->second.points.size(), std::size_t(53)); // a point put in, shared
+        QCOMPARE(pieces->second.brush, std::string("G-pen"));
+        QCOMPARE(pieces->second.seed, 7u);
+        QVERIFY(!cutStroke(line, *nearestPlace(line, QPointF(-5, 0)), 0.5));
     }
 };
 

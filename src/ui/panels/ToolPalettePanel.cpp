@@ -185,6 +185,7 @@ ToolPalettePanel::ToolPalettePanel(tools::ToolState *state, QWidget *parent)
             {ToolId::Blend, IconId::Blend},
             {ToolId::Liquify, IconId::Liquify},
             {ToolId::Shape, IconId::Shape},
+            {ToolId::VectorPoint, IconId::CorrectLine},
         },
         {   // selection and fill
             {ToolId::RectSelect, IconId::RectSelect}, // the selection tool

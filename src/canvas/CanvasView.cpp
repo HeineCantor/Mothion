@@ -4,6 +4,7 @@
 
 #include "canvas/DebugOverlay.h"
 #include "canvas/EyedropperTool.h"
+#include "canvas/VectorPointTool.h"
 #include "canvas/EffectBrushTools.h"
 #include "canvas/FillTool.h"
 #include "canvas/MoveTool.h"
@@ -203,6 +204,9 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
     connect(m_toolState, &ToolState::shapeSettingsChanged, this, &CanvasView::shapeChanged);
     m_vectorEraseTool = std::make_unique<VectorEraseTool>(m_document, m_toolState,
                                                           [this](const QString &text) { emit statusMessage(text); });
+    m_vectorPointTool = std::make_unique<VectorPointTool>(m_document, m_toolState,
+                                                          [this](const QString &text) { emit statusMessage(text); });
+    connect(m_toolState, &ToolState::vectorPointsChanged, this, [this] { update(); });
     m_animateTool = std::make_unique<AnimateTool>(
         m_document, m_toolState, [this](const QString &text) { emit statusMessage(text); }, [this] {
             update();
@@ -1408,6 +1412,7 @@ CanvasTool *CanvasView::canvasTool() const
     case ToolId::Blend: return m_blendTool.get();
     case ToolId::Liquify: return m_liquifyTool.get();
     case ToolId::Shape: return m_shapeTool.get();
+    case ToolId::VectorPoint: return m_vectorPointTool.get();
     default: return nullptr;
     }
 }

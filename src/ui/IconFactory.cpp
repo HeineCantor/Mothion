@@ -306,6 +306,12 @@ void drawGlyph(QPainter &p, IconId id)
         path.addRect(QRectF(3.5, 4.5, 11, 11));
         path.addEllipse(QPointF(15, 15), 5.5, 5.5);
         break;
+    case IconId::CorrectLine: // a curve with three control points on it, the middle one raised
+        path.moveTo(3, 18);
+        path.cubicTo(7, 4, 15, 4, 21, 14);
+        for (QPointF at : {QPointF(3, 18), QPointF(12, 7.6), QPointF(21, 14)})
+            path.addRect(QRectF(at.x() - 2, at.y() - 2, 4, 4));
+        break;
     case IconId::Transform: // a box with handles
         path.addRect(QRectF(6, 6, 12, 12));
         for (QPointF at : {QPointF(6, 6), QPointF(18, 6), QPointF(18, 18), QPointF(6, 18), QPointF(12, 6),

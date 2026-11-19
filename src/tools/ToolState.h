@@ -18,8 +18,8 @@ namespace mothion::tools {
 // The brush categories (Pencil, Pen, Brush, Watercolor, Airbrush, Decoration) are tools of their own, as in Clip Studio:
 // each has its sub tools, its size and opacity, and its brush. New ids go at the end (settings are indexed by id).
 enum class ToolId { Brush, Eraser, Hand, Zoom, Move, RectSelect, LassoSelect, Puppet, Eyedropper, Fill, Transform, Blend, Liquify, Shape,
-                    Pencil, Pen, Watercolor, Airbrush, Decoration };
-inline constexpr int kToolCount = 19;
+                    Pencil, Pen, Watercolor, Airbrush, Decoration, VectorPoint };
+inline constexpr int kToolCount = 20;
 // The brush categories, in the order of the tool palette.
 inline constexpr ToolId kBrushTools[] = {ToolId::Pencil, ToolId::Pen, ToolId::Brush, ToolId::Watercolor, ToolId::Airbrush,
                                          ToolId::Decoration};
@@ -36,6 +36,17 @@ struct PuppetSettings
     double radius = 80.0; // document px
 
     bool operator==(const PuppetSettings &) const = default;
+};
+
+// What the Correct line tool (ToolId::VectorPoint, as Clip Studio's Correct line > Control point) does to the control
+// points of a vector layer's strokes (see canvas::VectorPointTool): moves them (a click on the line adds one, Alt+click
+// takes one away), changes the line's width at them, makes them corners or smooth, or cuts the line.
+struct VectorPointSettings
+{
+    enum class Mode { Move, Width, Corner, Cut };
+    Mode mode = Mode::Move;
+
+    bool operator==(const VectorPointSettings &) const = default;
 };
 
 // What the eraser does on a vector layer (as Clip Studio's vector eraser): Off, it erases like a brush (the eraser's
@@ -257,6 +268,8 @@ public:
 
     VectorEraserSettings vectorEraser() const { return m_vectorEraser; }
     void setVectorEraser(const VectorEraserSettings &settings);
+    VectorPointSettings vectorPoints() const { return m_vectorPoints; }
+    void setVectorPoints(const VectorPointSettings &settings);
 
     ShapeSettings shapeSettings() const { return m_shape; }
     void setShapeSettings(const ShapeSettings &settings);
@@ -286,6 +299,7 @@ signals:
     void liquifySettingsChanged();
     void shapeSettingsChanged();
     void vectorEraserChanged();
+    void vectorPointsChanged();
     void onionSkinChanged();
 
 private:
@@ -316,6 +330,7 @@ private:
     LiquifySettings m_liquify;
     ShapeSettings m_shape;
     VectorEraserSettings m_vectorEraser;
+    VectorPointSettings m_vectorPoints;
     OnionSkinSettings m_onion;
 };
 

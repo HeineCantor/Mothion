@@ -90,6 +90,7 @@ QList<BrushPreset> builtInPresets(ToolId tool)
     case ToolId::Puppet:
     case ToolId::Eyedropper:
     case ToolId::Transform:
+    case ToolId::VectorPoint:
         return {}; // no sub tools
     }
     return {};

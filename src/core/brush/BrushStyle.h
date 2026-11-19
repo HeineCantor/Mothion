@@ -23,6 +23,8 @@ struct BrushInput
     double flowScale = 1.0;   // multiplies the flow
     double direction = 0.0;   // degrees, direction of travel (document, y down)
     bool corner = false;      // a sharp corner of the stroke (see isCorner): kept by the corrections
+
+    bool operator==(const BrushInput &) const = default;
 };
 
 // The tilt input from the pen's X and Y tilt (degrees from vertical, as
