@@ -627,6 +627,16 @@ private slots:
         QCOMPARE(pixel(923, 540), doc::Pixel(0xffff0000)); // up to it
         QCOMPARE(controller.undoText(), QStringLiteral("Undo fill"));
 
+        // Filled again in another color: the area filled before takes it, the line still on top.
+        state.setColor(QColor(0, 0, 255));
+        tool.press({960, 540}, Qt::NoModifier);
+        QCOMPARE(pixel(960, 540), doc::Pixel(0xff0000ff));
+        QCOMPARE(pixel(923, 540), doc::Pixel(0xff0000ff));
+        QCOMPARE(pixel(920, 540), doc::Pixel(0xff000000));
+        QCOMPARE(qAlpha(pixel(900, 540)), 0);
+        controller.undo();
+        QCOMPARE(pixel(960, 540), doc::Pixel(0xffff0000));
+        state.setColor(QColor(255, 0, 0));
         controller.undo();
         QCOMPARE(qAlpha(pixel(960, 540)), 0);
 

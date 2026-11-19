@@ -9,6 +9,7 @@
 #include <QLineF>
 #include <QPainterPath>
 
+#include <algorithm>
 #include <cmath>
 #include <vector>
 
@@ -26,6 +27,20 @@ doc::Pixel behind(doc::Pixel pixel, doc::Pixel fill, int coverage)
         const int f = (int((fill >> shift) & 0xff) * coverage + 127) / 255;
         const int p = int((pixel >> shift) & 0xff);
         out |= doc::Pixel(p + (f * (255 - a) + 127) / 255) << shift;
+    }
+    return out;
+}
+
+// `fill` × `coverage` (0..255) laid over `pixel`, premultiplied: what is there is covered (an area filled before
+// takes the new color).
+doc::Pixel over(doc::Pixel pixel, doc::Pixel fill, int coverage)
+{
+    doc::Pixel out = 0;
+    const int a = (int((fill >> 24) & 0xff) * coverage + 127) / 255;
+    for (int shift = 0; shift < 32; shift += 8) {
+        const int f = (int((fill >> shift) & 0xff) * coverage + 127) / 255;
+        const int p = int((pixel >> shift) & 0xff);
+        out |= doc::Pixel(std::min(255, f + (p * (255 - a) + 127) / 255)) << shift;
     }
     return out;
 }
@@ -152,13 +167,15 @@ void FillTool::fillAround(const QPointF &docPos)
         before.read(area.x(), area.y(), w, h, source.data(), w);
     }
     fill::Region region = fill::floodRegion(source.data(), w, h, seedX - area.x(), seedY - area.y(), settings.tolerance);
+    const fill::Region clicked = region; // the area itself, before it grows under the lines round it
     fill::grow(region, settings.expand);
     if (region.isEmpty()) {
         m_document->cancelPaint();
         return;
     }
 
-    // The color behind what is there, inside the area (and the selection).
+    // Inside the area clicked (and the selection) the color over what is there, so an area filled before is filled
+    // again; where the area grows under the lines round it, behind what is there, so the lines keep their edge.
     const doc::Pixel color = fillColor(target->tint(m_state->color()));
     const QRect box = QRect(QPoint(region.left, region.top), QPoint(region.right, region.bottom)).translated(area.topLeft());
     std::vector<doc::Pixel> pixels(std::size_t(box.width()) * std::size_t(box.height()));
@@ -170,8 +187,14 @@ void FillTool::fillAround(const QPointF &docPos)
             if (m_document->hasSelection())
                 coverage = coverage * selection.at(dx, dy) / 255;
             doc::Pixel &p = pixels[std::size_t(y) * std::size_t(box.width()) + std::size_t(x)];
-            if (coverage)
-                p = target->mask ? clearedBy(p, coverage * int(color >> 24) / 255) : behind(p, color, coverage);
+            if (!coverage)
+                continue;
+            if (target->mask)
+                p = clearedBy(p, coverage * int(color >> 24) / 255);
+            else if (clicked.at(dx - area.x(), dy - area.y()))
+                p = over(p, color, coverage);
+            else
+                p = behind(p, color, coverage);
         }
     }
     target->image->write(box.x(), box.y(), box.width(), box.height(), pixels.data(), box.width());
