@@ -1538,6 +1538,14 @@ private slots:
         d.layer(cel, source.id, a)->image.setPixel(10, 10, 0xffff0000u);
         d.layer(cel, source.id, b)->image.setPixel(20, 20, 0xff0000ffu);
         d.layer(cel, source.id, b)->properties.name = "Top";
+        { // the top one a vector layer, with the stroke it is drawn from
+            doc::Layer &top = *d.layer(cel, source.id, b);
+            top.kind = doc::LayerKind::Vector;
+            doc::VectorStroke stroke;
+            stroke.points.resize(2);
+            stroke.points[1].x = 20;
+            top.strokes.push_back(stroke);
+        }
         QCoreApplication::processEvents();
         QVERIFY(!controller.hasCopiedLayers());
         QString reason;
@@ -1565,6 +1573,9 @@ private slots:
         QCOMPARE(target.layers[1].image.pixel(10, 10), doc::Pixel(0xffff0000u));
         QCOMPARE(target.layers[2].image.pixel(20, 20), doc::Pixel(0xff0000ffu));
         QCOMPARE(target.layers[2].properties.name, std::string("Top"));
+        QCOMPARE(target.layers[2].kind, doc::LayerKind::Vector);
+        QCOMPARE(target.layers[2].strokes, source.layer(b)->strokes); // a vector layer keeps what it is drawn from
+        QVERIFY(target.layers[2].id != b);
         QCOMPARE(controller.currentLayer(), target.layers[2].id);
         QCOMPARE(controller.undoText(), QStringLiteral("Undo paste layers"));
         controller.undo();
@@ -1641,6 +1652,7 @@ private slots:
         QVERIFY(controller.currentDrawing());
         QCOMPARE(controller.currentDrawing()->layers.size(), std::size_t(1)); // what the cut took
         QCOMPARE(controller.currentDrawing()->layers[0].image.pixel(20, 20), doc::Pixel(0xff0000ffu));
+        QCOMPARE(controller.currentDrawing()->layers[0].strokes.size(), std::size_t(1));
         controller.undo(); // frame and layers together
         QVERIFY(!controller.currentDrawing());
     }

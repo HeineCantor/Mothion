@@ -631,14 +631,9 @@ bool DocumentController::pasteLayers(bool merged, const std::vector<doc::LayerId
         return fail(tr("Cel “%1” is locked").arg(QString::fromStdString(cel->properties().name)));
     interruptStroke();
 
-    // The new layers' pixels: each copied layer, or all of them as one.
-    struct Piece
-    {
-        doc::LayerProperties properties;
-        doc::TiledImage image;
-        doc::LayerKind kind;
-    };
-    std::vector<Piece> pieces;
+    // The new layers: each copied layer as it is (a vector layer with its strokes, which it is drawn again from), or
+    // all of them as one raster layer.
+    std::vector<doc::Layer> pieces;
     if (merged) {
         doc::Drawing together;
         for (const doc::Layer &layer : m_copiedLayers)
@@ -647,14 +642,13 @@ bool DocumentController::pasteLayers(bool merged, const std::vector<doc::LayerId
         if (bounds.isEmpty())
             return fail(tr("The copied layers show nothing to paste"));
         const QImage image = canvas::composeDrawing(together, bounds, false);
-        Piece piece{doc::LayerProperties{m_copiedLayers.back().properties.name}, {}, doc::LayerKind::Raster};
+        doc::Layer piece;
         piece.properties.name = tr("Merged layers").toStdString();
         piece.image.write(bounds.x(), bounds.y(), bounds.width(), bounds.height(),
                           reinterpret_cast<const doc::Pixel *>(image.constBits()), image.bytesPerLine() / 4);
         pieces.push_back(std::move(piece));
     } else {
-        for (const doc::Layer &layer : m_copiedLayers)
-            pieces.push_back({layer.properties, layer.image, layer.kind});
+        pieces = m_copiedLayers;
     }
 
     std::vector<std::unique_ptr<doc::Command>> steps;
@@ -692,9 +686,9 @@ bool DocumentController::pasteLayers(bool merged, const std::vector<doc::LayerId
         }
     }
     doc::LayerId last = doc::kNoId;
-    for (Piece &piece : pieces) {
+    for (doc::Layer &piece : pieces) {
         auto add = std::make_unique<doc::AddLayerCommand>(*m_document, m_currentCel, drawingId, index++,
-                                                          std::move(piece.properties), std::move(piece.image), piece.kind);
+                                                          std::move(piece));
         last = add->layerId();
         steps.push_back(std::move(add));
     }

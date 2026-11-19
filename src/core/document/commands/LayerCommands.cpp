@@ -35,6 +35,16 @@ AddLayerCommand::AddLayerCommand(Document &doc, CelId cel, DrawingId drawing, in
 {
 }
 
+AddLayerCommand::AddLayerCommand(Document &doc, CelId cel, DrawingId drawing, int index, Layer layer)
+    : m_cel(cel)
+    , m_drawing(drawing)
+    , m_id(doc.allocateLayerId())
+    , m_index(index)
+    , m_layer(std::move(layer))
+{
+    m_layer->id = m_id;
+}
+
 ChangeSet AddLayerCommand::apply(Document &doc)
 {
     Drawing *drawing = drawingOf(doc, m_cel, m_drawing);

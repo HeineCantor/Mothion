@@ -16,6 +16,8 @@ class AddLayerCommand : public Command
 public:
     AddLayerCommand(Document &doc, CelId cel, DrawingId drawing, int index, LayerProperties properties,
                     TiledImage image = {}, LayerKind kind = LayerKind::Raster);
+    // A whole layer put in (a copy: its pixels, mask and strokes), with an id of its own.
+    AddLayerCommand(Document &doc, CelId cel, DrawingId drawing, int index, Layer layer);
 
     LayerId layerId() const { return m_id; }
 
