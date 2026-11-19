@@ -272,6 +272,129 @@ void toggleCorner(doc::VectorStroke &stroke, const std::vector<int> &anchors, in
     refreshDirections(stroke.points);
 }
 
+namespace {
+
+// The way a line of points goes at its last point: from a point a little back along it (unit length; null if the
+// points do not go anywhere).
+QPointF wayAtEnd(const std::vector<BrushInput> &points, double back)
+{
+    const QPointF end = at(points.back());
+    double walked = 0;
+    for (std::size_t i = points.size() - 1; i > 0; --i) {
+        walked += std::hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
+        if (walked >= back || i == 1) {
+            const QPointF d = end - at(points[i - 1]);
+            const double length = std::hypot(d.x(), d.y());
+            return length > 1e-9 ? d / length : QPointF();
+        }
+    }
+    return {};
+}
+
+// The pressure the pen let fall over the last stretch of a line (up to `reach` long, and a third of the line) lifted
+// back to the most it had on that stretch: wholly near the end, less and less away from it.
+void liftEndPressure(std::vector<BrushInput> &points, double reach)
+{
+    double total = 0;
+    for (std::size_t i = 1; i < points.size(); ++i)
+        total += std::hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
+    reach = std::min(reach, total / 3.0);
+    if (points.size() < 2 || reach <= 1e-9)
+        return;
+    std::vector<double> back{0.0}; // from the end
+    std::size_t first = points.size() - 1;
+    double body = points.back().pressure;
+    while (first > 0) {
+        const double d = back.back() + std::hypot(points[first].x - points[first - 1].x,
+                                                  points[first].y - points[first - 1].y);
+        if (d > reach)
+            break;
+        --first;
+        back.push_back(d);
+        body = std::max(body, points[first].pressure);
+    }
+    for (std::size_t j = 0; j < back.size(); ++j) {
+        BrushInput &in = points[points.size() - 1 - j];
+        // All the way up over the half next to the end, then less and less to where the stretch begins.
+        const double x = std::clamp(2.0 * back[j] / reach - 1.0, 0.0, 1.0);
+        const double w = 1.0 - x * x * (3.0 - 2.0 * x);
+        if (in.pressure < body)
+            in.pressure += (body - in.pressure) * w;
+    }
+}
+
+void reverse(std::vector<BrushInput> &points)
+{
+    std::reverse(points.begin(), points.end());
+    for (BrushInput &in : points)
+        in.direction = std::remainder(in.direction + 180.0, 360.0);
+}
+
+} // namespace
+
+doc::VectorStroke mergedStrokes(const doc::VectorStroke &first, bool firstAtEnd, const doc::VectorStroke &second,
+                                bool secondAtEnd)
+{
+    doc::VectorStroke out = first;
+    std::vector<BrushInput> a = first.points, b = second.points;
+    if (!firstAtEnd)
+        reverse(a);
+    if (secondAtEnd)
+        reverse(b);
+    if (a.empty() || b.empty()) {
+        out.points = a.empty() ? b : a;
+        return out;
+    }
+    a.back().corner = false;
+    b.front().corner = false;
+    // No thinning where they meet: the pressure let fall at the ends lifted back.
+    liftEndPressure(a, std::max(4.0 * first.size, 24.0));
+    std::reverse(b.begin(), b.end());
+    liftEndPressure(b, std::max(4.0 * second.size, 24.0));
+    std::reverse(b.begin(), b.end());
+    const BrushInput p = a.back(), q = b.front();
+    const QPointF from = at(p), to = at(q);
+    const double gap = std::hypot(to.x() - from.x(), to.y() - from.y());
+    out.points = std::move(a);
+    if (gap > 1e-9) {
+        // Leaving the first along its line, meeting the second along its own (a cubic Hermite curve).
+        const double back = std::clamp(gap / 2.0, 2.0, 12.0);
+        const QPointF straight = (to - from) / gap;
+        QPointF leave = wayAtEnd(out.points, back);
+        std::vector<BrushInput> reversedB = b;
+        std::reverse(reversedB.begin(), reversedB.end());
+        QPointF meet = -wayAtEnd(reversedB, back);
+        if (leave.isNull())
+            leave = straight;
+        if (meet.isNull())
+            meet = straight;
+        const QPointF m0 = leave * gap, m1 = meet * gap;
+        // As close together as the strokes' points are, about.
+        double spacing = 0;
+        int steps = 0;
+        for (const std::vector<BrushInput> *line : {&out.points, &b})
+            for (std::size_t i = 1; i < line->size(); ++i, ++steps)
+                spacing += std::hypot((*line)[i].x - (*line)[i - 1].x, (*line)[i].y - (*line)[i - 1].y);
+        spacing = std::clamp(steps > 0 ? spacing / steps : 2.0, 0.5, 4.0);
+        const int n = std::max(1, int(std::ceil(gap / spacing)));
+        for (int i = 1; i < n; ++i) {
+            const double t = double(i) / n, t2 = t * t, t3 = t2 * t;
+            const QPointF point = (2 * t3 - 3 * t2 + 1) * from + (t3 - 2 * t2 + t) * m0 + (-2 * t3 + 3 * t2) * to
+                                  + (t3 - t2) * m1;
+            BrushInput in = brush::DabGenerator::interpolate(p, q, t);
+            in.x = point.x();
+            in.y = point.y();
+            in.corner = false;
+            out.points.push_back(in);
+        }
+        out.points.insert(out.points.end(), b.begin(), b.end());
+    } else {
+        out.points.insert(out.points.end(), b.begin() + 1, b.end()); // the ends on each other: one point
+    }
+    refreshDirections(out.points);
+    return out;
+}
+
 std::optional<std::pair<doc::VectorStroke, doc::VectorStroke>> cutStroke(const doc::VectorStroke &stroke,
                                                                          const PathPlace &place, double snap)
 {

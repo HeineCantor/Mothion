@@ -546,6 +546,127 @@ private slots:
         QCOMPARE(layer().strokes.size(), std::size_t(1));
     }
 
+    // Correct line with several strokes chosen (Shift+click on a stroke: one more, or taken away): their anchors all
+    // show and move together; an end dragged onto an end of another stroke chosen makes the two one, as one undo step,
+    // without thinning where they meet; dropped elsewhere, the end is only moved.
+    void correctLineChoosesSeveralStrokesAndMergesThem()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(500, 400);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 4, "Line").command);
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Vector));
+        QCoreApplication::processEvents();
+        auto strokes = [&]() -> const std::vector<doc::VectorStroke> & {
+            return controller.currentDrawing()->layer(controller.currentLayer())->strokes;
+        };
+        auto layerImage = [&]() -> const doc::TiledImage & {
+            return controller.currentDrawing()->layer(controller.currentLayer())->image;
+        };
+        state.setActiveTool(tools::ToolId::Brush);
+        const QTransform toView = canvas.view().documentToView();
+        auto line = [&](QPointF from, QPointF to) {
+            const QPoint a = toView.map(from).toPoint(), b = toView.map(to).toPoint();
+            QTest::mousePress(&canvas, Qt::LeftButton, {}, a);
+            for (int i = 1; i <= 30; ++i)
+                QTest::mouseMove(&canvas, a + (b - a) * i / 30);
+            QTest::mouseRelease(&canvas, Qt::LeftButton, {}, b);
+        };
+        line({800, 540}, {900, 540});
+        line({1000, 540}, {1100, 540});
+        line({800, 700}, {900, 700}); // a third, not chosen
+        QCOMPARE(strokes().size(), std::size_t(3));
+        // The pen's pressure let fall at the ends, as a pen put down and lifted does (the mouse draws at full pressure).
+        for (std::size_t s : {0u, 1u}) {
+            doc::VectorStroke &stroke = d.layer(controller.currentCel(), controller.currentDrawingId(),
+                                                controller.currentLayer())->strokes[s];
+            const std::size_t n = stroke.points.size();
+            for (std::size_t i = 0; i < n; ++i)
+                stroke.points[i].pressure = 0.15 + 0.85 * std::sin(std::numbers::pi * double(i) / double(n - 1));
+        }
+        const std::vector<doc::VectorStroke> drawn = strokes();
+        const QPointF firstEnd(drawn[0].points.back().x, drawn[0].points.back().y);
+        const QPointF secondStart(drawn[1].points.front().x, drawn[1].points.front().y);
+
+        state.setActiveTool(tools::ToolId::VectorPoint);
+        state.setVectorPoints({tools::VectorPointSettings::Mode::Move});
+        canvas::VectorPointTool tool(&controller, &state, [](const QString &) {});
+        tool.setViewZoom(canvas.view().zoom());
+        auto click = [&](const QPointF &at, Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+            tool.press(at, modifiers);
+            if (tool.isActive())
+                tool.release(at, modifiers);
+        };
+        const QPointF onFirst(850, drawn[0].points[drawn[0].points.size() / 2].y);
+        const QPointF onSecond(1050, drawn[1].points[drawn[1].points.size() / 2].y);
+        click(onFirst);
+        QCOMPARE(tool.chosenStrokes(), std::vector<int>({0}));
+        click(onSecond, Qt::ShiftModifier);
+        QCOMPARE(tool.chosenStrokes(), std::vector<int>({0, 1}));
+        QCOMPARE(tool.chosenStroke(), 1);
+        click(QPointF(850, drawn[2].points.front().y), Qt::ShiftModifier);
+        QCOMPARE(tool.chosenStrokes(), std::vector<int>({0, 1, 2}));
+        click(QPointF(850, drawn[2].points.front().y), Qt::ShiftModifier); // taken away again
+        QCOMPARE(tool.chosenStrokes(), std::vector<int>({0, 1}));
+        QCOMPARE(strokes(), drawn); // choosing changes nothing
+
+        // Anchors of both chosen: they move together, as one step.
+        QVERIFY(tool.chooseAllAnchors());
+        QCOMPARE(int(tool.chosenAnchorRefs().size()), int(tool.anchorsOf(0).size() + tool.anchorsOf(1).size()));
+        const QPointF grip = *tool.anchorPoint(0, 0);
+        tool.press(grip, Qt::NoModifier);
+        tool.move(grip + QPointF(0, -30), Qt::NoModifier);
+        tool.release(grip + QPointF(0, -30), Qt::NoModifier);
+        QCOMPARE(strokes()[0].points.front().y, drawn[0].points.front().y - 30);
+        QCOMPARE(strokes()[1].points.back().y, drawn[1].points.back().y - 30);
+        QCOMPARE(strokes()[2], drawn[2]);
+        controller.undo();
+        QCOMPARE(strokes(), drawn);
+
+        // An end dropped away from any end: only moved.
+        const int last = int(tool.anchorsOf(0).size()) - 1;
+        QCOMPARE(*tool.anchorPoint(0, last), firstEnd);
+        tool.press(firstEnd, Qt::NoModifier);
+        tool.move(firstEnd + QPointF(30, 60), Qt::NoModifier);
+        tool.release(firstEnd + QPointF(30, 60), Qt::NoModifier);
+        QCOMPARE(strokes().size(), std::size_t(3));
+        QCOMPARE(QPointF(strokes()[0].points.back().x, strokes()[0].points.back().y), firstEnd + QPointF(30, 60));
+        controller.undo();
+        QCOMPARE(strokes(), drawn);
+
+        // Dropped on the start of the other one: the two made one.
+        tool.press(firstEnd, Qt::NoModifier);
+        tool.move((firstEnd + secondStart) / 2, Qt::NoModifier);
+        canvas.repaint();
+        tool.move(secondStart + QPointF(1, 1), Qt::NoModifier);
+        QVERIFY(strokes().size() == 3); // not yet
+        tool.release(secondStart + QPointF(1, 1), Qt::NoModifier);
+        QCOMPARE(strokes().size(), std::size_t(2));
+        const doc::VectorStroke &merged = strokes()[0];
+        QCOMPARE(merged.points.front().x, drawn[0].points.front().x);
+        QCOMPARE(merged.points.back().x, drawn[1].points.back().x);
+        QCOMPARE(strokes()[1], drawn[2]);
+        QCOMPARE(tool.chosenStrokes(), std::vector<int>({0}));
+        // No thinning where they met: on the gap and the last pixels of each line the pressure stays about what the
+        // lines had a little before their ends (it fell to 0.15 at them).
+        double lowest = 1.0;
+        for (const brush::BrushInput &in : merged.points)
+            if (in.x > firstEnd.x() - 8 && in.x < secondStart.x() + 8)
+                lowest = std::min(lowest, in.pressure);
+        QVERIFY2(lowest > 0.8, qPrintable(QString::number(lowest)));
+        const QPoint middle = ((firstEnd + secondStart) / 2).toPoint();
+        QVERIFY(qAlpha(layerImage().pixel(middle.x(), middle.y())) > 0); // the gap drawn
+
+        controller.undo(); // one step
+        QCOMPARE(strokes(), drawn);
+        QCOMPARE(qAlpha(layerImage().pixel(middle.x(), middle.y())), 0);
+    }
+
+
     // Correct line: Shift+click chooses the anchors from the one clicked last to this one, Ctrl+click one more or takes
     // it away, Ctrl+A (Select all, with the tool) every anchor of the stroke chosen.
     void correctLineChoosesRangesAndAllAnchors()

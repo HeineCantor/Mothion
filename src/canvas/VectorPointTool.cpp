@@ -27,7 +27,29 @@ QRectF united(const QRectF &a, const QRectF &b)
     return a.united(b);
 }
 
+QPointF pointOf(const doc::VectorStroke &stroke, int index)
+{
+    const brush::BrushInput &in = stroke.points[std::size_t(index)];
+    return {in.x, in.y};
+}
+
 } // namespace
+
+VectorPointTool::Picked *VectorPointTool::Chosen::find(int index)
+{
+    for (Picked &p : strokes)
+        if (p.index == index)
+            return &p;
+    return nullptr;
+}
+
+const VectorPointTool::Picked *VectorPointTool::Chosen::find(int index) const
+{
+    for (const Picked &p : strokes)
+        if (p.index == index)
+            return &p;
+    return nullptr;
+}
 
 VectorPointTool::VectorPointTool(document::DocumentController *document, tools::ToolState *toolState,
                                  std::function<void(const QString &)> status)
@@ -50,39 +72,44 @@ const doc::Layer *VectorPointTool::currentLayer() const
 
 void VectorPointTool::refresh() const
 {
-    // During a drag the stroke chosen is the one being edited, which the layer gets only on the release.
+    // During a drag the strokes chosen are those being edited, which the layer gets only on the release.
     if (!m_chosen || m_edit)
         return;
     const doc::Layer *layer = currentLayer();
     if (!layer || m_chosen->cel != m_document->currentCel() || m_chosen->drawing != m_document->currentDrawingId()
-        || m_chosen->layer != layer->id || m_chosen->index >= int(layer->strokes.size())) {
+        || m_chosen->layer != layer->id
+        || std::any_of(m_chosen->strokes.begin(), m_chosen->strokes.end(),
+                       [&](const Picked &p) { return p.index >= int(layer->strokes.size()); })) {
         m_chosen.reset();
         return;
     }
-    const doc::VectorStroke &now = layer->strokes[std::size_t(m_chosen->index)];
-    if (now == m_chosen->stroke)
-        return;
-    m_chosen->stroke = now;
-    m_chosen->anchors = controlPoints(now, kTolerance / m_zoom);
-    m_chosen->chosen.clear();
-    m_chosen->pivot = -1;
+    for (Picked &p : m_chosen->strokes) {
+        const doc::VectorStroke &now = layer->strokes[std::size_t(p.index)];
+        if (now == p.stroke)
+            continue;
+        p.stroke = now;
+        p.anchors = controlPoints(now, kTolerance / m_zoom);
+        std::erase_if(m_chosen->anchors, [&](const AnchorRef &a) { return a.stroke == p.index; });
+        if (m_chosen->pivot && m_chosen->pivot->stroke == p.index)
+            m_chosen->pivot.reset();
+    }
 }
 
-int VectorPointTool::anchorAt(const QPointF &docPos) const
+std::optional<VectorPointTool::AnchorRef> VectorPointTool::anchorAt(const QPointF &docPos) const
 {
     if (!m_chosen)
-        return -1;
-    const double reach = kGrab / m_zoom;
-    int best = -1;
-    double nearest = reach;
-    for (std::size_t k = 0; k < m_chosen->anchors.size(); ++k) {
-        const brush::BrushInput &in = m_chosen->stroke.points[std::size_t(m_chosen->anchors[k])];
-        const double d = std::hypot(in.x - docPos.x(), in.y - docPos.y());
-        if (d <= nearest) {
-            nearest = d;
-            best = int(k);
+        return std::nullopt;
+    std::optional<AnchorRef> best;
+    double nearest = kGrab / m_zoom;
+    for (auto p = m_chosen->strokes.rbegin(); p != m_chosen->strokes.rend(); ++p) // the topmost first
+        for (std::size_t k = 0; k < p->anchors.size(); ++k) {
+            const QPointF at = pointOf(p->stroke, p->anchors[k]);
+            const double d = std::hypot(at.x() - docPos.x(), at.y() - docPos.y());
+            if (d < nearest || (!best && d <= nearest)) {
+                nearest = d;
+                best = AnchorRef{p->index, int(k)};
+            }
         }
-    }
     return best;
 }
 
@@ -102,21 +129,69 @@ int VectorPointTool::strokeAt(const QPointF &docPos) const
     return -1;
 }
 
-void VectorPointTool::choose(int index)
+std::optional<VectorPointTool::End> VectorPointTool::endAt(const QPointF &docPos, int except) const
+{
+    if (!m_chosen)
+        return std::nullopt;
+    std::optional<End> best;
+    double nearest = kGrab / m_zoom;
+    for (auto p = m_chosen->strokes.rbegin(); p != m_chosen->strokes.rend(); ++p) {
+        if (p->index == except || p->stroke.erase || p->stroke.points.empty())
+            continue;
+        for (const bool atEnd : {false, true}) {
+            const QPointF at = pointOf(p->stroke, atEnd ? int(p->stroke.points.size()) - 1 : 0);
+            const double d = std::hypot(at.x() - docPos.x(), at.y() - docPos.y());
+            if (d < nearest) {
+                nearest = d;
+                best = End{p->index, atEnd};
+            }
+        }
+    }
+    return best;
+}
+
+VectorPointTool::Picked VectorPointTool::makePicked(int index) const
+{
+    const doc::VectorStroke &stroke = currentLayer()->strokes[std::size_t(index)];
+    return Picked{index, stroke, controlPoints(stroke, kTolerance / m_zoom)};
+}
+
+void VectorPointTool::choose(int index, bool add)
 {
     const doc::Layer *layer = currentLayer();
     if (!layer || index < 0 || index >= int(layer->strokes.size())) {
-        m_chosen.reset();
+        if (!add)
+            m_chosen.reset();
         return;
     }
-    Chosen c;
-    c.cel = m_document->currentCel();
-    c.drawing = m_document->currentDrawingId();
-    c.layer = layer->id;
-    c.index = index;
-    c.stroke = layer->strokes[std::size_t(index)];
-    c.anchors = controlPoints(c.stroke, kTolerance / m_zoom);
-    m_chosen = std::move(c);
+    if (!add || !m_chosen) {
+        Chosen c;
+        c.cel = m_document->currentCel();
+        c.drawing = m_document->currentDrawingId();
+        c.layer = layer->id;
+        c.strokes.push_back(makePicked(index));
+        c.current = index;
+        m_chosen = std::move(c);
+        return;
+    }
+    Chosen &c = *m_chosen;
+    if (c.find(index)) { // taken away
+        std::erase_if(c.strokes, [&](const Picked &p) { return p.index == index; });
+        std::erase_if(c.anchors, [&](const AnchorRef &a) { return a.stroke == index; });
+        if (c.pivot && c.pivot->stroke == index)
+            c.pivot.reset();
+        if (c.strokes.empty()) {
+            m_chosen.reset();
+            return;
+        }
+        if (c.current == index)
+            c.current = c.strokes.back().index;
+        return;
+    }
+    const auto at = std::lower_bound(c.strokes.begin(), c.strokes.end(), index,
+                                     [](const Picked &p, int i) { return p.index < i; });
+    c.strokes.insert(at, makePicked(index));
+    c.current = index;
 }
 
 bool VectorPointTool::chooseAllAnchors()
@@ -124,39 +199,66 @@ bool VectorPointTool::chooseAllAnchors()
     if (m_edit)
         return true; // a drag goes on: nothing else now
     refresh();
-    if (!m_chosen || m_chosen->anchors.empty())
+    if (!m_chosen)
         return false;
-    m_chosen->chosen.clear();
-    for (int k = 0; k < int(m_chosen->anchors.size()); ++k)
-        m_chosen->chosen.insert(k);
+    m_chosen->anchors.clear();
+    for (const Picked &p : m_chosen->strokes)
+        for (int k = 0; k < int(p.anchors.size()); ++k)
+            m_chosen->anchors.insert({p.index, k});
     return true;
+}
+
+std::vector<int> VectorPointTool::chosenStrokes() const
+{
+    refresh();
+    std::vector<int> out;
+    if (m_chosen)
+        for (const Picked &p : m_chosen->strokes)
+            out.push_back(p.index);
+    return out;
 }
 
 int VectorPointTool::chosenStroke() const
 {
     refresh();
-    return m_chosen ? m_chosen->index : -1;
+    return m_chosen ? m_chosen->current : -1;
 }
 
-std::vector<int> VectorPointTool::anchors() const
+std::vector<int> VectorPointTool::anchors() const { return anchorsOf(chosenStroke()); }
+
+std::vector<int> VectorPointTool::anchorsOf(int stroke) const
 {
     refresh();
-    return m_chosen ? m_chosen->anchors : std::vector<int>();
+    const Picked *p = m_chosen ? m_chosen->find(stroke) : nullptr;
+    return p ? p->anchors : std::vector<int>();
 }
 
 std::set<int> VectorPointTool::chosenAnchors() const
 {
-    refresh();
-    return m_chosen ? m_chosen->chosen : std::set<int>();
+    const int stroke = chosenStroke();
+    std::set<int> out;
+    if (m_chosen)
+        for (const AnchorRef &a : m_chosen->anchors)
+            if (a.stroke == stroke)
+                out.insert(a.k);
+    return out;
 }
 
-std::optional<QPointF> VectorPointTool::anchorPoint(int k) const
+std::set<VectorPointTool::AnchorRef> VectorPointTool::chosenAnchorRefs() const
 {
     refresh();
-    if (!m_chosen || k < 0 || k >= int(m_chosen->anchors.size()))
+    return m_chosen ? m_chosen->anchors : std::set<AnchorRef>();
+}
+
+std::optional<QPointF> VectorPointTool::anchorPoint(int k) const { return anchorPoint(chosenStroke(), k); }
+
+std::optional<QPointF> VectorPointTool::anchorPoint(int stroke, int k) const
+{
+    refresh();
+    const Picked *p = m_chosen ? m_chosen->find(stroke) : nullptr;
+    if (!p || k < 0 || k >= int(p->anchors.size()))
         return std::nullopt;
-    const brush::BrushInput &in = m_chosen->stroke.points[std::size_t(m_chosen->anchors[std::size_t(k)])];
-    return QPointF(in.x, in.y);
+    return pointOf(p->stroke, p->anchors[std::size_t(k)]);
 }
 
 void VectorPointTool::press(const QPointF &docPos, Qt::KeyboardModifiers modifiers)
@@ -169,57 +271,72 @@ void VectorPointTool::press(const QPointF &docPos, Qt::KeyboardModifiers modifie
     }
     refresh();
     const Mode mode = m_toolState->vectorPoints().mode;
-    const int anchor = anchorAt(docPos);
 
-    if (anchor >= 0) {
-        if (modifiers & Qt::ShiftModifier) { // the anchors from the one clicked last to this one
-            const int from = m_chosen->pivot >= 0 ? m_chosen->pivot : anchor;
-            m_chosen->chosen.clear();
-            for (int k = std::min(from, anchor); k <= std::max(from, anchor); ++k)
-                m_chosen->chosen.insert(k);
-            m_chosen->pivot = from;
+    if (const std::optional<AnchorRef> anchor = anchorAt(docPos)) {
+        Chosen &c = *m_chosen;
+        Picked &picked = *c.find(anchor->stroke);
+        c.current = anchor->stroke;
+        if (modifiers & Qt::ShiftModifier) { // the anchors from the one clicked last to this one (on its stroke)
+            const int from = c.pivot && c.pivot->stroke == anchor->stroke ? c.pivot->k : anchor->k;
+            c.anchors.clear();
+            for (int k = std::min(from, anchor->k); k <= std::max(from, anchor->k); ++k)
+                c.anchors.insert({anchor->stroke, k});
+            c.pivot = AnchorRef{anchor->stroke, from};
             return;
         }
         if (modifiers & Qt::ControlModifier) { // one more anchor chosen, or one taken away
-            if (!m_chosen->chosen.erase(anchor))
-                m_chosen->chosen.insert(anchor);
-            m_chosen->pivot = anchor;
+            if (!c.anchors.erase(*anchor))
+                c.anchors.insert(*anchor);
+            c.pivot = anchor;
             return;
         }
         if (mode == Mode::Move && (modifiers & Qt::AltModifier)) {
-            const int index = m_chosen->index;
-            changeAtOnce([&](std::vector<doc::VectorStroke> &strokes) {
-                return removeAnchor(strokes[std::size_t(index)], m_chosen->anchors, anchor);
+            const int k = anchor->k;
+            changeAtOnce(anchor->stroke, [&](std::vector<doc::VectorStroke> &strokes) {
+                return removeAnchor(strokes[std::size_t(picked.index)], picked.anchors, k);
             });
             return;
         }
         if (mode == Mode::Corner) {
-            const int index = m_chosen->index;
-            changeAtOnce([&](std::vector<doc::VectorStroke> &strokes) {
-                toggleCorner(strokes[std::size_t(index)], m_chosen->anchors, anchor);
+            const int k = anchor->k;
+            changeAtOnce(anchor->stroke, [&](std::vector<doc::VectorStroke> &strokes) {
+                toggleCorner(strokes[std::size_t(picked.index)], picked.anchors, k);
                 return true;
             });
             return;
         }
         if (mode == Mode::Move || mode == Mode::Width) {
-            if (!m_chosen->chosen.count(anchor))
-                m_chosen->chosen = {anchor};
-            m_chosen->pivot = anchor;
-            if (beginEdit(mode == Mode::Move ? Edit::Kind::Move : Edit::Kind::Width))
+            if (!c.anchors.count(*anchor))
+                c.anchors = {*anchor};
+            c.pivot = anchor;
+            std::set<int> strokes;
+            for (const AnchorRef &a : c.anchors)
+                strokes.insert(a.stroke);
+            const bool loneEnd = mode == Mode::Move && c.anchors.size() == 1 && picked.anchors.size() >= 2
+                                 && (anchor->k == 0 || anchor->k == int(picked.anchors.size()) - 1);
+            const End end{anchor->stroke, anchor->k != 0};
+            if (beginEdit(mode == Mode::Move ? Edit::Kind::Move : Edit::Kind::Width, strokes)) {
                 m_edit->press = docPos;
+                if (loneEnd)
+                    m_edit->mergeFrom = end;
+            }
             return;
         }
     }
 
-    // On the line of the stroke chosen: an anchor added there (and dragged), or the line cut.
-    if (m_chosen && (mode == Mode::Move || mode == Mode::Cut)) {
-        const auto place = nearestPlace(m_chosen->stroke, docPos);
-        if (place && place->distance <= std::max(kLineGrab / m_zoom, m_chosen->stroke.size / 2.0)) {
+    // On the line of a stroke chosen: an anchor added there (and dragged), or the line cut.
+    if (m_chosen && !(modifiers & Qt::ShiftModifier) && (mode == Mode::Move || mode == Mode::Cut)) {
+        for (auto p = m_chosen->strokes.rbegin(); p != m_chosen->strokes.rend(); ++p) {
+            const auto place = nearestPlace(p->stroke, docPos);
+            if (!place || place->distance > std::max(kLineGrab / m_zoom, p->stroke.size / 2.0))
+                continue;
+            const int index = p->index;
             const double snap = 2.0 / m_zoom;
+            m_chosen->current = index;
             if (mode == Mode::Cut) {
-                const int index = m_chosen->index;
-                changeAtOnce([&](std::vector<doc::VectorStroke> &strokes) {
-                    auto pieces = cutStroke(strokes[std::size_t(index)], *place, snap);
+                const PathPlace at = *place;
+                changeAtOnce(index, [&](std::vector<doc::VectorStroke> &strokes) {
+                    auto pieces = cutStroke(strokes[std::size_t(index)], at, snap);
                     if (!pieces)
                         return false;
                     strokes[std::size_t(index)] = std::move(pieces->first);
@@ -228,31 +345,42 @@ void VectorPointTool::press(const QPointF &docPos, Qt::KeyboardModifiers modifie
                 });
                 return;
             }
-            if (!beginEdit(Edit::Kind::Move))
+            const PathPlace at = *place;
+            if (!beginEdit(Edit::Kind::Move, {index}))
                 return;
-            const std::size_t pointsBefore = m_edit->start.points.size();
-            const int k = addAnchor(m_edit->start, m_edit->anchors, *place, snap);
-            m_edit->changed = m_edit->start.points.size() != pointsBefore;
-            m_edit->strokes[std::size_t(m_chosen->index)] = m_edit->start;
-            m_chosen->stroke = m_edit->start;
-            m_chosen->anchors = m_edit->anchors;
-            m_chosen->chosen = {k};
-            m_chosen->pivot = k;
+            Edit::Stroke &es = m_edit->edited.front();
+            const std::size_t pointsBefore = es.start.points.size();
+            const int k = addAnchor(es.start, es.anchors, at, snap);
+            m_edit->changed = es.start.points.size() != pointsBefore;
+            m_edit->strokes[std::size_t(index)] = es.start;
+            Picked &picked = *m_chosen->find(index);
+            picked.stroke = es.start;
+            picked.anchors = es.anchors;
+            m_chosen->anchors = {{index, k}};
+            m_chosen->pivot = AnchorRef{index, k};
             m_edit->press = docPos;
             return;
         }
     }
 
-    // Elsewhere: the stroke there chosen (or none).
+    // Elsewhere: the stroke there chosen (Shift: one more, or taken away), or none.
     const int index = strokeAt(docPos);
-    if (index < 0)
+    if (modifiers & Qt::ShiftModifier) {
+        if (index >= 0)
+            choose(index, true);
+    } else if (index < 0) {
         m_chosen.reset();
-    else if (!m_chosen || m_chosen->index != index)
+    } else if (m_chosen && m_chosen->find(index)) {
+        m_chosen->current = index; // chosen already: the others stay
+    } else {
         choose(index);
+    }
 }
 
-bool VectorPointTool::beginEdit(Edit::Kind kind)
+bool VectorPointTool::beginEdit(Edit::Kind kind, const std::set<int> &indices)
 {
+    if (!m_chosen || indices.empty())
+        return false;
     QString reason;
     const auto target = m_document->beginPaint(false, &reason, true, true);
     if (!target) {
@@ -261,8 +389,10 @@ bool VectorPointTool::beginEdit(Edit::Kind kind)
         return false;
     }
     const doc::Layer *layer = m_document->document().layer(target->cel, target->drawing, target->layer);
-    if (!target->vector || !layer || !m_chosen || target->layer != m_chosen->layer
-        || m_chosen->index >= int(layer->strokes.size())) {
+    const bool fine = target->vector && layer && target->layer == m_chosen->layer
+                      && *indices.rbegin() < int(layer->strokes.size())
+                      && std::all_of(indices.begin(), indices.end(), [&](int i) { return m_chosen->find(i); });
+    if (!fine) {
         m_document->cancelPaint();
         return false;
     }
@@ -272,14 +402,26 @@ bool VectorPointTool::beginEdit(Edit::Kind kind)
     e.before = *target->image;
     e.original = layer->strokes;
     e.strokes = layer->strokes;
-    e.start = m_chosen->stroke;
-    e.anchors = m_chosen->anchors;
-    e.shown = strokeReach(e.start);
-    for (std::size_t i = std::size_t(m_chosen->index) + 1; i < e.strokes.size(); ++i)
+    for (int i : indices) {
+        const Picked &p = *m_chosen->find(i);
+        e.edited.push_back({i, p.stroke, p.anchors, 0, -1, {}});
+    }
+    e.lowest = *indices.begin();
+    e.highest = *indices.rbegin();
+    for (std::size_t i = std::size_t(e.highest) + 1; i < e.strokes.size(); ++i)
         if (e.strokes[i].erase)
             e.aboveLaidOver = false;
     m_edit = std::move(e);
     return true;
+}
+
+void VectorPointTool::syncPicked()
+{
+    if (!m_chosen || !m_edit)
+        return;
+    for (Picked &p : m_chosen->strokes)
+        if (p.index < int(m_edit->strokes.size()))
+            p.stroke = m_edit->strokes[std::size_t(p.index)];
 }
 
 void VectorPointTool::move(const QPointF &docPos, Qt::KeyboardModifiers)
@@ -287,38 +429,55 @@ void VectorPointTool::move(const QPointF &docPos, Qt::KeyboardModifiers)
     if (!m_edit || !m_chosen)
         return;
     Edit &e = *m_edit;
-    if (e.to < 0 && !m_chosen->chosen.empty() && !e.anchors.empty()) {
-        // The points a drag of the anchors chosen changes (and one more each side, whose direction of travel follows),
-        // known now that the anchor pressed is among them (one added on the line too).
-        const int first = *m_chosen->chosen.begin(), last = *m_chosen->chosen.rbegin();
-        e.from = e.anchors[std::size_t(std::max(first - 1, 0))] - 1;
-        e.to = e.anchors[std::size_t(std::min(last + 1, int(e.anchors.size()) - 1))] + 1;
-        e.changedShown = pointsReach(e.start, e.from, e.to);
-        if (e.changed) // a point was put in at the press: the whole stroke is drawn again once
-            e.pending = e.shown;
+    if (!e.rangesKnown) {
+        // The points a drag of the anchors chosen changes, known now that the anchor pressed is among them (one added
+        // on the line too).
+        e.rangesKnown = true;
+        for (Edit::Stroke &es : e.edited) {
+            std::vector<int> ks;
+            for (const AnchorRef &a : m_chosen->anchors)
+                if (a.stroke == es.index)
+                    ks.push_back(a.k);
+            if (ks.empty() || es.anchors.empty())
+                continue;
+            const int first = ks.front(), last = ks.back();
+            es.from = es.anchors[std::size_t(std::max(first - 1, 0))] - 1;
+            es.to = es.anchors[std::size_t(std::min(last + 1, int(es.anchors.size()) - 1))] + 1;
+            es.changedShown = pointsReach(es.start, es.from, es.to);
+            if (e.changed) // a point was put in at the press: the whole stroke is drawn again once
+                e.pending = united(e.pending, strokeReach(es.start));
+        }
     }
-    doc::VectorStroke stroke;
-    if (e.kind == Edit::Kind::Move) {
-        std::vector<QPointF> offsets(e.anchors.size());
-        for (int k : m_chosen->chosen)
-            offsets[std::size_t(k)] = docPos - e.press;
-        stroke = movedAnchors(e.start, e.anchors, offsets);
-    } else {
-        // Up widens, down thins: twice as wide for each 80 px on screen.
-        const double factor = std::pow(2.0, -(docPos.y() - e.press.y()) * m_zoom / 80.0);
-        std::vector<double> factors(e.anchors.size(), 1.0);
-        for (int k : m_chosen->chosen)
-            factors[std::size_t(k)] = factor;
-        stroke = scaledWidths(e.start, e.anchors, factors);
+    // A lone end on an end of another stroke chosen: it stays where it was, and the strokes joined show over it.
+    if (e.mergeFrom)
+        e.mergeTo = endAt(docPos, e.mergeFrom->stroke);
+    const double factor = std::pow(2.0, -(docPos.y() - e.press.y()) * m_zoom / 80.0); // Width: ×2 each 80 px up
+    for (Edit::Stroke &es : e.edited) {
+        doc::VectorStroke stroke;
+        if (e.mergeTo) {
+            stroke = es.start;
+        } else if (e.kind == Edit::Kind::Move) {
+            std::vector<QPointF> offsets(es.anchors.size());
+            for (const AnchorRef &a : m_chosen->anchors)
+                if (a.stroke == es.index)
+                    offsets[std::size_t(a.k)] = docPos - e.press;
+            stroke = movedAnchors(es.start, es.anchors, offsets);
+        } else {
+            std::vector<double> factors(es.anchors.size(), 1.0);
+            for (const AnchorRef &a : m_chosen->anchors)
+                if (a.stroke == es.index)
+                    factors[std::size_t(a.k)] = factor;
+            stroke = scaledWidths(es.start, es.anchors, factors);
+        }
+        const QRectF reach = pointsReach(stroke, es.from, es.to);
+        e.pending = united(e.pending, united(es.changedShown, reach));
+        es.changedShown = reach;
+        e.strokes[std::size_t(es.index)] = std::move(stroke);
+    }
+    if (e.kind == Edit::Kind::Width)
         m_status(QObject::tr("Width ×%1").arg(factor, 0, 'f', 2));
-    }
-    const QRectF reach = pointsReach(stroke, e.from, e.to);
-    e.pending = united(e.pending, united(e.changedShown, reach));
-    e.changedShown = reach;
-    e.shown = strokeReach(stroke);
-    e.strokes[std::size_t(m_chosen->index)] = std::move(stroke);
-    m_chosen->stroke = e.strokes[std::size_t(m_chosen->index)];
     e.changed = true;
+    syncPicked();
     if (!m_flushTimer.isActive())
         m_flushTimer.start(); // drawn once the events waiting are handled
 }
@@ -330,7 +489,6 @@ void VectorPointTool::cacheLayers(const QRect &region)
     if (missing.isEmpty())
         return;
     const QRect r = missing.boundingRect();
-    const std::size_t index = std::size_t(m_chosen->index);
     auto make = [&](doc::TiledImage &cache, std::size_t first, std::size_t last) {
         std::vector<doc::VectorStroke> in;
         for (std::size_t i = first; i < last; ++i)
@@ -342,15 +500,15 @@ void VectorPointTool::cacheLayers(const QRect &region)
         made.read(r.x(), r.y(), r.width(), r.height(), pixels.data(), r.width());
         cache.write(r.x(), r.y(), r.width(), r.height(), pixels.data(), r.width());
     };
-    make(e.below, 0, index);
+    make(e.below, 0, std::size_t(e.lowest));
     if (e.aboveLaidOver)
-        make(e.above, index + 1, e.strokes.size());
+        make(e.above, std::size_t(e.highest) + 1, e.strokes.size());
     e.cached += r;
 }
 
 void VectorPointTool::flush()
 {
-    if (!m_edit || !m_chosen || m_edit->pending.isNull())
+    if (!m_edit || m_edit->pending.isNull())
         return;
     Edit &e = *m_edit;
     const QRect region = e.pending.toAlignedRect().adjusted(-1, -1, 1, 1);
@@ -358,18 +516,17 @@ void VectorPointTool::flush()
     if (region.isEmpty())
         return;
     cacheLayers(region);
-    const std::size_t index = std::size_t(m_chosen->index);
     const std::size_t count = std::size_t(region.width()) * std::size_t(region.height());
     std::vector<doc::Pixel> pixels(count);
-    // The strokes under it, the stroke chosen over them, then the strokes over it.
+    // The strokes under them, the strokes edited (and those between) over them, then the strokes over them.
     doc::TiledImage patch;
     e.below.read(region.x(), region.y(), region.width(), region.height(), pixels.data(), region.width());
     patch.write(region.x(), region.y(), region.width(), region.height(), pixels.data(), region.width());
-    std::vector<doc::VectorStroke> in{e.strokes[index]};
-    if (!e.aboveLaidOver)
-        for (std::size_t i = index + 1; i < e.strokes.size(); ++i)
-            if (strokeReach(e.strokes[i]).intersects(region))
-                in.push_back(e.strokes[i]);
+    std::vector<doc::VectorStroke> in;
+    const std::size_t last = e.aboveLaidOver ? std::size_t(e.highest) + 1 : e.strokes.size();
+    for (std::size_t i = std::size_t(e.lowest); i < last; ++i)
+        if (strokeReach(e.strokes[i]).intersects(region))
+            in.push_back(e.strokes[i]);
     drawStrokes(patch, in, *m_toolState, region);
     patch.read(region.x(), region.y(), region.width(), region.height(), pixels.data(), region.width());
     if (e.aboveLaidOver) {
@@ -399,13 +556,6 @@ void VectorPointTool::flush()
     m_document->notifyPainted(region);
 }
 
-void VectorPointTool::showEdit(std::vector<doc::VectorStroke> strokes, const QRectF &area)
-{
-    m_edit->strokes = std::move(strokes);
-    m_chosen->stroke = m_edit->strokes[std::size_t(m_chosen->index)];
-    redraw(m_edit->strokes, area);
-}
-
 void VectorPointTool::redraw(const std::vector<doc::VectorStroke> &strokes, const QRectF &area)
 {
     // Only the area is drawn again, from the strokes that reach into it.
@@ -432,7 +582,10 @@ void VectorPointTool::release(const QPointF &docPos, Qt::KeyboardModifiers modif
     move(docPos, modifiers);
     m_flushTimer.stop();
     flush();
-    finishEdit();
+    const std::optional<End> from = m_edit->mergeFrom, to = m_edit->mergeTo;
+    finishEdit(); // dropped on an end, the stroke is as it was: nothing recorded
+    if (from && to)
+        merge(*from, *to);
 }
 
 void VectorPointTool::finishEdit()
@@ -441,45 +594,96 @@ void VectorPointTool::finishEdit()
     m_edit.reset();
     if (!e.changed || e.strokes == e.original) {
         *e.target.image = e.before;
+        if (e.rangesKnown)
+            m_document->notifyPainted(document::kWholeCanvas); // drawn while dragged
         m_document->cancelPaint();
-        if (m_chosen) {
-            m_chosen->stroke = e.original[std::size_t(m_chosen->index)];
-            if (m_chosen->stroke.points.size() != e.start.points.size()) // an anchor was put in, and nothing came of it
-                m_chosen->anchors = controlPoints(m_chosen->stroke, kTolerance / m_zoom);
-        }
+        if (m_chosen)
+            for (const Edit::Stroke &es : e.edited)
+                if (Picked *p = m_chosen->find(es.index); p && es.index < int(e.original.size())) {
+                    p->stroke = e.original[std::size_t(es.index)];
+                    if (p->stroke.points.size() != es.start.points.size()) // an anchor was put in, for nothing
+                        p->anchors = controlPoints(p->stroke, kTolerance / m_zoom);
+                }
         return;
     }
     if (m_chosen)
-        m_chosen->anchors = e.anchors; // the points moved, but they are the same points
+        for (const Edit::Stroke &es : e.edited)
+            if (Picked *p = m_chosen->find(es.index))
+                p->anchors = es.anchors; // the points moved, but they are the same points
     m_document->attachStrokeChange(e.target, std::move(e.original), e.strokes);
     m_document->endPaint(e.before, doc::CommandKind::Paint);
 }
 
-void VectorPointTool::changeAtOnce(const std::function<bool(std::vector<doc::VectorStroke> &)> &apply)
+void VectorPointTool::changeAtOnce(int index, const std::function<bool(std::vector<doc::VectorStroke> &)> &apply)
 {
-    const std::vector<int> anchorsBefore = m_chosen->anchors;
-    if (!beginEdit(Edit::Kind::Move))
+    Picked *picked = m_chosen ? m_chosen->find(index) : nullptr;
+    if (!picked)
+        return;
+    const std::vector<int> anchorsBefore = picked->anchors;
+    if (!beginEdit(Edit::Kind::Move, {index}))
         return;
     std::vector<doc::VectorStroke> strokes = m_edit->strokes;
     if (!apply(strokes)) {
-        m_chosen->anchors = anchorsBefore;
+        picked->anchors = anchorsBefore;
         m_edit->changed = false;
         finishEdit();
         return;
     }
-    QRectF area = m_edit->shown;
-    const int index = m_chosen->index;
+    const bool cut = strokes.size() != m_edit->original.size();
+    QRectF area = strokeReach(m_edit->original[std::size_t(index)]);
     for (int i = index; i <= index + 1 && i < int(strokes.size()); ++i) // the cut's second piece too
         area = united(area, strokeReach(strokes[std::size_t(i)]));
-    const std::vector<int> anchorsNow = m_chosen->anchors;
-    showEdit(std::move(strokes), area);
-    m_edit->anchors = anchorsNow;
+    m_edit->strokes = std::move(strokes);
+    redraw(m_edit->strokes, area);
+    m_edit->edited.front().anchors = picked->anchors;
     m_edit->changed = true;
-    const bool cut = m_edit->strokes.size() != m_edit->original.size();
+    if (!cut)
+        picked->stroke = m_edit->strokes[std::size_t(index)];
     finishEdit();
-    m_chosen->chosen.clear();
-    if (cut)
+    if (cut) {
         choose(index); // the first piece, with its own anchors
+        return;
+    }
+    std::erase_if(m_chosen->anchors, [&](const AnchorRef &a) { return a.stroke == index; });
+    m_chosen->pivot.reset();
+}
+
+void VectorPointTool::merge(const End &from, const End &to)
+{
+    if (!m_chosen || !beginEdit(Edit::Kind::Move, {from.stroke}))
+        return;
+    std::vector<doc::VectorStroke> strokes = m_edit->strokes;
+    const int a = from.stroke, b = to.stroke;
+    if (a == b || b < 0 || b >= int(strokes.size())) {
+        m_edit->changed = false;
+        finishEdit();
+        return;
+    }
+    doc::VectorStroke merged = mergedStrokes(strokes[std::size_t(a)], from.atEnd, strokes[std::size_t(b)], to.atEnd);
+    const QRectF area = united(united(strokeReach(strokes[std::size_t(a)]), strokeReach(strokes[std::size_t(b)])),
+                               strokeReach(merged));
+    strokes[std::size_t(a)] = std::move(merged); // where the stroke dragged was among the others
+    strokes.erase(strokes.begin() + b);
+    m_edit->strokes = std::move(strokes);
+    redraw(m_edit->strokes, area);
+    m_edit->edited.clear(); // the strokes chosen are put right below
+    m_edit->changed = true;
+    finishEdit();
+
+    // The strokes chosen stay chosen, the one made among them (those over the second one a place lower now).
+    std::set<int> keep;
+    for (const Picked &p : m_chosen->strokes)
+        if (p.index != b)
+            keep.insert(p.index > b ? p.index - 1 : p.index);
+    const int made = b < a ? a - 1 : a;
+    Chosen c;
+    c.cel = m_chosen->cel;
+    c.drawing = m_chosen->drawing;
+    c.layer = m_chosen->layer;
+    for (int i : keep)
+        c.strokes.push_back(makePicked(i));
+    c.current = made;
+    m_chosen = std::move(c);
 }
 
 void VectorPointTool::cancel()
@@ -492,18 +696,21 @@ void VectorPointTool::cancel()
     *e.target.image = e.before;
     m_document->notifyPainted(document::kWholeCanvas);
     m_document->cancelPaint();
-    if (m_chosen && m_chosen->index < int(e.original.size())) {
-        m_chosen->stroke = e.original[std::size_t(m_chosen->index)];
-        m_chosen->anchors = controlPoints(m_chosen->stroke, kTolerance / m_zoom);
-        m_chosen->chosen.clear();
-    }
+    if (m_chosen)
+        for (Picked &p : m_chosen->strokes)
+            if (p.index < int(e.original.size())) {
+                p.stroke = e.original[std::size_t(p.index)];
+                p.anchors = controlPoints(p.stroke, kTolerance / m_zoom);
+            }
+    if (m_chosen)
+        m_chosen->anchors.clear();
 }
 
 bool VectorPointTool::hover(const QPointF &docPos)
 {
     refresh();
-    const int anchor = anchorAt(docPos);
-    const int stroke = anchor >= 0 ? -1 : strokeAt(docPos);
+    const std::optional<AnchorRef> anchor = anchorAt(docPos);
+    const int stroke = anchor ? -1 : strokeAt(docPos);
     if (anchor == m_hoverAnchor && stroke == m_hoverStroke)
         return false;
     m_hoverAnchor = anchor;
@@ -513,7 +720,7 @@ bool VectorPointTool::hover(const QPointF &docPos)
 
 QCursor VectorPointTool::cursor() const
 {
-    if (m_hoverAnchor >= 0) {
+    if (m_hoverAnchor) {
         switch (m_toolState->vectorPoints().mode) {
         case Mode::Move: return Qt::SizeAllCursor;
         case Mode::Width: return Qt::SizeVerCursor;
@@ -547,7 +754,7 @@ void VectorPointTool::paintOverlay(QPainter &painter, const ViewTransform &view)
     // The stroke under the pointer, faint, to show what a click would choose.
     if (const doc::Layer *layer = currentLayer();
         layer && m_hoverStroke >= 0 && m_hoverStroke < int(layer->strokes.size())
-        && (!m_chosen || m_chosen->index != m_hoverStroke)) {
+        && (!m_chosen || !m_chosen->find(m_hoverStroke))) {
         painter.setPen(QPen(QColor(accent.red(), accent.green(), accent.blue(), 120), 1.5));
         painter.drawPath(pathOf(layer->strokes[std::size_t(m_hoverStroke)]));
     }
@@ -555,26 +762,53 @@ void VectorPointTool::paintOverlay(QPainter &painter, const ViewTransform &view)
         painter.restore();
         return;
     }
-    const QPainterPath path = pathOf(m_chosen->stroke);
-    painter.setPen(QPen(QColor(255, 255, 255, 200), 3.0));
-    painter.drawPath(path);
-    painter.setPen(QPen(accent, 1.2));
-    painter.drawPath(path);
+    for (const Picked &p : m_chosen->strokes) {
+        const QPainterPath path = pathOf(p.stroke);
+        painter.setPen(QPen(QColor(255, 255, 255, 200), 3.0));
+        painter.drawPath(path);
+        painter.setPen(QPen(accent, 1.2));
+        painter.drawPath(path);
+    }
+
+    // A lone end dragged: the ends it can be dropped on, and the strokes joined when it is on one.
+    if (m_edit && m_edit->mergeFrom) {
+        for (const Picked &p : m_chosen->strokes) {
+            if (p.index == m_edit->mergeFrom->stroke || p.stroke.points.empty() || p.stroke.erase)
+                continue;
+            painter.setPen(QPen(accent, 1.5));
+            painter.setBrush(Qt::NoBrush);
+            for (const int i : {0, int(p.stroke.points.size()) - 1})
+                painter.drawEllipse(toView.map(pointOf(p.stroke, i)), 9.0, 9.0);
+        }
+        if (const auto &to = m_edit->mergeTo) {
+            const auto &original = m_edit->original;
+            const doc::VectorStroke joined =
+                mergedStrokes(original[std::size_t(m_edit->mergeFrom->stroke)], m_edit->mergeFrom->atEnd,
+                              original[std::size_t(to->stroke)], to->atEnd);
+            const QPainterPath path = pathOf(joined);
+            painter.setPen(QPen(QColor(255, 255, 255, 220), 4.0));
+            painter.drawPath(path);
+            painter.setPen(QPen(accent, 2.2));
+            painter.drawPath(path);
+        }
+    }
 
     constexpr double r = 4.0;
-    for (std::size_t k = 0; k < m_chosen->anchors.size(); ++k) {
-        const brush::BrushInput &in = m_chosen->stroke.points[std::size_t(m_chosen->anchors[k])];
-        const QPointF p = toView.map(QPointF(in.x, in.y));
-        const bool chosen = m_chosen->chosen.count(int(k)) > 0;
-        const bool hovered = int(k) == m_hoverAnchor;
-        painter.setPen(QPen(chosen ? Qt::white : accent, 1.2));
-        painter.setBrush(chosen ? accent : (hovered ? QColor(0xcf, 0xe6, 0xff) : QColor(Qt::white)));
-        const QRectF box(p.x() - r, p.y() - r, 2 * r, 2 * r);
-        if (in.corner)
-            painter.drawRect(box);
-        else
-            painter.drawEllipse(box);
-    }
+    for (const Picked &p : m_chosen->strokes)
+        for (std::size_t k = 0; k < p.anchors.size(); ++k) {
+            const AnchorRef ref{p.index, int(k)};
+            const brush::BrushInput &in = p.stroke.points[std::size_t(p.anchors[k])];
+            const QPointF at = toView.map(QPointF(in.x, in.y));
+            const bool chosen = m_chosen->anchors.count(ref) > 0;
+            const bool hovered = m_hoverAnchor == ref;
+            painter.setPen(QPen(chosen ? Qt::white : accent, 1.2));
+            painter.setBrush(chosen ? accent : (hovered ? QColor(0xcf, 0xe6, 0xff) : QColor(Qt::white)));
+            const QRectF box(at.x() - r, at.y() - r, 2 * r, 2 * r);
+            if (in.corner)
+                painter.drawRect(box);
+            else
+                painter.drawEllipse(box);
+        }
     painter.restore();
 }
 

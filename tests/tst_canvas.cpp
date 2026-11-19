@@ -746,6 +746,59 @@ private slots:
         QVERIFY2(turn < 15.0, qPrintable(QString::number(turn)));
     }
 
+    // Two strokes merged: from the first's other end to the second's other end, with the first's brush; a gap filled
+    // with a curve that leaves and meets the ends along their lines; ends on each other made one point.
+    void twoStrokesAreMerged()
+    {
+        doc::VectorStroke left = straightStroke(11); // 0..20 on y = 0
+        left.brush = "G-pen";
+        left.size = 9;
+        doc::VectorStroke right = straightStroke(11);
+        right.brush = "Pencil";
+        for (brush::BrushInput &in : right.points)
+            in.x += 40.0; // 40..60
+        right.points.front().corner = true;
+
+        const doc::VectorStroke m = mergedStrokes(left, true, right, false);
+        QCOMPARE(m.brush, std::string("G-pen"));
+        QCOMPARE(m.size, 9.0);
+        QCOMPARE(m.points.front().x, 0.0);
+        QCOMPARE(m.points.back().x, 60.0);
+        QVERIFY(m.points.size() > 22); // the gap filled with points
+        for (std::size_t i = 1; i < m.points.size(); ++i) {
+            QVERIFY(std::abs(m.points[i].y) < 1e-9); // straight on: both lines go the same way
+            QVERIFY(m.points[i].x > m.points[i - 1].x);
+            QVERIFY(m.points[i].x - m.points[i - 1].x <= 2.0 + 1e-9);
+            QVERIFY(!m.points[i].corner);
+        }
+
+        // Joined by their starts: the first goes backwards, then along the second.
+        const doc::VectorStroke back = mergedStrokes(right, false, left, false);
+        QCOMPARE(back.brush, std::string("Pencil"));
+        QCOMPARE(back.points.front().x, 60.0);
+        QCOMPARE(back.points.back().x, 20.0);
+        QCOMPARE(back.points[back.points.size() - 11].x, 0.0); // the second, its start first
+
+        // A gap between lines going different ways: the curve leaves each along its line.
+        doc::VectorStroke down = straightStroke(11);
+        for (brush::BrushInput &in : down.points) {
+            in.y = 40.0 + in.x; // from (40, 40) down to (40, 60)
+            in.x = 40.0;
+        }
+        const doc::VectorStroke bend = mergedStrokes(left, true, down, false);
+        const brush::BrushInput &after = bend.points[11]; // the first point of the curve
+        QVERIFY(after.x > 20.0);
+        QVERIFY(std::abs(after.y) < std::abs(after.x - 20.0)); // leaving along the first line (to the right)
+        const brush::BrushInput &before = bend.points[bend.points.size() - 12]; // the last one before the second
+        QVERIFY(std::abs(before.x - 40.0) < std::abs(before.y - 40.0)); // meeting the second along its line (down)
+
+        // Ends on each other: one point.
+        doc::VectorStroke touching = straightStroke(11);
+        for (brush::BrushInput &in : touching.points)
+            in.x += 20.0; // 20..40
+        QCOMPARE(mergedStrokes(left, true, touching, false).points.size(), std::size_t(21));
+    }
+
     // A stroke cut in two: the pieces share the point of the cut and keep the stroke's brush; not at an end.
     void aStrokeIsCutInTwo()
     {

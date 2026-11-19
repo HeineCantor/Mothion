@@ -12,6 +12,7 @@
 #include <QString>
 #include <QTimer>
 
+#include <compare>
 #include <functional>
 #include <optional>
 #include <set>
@@ -24,16 +25,18 @@ class ToolState;
 namespace mothion::canvas {
 
 // Correct line (as Clip Studio's Correct line > Control point): the control points of a vector layer's strokes (see
-// VectorPoints.h), changed one by one. A click on a stroke chooses it, and its anchors show on it (a round dot for a
-// smooth one, a square for a corner); then, by the mode of the tool's properties (tools::VectorPointSettings):
+// VectorPoints.h), changed one by one. A click on a stroke chooses it (Shift+click chooses one more, or takes it away),
+// and the anchors of the strokes chosen show on them (a round dot for a smooth one, a square for a corner); then, by
+// the mode of the tool's properties (tools::VectorPointSettings):
 //
-//  - Move: an anchor dragged takes the line with it (the anchors chosen go together: Shift+click chooses those from
-//    the anchor clicked last to this one, Ctrl+click chooses one more or takes it away, Ctrl+A chooses them all); a
-//    press on the line between them adds an anchor there, which the drag moves; Alt+click on an anchor takes it away
-//    (the line is laid smooth again there, or cut short at an end);
+//  - Move: an anchor dragged takes the line with it (the anchors chosen go together, on every stroke chosen:
+//    Shift+click chooses those from the anchor clicked last to this one, Ctrl+click one more or takes it away, Ctrl+A
+//    them all); a press on the line of a stroke chosen adds an anchor there, which the drag moves; Alt+click on an
+//    anchor takes it away (the line is laid smooth again there, or cut short at an end). An end of a stroke dropped on
+//    an end of another stroke chosen makes the two one (see mergedStrokes());
 //  - Width: an anchor dragged up makes the line wider round it, down thinner (the anchors chosen together);
-//  - Corner: a click on an anchor makes it a corner, or smooth again (the angle rounded);
-//  - Cut: a click on the line cuts it in two there.
+//  - Corner: a click on an anchor makes it a corner, or smooth again;
+//  - Cut: a click on the line of a stroke chosen cuts it in two there.
 //
 // Each change is one undo step, the strokes and the layer's pixels together (drawn again from the strokes).
 class VectorPointTool : public CanvasTool
@@ -52,14 +55,28 @@ public:
     void paintOverlay(QPainter &painter, const ViewTransform &view) const override;
     QCursor cursor() const override;
 
-    // The stroke chosen (its index in the current layer's strokes) and its anchors, for tests; -1 / empty for none.
+    // An anchor of a stroke chosen: the stroke's index in the layer, and the anchor's place among its anchors.
+    struct AnchorRef
+    {
+        int stroke = -1;
+        int k = -1;
+        auto operator<=>(const AnchorRef &) const = default;
+    };
+
+    // The strokes chosen (their indices in the current layer's strokes, from the bottom), for tests.
+    std::vector<int> chosenStrokes() const;
+    // The stroke clicked last among them, -1 for none; its anchors, those of them chosen, and where anchor `k` of it
+    // is (document coordinates). For tests.
     int chosenStroke() const;
     std::vector<int> anchors() const;
     std::set<int> chosenAnchors() const;
-    // Ctrl+A: every anchor of the stroke chosen; false if no stroke is chosen.
-    bool chooseAllAnchors();
-    // Where anchor `k` of the stroke chosen is (document coordinates); for tests.
     std::optional<QPointF> anchorPoint(int k) const;
+    // The same for any stroke chosen.
+    std::vector<int> anchorsOf(int stroke) const;
+    std::optional<QPointF> anchorPoint(int stroke, int k) const;
+    std::set<AnchorRef> chosenAnchorRefs() const;
+    // Ctrl+A: every anchor of the strokes chosen; false if no stroke is chosen.
+    bool chooseAllAnchors();
 
     // Sizes on screen, px.
     static constexpr double kGrab = 8.0;      // how near an anchor grabs it
@@ -67,64 +84,95 @@ public:
     static constexpr double kTolerance = 3.0; // how far from the path the anchors let the line go
 
 private:
+    struct Picked
+    {
+        int index = -1;
+        doc::VectorStroke stroke; // as it is in the layer (as it is being edited, during a drag)
+        std::vector<int> anchors;
+    };
     struct Chosen
     {
         doc::CelId cel = doc::kNoId;
         doc::DrawingId drawing = doc::kNoId;
         doc::LayerId layer = doc::kNoId;
-        int index = -1;
-        doc::VectorStroke stroke; // as it is in the layer
-        std::vector<int> anchors;
-        std::set<int> chosen; // positions in `anchors`
-        int pivot = -1;       // the anchor clicked last: where a Shift+click's range starts
+        std::vector<Picked> strokes; // by their index, from the bottom
+        std::set<AnchorRef> anchors;
+        std::optional<AnchorRef> pivot; // the anchor clicked last: where a Shift+click's range starts
+        int current = -1;               // the stroke clicked last
+
+        Picked *find(int index);
+        const Picked *find(int index) const;
+    };
+    // An end of a stroke: its index, and whether it is the last point (else the first).
+    struct End
+    {
+        int stroke = -1;
+        bool atEnd = false;
+        bool operator==(const End &) const = default;
     };
     struct Edit
     {
         enum class Kind { Move, Width };
+        // A stroke whose anchors the edit moves: as it was at the press (with the anchor added, if one was), and the
+        // points a drag changes (from the anchor before the first chosen to the one after the last, and one more each
+        // side), with what they covered as drawn last.
+        struct Stroke
+        {
+            int index = -1;
+            doc::VectorStroke start;
+            std::vector<int> anchors;
+            int from = 0, to = -1;
+            QRectF changedShown;
+        };
         Kind kind = Kind::Move;
         document::DocumentController::PaintTarget target;
         doc::TiledImage before;                  // the layer's pixels at the press
         std::vector<doc::VectorStroke> original; // its strokes at the press
         std::vector<doc::VectorStroke> strokes;  // as they are now
-        doc::VectorStroke start;                 // the stroke chosen at the press (with the anchor added, if one was)
-        std::vector<int> anchors;                // its anchors then
+        std::vector<Stroke> edited;
+        int lowest = 0, highest = -1; // the strokes edited lie between these
         QPointF press;
-        QRectF shown; // what the stroke covers as drawn now
         bool changed = false;
-        // A drag: the points it changes (from the anchor before the first chosen to the one after the last), what
-        // they covered as drawn last, and what is to be drawn again at the next flush().
-        int from = 0, to = -1;
-        QRectF changedShown;
-        QRectF pending;
-        // The layer's pixels from the strokes under the one chosen, and from those over it, made where the drag
-        // needed them (`cached`): while it goes on only the stroke chosen is drawn again, between the two. The strokes
-        // over it are laid over as one picture unless one of them erases (then they are drawn again each time).
+        bool rangesKnown = false;
+        QRectF pending; // what is to be drawn again at the next flush()
+        // The layer's pixels from the strokes under the lowest edited, and from those over the highest, made where
+        // the drag needed them (`cached`): while it goes on only the strokes between are drawn again. The strokes over
+        // are laid over as one picture unless one of them erases (then they are drawn again each time).
         doc::TiledImage below, above;
         QRegion cached;
         bool aboveLaidOver = true;
+        // A lone end dragged: the end of another stroke chosen it is on now (dropped there, the two are merged).
+        std::optional<End> mergeFrom, mergeTo;
     };
 
     const doc::Layer *currentLayer() const;
-    // The stroke chosen, put right with the layer: dropped when the layer is another, taken again (with new anchors)
-    // when the stroke changed (an undo).
+    // The strokes chosen, put right with the layer: dropped when the layer is another, taken again (with new anchors)
+    // when a stroke changed (an undo).
     void refresh() const;
-    int anchorAt(const QPointF &docPos) const;
+    std::optional<AnchorRef> anchorAt(const QPointF &docPos) const;
     // The topmost stroke of the current layer that `docPos` is on, or -1.
     int strokeAt(const QPointF &docPos) const;
-    void choose(int index);
-    // Begins an edit of the stroke chosen; false if the layer cannot be changed now.
-    bool beginEdit(Edit::Kind kind);
-    // The stroke chosen is `stroke` now (and the strokes `strokes`): the layer drawn again where it changed.
-    void showEdit(std::vector<doc::VectorStroke> strokes, const QRectF &area);
+    // An end of a stroke chosen (not `except`) within reach of `docPos`.
+    std::optional<End> endAt(const QPointF &docPos, int except) const;
+    // The stroke `index` the one chosen (`add`: one more chosen, or taken away if it was).
+    void choose(int index, bool add = false);
+    Picked makePicked(int index) const;
+    // Begins an edit of the strokes `indices` (chosen); false if the layer cannot be changed now.
+    bool beginEdit(Edit::Kind kind, const std::set<int> &indices);
+    // The strokes chosen as the edit has them now.
+    void syncPicked();
     void redraw(const std::vector<doc::VectorStroke> &strokes, const QRectF &area);
-    // A drag: what is pending drawn again, the stroke chosen between the pixels of the strokes under and over it.
+    // A drag: what is pending drawn again, the strokes edited between the pixels of the strokes under and over them.
     // Called once the events waiting are handled (the pen sends many more than can be drawn), and on the release.
     void flush();
     void cacheLayers(const QRect &region);
     // Records the edit (if it changed anything) as one undo step.
     void finishEdit();
-    // A change made at once (an anchor taken away, a corner, a cut): `apply` changes the layer's strokes, true if it did.
-    void changeAtOnce(const std::function<bool(std::vector<doc::VectorStroke> &)> &apply);
+    // A change of the stroke `index` made at once (an anchor taken away, a corner, a cut): `apply` changes the layer's
+    // strokes, true if it did.
+    void changeAtOnce(int index, const std::function<bool(std::vector<doc::VectorStroke> &)> &apply);
+    // `from` (dragged) and `to` made one stroke, as one undo step.
+    void merge(const End &from, const End &to);
 
     document::DocumentController *m_document;
     tools::ToolState *m_toolState;
@@ -133,7 +181,7 @@ private:
     mutable std::optional<Chosen> m_chosen;
     std::optional<Edit> m_edit;
     QTimer m_flushTimer;
-    int m_hoverAnchor = -1;
+    std::optional<AnchorRef> m_hoverAnchor;
     int m_hoverStroke = -1;
 };
 

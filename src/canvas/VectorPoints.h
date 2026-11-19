@@ -64,6 +64,15 @@ bool removeAnchor(doc::VectorStroke &stroke, std::vector<int> &anchors, int k);
 // bends at it from then on.
 void toggleCorner(doc::VectorStroke &stroke, const std::vector<int> &anchors, int k);
 
+// Two strokes made one: `first` joined by one of its ends (the last point if `firstAtEnd`, else the first) to one of
+// `second`'s (`secondAtEnd` likewise). The stroke made goes from first's other end to second's other end, with first's
+// brush, size and colors; where the ends are apart, a smooth curve that leaves and meets each end along its line fills
+// the gap (the pen's pressure and the rest going from one end to the other on it). The pen's pressure falling at the
+// ends joined (as it does where a line was begun or let go) is lifted to the line's own there, so the stroke made
+// does not thin where they meet.
+doc::VectorStroke mergedStrokes(const doc::VectorStroke &first, bool firstAtEnd, const doc::VectorStroke &second,
+                                bool secondAtEnd);
+
 // The stroke cut in two at `place` (a point is put there if none is within `snap`): each piece has the stroke's brush,
 // colors and seed, and they share the point of the cut. Nothing if the place is at an end.
 std::optional<std::pair<doc::VectorStroke, doc::VectorStroke>> cutStroke(const doc::VectorStroke &stroke,
