@@ -163,6 +163,7 @@ void DocumentController::replaceDocument(std::unique_ptr<doc::Document> document
     m_currentFrame = 0;
     m_currentLayer = doc::kNoId;
     m_currentLayerName.clear();
+    m_lastLayerOf.clear();
     const bool cameraWasSelected = m_cameraSelected;
     m_cameraSelected = false;
     m_layerChosen = true;
@@ -171,6 +172,7 @@ void DocumentController::replaceDocument(std::unique_ptr<doc::Document> document
     if (const doc::Drawing *drawing = currentDrawing(); drawing && !drawing->layers.empty()) {
         m_currentLayer = drawing->layers.back().id;
         m_currentLayerName = drawing->layers.back().properties.name;
+        m_lastLayerOf[currentDrawingId()] = m_currentLayer;
     }
 
     m_tempPoseCel = doc::kNoId;
@@ -2888,7 +2890,10 @@ void DocumentController::resolveCurrentLayer()
     const doc::Drawing *drawing = currentDrawing();
     doc::LayerId layer = doc::kNoId;
     if (drawing && !drawing->layers.empty()) {
-        if (drawing->layer(m_currentLayer)) {
+        const auto last = m_lastLayerOf.find(currentDrawingId());
+        if (last != m_lastLayerOf.end() && drawing->layer(last->second)) {
+            layer = last->second; // back on this drawing: the layer worked on in it last
+        } else if (drawing->layer(m_currentLayer)) {
             layer = m_currentLayer;
         } else {
             layer = drawing->layers.back().id; // the top one, unless one has the name
@@ -2899,6 +2904,7 @@ void DocumentController::resolveCurrentLayer()
                 }
         }
         m_currentLayerName = drawing->layer(layer)->properties.name; // renamed, perhaps
+        m_lastLayerOf[currentDrawingId()] = layer;
     }
     if (layer == m_currentLayer)
         return;
@@ -2939,6 +2945,7 @@ void DocumentController::setCurrentLayer(doc::LayerId layer)
     interruptStroke();
     m_currentLayer = layer;
     m_currentLayerName = drawing->layer(layer)->properties.name;
+    m_lastLayerOf[currentDrawingId()] = layer;
     emit currentLayerChanged(layer);
 }
 

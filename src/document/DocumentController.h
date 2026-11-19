@@ -65,8 +65,8 @@ public:
     int currentFrame() const { return m_currentFrame; }
     // The drawing the current cel shows at the current frame (nullptr on an
     // empty frame), and the layer of it that tools work on (kNoId then).
-    // Going to another drawing keeps a layer of the same name current, else
-    // the top one.
+    // Going back to a drawing makes current the layer last worked on in it;
+    // going to one not seen yet keeps a layer of the same name, else the top one.
     const doc::Drawing *currentDrawing() const;
     doc::DrawingId currentDrawingId() const;
     doc::LayerId currentLayer() const { return m_currentLayer; }
@@ -688,6 +688,7 @@ private:
     bool m_cameraSelected = false;
     doc::LayerId m_currentLayer = doc::kNoId;
     std::string m_currentLayerName; // looked for when the drawing changes
+    std::map<doc::DrawingId, doc::LayerId> m_lastLayerOf; // the layer last current in each drawing (this session)
     QPainterPath m_selection;
     std::shared_ptr<const doc::Cel> m_copiedCel; // (see copyCel())
     std::vector<LayerRef> m_layerSelection;

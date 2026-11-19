@@ -113,9 +113,10 @@ private slots:
     }
 
 
-    // The layer tools work on is one of the drawing shown: going to another
-    // drawing keeps the layer of the same name, else the top one; a drawing
-    // made by painting on an empty frame names its layer after it.
+    // The layer tools work on is one of the drawing shown: going back to a
+    // drawing takes the layer last worked on in it; going to one not seen yet
+    // keeps the layer of the same name, else the top one; a drawing made by
+    // painting on an empty frame names its layer after it.
     void currentLayerFollowsTheDrawings()
     {
         document::DocumentController controller;
@@ -142,7 +143,12 @@ private slots:
         QCOMPARE(controller.currentLayer(), second->layers[1].id); // Line again
         controller.setCurrentLayer(second->layers[2].id); // Shadow: not in the first drawing
         controller.setCurrentFrame(0);
-        QCOMPARE(controller.currentLayer(), first->layers.back().id);
+        QCOMPARE(controller.currentLayer(), first->layers[0].id); // Line, as it was left there
+        controller.setCurrentLayer(first->layers[1].id); // Color, which the second drawing has too
+        controller.setCurrentFrame(1);
+        QCOMPARE(controller.currentLayer(), second->layers[2].id); // Shadow, as it was left there
+        controller.setCurrentFrame(0);
+        QCOMPARE(controller.currentLayer(), first->layers[1].id); // Color
         controller.setCurrentFrame(5);
         QCOMPARE(controller.currentLayer(), doc::kNoId); // an empty frame
         QCOMPARE(controller.currentDrawing(), nullptr);
@@ -160,6 +166,7 @@ private slots:
 
         // A locked layer is not painted.
         controller.setCurrentFrame(0);
+        QCOMPARE(controller.currentLayer(), first->layers.back().id); // Color
         doc::LayerProperties p = first->layers.back().properties;
         p.locked = true;
         controller.execute(doc::makeSetLayerProperties(d, cel, first->id, first->layers.back().id, p));
