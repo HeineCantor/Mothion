@@ -710,6 +710,155 @@ private slots:
         QVERIFY2(canvasWidest > 1.9, qPrintable(QString::number(canvasWidest)));
     }
 
+    // With the symmetry on, a stroke is drawn again round the axes, in the same undo step: mirrored on a raster layer;
+    // on a vector layer each copy is a stroke of its own.
+    void symmetryDrawsTheStrokeRoundTheAxes()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(500, 400);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 4, "Line").command);
+        QCoreApplication::processEvents();
+        auto layer = [&]() -> const doc::Layer & { return *controller.currentDrawing()->layer(controller.currentLayer()); };
+
+        state.setActiveTool(tools::ToolId::Brush);
+        state.setSize(tools::ToolId::Brush, 12);
+        tools::SymmetrySettings symmetry;
+        symmetry.on = true;
+        state.setSymmetry(symmetry);
+        QCOMPARE(controller.symmetryCenter(), QPointF(960, 540)); // the middle of the page until placed
+        const QTransform toView = canvas.view().documentToView();
+        auto draw = [&](QPointF from, QPointF to) {
+            const QPoint a = toView.map(from).toPoint(), b = toView.map(to).toPoint();
+            QTest::mousePress(&canvas, Qt::LeftButton, {}, a);
+            for (int i = 1; i <= 20; ++i)
+                QTest::mouseMove(&canvas, a + (b - a) * i / 20);
+            QTest::mouseRelease(&canvas, Qt::LeftButton, {}, b);
+        };
+        draw(QPointF(700, 400), QPointF(780, 400));
+        auto inked = [&](double x, double y) {
+            int most = 0;
+            for (int dy = -8; dy <= 8; ++dy)
+                most = std::max(most, qAlpha(layer().image.pixel(int(x), int(y) + dy)));
+            return most > 100;
+        };
+        QVERIFY(inked(740, 400));
+        QVERIFY(inked(1920 - 740, 400)); // mirrored across the upright axis
+        QVERIFY(!inked(1920 - 740, 680));
+        controller.undo();
+        QVERIFY(!inked(740, 400));
+        QVERIFY(!inked(1920 - 740, 400)); // the copy goes with it
+
+        // Four copies turned round the center, each a stroke on a vector layer.
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Vector));
+        QCoreApplication::processEvents();
+        symmetry.kind = tools::SymmetrySettings::Kind::Rotate;
+        symmetry.count = 4;
+        state.setSymmetry(symmetry);
+        draw(QPointF(940, 300), QPointF(980, 300)); // 240 above the center
+        QCOMPARE(layer().strokes.size(), std::size_t(4));
+        QVERIFY(inked(960, 300) && inked(960, 780) && inked(1200, 540 - 8) && inked(720, 540 - 8));
+        controller.undo();
+        QCOMPARE(layer().strokes.size(), std::size_t(0));
+    }
+
+    // The axes are on the page: on a cel its pose moves, the copy is where the page's mirror puts it (the stroke's points
+    // are kept in the cel's own place).
+    void symmetryGoesByThePageOnAPosedCel()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(500, 400);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 4, "Line").command);
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Vector));
+        doc::CelPose pose;
+        pose.x = 150; // the cel moved 150 to the right
+        QVERIFY(controller.setCelKey(controller.currentCel(), 0, pose));
+        QCoreApplication::processEvents();
+        state.setActiveTool(tools::ToolId::Brush);
+        tools::SymmetrySettings symmetry;
+        symmetry.on = true;
+        state.setSymmetry(symmetry);
+        const QTransform toView = canvas.view().documentToView();
+        const QPoint a = toView.map(QPointF(700, 400)).toPoint(), b = toView.map(QPointF(780, 400)).toPoint();
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, a);
+        for (int i = 1; i <= 20; ++i)
+            QTest::mouseMove(&canvas, a + (b - a) * i / 20);
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, b);
+        const doc::Layer &layer = *controller.currentDrawing()->layer(controller.currentLayer());
+        QCOMPARE(layer.strokes.size(), std::size_t(2));
+        // In the cel: the stroke 150 to the left of where it was drawn, its copy 150 to the left of the page's mirror.
+        for (const brush::BrushInput &in : layer.strokes[0].points)
+            QVERIFY(in.x > 540 && in.x < 640);
+        for (const brush::BrushInput &in : layer.strokes[1].points)
+            QVERIFY2(in.x > 980 && in.x < 1080, qPrintable(QString::number(in.x)));
+    }
+
+    // The axes on the canvas: the center dragged, the knob turning them (0 is up), Ctrl+drag with a brush bringing
+    // the center to the pen (and drawing nothing), a double click on the center putting them back.
+    void symmetryAxesAreMovedOnTheCanvas()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(500, 400);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 4, "Line").command);
+        QCoreApplication::processEvents();
+        state.setActiveTool(tools::ToolId::Brush);
+        tools::SymmetrySettings symmetry;
+        state.setSymmetry(symmetry);
+        const QTransform toView = canvas.view().documentToView();
+        const QPoint center = toView.map(QPointF(960, 540)).toPoint();
+        QCOMPARE(canvas.symmetryGizmo().handleAt(QPointF(960, 540), canvas.view()), canvas::SymmetryGizmo::Handle::None);
+        symmetry.on = true;
+        state.setSymmetry(symmetry);
+        QCOMPARE(canvas.symmetryGizmo().handleAt(QPointF(960, 540), canvas.view()), canvas::SymmetryGizmo::Handle::Center);
+
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, center);
+        QTest::mouseMove(&canvas, center + QPoint(40, 0));
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, center + QPoint(40, 0));
+        const double moved = 40 / canvas.view().zoom();
+        QVERIFY(std::abs(controller.symmetryCenter().x() - (960 + moved)) < 1.0);
+        QVERIFY(controller.currentDrawing()->layers.front().image.isEmpty()); // nothing drawn
+
+        // The knob: dragged to the right of the center, the first axis points right.
+        const QPointF knob = *canvas.symmetryGizmo().handlePoint(canvas::SymmetryGizmo::Handle::Turn, canvas.view());
+        const QPoint knobAt = toView.map(knob).toPoint();
+        const QPoint right = toView.map(controller.symmetryCenter() + QPointF(200, 0)).toPoint();
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, knobAt);
+        QTest::mouseMove(&canvas, right);
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, right);
+        QVERIFY(std::abs(controller.symmetryAngle() - 90.0) < 1.0);
+
+        // Ctrl+drag with the brush: the center comes to the pen, and no stroke is made.
+        const QPoint elsewhere = toView.map(QPointF(400, 300)).toPoint();
+        QTest::mousePress(&canvas, Qt::LeftButton, Qt::ControlModifier, elsewhere);
+        QTest::mouseMove(&canvas, elsewhere + QPoint(10, 0));
+        QTest::mouseRelease(&canvas, Qt::LeftButton, Qt::ControlModifier, elsewhere + QPoint(10, 0));
+        const QPointF brought = canvas.view().mapToDocument(QPointF(elsewhere + QPoint(10, 0)));
+        QVERIFY(QLineF(controller.symmetryCenter(), brought).length() < 0.01);
+        QVERIFY(controller.currentDrawing()->layers.front().image.isEmpty());
+
+        // A double click on the center: back in the middle, upright.
+        const QPoint now = toView.map(controller.symmetryCenter()).toPoint();
+        QTest::mouseClick(&canvas, Qt::LeftButton, {}, now);
+        QTest::mouseClick(&canvas, Qt::LeftButton, {}, now);
+        QCOMPARE(controller.symmetryCenter(), QPointF(960, 540));
+        QCOMPARE(controller.symmetryAngle(), 0.0);
+        QVERIFY(!controller.document().symmetryAxes().placed);
+    }
+
     // While a control point is dragged only the stroke is drawn again, between the pixels of the strokes under and
     // over it: what comes out is what drawing all the strokes again gives, with an erasing stroke over it too.
     void correctLineDrawsTheLayerAsTheStrokesDo()

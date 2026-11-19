@@ -150,6 +150,19 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_toolState, &tools::ToolState::vectorEraserChanged, this, [this] {
         tools::Preferences::instance().setVectorEraserMode(int(m_toolState->vectorEraser().mode));
     });
+    // So are the symmetry's kind and copies (not whether it is on).
+    {
+        const tools::Preferences &p = tools::Preferences::instance();
+        tools::SymmetrySettings symmetry;
+        symmetry.kind = static_cast<tools::SymmetrySettings::Kind>(p.symmetryKind());
+        symmetry.count = p.symmetryCount();
+        symmetry.tiles = p.symmetryTiles();
+        m_toolState->setSymmetry(symmetry);
+    }
+    connect(m_toolState, &tools::ToolState::symmetryChanged, this, [this] {
+        const tools::SymmetrySettings s = m_toolState->symmetry();
+        tools::Preferences::instance().setSymmetryShape(int(s.kind), s.count, s.tiles);
+    });
     m_audioPlayer = new audio::AudioPlayer(m_document, this);
     // If the program dies, a copy of the project is tried (the stroke being drawn is not in it).
     diagnostics::setEmergencySave([this](const QString &path) {
@@ -414,6 +427,23 @@ void MainWindow::createCanvasArea()
     connect(m_toolState, &tools::ToolState::perspectiveSnapChanged, this, [this, snapAction] {
         const QSignalBlocker block(snapAction);
         snapAction->setChecked(m_toolState->perspectiveSnap());
+    });
+    // Symmetry, beside it: on and off (its kind is chosen in the brushes' properties).
+    auto *symmetryAction = new QAction(icon(IconId::Symmetry), tr("Symmetry"), this);
+    symmetryAction->setObjectName(QStringLiteral("symmetryAction"));
+    symmetryAction->setCheckable(true);
+    symmetryAction->setToolTip(tr("Symmetry: what the brushes draw is drawn again round the axes shown on the canvas "
+                                  "(drag their center or knob, or Ctrl+drag with a brush; double-click the center to "
+                                  "put it back). The kind is chosen in the brush's properties."));
+    bar->addAction(symmetryAction);
+    connect(symmetryAction, &QAction::toggled, this, [this](bool on) {
+        tools::SymmetrySettings s = m_toolState->symmetry();
+        s.on = on;
+        m_toolState->setSymmetry(s);
+    });
+    connect(m_toolState, &tools::ToolState::symmetryChanged, this, [this, symmetryAction] {
+        const QSignalBlocker block(symmetryAction);
+        symmetryAction->setChecked(m_toolState->symmetry().on);
     });
 
     auto *area = new QWidget(this);

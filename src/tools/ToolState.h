@@ -49,6 +49,24 @@ struct VectorPointSettings
     bool operator==(const VectorPointSettings &) const = default;
 };
 
+// Symmetry (as FireAlpaca's): while on, what the brushes and the eraser draw is drawn again round the axes, which
+// the document keeps (doc::Document::symmetryAxes(): a center and an angle on the page; see canvas::Symmetry.h):
+//  - Bilateral: mirrored left and right of the axis; Vertical: above and below it; Both: the two, four copies;
+//  - Rotate: `count` copies turned round the center; RotateMirror: the same, each mirrored too (a kaleidoscope);
+//  - Tile: the page cut into `tiles` x `tiles` cells, what is drawn in one drawn in all; HalfDrop: the same, every
+//    other column half a cell down.
+struct SymmetrySettings
+{
+    enum class Kind { Bilateral, Vertical, Both, Rotate, RotateMirror, Tile, HalfDrop };
+    bool on = false;
+    Kind kind = Kind::Bilateral;
+    int count = 4; // Rotate, RotateMirror: 2..kMaxCount
+    int tiles = 2; // Tile, HalfDrop: 2..4 (HalfDrop: 2 or 4)
+    static constexpr int kMaxCount = 12;
+
+    bool operator==(const SymmetrySettings &) const = default;
+};
+
 // What the eraser does on a vector layer (as Clip Studio's vector eraser): Off, it erases like a brush (the eraser's
 // strokes are kept with the layer); otherwise it takes away strokes, or parts of them.
 struct VectorEraserSettings
@@ -268,6 +286,8 @@ public:
 
     VectorEraserSettings vectorEraser() const { return m_vectorEraser; }
     void setVectorEraser(const VectorEraserSettings &settings);
+    SymmetrySettings symmetry() const { return m_symmetry; }
+    void setSymmetry(const SymmetrySettings &settings);
     VectorPointSettings vectorPoints() const { return m_vectorPoints; }
     void setVectorPoints(const VectorPointSettings &settings);
 
@@ -300,6 +320,7 @@ signals:
     void shapeSettingsChanged();
     void vectorEraserChanged();
     void vectorPointsChanged();
+    void symmetryChanged();
     void onionSkinChanged();
 
 private:
@@ -331,6 +352,7 @@ private:
     ShapeSettings m_shape;
     VectorEraserSettings m_vectorEraser;
     VectorPointSettings m_vectorPoints;
+    SymmetrySettings m_symmetry;
     OnionSkinSettings m_onion;
 };
 

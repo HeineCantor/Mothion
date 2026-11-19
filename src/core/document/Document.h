@@ -65,6 +65,19 @@ public:
         m_playFirst = first;
         m_playLast = last;
     }
+    // The axes of the brushes' symmetry (tools::SymmetrySettings): a center on the page and an angle (degrees). Until
+    // they are placed (`placed` false) they are at the middle of the page, upright. Saved with the project, but not an
+    // edit: it is not an undo step.
+    struct SymmetryAxes
+    {
+        bool placed = false;
+        double x = 0, y = 0;
+        double angle = 0;
+        bool operator==(const SymmetryAxes &) const = default;
+    };
+    const SymmetryAxes &symmetryAxes() const { return m_symmetryAxes; }
+    void setSymmetryAxes(const SymmetryAxes &axes) { m_symmetryAxes = axes; }
+
     const std::map<int, std::string> &markers() const { return m_markers; }
     void setMarkers(std::map<int, std::string> markers) { m_markers = std::move(markers); }
 
@@ -131,6 +144,7 @@ private:
     std::optional<AudioTrack> m_audio;
     std::optional<Camera> m_camera;
     std::map<int, std::string> m_markers;
+    SymmetryAxes m_symmetryAxes;
     int m_playFirst = 0;
     int m_playLast = kSceneEnd;
     GraphData m_compositing;

@@ -117,6 +117,7 @@ std::unique_ptr<doc::Document> sampleDocument()
     d->setCompositingView({true, 1.5, -120.25, 40});
     d->setFrameRate({30, 1});
     d->setPlayRange(-5, 40); // the Timeline's From and To, before the scene too
+    d->setSymmetryAxes({true, 300.5, -20.25, 30}); // the symmetry's axes, placed
     d->allocateCelId(); // ids used by a cel and a layer since deleted: must not come back
     d->allocateLayerId();
     return d;
@@ -132,6 +133,7 @@ void compareDocuments(const doc::Document &x, const doc::Document &y)
     QVERIFY(x.markers() == y.markers());
     QCOMPARE(x.playFirst(), y.playFirst());
     QCOMPARE(x.playLast(), y.playLast());
+    QVERIFY(x.symmetryAxes() == y.symmetryAxes());
     QCOMPARE(x.nextCelId(), y.nextCelId());
     QCOMPARE(x.nextDrawingId(), y.nextDrawingId());
     QCOMPARE(x.nextLayerId(), y.nextLayerId());
@@ -272,6 +274,7 @@ private slots:
         original->setCamera(std::nullopt); // and the camera with format 8
         original->setMarkers({}); // and the markers with format 10
         original->setPlayRange(0, doc::Document::kSceneEnd); // and the play range with format 17
+        original->setSymmetryAxes({}); // and the symmetry's axes with format 18
         for (int i = 0; i < original->celCount(); ++i) // and the motion of the cels with format 11
             original->celAt(i).setMotion({});
         for (int i = 0; i < original->celCount(); ++i) // and the Blender links with format 12

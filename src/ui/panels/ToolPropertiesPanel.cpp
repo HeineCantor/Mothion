@@ -28,6 +28,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 
 namespace mothion::ui {
 
@@ -139,6 +140,59 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
     brush->addWidget(m_smoothing);
     // On a vector layer the eraser can take away strokes (as Clip Studio's vector eraser) instead of erasing like a
     // brush: four buttons side by side, one of them down.
+    // Symmetry, for every brush and the eraser (the same for all; also on the bar above the canvas).
+    m_symmetryControls = new QWidget(m_brushControls);
+    m_symmetryOn = new QCheckBox(tr("Symmetry"), m_symmetryControls);
+    m_symmetryOn->setObjectName(QStringLiteral("symmetryOn"));
+    m_symmetryKind = new QComboBox(m_symmetryControls);
+    m_symmetryKind->setObjectName(QStringLiteral("symmetryKind"));
+    m_symmetryKind->addItem(tr("Bilateral"));
+    m_symmetryKind->addItem(tr("Vertical"));
+    m_symmetryKind->addItem(tr("Bilateral and vertical"));
+    m_symmetryKind->addItem(tr("Rotate"));
+    m_symmetryKind->addItem(tr("Rotate (mirror)"));
+    m_symmetryKind->addItem(tr("Tile"));
+    m_symmetryKind->addItem(tr("Half drop"));
+    m_symmetryKind->setToolTip(tr("Drag the center or the knob of the axes on the canvas, or Ctrl+drag with a brush to "
+                                  "bring the center there; double-click the center to put it back in the middle."));
+    m_symmetryCount = new QSpinBox(m_symmetryControls);
+    m_symmetryCount->setObjectName(QStringLiteral("symmetryCount"));
+    m_symmetryCount->setRange(2, tools::SymmetrySettings::kMaxCount);
+    m_symmetryCount->setToolTip(tr("How many times round the center"));
+    m_symmetryTiles = new QComboBox(m_symmetryControls);
+    m_symmetryTiles->setObjectName(QStringLiteral("symmetryTiles"));
+    for (int n = 2; n <= 4; ++n)
+        m_symmetryTiles->addItem(QStringLiteral("%1 × %1").arg(n), n);
+    auto *symmetryRow = new QHBoxLayout(m_symmetryControls);
+    symmetryRow->setContentsMargins(0, 0, 0, 0);
+    symmetryRow->setSpacing(4);
+    symmetryRow->addWidget(m_symmetryOn);
+    symmetryRow->addWidget(m_symmetryKind, 1);
+    symmetryRow->addWidget(m_symmetryCount);
+    symmetryRow->addWidget(m_symmetryTiles);
+    auto editSymmetry = [this](const std::function<void(tools::SymmetrySettings &)> &change) {
+        tools::SymmetrySettings s = m_state->symmetry();
+        change(s);
+        m_state->setSymmetry(s);
+    };
+    connect(m_symmetryOn, &QCheckBox::toggled, this,
+            [editSymmetry](bool on) { editSymmetry([on](tools::SymmetrySettings &s) { s.on = on; }); });
+    connect(m_symmetryKind, &QComboBox::activated, this, [editSymmetry](int index) {
+        editSymmetry([index](tools::SymmetrySettings &s) {
+            s.kind = static_cast<tools::SymmetrySettings::Kind>(index);
+            s.on = true; // a kind chosen is a kind wanted
+        });
+    });
+    connect(m_symmetryCount, &QSpinBox::valueChanged, this,
+            [editSymmetry](int n) { editSymmetry([n](tools::SymmetrySettings &s) { s.count = n; }); });
+    connect(m_symmetryTiles, &QComboBox::activated, this, [this, editSymmetry](int index) {
+        const int n = m_symmetryTiles->itemData(index).toInt();
+        editSymmetry([n](tools::SymmetrySettings &s) { s.tiles = n; });
+    });
+    connect(m_state, &ToolState::symmetryChanged, this, &ToolPropertiesPanel::syncSymmetryFromState);
+    brush->addWidget(m_symmetryControls);
+    syncSymmetryFromState();
+
     m_vectorEraserControls = new QWidget(m_brushControls);
     m_vectorEraserModes = new QButtonGroup(this);
     m_vectorEraserModes->setExclusive(true);
@@ -566,6 +620,19 @@ void ToolPropertiesPanel::syncVectorEraserFromState()
 {
     if (QAbstractButton *button = m_vectorEraserModes->button(int(m_state->vectorEraser().mode)))
         button->setChecked(true);
+}
+
+void ToolPropertiesPanel::syncSymmetryFromState()
+{
+    using Kind = tools::SymmetrySettings::Kind;
+    const tools::SymmetrySettings s = m_state->symmetry();
+    const QSignalBlocker b1(m_symmetryOn), b2(m_symmetryKind), b3(m_symmetryCount), b4(m_symmetryTiles);
+    m_symmetryOn->setChecked(s.on);
+    m_symmetryKind->setCurrentIndex(int(s.kind));
+    m_symmetryCount->setValue(s.count);
+    m_symmetryTiles->setCurrentIndex(m_symmetryTiles->findData(s.tiles));
+    m_symmetryCount->setVisible(s.kind == Kind::Rotate || s.kind == Kind::RotateMirror);
+    m_symmetryTiles->setVisible(s.kind == Kind::Tile || s.kind == Kind::HalfDrop);
 }
 
 void ToolPropertiesPanel::syncShapeFromState()

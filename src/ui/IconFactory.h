@@ -16,8 +16,8 @@ enum class IconId {
     KindRaster, KindVector, KindPerspective, Rasterize,
     // The timeline bar: a new frame (a frame with a plus) and the onion skin (an onion).
     NewFrame, Onion, NewCel, NewTrajectory,
-    // Correct line (the control points of vector strokes).
-    CorrectLine,
+    // Correct line (the control points of vector strokes), and the brushes' symmetry.
+    CorrectLine, Symmetry,
 };
 
 // Provisional icons, drawn in code as simple line art on a 24x24 grid.

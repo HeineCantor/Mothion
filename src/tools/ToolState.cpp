@@ -275,6 +275,19 @@ void ToolState::setPerspectiveSnapLayer(doc::LayerId layer)
     emit perspectiveSnapChanged();
 }
 
+void ToolState::setSymmetry(const SymmetrySettings &settings)
+{
+    SymmetrySettings s = settings;
+    s.count = std::clamp(s.count, 2, SymmetrySettings::kMaxCount);
+    s.tiles = std::clamp(s.tiles, 2, 4);
+    if (s.kind == SymmetrySettings::Kind::HalfDrop && s.tiles == 3) // a half drop needs an even number of columns
+        s.tiles = 4;
+    if (s == m_symmetry)
+        return;
+    m_symmetry = s;
+    emit symmetryChanged();
+}
+
 void ToolState::setVectorPoints(const VectorPointSettings &settings)
 {
     if (settings == m_vectorPoints)

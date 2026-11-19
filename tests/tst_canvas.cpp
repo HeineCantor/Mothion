@@ -1,6 +1,7 @@
 #include "canvas/FrameRenderer.h"
 #include "canvas/Resample.h"
 #include "canvas/StrokeSession.h"
+#include "canvas/Symmetry.h"
 #include "canvas/VectorPoints.h"
 #include "core/brush/DabGenerator.h"
 #include "canvas/ViewTransform.h"
@@ -759,6 +760,90 @@ private slots:
         QCOMPARE(pieces->second.brush, std::string("G-pen"));
         QCOMPARE(pieces->second.seed, 7u);
         QVERIFY(!cutStroke(line, *nearestPlace(line, QPointF(-5, 0)), 0.5));
+    }
+    // The copies of the symmetry: mirrored round the axes through the center (turned by the angle), turned round it,
+    // or moved cell to cell; the first is the stroke itself.
+    void symmetryCopiesGoRoundTheAxes()
+    {
+        using Kind = tools::SymmetrySettings::Kind;
+        const QPointF center(100, 50);
+        const QSizeF page(200, 100);
+        auto mapped = [&](Kind kind, int count, double angle, QPointF p, QPointF start = {}) {
+            tools::SymmetrySettings s;
+            s.kind = kind;
+            s.count = count;
+            s.tiles = count;
+            std::vector<QPointF> out;
+            const auto transforms = symmetryTransforms(s, center, angle, page, start);
+            if (transforms.empty() || !transforms.front().isIdentity())
+                return std::vector<QPointF>{};
+            for (const QTransform &t : transforms)
+                out.push_back(t.map(p));
+            return out;
+        };
+        auto has = [](const std::vector<QPointF> &points, QPointF p) {
+            return std::any_of(points.begin(), points.end(), [&](QPointF q) { return QLineF(p, q).length() < 1e-9; });
+        };
+        const QPointF p(130, 70);
+        auto bilateral = mapped(Kind::Bilateral, 0, 0, p);
+        QCOMPARE(bilateral.size(), std::size_t(2));
+        QVERIFY(has(bilateral, QPointF(70, 70)));
+        QVERIFY(has(mapped(Kind::Bilateral, 0, 90, p), QPointF(130, 30))); // the mirror turned level
+        QVERIFY(has(mapped(Kind::Vertical, 0, 0, p), QPointF(130, 30)));
+        const auto both = mapped(Kind::Both, 0, 0, p);
+        QCOMPARE(both.size(), std::size_t(4));
+        QVERIFY(has(both, QPointF(70, 30)));
+        const auto rotate = mapped(Kind::Rotate, 4, 0, QPointF(100, 20)); // 30 above the center
+        QCOMPARE(rotate.size(), std::size_t(4));
+        QVERIFY(has(rotate, QPointF(130, 50)) && has(rotate, QPointF(100, 80)) && has(rotate, QPointF(70, 50)));
+        const auto kaleidoscope = mapped(Kind::RotateMirror, 3, 0, p);
+        QCOMPARE(kaleidoscope.size(), std::size_t(6));
+        QVERIFY(has(kaleidoscope, QPointF(70, 70)));
+
+        // Cells of the page, from the center: 2 x 2 cells of 100 x 50 from (0, 0) when the center is there.
+        tools::SymmetrySettings tile;
+        tile.kind = Kind::Tile;
+        tile.tiles = 2;
+        auto cells = symmetryTransforms(tile, QPointF(0, 0), 30, page, QPointF(30, 20));
+        std::vector<QPointF> tiled;
+        for (const QTransform &t : cells)
+            tiled.push_back(t.map(QPointF(30, 20)));
+        QCOMPARE(tiled.size(), std::size_t(4));
+        QVERIFY(has(tiled, QPointF(130, 20)) && has(tiled, QPointF(30, 70)) && has(tiled, QPointF(130, 70)));
+        tile.kind = Kind::HalfDrop;
+        tiled.clear();
+        for (const QTransform &t : symmetryTransforms(tile, QPointF(0, 0), 0, page, QPointF(30, 20)))
+            tiled.push_back(t.map(QPointF(30, 20)));
+        QVERIFY(has(tiled, QPointF(130, 45)) && has(tiled, QPointF(30, 70))); // the second column half a cell down
+
+        // The way a point of the brush points is mirrored with it.
+        brush::BrushInput in;
+        in.direction = 0;
+        in.penAngle = 30;
+        const brush::BrushInput mirrored = transformedInput(in, symmetryTransforms({}, center, 0, page, {})[1]);
+        QVERIFY(std::abs(std::abs(mirrored.direction) - 180.0) < 1e-9);
+        QVERIFY(std::abs(mirrored.penAngle - 150.0) < 1e-9);
+    }
+
+    // The guides: the mirror's line through the center, a ray for each copy turned, the lines between the cells.
+    void symmetryGuidesShowTheAxes()
+    {
+        using Kind = tools::SymmetrySettings::Kind;
+        tools::SymmetrySettings s;
+        const auto mirror = symmetryGuides(s, QPointF(100, 50), 0, QSizeF(200, 100), 1000);
+        QCOMPARE(mirror.size(), std::size_t(1));
+        QVERIFY(std::abs(mirror[0].p1().x() - 100) < 1e-9 && std::abs(mirror[0].p2().x() - 100) < 1e-9);
+        s.kind = Kind::Rotate;
+        s.count = 5;
+        QCOMPARE(symmetryGuides(s, QPointF(100, 50), 0, QSizeF(200, 100), 1000).size(), std::size_t(5));
+        s.kind = Kind::Tile;
+        s.tiles = 2;
+        const auto grid = symmetryGuides(s, QPointF(0, 0), 0, QSizeF(200, 100), 1000);
+        QCOMPARE(grid.size(), std::size_t(2));
+        QVERIFY(std::any_of(grid.begin(), grid.end(), [](const QLineF &l) { return l.p1().x() == 100 && l.p2().x() == 100; }));
+        QVERIFY(std::any_of(grid.begin(), grid.end(), [](const QLineF &l) { return l.p1().y() == 50 && l.p2().y() == 50; }));
+        QVERIFY(!symmetryTurns(Kind::Tile));
+        QVERIFY(symmetryTurns(Kind::RotateMirror));
     }
 };
 

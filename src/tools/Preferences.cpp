@@ -24,6 +24,9 @@ constexpr auto kUndoSteps = "undoSteps";
 constexpr auto kMousePressure = "mousePressure";
 constexpr auto kAutosave = "autosaveMinutes";
 constexpr auto kVectorEraserMode = "vectorEraserMode";
+constexpr auto kSymmetryKind = "symmetryKind";
+constexpr auto kSymmetryCount = "symmetryCount";
+constexpr auto kSymmetryTiles = "symmetryTiles";
 constexpr auto kOutsideScene = "outsideScenePercent";
 
 QString path(const char *key)
@@ -58,6 +61,9 @@ Preferences::Preferences()
     m_mousePressure = std::clamp(settings.value(path(kMousePressure), 100).toInt(), 10, 100);
     m_autosaveMinutes = std::clamp(settings.value(path(kAutosave), kDefaultAutosaveMinutes).toInt(), 0, 120);
     m_vectorEraserMode = std::clamp(settings.value(path(kVectorEraserMode), 0).toInt(), 0, 3);
+    m_symmetryKind = std::clamp(settings.value(path(kSymmetryKind), 0).toInt(), 0, 6);
+    m_symmetryCount = std::clamp(settings.value(path(kSymmetryCount), 4).toInt(), 2, 12);
+    m_symmetryTiles = std::clamp(settings.value(path(kSymmetryTiles), 2).toInt(), 2, 4);
     m_outsideScene = std::clamp(settings.value(path(kOutsideScene), 100).toInt(), 0, 100);
 }
 
@@ -127,6 +133,22 @@ void Preferences::setVectorEraserMode(int mode)
         return;
     m_vectorEraserMode = mode;
     save(kVectorEraserMode, mode);
+}
+
+void Preferences::setSymmetryShape(int kind, int count, int tiles)
+{
+    if (kind != m_symmetryKind) {
+        m_symmetryKind = kind;
+        save(kSymmetryKind, kind);
+    }
+    if (count != m_symmetryCount) {
+        m_symmetryCount = count;
+        save(kSymmetryCount, count);
+    }
+    if (tiles != m_symmetryTiles) {
+        m_symmetryTiles = tiles;
+        save(kSymmetryTiles, tiles);
+    }
 }
 
 void Preferences::setBrushOutline(bool on)

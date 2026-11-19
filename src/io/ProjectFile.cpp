@@ -80,6 +80,8 @@ const char *const kSchema[] = {
     "create table vector_strokes (layer integer primary key references layers(id), data text not null)",
     // Format 17: the frames that play (the Timeline's From and To); a null last frame is the end of the scene.
     "create table play_range (first integer not null, last integer)",
+    // Format 18: the axes of the brushes' symmetry, once placed.
+    "create table symmetry (x real not null, y real not null, angle real not null)",
 };
 
 // Stored by name, so reordering the enum cannot change old files.
@@ -783,6 +785,17 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
             return false;
         }
     }
+    if (const doc::Document::SymmetryAxes &axes = d.symmetryAxes(); axes.placed) {
+        QSqlQuery symmetry(db);
+        symmetry.prepare(QStringLiteral("insert into symmetry values (?, ?, ?)"));
+        symmetry.addBindValue(axes.x);
+        symmetry.addBindValue(axes.y);
+        symmetry.addBindValue(axes.angle);
+        if (!symmetry.exec()) {
+            failure = sqlError(symmetry);
+            return false;
+        }
+    }
     if (!db.commit()) {
         failure = db.lastError().text();
         return false;
@@ -1057,6 +1070,9 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
 
     if (version >= 17 && q.exec(QStringLiteral("select first, last from play_range")) && q.next())
         d->setPlayRange(q.value(0).toInt(), q.value(1).isNull() ? doc::Document::kSceneEnd : q.value(1).toInt());
+
+    if (version >= 18 && q.exec(QStringLiteral("select x, y, angle from symmetry")) && q.next())
+        d->setSymmetryAxes({true, q.value(0).toDouble(), q.value(1).toDouble(), q.value(2).toDouble()});
 
     if (version >= 8 && q.exec(QStringLiteral("select data from camera")) && q.next())
         d->setCamera(cameraFromJson(q.value(0).toString()));

@@ -90,6 +90,13 @@ private:
 
     // Eraser: what it does on a vector layer (tools::VectorEraserSettings).
     QWidget *m_vectorEraserControls = nullptr;
+    // The symmetry (tools::SymmetrySettings): on, its kind, and its copies or tiles as the kind has them.
+    QWidget *m_symmetryControls = nullptr;
+    QCheckBox *m_symmetryOn = nullptr;
+    QComboBox *m_symmetryKind = nullptr;
+    QSpinBox *m_symmetryCount = nullptr;
+    QComboBox *m_symmetryTiles = nullptr;
+    void syncSymmetryFromState();
     QButtonGroup *m_vectorEraserModes = nullptr; // one button per mode, one down at a time
     // The brush's advanced options (pen tilt, pressure curve), folded away at the end of the panel.
     QToolButton *m_advancedToggle = nullptr;

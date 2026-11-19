@@ -62,6 +62,12 @@ public:
     // it is as it was at the next start. Not a choice of the Settings window: the tool's properties keep it.
     int vectorEraserMode() const { return m_vectorEraserMode; }
     void setVectorEraserMode(int mode);
+    // The symmetry's kind (a SymmetrySettings::Kind's number), its copies and its tiles as they were last set, likewise.
+    // Whether it is on is not kept: each session starts without it.
+    int symmetryKind() const { return m_symmetryKind; }
+    int symmetryCount() const { return m_symmetryCount; }
+    int symmetryTiles() const { return m_symmetryTiles; }
+    void setSymmetryShape(int kind, int count, int tiles);
 
     // How what is drawn out of the scene's frame (the canvas has no end; the size of the project is the frame of the
     // scene) shows on the canvas, in %: 100 as inside, 0 hidden.
@@ -107,6 +113,9 @@ private:
     int m_mousePressure = 100;
     int m_autosaveMinutes = kDefaultAutosaveMinutes;
     int m_vectorEraserMode = 0;
+    int m_symmetryKind = 0;
+    int m_symmetryCount = 4;
+    int m_symmetryTiles = 2;
     int m_outsideScene = 100;
 };
 

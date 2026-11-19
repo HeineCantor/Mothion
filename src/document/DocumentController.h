@@ -12,6 +12,7 @@
 
 #include <map>
 #include <string>
+#include <QPointF>
 #include <QRect>
 #include <QString>
 
@@ -276,6 +277,12 @@ public:
     // plays the whole scene.
     static constexpr int kSceneEnd = doc::Document::kSceneEnd;
     void setPlayRange(int first, int last);
+    // The symmetry's axes (doc::Document::symmetryAxes()), resolved: where they are on the page, the middle until
+    // placed. Setting them places them; resetSymmetryAxes() puts them back in the middle, upright.
+    QPointF symmetryCenter() const;
+    double symmetryAngle() const { return m_document->symmetryAxes().angle; }
+    void setSymmetryAxes(const QPointF &center, double angle);
+    void resetSymmetryAxes();
     int playRangeFirst() const { return m_document->playFirst(); }
     int playRangeLast() const; // resolved, and never before the first
     bool playRangeFollowsSceneEnd() const { return m_document->playLast() == kSceneEnd; }
@@ -603,6 +610,8 @@ signals:
     void structureChanged();
     // The play range was set (see setPlayRange()), or went back to the whole scene with a new project.
     void playRangeChanged();
+    // The symmetry's axes were moved or turned (or another document came).
+    void symmetryAxesChanged();
     void currentFrameChanged(int frame);
     void currentCelChanged(doc::CelId cel);
     void currentLayerChanged(doc::LayerId layer);

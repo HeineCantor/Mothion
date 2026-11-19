@@ -4,6 +4,7 @@
 
 #include "canvas/DebugOverlay.h"
 #include "canvas/EyedropperTool.h"
+#include "canvas/Symmetry.h"
 #include "canvas/VectorPointTool.h"
 #include "canvas/EffectBrushTools.h"
 #include "canvas/FillTool.h"
@@ -101,6 +102,7 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
     , m_gizmo(document)
     , m_cameraGizmo(document)
     , m_trajectoryGizmo(document)
+    , m_symmetryGizmo(document, toolState)
     , m_overlay(new DebugOverlay(this))
 {
     setFocusPolicy(Qt::StrongFocus);
@@ -207,6 +209,8 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
     m_vectorPointTool = std::make_unique<VectorPointTool>(m_document, m_toolState,
                                                           [this](const QString &text) { emit statusMessage(text); });
     connect(m_toolState, &ToolState::vectorPointsChanged, this, [this] { update(); });
+    connect(m_toolState, &ToolState::symmetryChanged, this, [this] { update(); });
+    connect(m_document, &DocumentController::symmetryAxesChanged, this, [this] { update(); });
     m_animateTool = std::make_unique<AnimateTool>(
         m_document, m_toolState, [this](const QString &text) { emit statusMessage(text); }, [this] {
             update();
@@ -595,6 +599,7 @@ void CanvasView::paintEvent(QPaintEvent *)
     m_cameraGizmo.paint(p, m_view);
     m_trajectoryGizmo.paintPath(p, m_view); // the whole way of the trajectory, under its circle
     m_trajectoryGizmo.paint(p, m_view);
+    m_symmetryGizmo.paint(p, m_view);
     paintSnapGuide(p);
     paintStraightLinePreview(p);
 
@@ -939,7 +944,8 @@ void CanvasView::handleSample(const PenSample &sample)
     updateBrushOutline(QPointF(sample.x, sample.y));
 
     const bool busy = m_gesture.isActive() || m_stroke.has_value() || m_editTool || m_gizmo.isDragging()
-                      || m_cameraGizmo.isDragging() || m_trajectoryGizmo.isDragging() || m_flip.has_value();
+                      || m_cameraGizmo.isDragging() || m_trajectoryGizmo.isDragging() || m_symmetryGizmo.isDragging()
+                      || m_flip.has_value();
     const QPointF docPos = m_view.mapToDocument(QPointF(sample.x, sample.y));
     const QPointF celPos = toCel(docPos);
     // The place a tool is given: the cel's own, but for the tools that work on what is shown.
@@ -953,6 +959,12 @@ void CanvasView::handleSample(const PenSample &sample)
             m_gesture.begin(mode, QPointF(sample.x, sample.y), m_view);
         } else if (sample.tipDown() && m_cameraGizmo.press(docPos, m_view)) {
             update(); // the camera selected: its frame or a handle, whatever the tool
+        } else if (sample.tipDown()
+                   && m_symmetryGizmo.press(docPos, m_view,
+                                            (modifiers & Qt::ControlModifier)
+                                                && (sample.tool == InputTool::Eraser
+                                                    || ToolState::isPaintTool(m_toolState->activeTool())))) {
+            update(); // the symmetry's center or knob, whatever the tool; Ctrl+drag with a brush brings the center
         } else if (sample.tipDown() && m_trajectoryGizmo.press(docPos, m_view, modifiers)) {
             update(); // the circle of the trajectory cel selected: its middle, its arrow or its edge, whatever the tool
         } else if (sample.tipDown() && m_gizmo.press(docPos, m_view)) {
@@ -1011,6 +1023,9 @@ void CanvasView::handleSample(const PenSample &sample)
         } else if (m_cameraGizmo.isDragging()) {
             m_cameraGizmo.move(docPos);
             update();
+        } else if (m_symmetryGizmo.isDragging()) {
+            m_symmetryGizmo.move(docPos, modifiers);
+            update();
         } else if (m_trajectoryGizmo.isDragging()) {
             m_trajectoryGizmo.move(docPos, modifiers);
             update();
@@ -1044,6 +1059,11 @@ void CanvasView::handleSample(const PenSample &sample)
             update();
             updateGizmoCursor();
         }
+        if (m_symmetryGizmo.isDragging()) {
+            m_symmetryGizmo.release(docPos);
+            update();
+            updateGizmoCursor();
+        }
         if (m_trajectoryGizmo.isDragging()) {
             m_trajectoryGizmo.release(docPos);
             update();
@@ -1070,6 +1090,10 @@ void CanvasView::handleSample(const PenSample &sample)
         break;
     case SamplePhase::Hover:
         if (!busy && m_cameraGizmo.hover(docPos, m_view)) {
+            updateGizmoCursor();
+            update();
+        }
+        if (!busy && m_symmetryGizmo.hover(docPos, m_view)) {
             updateGizmoCursor();
             update();
         }
@@ -1155,6 +1179,27 @@ void CanvasView::beginStroke(const PenSample &sample)
     m_stroke->setStyle(style);
     m_seed = QRandomGenerator::global()->generate();
     m_dabs.emplace(style, m_seed);
+    // The copies round the symmetry's axes: the axes are on the page, the stroke's points in the cel (which its pose
+    // may move), so each copy's transform goes out to the page and back.
+    m_symmetryCopies.clear();
+    if (const tools::SymmetrySettings symmetry = m_toolState->symmetry(); symmetry.on) {
+        const doc::Document &d = m_document->document();
+        const std::vector<QTransform> transforms =
+            symmetryTransforms(symmetry, m_document->symmetryCenter(), m_document->symmetryAngle(),
+                               QSizeF(d.width(), d.height()), m_view.mapToDocument(QPointF(sample.x, sample.y)));
+        QTransform pose;
+        if (celIsPosed()) {
+            const doc::Matrix2x3 m = celPose();
+            pose = QTransform(m.a, m.b, m.c, m.d, m.e, m.f);
+        }
+        const QTransform poseBack = pose.inverted();
+        for (std::size_t i = 1; i < transforms.size(); ++i) {
+            SymmetryCopy copy;
+            copy.transform = pose * transforms[i] * poseBack;
+            copy.dabs.emplace(style, m_seed);
+            m_symmetryCopies.push_back(std::move(copy));
+        }
+    }
     m_points.clear();
     m_drawnPoints = 0;
     m_vectorStroke.reset();
@@ -1235,6 +1280,8 @@ void CanvasView::cycleSnapAxis()
     const brush::BrushStyle style = m_dabs->style();
     const QRect area = m_stroke->restart();
     m_dabs.emplace(style, m_seed);
+    for (SymmetryCopy &copy : m_symmetryCopies)
+        copy.dabs.emplace(style, m_seed);
     m_points.clear();
     m_drawnPoints = 0;
     m_smoother.reset();
@@ -1326,6 +1373,14 @@ void CanvasView::releaseHeldSamples(bool end)
         if (const auto tip = brush::cornerTip(corner.x, corner.y, corner.x - in.x(), corner.y - in.y(),
                                               out.x() - corner.x, out.y() - corner.y, dab.radius))
             m_document->notifyPainted(m_stroke->addCornerTip(*tip, dab));
+        for (SymmetryCopy &copy : m_symmetryCopies) { // the corner's point on each copy too
+            const brush::BrushInput c = transformedInput(corner, copy.transform);
+            const QPointF i = copy.transform.map(in), o = copy.transform.map(out);
+            const brush::BrushDab copyDab = copy.dabs->dabHere(c);
+            if (const auto tip = brush::cornerTip(c.x, c.y, c.x - i.x(), c.y - i.y(), o.x() - c.x, o.y() - c.y,
+                                                  copyDab.radius))
+                m_document->notifyPainted(m_stroke->addCornerTip(*tip, copyDab));
+        }
     }
 }
 
@@ -1343,6 +1398,10 @@ void CanvasView::drawPendingPoints()
         const brush::BrushInput &in = m_points[m_drawnPoints];
         const auto dabs = m_drawnPoints == 0 ? m_dabs->begin(in) : m_dabs->continueTo(in);
         changed |= m_stroke->addDabs(dabs);
+        for (SymmetryCopy &copy : m_symmetryCopies) {
+            const brush::BrushInput moved = transformedInput(in, copy.transform);
+            changed |= m_stroke->addDabs(m_drawnPoints == 0 ? copy.dabs->begin(moved) : copy.dabs->continueTo(moved));
+        }
     }
     m_document->notifyPainted(changed);
 }
@@ -1373,6 +1432,16 @@ void CanvasView::endStroke()
         generator.setStrokeLength(brush::strokeLength(points));
         // Dabs, and the points of sharp corners with the option on.
         changed |= m_stroke->drawPoints(generator, points, m_toolState->sharpCorners());
+        for (const SymmetryCopy &copy : m_symmetryCopies) {
+            std::vector<brush::BrushInput> moved;
+            moved.reserve(m_points.size());
+            for (const brush::BrushInput &in : m_points)
+                moved.push_back(transformedInput(in, copy.transform));
+            const std::vector<brush::BrushInput> copyPoints = brush::finalPoints(style, moved);
+            brush::DabGenerator copyGenerator(style, m_seed);
+            copyGenerator.setStrokeLength(brush::strokeLength(copyPoints));
+            changed |= m_stroke->drawPoints(copyGenerator, copyPoints, m_toolState->sharpCorners());
+        }
         m_document->notifyPainted(changed);
     }
     m_document->notifyPainted(m_stroke->finish());
@@ -1382,12 +1451,23 @@ void CanvasView::endStroke()
         m_lastPoint = lineStartOf(m_points);
     if (m_vectorStroke) {
         m_vectorStroke->points = m_points;
-        if (m_document->hasSelection()) { // painted only inside the selection: so is what is kept
-            const SplitStroke cut = splitStrokeByMask(*m_vectorStroke, SelectionMask::fromPath(m_document->selection()));
-            for (const doc::VectorStroke &piece : cut.inside)
+        // The stroke, then each of its copies round the symmetry's axes, a stroke of its own.
+        std::vector<doc::VectorStroke> kept{*m_vectorStroke};
+        for (const SymmetryCopy &copy : m_symmetryCopies) {
+            doc::VectorStroke moved = *m_vectorStroke;
+            for (brush::BrushInput &in : moved.points)
+                in = transformedInput(in, copy.transform);
+            kept.push_back(std::move(moved));
+        }
+        const bool inSelection = m_document->hasSelection(); // painted only inside the selection: so is what is kept
+        const SelectionMask mask = inSelection ? SelectionMask::fromPath(m_document->selection()) : SelectionMask();
+        for (doc::VectorStroke &stroke : kept) {
+            if (!inSelection) {
+                m_document->attachStroke(std::move(stroke));
+                continue;
+            }
+            for (const doc::VectorStroke &piece : splitStrokeByMask(stroke, mask).inside)
                 m_document->attachStroke(piece);
-        } else {
-            m_document->attachStroke(std::move(*m_vectorStroke));
         }
         m_vectorStroke.reset();
     }
@@ -1395,6 +1475,7 @@ void CanvasView::endStroke()
     m_stroke.reset();
     m_strokeImage = nullptr;
     m_dabs.reset();
+    m_symmetryCopies.clear();
     m_points.clear();
     updateStraightLine(); // Shift still held: a line from where this stroke ended
 }
@@ -1520,6 +1601,7 @@ void CanvasView::cancelStroke()
     m_gizmo.cancel();
     m_cameraGizmo.cancel();
     m_trajectoryGizmo.cancel();
+    m_symmetryGizmo.cancel();
     if (m_editTool) {
         // A drag cut short is dropped, unless it belongs to a longer edit.
         CanvasTool *tool = m_editTool;
@@ -1548,6 +1630,7 @@ void CanvasView::cancelStroke()
     m_stroke.reset();
     m_strokeImage = nullptr;
     m_dabs.reset();
+    m_symmetryCopies.clear();
     m_vectorStroke.reset();
     m_heldSamples.clear();
     m_document->cancelPaint();
@@ -1771,6 +1854,8 @@ void CanvasView::updateGizmoCursor()
         setCursor(hovered == H::Move || hovered == H::Key || hovered == H::BoxMove ? Qt::SizeAllCursor
                   : hovered == H::Rotate || hovered == H::BoxRotate              ? turnCursor()
                                                                                  : Qt::SizeFDiagCursor);
+    else if (m_symmetryGizmo.hovered() != SymmetryGizmo::Handle::None && !panKeyHeld())
+        setCursor(m_symmetryGizmo.hovered() == SymmetryGizmo::Handle::Turn ? turnCursor() : Qt::SizeAllCursor);
     else if ((m_gizmo.hovered() != PerspectiveGizmo::Handle::None || m_cameraGizmo.hovered() != CameraGizmo::Handle::None)
         && !panKeyHeld())
         setCursor(Qt::PointingHandCursor);

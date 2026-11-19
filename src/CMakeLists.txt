@@ -105,6 +105,8 @@ qt_add_library(mothion_gui STATIC
     canvas/VectorEraseTool.h canvas/VectorEraseTool.cpp
     canvas/VectorPoints.h canvas/VectorPoints.cpp
     canvas/VectorPointTool.h canvas/VectorPointTool.cpp
+    canvas/Symmetry.h canvas/Symmetry.cpp
+    canvas/SymmetryGizmo.h canvas/SymmetryGizmo.cpp
     canvas/BlendDraw.h canvas/BlendDraw.cpp
     canvas/FrameRenderer.h canvas/FrameRenderer.cpp
     canvas/PerspectiveGizmo.h canvas/PerspectiveGizmo.cpp

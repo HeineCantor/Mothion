@@ -306,6 +306,16 @@ void drawGlyph(QPainter &p, IconId id)
         path.addRect(QRectF(3.5, 4.5, 11, 11));
         path.addEllipse(QPointF(15, 15), 5.5, 5.5);
         break;
+    case IconId::Symmetry: // a dashed axis, and a curve mirrored on either side of it
+        for (double y = 2; y < 22; y += 4) {
+            path.moveTo(12, y);
+            path.lineTo(12, y + 2);
+        }
+        path.moveTo(9, 5);
+        path.cubicTo(3, 6, 2, 15, 9, 19);
+        path.moveTo(15, 5);
+        path.cubicTo(21, 6, 22, 15, 15, 19);
+        break;
     case IconId::CorrectLine: // a curve with three control points on it, the middle one raised
         path.moveTo(3, 18);
         path.cubicTo(7, 4, 15, 4, 21, 14);

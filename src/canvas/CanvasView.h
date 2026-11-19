@@ -5,6 +5,7 @@
 #include "canvas/FrameRenderer.h"
 #include "canvas/NavigationGesture.h"
 #include "canvas/CameraGizmo.h"
+#include "canvas/SymmetryGizmo.h"
 #include "canvas/TrajectoryGizmo.h"
 #include "canvas/PerspectiveGizmo.h"
 #include "canvas/PerspectiveSnap.h"
@@ -77,6 +78,7 @@ public:
     // The frame of the camera and its handles (the camera selected in the Layers panel).
     const CameraGizmo &cameraGizmo() const { return m_cameraGizmo; }
     const TrajectoryGizmo &trajectoryGizmo() const { return m_trajectoryGizmo; }
+    const SymmetryGizmo &symmetryGizmo() const { return m_symmetryGizmo; }
     // Where the open transform's box is now (document coordinates, the box
     // after the transform); a null rect when no transform is open.
     QRectF transformBounds() const;
@@ -271,12 +273,21 @@ private:
     PerspectiveGizmo m_gizmo;
     CameraGizmo m_cameraGizmo;
     TrajectoryGizmo m_trajectoryGizmo;
+    SymmetryGizmo m_symmetryGizmo;
     void updateGizmoCursor(); // over a handle: the hand
     std::optional<brush::DabGenerator> m_dabs;
     std::vector<brush::BrushInput> m_points; // the stroke so far, for the final pass
     std::size_t m_drawnPoints = 0;           // points already given to m_dabs
     std::uint32_t m_seed = 0;                // the stroke's random seed, reused by the final pass
     std::optional<doc::VectorStroke> m_vectorStroke; // on a vector layer: the stroke kept with its pixels
+    // The stroke's copies round the symmetry's axes (tools::SymmetrySettings), besides itself: each drawn by a dab
+    // generator of its own from the stroke's points moved by its transform (cel coordinates), into the same stroke.
+    struct SymmetryCopy
+    {
+        QTransform transform;
+        std::optional<brush::DabGenerator> dabs;
+    };
+    std::vector<SymmetryCopy> m_symmetryCopies;
     brush::VelocityMeter m_velocity;
     StrokeSmoother m_smoother;
     brush::CornerDetector m_corners; // on the raw pen points, screen pixels

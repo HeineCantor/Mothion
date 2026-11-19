@@ -1733,6 +1733,32 @@ void DocumentController::setFrameRate(int fps)
     execute(std::make_unique<doc::SetFrameRateCommand>(rate));
 }
 
+QPointF DocumentController::symmetryCenter() const
+{
+    const doc::Document::SymmetryAxes &axes = m_document->symmetryAxes();
+    if (axes.placed)
+        return {axes.x, axes.y};
+    return {m_document->width() / 2.0, m_document->height() / 2.0};
+}
+
+void DocumentController::setSymmetryAxes(const QPointF &center, double angle)
+{
+    angle = std::remainder(angle, 360.0);
+    const doc::Document::SymmetryAxes axes{true, center.x(), center.y(), angle};
+    if (axes == m_document->symmetryAxes())
+        return;
+    m_document->setSymmetryAxes(axes);
+    emit symmetryAxesChanged();
+}
+
+void DocumentController::resetSymmetryAxes()
+{
+    if (!m_document->symmetryAxes().placed)
+        return;
+    m_document->setSymmetryAxes({});
+    emit symmetryAxesChanged();
+}
+
 int DocumentController::playRangeLast() const
 {
     const int last = m_document->playLast();
