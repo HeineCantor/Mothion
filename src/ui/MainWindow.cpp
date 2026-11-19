@@ -28,6 +28,7 @@
 #include "io/VideoExport.h"
 #include "ui/ExportDialog.h"
 #include "ui/TweenDialog.h"
+#include "ui/HueSaturationDialog.h"
 #include "ui/VideoExportDialog.h"
 #include "ui/IconFactory.h"
 #include "ui/PanelDock.h"
@@ -504,6 +505,11 @@ void MainWindow::createMenus()
     keymap.bind(edit->addAction(icon(IconId::Transform), tr("Transform"), this,
                                 [this] { m_toolState->setActiveTool(tools::ToolId::Transform); }),
                 QStringLiteral("edit.transform"));
+    edit->addSeparator();
+    QMenu *color = edit->addMenu(tr("Color"));
+    color->setObjectName(QStringLiteral("colorMenu"));
+    keymap.bind(color->addAction(tr("Hue/Saturation/Value…"), this, &MainWindow::adjustHueSaturation),
+                QStringLiteral("edit.hueSaturation"));
 
     m_viewMenu = menuBar()->addMenu(tr("&View"));
     m_viewMenu->addActions(m_zoomActions);
@@ -657,6 +663,33 @@ void MainWindow::copyPixels(bool cut)
                                                    : m_document->clearCurrentLayer(&reason);
     if (!erased)
         statusBar()->showMessage(tr("Copied, not cut: %1").arg(reason), 4000);
+}
+
+void MainWindow::adjustHueSaturation()
+{
+    if (m_hueSaturation) { // open already
+        m_hueSaturation->raise();
+        m_hueSaturation->activateWindow();
+        return;
+    }
+    QString reason;
+    if (!m_document->beginColorAdjust(&reason)) {
+        statusBar()->showMessage(reason.isEmpty() ? tr("The current layer cannot be changed now") : reason, 4000);
+        return;
+    }
+    // Not modal (the window behind would be dimmed, its colors not seen as they are): what interrupts the change on
+    // the canvas (another frame, a stroke, an undo) closes it.
+    auto *dialog = new HueSaturationDialog(this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    m_hueSaturation = dialog;
+    connect(dialog, &HueSaturationDialog::changed, m_document, &document::DocumentController::previewColorAdjust);
+    connect(dialog, &QDialog::finished, this,
+            [this](int result) { m_document->finishColorAdjust(result == QDialog::Accepted); });
+    connect(m_document, &document::DocumentController::colorAdjustFinished, dialog, [dialog] {
+        if (dialog->isVisible())
+            dialog->reject();
+    });
+    dialog->show();
 }
 
 void MainWindow::pastePixels()

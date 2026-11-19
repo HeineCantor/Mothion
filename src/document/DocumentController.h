@@ -423,6 +423,15 @@ public:
     bool cutSelectionToLayer(QString *reason = nullptr);
     bool copySelectionToLayer(QString *reason = nullptr);
 
+    // Edit > Color > Hue/Saturation/Value on the current layer (inside the selection, if there is one): begun (false,
+    // with `reason`, if the layer cannot be changed now), shown on the canvas as it is set (see canvas::HsvShift for the
+    // ranges), then applied as one undo step or dropped. A vector layer's strokes take the colors too, so that drawing
+    // them again keeps them. Anything that interrupts a stroke drops it.
+    bool beginColorAdjust(QString *reason = nullptr);
+    bool isAdjustingColor() const { return m_colorAdjust.has_value(); }
+    void previewColorAdjust(int hue, int saturation, int value);
+    void finishColorAdjust(bool apply);
+
     // --- clipboard ------------------------------------------------------------------
     // The pixels of the current layer under the selection (all of it when nothing is selected), cropped to what is
     // drawn; `origin` gets where their top-left corner is. A null image, with
@@ -589,6 +598,8 @@ public slots:
     bool drawingBlocked() const;
 
 signals:
+    // The Hue/Saturation/Value begun is over: applied, dropped or interrupted (see beginColorAdjust()).
+    void colorAdjustFinished();
     // The audio track changed without a structure change (a volume being dragged): the views and the player take it up.
     void audioChanged();
     // The camera changed (a key, whether it is on, or it was added or taken away; also a preview).
@@ -710,6 +721,17 @@ private:
     };
     std::optional<PaintState> m_paint;
     doc::LayerId m_maskLayer = doc::kNoId;
+    struct ColorAdjust
+    {
+        PaintTarget target;
+        doc::TiledImage before;
+        doc::TiledImage inside, outside;              // split by the selection (all inside without one)
+        bool selection = false;
+        std::vector<doc::VectorStroke> strokesBefore; // a vector layer's
+        std::vector<doc::VectorStroke> strokesKept, strokesInside;
+        int hue = 0, saturation = 0, value = 0;
+    };
+    std::optional<ColorAdjust> m_colorAdjust;
 };
 
 } // namespace mothion::document

@@ -1,5 +1,6 @@
 #include "document/DocumentController.h"
 
+#include "canvas/ColorAdjust.h"
 #include "canvas/FrameRenderer.h"
 #include "tools/Preferences.h"
 #include "canvas/SelectionMask.h"
@@ -2468,6 +2469,100 @@ bool DocumentController::eraseBySelection(bool insideIt, QString *reason)
     return true;
 }
 
+bool DocumentController::beginColorAdjust(QString *reason)
+{
+    interruptStroke();
+    const auto target = beginPaint(false, reason, true, true);
+    if (!target)
+        return false;
+    if (target->mask) {
+        cancelPaint();
+        if (reason)
+            *reason = tr("A mask has no colors to change");
+        return false;
+    }
+    ColorAdjust a;
+    a.target = *target;
+    a.before = *target->image;
+    a.selection = hasSelection();
+    std::optional<canvas::SelectionMask> mask;
+    if (a.selection) {
+        mask = canvas::SelectionMask::fromPath(m_selection);
+        canvas::splitByMask(a.before, *mask, a.inside, a.outside);
+    } else {
+        a.inside = a.before;
+    }
+    if (target->vector) {
+        const doc::Layer *layer = m_document->layer(target->cel, target->drawing, target->layer);
+        a.strokesBefore = layer->strokes;
+        for (const doc::VectorStroke &stroke : layer->strokes) {
+            if (!mask) {
+                a.strokesInside.push_back(stroke);
+                continue;
+            }
+            canvas::SplitStroke split = canvas::splitStrokeByMask(stroke, *mask);
+            a.strokesKept.insert(a.strokesKept.end(), split.outside.begin(), split.outside.end());
+            a.strokesInside.insert(a.strokesInside.end(), split.inside.begin(), split.inside.end());
+        }
+    }
+    if (a.inside.isEmpty() && a.strokesInside.empty()) {
+        cancelPaint();
+        if (reason)
+            *reason = a.selection ? tr("Nothing in the selection on this layer") : tr("Nothing on this layer");
+        return false;
+    }
+    m_colorAdjust = std::move(a);
+    return true;
+}
+
+void DocumentController::previewColorAdjust(int hue, int saturation, int value)
+{
+    if (!m_colorAdjust)
+        return;
+    ColorAdjust &a = *m_colorAdjust;
+    a.hue = hue;
+    a.saturation = saturation;
+    a.value = value;
+    doc::TiledImage shown = canvas::shiftedImage(a.inside, {hue, saturation, value});
+    if (a.selection) {
+        doc::TiledImage all = a.outside;
+        canvas::compositeOver(all, shown);
+        shown = std::move(all);
+    }
+    *a.target.image = std::move(shown);
+    notifyPainted(kWholeCanvas);
+}
+
+void DocumentController::finishColorAdjust(bool apply)
+{
+    if (!m_colorAdjust)
+        return;
+    ColorAdjust a = std::move(*m_colorAdjust);
+    m_colorAdjust.reset();
+    const canvas::HsvShift shift{a.hue, a.saturation, a.value};
+    if (!apply || shift.isNone() || !m_paint) {
+        if (m_paint) {
+            *a.target.image = a.before;
+            cancelPaint();
+        }
+        notifyPainted(kWholeCanvas);
+        emit colorAdjustFinished();
+        return;
+    }
+    if (a.target.vector) {
+        std::vector<doc::VectorStroke> after = a.strokesKept;
+        for (doc::VectorStroke stroke : a.strokesInside) {
+            stroke.color = canvas::shiftedColor(stroke.color, shift);
+            stroke.secondaryColor = canvas::shiftedColor(stroke.secondaryColor, shift);
+            after.push_back(std::move(stroke));
+        }
+        attachStrokeChange(a.target, std::move(a.strokesBefore), std::move(after));
+    }
+    notifyPainted(kWholeCanvas);
+    endPaint(a.before, doc::CommandKind::AdjustColor);
+    emit colorAdjustFinished();
+}
+
 bool DocumentController::flipSelection(bool horizontal, QString *reason)
 {
     interruptStroke();
@@ -2811,6 +2906,7 @@ QString DocumentController::commandName(doc::CommandKind kind)
     case doc::CommandKind::Flip: return tr("flip");
     case doc::CommandKind::EditMotion: return tr("keyframes");
     case doc::CommandKind::EditBlenderLink: return tr("Blender link");
+    case doc::CommandKind::AdjustColor: return tr("hue/saturation/value");
     case doc::CommandKind::ChangeMask: return tr("mask");
     case doc::CommandKind::ClearLayer: return tr("clear");
     case doc::CommandKind::Move: return tr("move");
@@ -3154,6 +3250,8 @@ void DocumentController::cancelPaint()
 
 void DocumentController::interruptStroke()
 {
+    if (m_colorAdjust)
+        finishColorAdjust(false);
     emit poseEditClosing(); // a pose edit left open (Transform, Move on a cel with keys) is applied as it is
     if (!m_paint)
         return;

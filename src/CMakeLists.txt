@@ -106,6 +106,7 @@ qt_add_library(mothion_gui STATIC
     canvas/VectorPoints.h canvas/VectorPoints.cpp
     canvas/VectorPointTool.h canvas/VectorPointTool.cpp
     canvas/Symmetry.h canvas/Symmetry.cpp
+    canvas/ColorAdjust.h canvas/ColorAdjust.cpp
     canvas/SymmetryGizmo.h canvas/SymmetryGizmo.cpp
     canvas/BlendDraw.h canvas/BlendDraw.cpp
     canvas/FrameRenderer.h canvas/FrameRenderer.cpp
@@ -137,6 +138,7 @@ qt_add_library(mothion_gui STATIC
     ui/BlenderLiveLink.h ui/BlenderLiveLink.cpp
     ui/BlenderSessionDialog.h ui/BlenderSessionDialog.cpp
     ui/TweenDialog.h ui/TweenDialog.cpp
+    ui/HueSaturationDialog.h ui/HueSaturationDialog.cpp
     ui/PanelDock.h ui/PanelDock.cpp
     ui/SplashScreen.h ui/SplashScreen.cpp
     ui/SelectionBar.h ui/SelectionBar.cpp

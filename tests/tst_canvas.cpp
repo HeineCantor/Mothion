@@ -1,3 +1,4 @@
+#include "canvas/ColorAdjust.h"
 #include "canvas/FrameRenderer.h"
 #include "canvas/Resample.h"
 #include "canvas/StrokeSession.h"
@@ -797,6 +798,34 @@ private slots:
         for (brush::BrushInput &in : touching.points)
             in.x += 20.0; // 20..40
         QCOMPARE(mergedStrokes(left, true, touching, false).points.size(), std::size_t(21));
+    }
+
+    // Hue / Saturation / Value: the hue turned round the wheel, saturation and value moved towards none or full; the
+    // alpha kept, a premultiplied pixel shifted as its color is.
+    void colorsAreShiftedInHsv()
+    {
+        using canvas::shiftedColor;
+        QCOMPARE(shiftedColor(0xffff0000u, {120, 0, 0}), 0xff00ff00u); // red to green
+        QCOMPARE(shiftedColor(0xffff0000u, {-120, 0, 0}), 0xff0000ffu); // to blue
+        QCOMPARE(shiftedColor(0x80ff0000u, {180, 0, 0}), 0x8000ffffu);  // to cyan, the alpha as it was
+        QCOMPARE(shiftedColor(0xffff0000u, {0, -100, 0}), 0xffffffffu); // no saturation: gray as bright (white here)
+        QCOMPARE(shiftedColor(0xff804040u, {0, 100, 0}), 0xff800000u);  // full
+        QCOMPARE(shiftedColor(0xff336699u, {0, 0, -100}), 0xff000000u); // no value: black
+        QCOMPARE(shiftedColor(0xff400000u, {0, 0, 100}), 0xffff0000u);  // full value
+        QCOMPARE(shiftedColor(0xff336699u, {}), 0xff336699u);
+        QCOMPARE(shiftedColor(0xff808080u, {90, 0, 0}), 0xff808080u); // a gray has no hue to turn
+
+        QCOMPARE(canvas::shiftedPixel(0x80800000u, {120, 0, 0}), doc::Pixel(0x80008000u)); // half red, half green
+        QCOMPARE(canvas::shiftedPixel(0u, {120, 50, 50}), doc::Pixel(0));
+
+        doc::TiledImage image;
+        image.setPixel(3, 4, 0xffff0000u);
+        image.setPixel(200, 90, 0xff0000ffu);
+        const doc::TiledImage shifted = canvas::shiftedImage(image, {120, 0, 0});
+        QCOMPARE(shifted.pixel(3, 4), doc::Pixel(0xff00ff00u));
+        QCOMPARE(shifted.pixel(200, 90), doc::Pixel(0xffff0000u));
+        QCOMPARE(shifted.pixel(5, 5), doc::Pixel(0));
+        QCOMPARE(image.pixel(3, 4), doc::Pixel(0xffff0000u)); // the image itself as it was
     }
 
     // A stroke cut in two: the pieces share the point of the cut and keep the stroke's brush; not at an end.

@@ -3,6 +3,7 @@
 #include "test_common.h"
 #include "tools/SubToolMemory.h"
 #include "tools/BrushLibrary.h"
+#include "ui/HueSaturationDialog.h"
 #include <QTemporaryDir>
 #include <numbers>
 #include <QElapsedTimer>
@@ -110,6 +111,149 @@ private slots:
         QVERIFY(!controller.canClearCurrentLayer());
         QVERIFY(!controller.clearCurrentLayer());
         QVERIFY(!controller.canUndo());
+    }
+
+
+    // Edit > Color > Hue/Saturation/Value on the current layer: shown as it is set, dropped or applied as one undo
+    // step; with a selection only inside it; a vector layer's strokes take the colors too.
+    void hueSaturationValueChangesTheCurrentLayer()
+    {
+        document::DocumentController controller;
+        doc::Document &d = controller.documentForCommands();
+        const doc::CelId cel = controller.currentCel();
+        controller.execute(doc::makeNewDrawing(d, cel, 0, 1, "Line").command);
+        doc::Layer &layer = *d.layer(cel, controller.currentDrawingId(), controller.currentLayer());
+        layer.image.setPixel(10, 10, 0xffff0000u);
+        layer.image.setPixel(300, 300, 0xffff0000u);
+        auto pixel = [&](int x, int y) {
+            return d.layer(cel, controller.currentDrawingId(), controller.currentLayer())->image.pixel(x, y);
+        };
+
+        QVERIFY(controller.beginColorAdjust());
+        QVERIFY(controller.isAdjustingColor());
+        controller.previewColorAdjust(120, 0, 0);
+        QCOMPARE(pixel(10, 10), doc::Pixel(0xff00ff00u)); // shown at once
+        controller.previewColorAdjust(-120, 0, 0);
+        QCOMPARE(pixel(10, 10), doc::Pixel(0xff0000ffu)); // from the layer as it was, not from the last one shown
+        controller.finishColorAdjust(false);
+        QVERIFY(!controller.isAdjustingColor());
+        QCOMPARE(pixel(10, 10), doc::Pixel(0xffff0000u)); // dropped
+        QVERIFY(!controller.canUndo() || controller.undoText() != QStringLiteral("Undo hue/saturation/value"));
+
+        QVERIFY(controller.beginColorAdjust());
+        controller.previewColorAdjust(120, 0, 0);
+        controller.finishColorAdjust(true);
+        QCOMPARE(pixel(10, 10), doc::Pixel(0xff00ff00u));
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo hue/saturation/value"));
+        controller.undo();
+        QCOMPARE(pixel(10, 10), doc::Pixel(0xffff0000u));
+        QCOMPARE(pixel(300, 300), doc::Pixel(0xffff0000u));
+
+        // Inside the selection only.
+        QPainterPath area;
+        area.addRect(0, 0, 100, 100);
+        controller.setSelection(area);
+        QVERIFY(controller.beginColorAdjust());
+        controller.previewColorAdjust(0, 0, -100);
+        controller.finishColorAdjust(true);
+        QCOMPARE(pixel(10, 10), doc::Pixel(0xff000000u));
+        QCOMPARE(pixel(300, 300), doc::Pixel(0xffff0000u)); // outside: as it was
+        controller.undo();
+        controller.clearSelection();
+
+        // Interrupted (another frame chosen, say): dropped.
+        QVERIFY(controller.beginColorAdjust());
+        controller.previewColorAdjust(120, 0, 0);
+        controller.finishEdits();
+        QVERIFY(!controller.isAdjustingColor());
+        QCOMPARE(pixel(10, 10), doc::Pixel(0xffff0000u));
+
+        // A vector layer: its strokes take the colors.
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Vector));
+        doc::Layer &vector = *d.layer(cel, controller.currentDrawingId(), controller.currentLayer());
+        doc::VectorStroke stroke;
+        stroke.color = 0xffff0000u;
+        stroke.points.resize(2);
+        stroke.points[1].x = 20;
+        vector.strokes.push_back(stroke);
+        vector.image.setPixel(5, 5, 0xffff0000u);
+        QVERIFY(controller.beginColorAdjust());
+        controller.previewColorAdjust(120, 0, 0);
+        controller.finishColorAdjust(true);
+        const doc::Layer &after = *d.layer(cel, controller.currentDrawingId(), controller.currentLayer());
+        QCOMPARE(after.strokes.size(), std::size_t(1));
+        QCOMPARE(after.strokes[0].color, 0xff00ff00u);
+        QCOMPARE(after.image.pixel(5, 5), doc::Pixel(0xff00ff00u));
+        controller.undo(); // one step: strokes and pixels
+        QCOMPARE(d.layer(cel, controller.currentDrawingId(), controller.currentLayer())->strokes[0].color, 0xffff0000u);
+
+        // An empty layer: nothing to change.
+        QVERIFY(controller.addLayer(true));
+        QString reason;
+        QVERIFY(!controller.beginColorAdjust(&reason));
+        QVERIFY(!reason.isEmpty());
+        QVERIFY(!controller.isAdjustingColor());
+    }
+
+    // The Edit menu has a Color menu, with Hue/Saturation/Value (Ctrl+U).
+    void editMenuHasHueSaturationValue()
+    {
+        ui::MainWindow window;
+        auto *color = window.findChild<QMenu *>(QStringLiteral("colorMenu"));
+        QVERIFY(color);
+        QCOMPARE(color->title(), QStringLiteral("Color"));
+        QAction *hsv = nullptr;
+        for (QAction *a : color->actions())
+            if (a->text().startsWith(QStringLiteral("Hue/Saturation/Value")))
+                hsv = a;
+        QVERIFY(hsv);
+        QCOMPARE(hsv->shortcut(), QKeySequence(Qt::CTRL | Qt::Key_U));
+
+        // The dialog does not block the window (it would be dimmed); OK applies, Cancel drops, another frame closes it.
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *controller = window.findChild<document::DocumentController *>();
+        QImage red(20, 20, QImage::Format_ARGB32);
+        red.fill(Qt::red);
+        controller->importImage(red, QStringLiteral("red")); // at 950..969, 530..549
+        const doc::CelId cel = controller->currentCel();
+        auto pixel = [&] { return controller->document().cel(cel)->drawingAt(0)->layers.front().image.pixel(960, 540); };
+        auto open = [&] {
+            hsv->trigger();
+            auto *dialog = window.findChild<ui::HueSaturationDialog *>();
+            return dialog && dialog->isVisible() ? dialog : nullptr;
+        };
+        ui::HueSaturationDialog *dialog = open();
+        QVERIFY(dialog);
+        QVERIFY(!dialog->isModal());
+        QVERIFY(dialog->findChild<QWidget *>(QStringLiteral("hueResultStrip")));
+        dialog->findChild<QSpinBox *>(QStringLiteral("hue"))->setValue(120);
+        QCOMPARE(pixel(), doc::Pixel(0xff00ff00u)); // shown at once
+        if (qEnvironmentVariableIsSet("MOTHION_HSV_SHOT"))
+            dialog->grab().save(qEnvironmentVariable("MOTHION_HSV_SHOT"));
+        hsv->trigger(); // open already: the same one
+        QCOMPARE(window.findChildren<ui::HueSaturationDialog *>().size(), qsizetype(1));
+        dialog->reject();
+        QCOMPARE(pixel(), doc::Pixel(0xffff0000u));
+        QTRY_VERIFY(!window.findChild<ui::HueSaturationDialog *>()); // gone
+
+        dialog = open();
+        QVERIFY(dialog);
+        dialog->setValues(120, 0, 0);
+        dialog->accept();
+        QCOMPARE(pixel(), doc::Pixel(0xff00ff00u));
+        QCOMPARE(controller->undoText(), QStringLiteral("Undo hue/saturation/value"));
+        controller->undo();
+        QCOMPARE(pixel(), doc::Pixel(0xffff0000u));
+
+        QTRY_VERIFY(!window.findChild<ui::HueSaturationDialog *>());
+        dialog = open();
+        QVERIFY(dialog);
+        dialog->setValues(-120, 0, 0);
+        controller->setCurrentFrame(3); // interrupts: dropped, and the dialog closed
+        QVERIFY(!controller->isAdjustingColor());
+        QVERIFY(!dialog->isVisible());
+        QCOMPARE(pixel(), doc::Pixel(0xffff0000u));
     }
 
 
@@ -482,6 +626,7 @@ private slots:
         QCOMPARE(pixel(920, 540), doc::Pixel(0xff000000)); // the line stays on top
         QCOMPARE(pixel(923, 540), doc::Pixel(0xffff0000)); // up to it
         QCOMPARE(controller.undoText(), QStringLiteral("Undo fill"));
+
         controller.undo();
         QCOMPARE(qAlpha(pixel(960, 540)), 0);
 

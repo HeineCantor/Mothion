@@ -78,6 +78,7 @@ Shortcuts::Shortcuts()
     add(QStringLiteral("edit.deselect"), edit, tr("Deselect"), {ctrl(Qt::Key_D)});
     add(QStringLiteral("edit.invertSelection"), edit, tr("Invert selection"), {ctrl(Qt::Key_I, Qt::ShiftModifier)});
     add(QStringLiteral("edit.transform"), edit, tr("Transform"), {ctrl(Qt::Key_T)});
+    add(QStringLiteral("edit.hueSaturation"), edit, tr("Hue/Saturation/Value"), {ctrl(Qt::Key_U)});
 
     add(QStringLiteral("view.zoomOut"), view, tr("Zoom out"), {ctrl(Qt::Key_Minus)});
     add(QStringLiteral("view.zoomIn"), view, tr("Zoom in"), {ctrl(Qt::Key_Plus), ctrl(Qt::Key_Equal)});

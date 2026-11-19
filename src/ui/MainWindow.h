@@ -10,6 +10,7 @@
 #include <QMainWindow>
 #include <QPointer>
 
+class QDialog;
 class QMenu;
 class QLabel;
 class QPushButton;
@@ -125,6 +126,8 @@ private:
     // any image onto the current layer.
     void copyPixels(bool cut);
     void pastePixels();
+    // Edit > Color > Hue/Saturation/Value on the current layer, shown as it is set.
+    void adjustHueSaturation();
     QByteArray m_vectorCopy; // the clipboard data of the last copy taken from a vector layer (empty after another copy)
     void importBrush();
     // The audio track: asks for a sound file and puts it in the project (a song under the animation).
@@ -160,6 +163,7 @@ private:
     bool m_autosaveDirty = false; // the project changed since the last copy
     int m_autosaveWaits = 0;      // times the copy was put off for the user's drawing
     QElapsedTimer m_lastInput;
+    QPointer<QDialog> m_hueSaturation; // Edit > Color > Hue/Saturation/Value, while open
 };
 
 } // namespace mothion::ui
