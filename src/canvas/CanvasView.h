@@ -309,7 +309,6 @@ private:
     QRect m_paintedOutline;
     InputTool m_pointerTool = InputTool::Mouse;
     // Held keys that turn the pen into the hand (Ctrl: zoom, Shift: rotate).
-    // Space pans only when the main window gives it to the canvas (the pointer over it); elsewhere it plays.
     bool m_spaceHeld = false;
     bool m_tabHeld = false;
     bool panKeyHeld() const { return m_spaceHeld || m_tabHeld; }

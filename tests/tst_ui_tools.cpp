@@ -6,9 +6,6 @@
 #include <QTemporaryDir>
 #include <numbers>
 #include <QElapsedTimer>
-#include <QCursor>
-#include "ui/panels/timeline/TimelinePanel.h"
-#include "ui/panels/timeline/TimelinePlayer.h"
 
 class TestUiTools : public QObject
 {
@@ -876,47 +873,6 @@ private slots:
         reason.clear();
         QVERIFY(controller.copyPixels(nullptr, &reason).isNull());
         QVERIFY(!reason.isEmpty());
-    }
-
-
-    // Space held with the pointer over the canvas pans it, wherever the focus is; over anything else it plays and
-    // pauses the timeline.
-    void spacePansOverTheCanvasAndPlaysElsewhere()
-    {
-        ui::Shortcuts::instance().resetAll();
-        ui::MainWindow window;
-        window.resize(1400, 900);
-        window.show();
-        window.activateWindow();
-        QVERIFY(QTest::qWaitForWindowActive(&window));
-        auto *canvas = window.findChild<canvas::CanvasView *>();
-        auto *timeline = window.findChild<ui::TimelinePanel *>();
-        QVERIFY(canvas && timeline);
-        ui::TimelinePlayer *player = timeline->player();
-        const Qt::CursorShape drawing = canvas->cursor().shape();
-        QVERIFY(drawing != Qt::OpenHandCursor);
-
-        QCursor::setPos(canvas->mapToGlobal(canvas->rect().center()));
-        if (QApplication::widgetAt(QCursor::pos()) != canvas)
-            QSKIP("the platform does not move the pointer");
-        QWidget *focus = timeline->view();
-        focus->setFocus();
-        QTRY_VERIFY(focus->hasFocus());
-        QTest::keyPress(focus, Qt::Key_Space);
-        QVERIFY(!player->isPlaying());
-        QVERIFY(canvas->hasFocus());
-        QCOMPARE(canvas->cursor().shape(), Qt::OpenHandCursor);
-        QTest::keyRelease(canvas, Qt::Key_Space);
-        QVERIFY(!player->isPlaying());
-        QCOMPARE(canvas->cursor().shape(), drawing);
-
-        // Over the timeline, with the focus on the canvas: play, and no hand.
-        QCursor::setPos(focus->mapToGlobal(focus->rect().center()));
-        QTest::keyClick(canvas, Qt::Key_Space);
-        QVERIFY(player->isPlaying());
-        QCOMPARE(canvas->cursor().shape(), drawing);
-        QTest::keyClick(canvas, Qt::Key_Space);
-        QVERIFY(!player->isPlaying());
     }
 
 

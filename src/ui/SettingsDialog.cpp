@@ -332,7 +332,7 @@ QWidget *SettingsDialog::shortcutsPage()
     editRow->addWidget(none);
     editRow->addWidget(reset);
 
-    auto *fixed = new QLabel(tr("Fixed keys: Tab held, or Space with the pointer over the canvas: pan the view (with Ctrl: zoom, with Shift: rotate) · "
+    auto *fixed = new QLabel(tr("Fixed keys: Space or Tab held: pan the view (with Ctrl: zoom, with Shift: rotate) · "
                                 "Shift held: a straight line from the last point · Alt held: pick a color · "
                                 "Enter and Esc: apply or drop what a tool has open"),
                              page);

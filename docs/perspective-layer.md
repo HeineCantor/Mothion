@@ -235,7 +235,7 @@ The choices of the menu are commands of their own, one undo step each.
 
 ### 4.4 How it fits with the tools
 
-In `CanvasView::handleSample`, on a press the order is: navigation (Tab, middle button,
+In `CanvasView::handleSample`, on a press the order is: navigation (Space, middle button,
 pen barrel) → **gizmo** → color picking → stroke → the active `CanvasTool`. The gizmo takes
 the press only if a handle is under the pointer, so with a perspective layer selected you can
 still draw on another layer elsewhere. Details:

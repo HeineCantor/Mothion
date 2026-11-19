@@ -369,16 +369,6 @@ void AutoplayWindow::hideEvent(QHideEvent *event)
     QWidget::hideEvent(event);
 }
 
-bool AutoplayWindow::event(QEvent *event)
-{
-    if (event->type() == QEvent::ShortcutOverride && static_cast<QKeyEvent *>(event)->key() == Qt::Key_Space
-        && static_cast<QKeyEvent *>(event)->modifiers() == Qt::NoModifier) {
-        event->accept(); // comes as a key press: the timeline's play shortcut is for the main window
-        return true;
-    }
-    return QWidget::event(event);
-}
-
 void AutoplayWindow::keyPressEvent(QKeyEvent *event)
 {
     if (event->key() == Qt::Key_Space && !event->isAutoRepeat()) {

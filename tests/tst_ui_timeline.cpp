@@ -1393,7 +1393,8 @@ private slots:
     }
 
 
-    // Space plays and pauses the timeline wherever the focus is in the program.
+    // Space plays and pauses the timeline while the focus is in it (the pointer is over it); with the focus
+    // anywhere else in the window it does not (over the canvas it is the key that pans).
     void spacePlaysAndPausesTheTimeline()
     {
         ui::Shortcuts::instance().resetAll();
@@ -1420,10 +1421,8 @@ private slots:
 
         elsewhere->setFocus();
         QVERIFY(elsewhere->hasFocus());
-        QTest::keyClick(elsewhere, Qt::Key_Space);
-        QVERIFY(panel->player()->isPlaying()); // from outside the timeline too
-        QTest::keyClick(elsewhere, Qt::Key_Space);
-        QVERIFY(!panel->player()->isPlaying());
+        QTest::keyClick(&window, Qt::Key_Space);
+        QVERIFY(!panel->player()->isPlaying()); // not from outside the timeline
     }
 
 
