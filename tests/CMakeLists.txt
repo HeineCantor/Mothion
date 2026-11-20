@@ -39,3 +39,7 @@ find_package(Qt6 REQUIRED COMPONENTS Network)
 foreach(area panels tools drawing puppet timeline audio compositing window)
     mothion_add_test(tst_ui_${area} mothion_gui Qt6::Network)
 endforeach()
+# A stand-in for Rhubarb Lip Sync, which the lip sync from the audio runs (tst_ui_timeline).
+add_executable(fake_rhubarb fake_rhubarb.cpp)
+add_dependencies(tst_ui_timeline fake_rhubarb)
+target_compile_definitions(tst_ui_timeline PRIVATE FAKE_RHUBARB="$<TARGET_FILE:fake_rhubarb>")

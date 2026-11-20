@@ -6,6 +6,8 @@
 #include "core/fill/FloodFill.h"
 #include "core/document/Document.h"
 #include "core/document/LipSync.h"
+#include <map>
+#include <tuple>
 #include "core/perspective/PerspectiveGrid.h"
 
 #include <QTest>
@@ -164,6 +166,45 @@ private slots:
         QCOMPARE(doc::mouthDrawing(cel, 'A'), a);
         QCOMPARE(doc::mouthDrawing(cel, 'X'), x);
         QCOMPARE(doc::mouthDrawing(cel, 'D'), doc::kNoId);
+    }
+
+    // Lip sync from the sound: each cue's mouth from its frame (the sound's offset counted) to the next one's; a cue
+    // too soon after the one before, or of a shape the chart has no drawing for, dropped; out of the scene, cut.
+    void mouthCuesBecomeTheChartsTiming()
+    {
+        doc::Document d(100, 100);
+        doc::Cel cel(d.allocateCelId(), doc::CelProperties{"Mouth"});
+        std::map<char, doc::DrawingId> ids;
+        for (const char shape : {'A', 'D', 'X'}) {
+            doc::Drawing drawing;
+            drawing.id = d.allocateDrawingId();
+            drawing.name = std::string(1, shape);
+            cel.addDrawing(drawing);
+            ids[shape] = drawing.id;
+        }
+        const std::vector<doc::MouthCue> cues{{0.0, 0.25, 'X'}, {0.25, 0.5, 'D'}, {0.5, 0.75, 'E'}, {0.75, 1.0, 'A'}};
+        auto runs = [](const doc::Timing &t) {
+            std::vector<std::tuple<int, int, doc::DrawingId>> out;
+            for (const doc::Exposure &e : t.exposures())
+                out.emplace_back(e.start, e.length, e.drawing);
+            return out;
+        };
+        using Runs = std::vector<std::tuple<int, int, doc::DrawingId>>;
+        // At 24 fps: X 0..5, D 6..17 (no drawing for E: D holds), A 18..23.
+        QCOMPARE(runs(doc::lipSyncTiming(cel, cues, 24.0, 0, 1, 100)),
+                 (Runs{{0, 6, ids['X']}, {6, 12, ids['D']}, {18, 6, ids['A']}}));
+        // The sound beginning at frame 10.
+        QCOMPARE(runs(doc::lipSyncTiming(cel, cues, 24.0, 10, 1, 100)),
+                 (Runs{{10, 6, ids['X']}, {16, 12, ids['D']}, {28, 6, ids['A']}}));
+        // Each at least 8 frames: D (6 after X) dropped, X holds.
+        QCOMPARE(runs(doc::lipSyncTiming(cel, cues, 24.0, 0, 8, 100)), (Runs{{0, 18, ids['X']}, {18, 6, ids['A']}}));
+        // Begun before the scene (a negative offset) and past its end: cut to the scene.
+        QCOMPARE(runs(doc::lipSyncTiming(cel, cues, 24.0, -3, 1, 20)),
+                 (Runs{{0, 3, ids['X']}, {3, 12, ids['D']}, {15, 5, ids['A']}}));
+        // What was on the cel elsewhere stays.
+        cel.timing().setExposure(40, 5, ids['A']);
+        QCOMPARE(std::get<0>(runs(doc::lipSyncTiming(cel, cues, 24.0, 0, 1, 100)).back()), 40);
+        QVERIFY(doc::lipSyncTiming(cel, {}, 24.0, 0, 1, 100) == cel.timing());
     }
 
     void floodFillStopsAtLinesAndGrows()

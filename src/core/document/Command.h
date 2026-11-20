@@ -88,6 +88,7 @@ enum class CommandKind {
     RenameDrawing,
     SetMouthShape,
     MouthChart,
+    LipSync,
 };
 
 // An undoable change to a Document.

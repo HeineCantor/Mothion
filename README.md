@@ -309,6 +309,7 @@ recover the work; a copy older than the project's file is dropped without asking
 | Undo / Redo | Ctrl+Z / Ctrl+Shift+Z or Ctrl+Y. History is limited to 500 steps or 1 GB. |
 | Input debug overlay | F12 |
 | Timeline | Click or drag to select frame/layer. Arrow keys navigate; Home/End go to the first/last frame. Ctrl+wheel changes frame zoom. |
+| Lip sync | Make a cel a mouth chart (its menu: *Mouth chart*); draw its mouths A–H and X in the Mouth chart panel. The Timeline's mouth bar puts a shape at the current frame (or its letter, with the focus in the timeline); *From the audio…* puts them all with [Rhubarb Lip Sync](https://github.com/DanielSWolf/rhubarb-lip-sync), which comes with the Windows releases (for a Linux build: `scripts/fetch-rhubarb.sh`). |
 | Hold | Drag the right edge of an exposure block to extend it and shift later frames. |
 | Drawings | Drawing on an empty frame creates a new drawing. Right-click the timeline for drawing/frame operations. |
 | Layers | Add, delete and reorder using the timeline controls. Eye toggles visibility; padlock toggles locking; double-click to rename. |

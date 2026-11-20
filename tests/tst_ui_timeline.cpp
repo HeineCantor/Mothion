@@ -2,6 +2,7 @@
 
 #include "test_common.h"
 #include "ui/panels/MouthChartPanel.h"
+#include "io/RhubarbLipSync.h"
 #include "core/document/LipSync.h"
 #include "canvas/FrameRenderer.h"
 
@@ -1605,6 +1606,103 @@ private slots:
         const doc::Drawing *mouth = controller.document().cel(cel)->drawing(controller.mouthDrawingEdited());
         QVERIFY(qAlpha(mouth->layers.front().image.pixel(960, 540)) > 0); // drawn on the mouth
         QVERIFY(canvas.documentImage().pixelColor(960, 540) != paper);    // and seen at once
+    }
+
+
+    // Rhubarb Lip Sync's output read: its JSON cues, and its machine-readable status (progress, failure).
+    void rhubarbsOutputIsRead()
+    {
+        const auto cues = io::parseRhubarbJson(
+            R"({"metadata":{"duration":0.47},"mouthCues":[{"start":0.00,"end":0.05,"value":"X"},
+               {"start":0.05,"end":0.27,"value":"D"},{"start":0.27,"end":0.31,"value":"c"}]})");
+        QVERIFY(cues);
+        QCOMPARE(cues->size(), std::size_t(3));
+        QCOMPARE((*cues)[1].shape, 'D');
+        QCOMPARE((*cues)[1].start, 0.05);
+        QCOMPARE((*cues)[2].shape, 'C');
+        QString error;
+        QVERIFY(!io::parseRhubarbJson("not json", &error));
+        QVERIFY(!error.isEmpty());
+        QCOMPARE(*io::parseRhubarbStatus(R"({ "type": "progress", "value": 0.69, "log": {} })").progress, 0.69);
+        QCOMPARE(*io::parseRhubarbStatus(R"({ "type": "failure", "reason": "No file", "log": {} })").failure,
+                 QStringLiteral("No file"));
+        QVERIFY(!io::parseRhubarbStatus(R"({ "type": "start" })").progress);
+    }
+
+    // Lip sync from the audio, with a stand-in for Rhubarb: the sound handed to it with the options (any language by
+    // default, the dialog, the extended shapes), its progress told, its cues put on the mouth chart where the audio
+    // track has them, as one undo step; a failure told as Rhubarb says it.
+    void lipSyncFromTheAudioPutsTheMouths()
+    {
+        document::DocumentController controller;
+        doc::Document &d = controller.documentForCommands();
+        d.setFrameRate(doc::FrameRate{24, 1});
+        const doc::CelId cel = controller.currentCel();
+        QVERIFY(controller.setMouthChart(cel, true));
+        doc::AudioTrack track;
+        track.name = "voice";
+        track.format = "wav";
+        track.data = std::make_shared<const std::vector<unsigned char>>(std::vector<unsigned char>{'R', 'I', 'F', 'F'});
+        track.offset = 10;
+        d.setAudio(track);
+
+        QTemporaryDir dir;
+        const QString argsFile = dir.filePath(QStringLiteral("args.txt"));
+        qputenv("FAKE_RHUBARB_ARGS", argsFile.toLocal8Bit());
+        io::RhubarbJob job;
+        QSignalSpy progress(&job, &io::RhubarbJob::progress);
+        QSignalSpy finished(&job, &io::RhubarbJob::finished);
+        QSignalSpy failed(&job, &io::RhubarbJob::failed);
+        io::LipSyncOptions options;
+        options.dialog = QStringLiteral("mamma ho fame");
+        options.extendedShapes = QStringLiteral("GX");
+        QString reason;
+        QVERIFY2(job.start(track, options, &reason, QStringLiteral(FAKE_RHUBARB)), qPrintable(reason));
+        QTRY_COMPARE(finished.count() + failed.count(), 1);
+        QCOMPARE(failed.count(), 0);
+        QVERIFY(progress.count() >= 2);
+        QCOMPARE(progress.last().first().toDouble(), 1.0);
+        QFile given(argsFile);
+        QVERIFY(given.open(QIODevice::ReadOnly));
+        const QStringList args = QString::fromLocal8Bit(given.readAll()).split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+        QVERIFY(args.contains(QStringLiteral("--machineReadable")));
+        QCOMPARE(args.at(args.indexOf(QStringLiteral("-r")) + 1), QStringLiteral("phonetic"));
+        QCOMPARE(args.at(args.indexOf(QStringLiteral("--extendedShapes")) + 1), QStringLiteral("GX"));
+        QVERIFY(args.contains(QStringLiteral("-d")));
+        QVERIFY(args.last().endsWith(QStringLiteral(".wav"))); // the sound, last
+        const auto cues = finished.first().first().value<std::vector<doc::MouthCue>>();
+        QCOMPARE(cues.size(), std::size_t(4));
+
+        // Put on the chart from frame 10 (the audio's offset): X 10..15, D 16..21, A 22..27, X 28..33.
+        QVERIFY(controller.applyMouthCues(cues, 1, &reason));
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo lip sync"));
+        auto shown = [&](int frame) {
+            const doc::Drawing *drawing = d.cel(cel)->drawingAt(frame);
+            return drawing ? QString::fromStdString(drawing->name) : QString();
+        };
+        QCOMPARE(shown(9), QString());
+        QCOMPARE(shown(10), QStringLiteral("X"));
+        QCOMPARE(shown(16), QStringLiteral("D"));
+        QCOMPARE(shown(22), QStringLiteral("A"));
+        QCOMPARE(shown(33), QStringLiteral("X"));
+        QCOMPARE(shown(34), QString());
+        controller.undo(); // one step
+        QCOMPARE(shown(16), QString());
+
+        // Rhubarb failing: told why.
+        qputenv("FAKE_RHUBARB_FAIL", "1");
+        QVERIFY(job.start(track, options, &reason, QStringLiteral(FAKE_RHUBARB)));
+        QTRY_COMPARE(failed.count(), 1);
+        QVERIFY(failed.first().first().toString().contains(QStringLiteral("Could not open sound file")));
+        qunsetenv("FAKE_RHUBARB_FAIL");
+        qunsetenv("FAKE_RHUBARB_ARGS");
+
+        // No chart: refused.
+        controller.addCel();
+        QVERIFY(!controller.applyMouthCues(cues, 1, &reason));
+        QVERIFY(!reason.isEmpty());
+        // No Rhubarb: refused at once, with where to put it.
+        QVERIFY(!job.start(track, options, &reason, QString()) || !io::findRhubarb().isEmpty());
     }
 
 

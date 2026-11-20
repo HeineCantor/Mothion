@@ -1,6 +1,7 @@
 # A tag v<version> pushed (git tag v0.2.0 && git push origin v0.2.0) builds Mothion for Windows and publishes a GitHub
 # Release with it: Mothion-<version>-windows-x64-setup.exe, the installer (installer/mothion.iss), and
-# Mothion-<version>-windows-x64.zip, which runs as it is extracted (Qt, the C++ runtime and ffmpeg are in both). The version the program shows is the tag's (see MOTHION_VERSION in CMakeLists.txt). A tag with a dash
+# Mothion-<version>-windows-x64.zip, which runs as it is extracted (Qt, the C++ runtime, ffmpeg and Rhubarb Lip Sync
+# are in both). The version the program shows is the tag's (see MOTHION_VERSION in CMakeLists.txt). A tag with a dash
 # (v0.2.0-beta1) makes a pre-release. Run again by hand (Actions > Release > Run workflow) on a tag, it replaces the files.
 name: Release
 
@@ -23,6 +24,11 @@ env:
   FFMPEG_VERSION: 7.1.1
   FFMPEG_URL: https://github.com/GyanD/codexffmpeg/releases/download/7.1.1/ffmpeg-7.1.1-essentials_build.zip
   FFMPEG_SHA256: 04861d3339c5ebe38b56c19a15cf2c0cc97f5de4fa8910e4d47e5e6404e4a2d4
+  # Rhubarb Lip Sync for the lip sync from the audio, in "rhubarb" beside mothion.exe (where Mothion looks first) with
+  # its "res" folder (the speech models). MIT; https://github.com/DanielSWolf/rhubarb-lip-sync
+  RHUBARB_VERSION: 1.14.0
+  RHUBARB_URL: https://github.com/DanielSWolf/rhubarb-lip-sync/releases/download/v1.14.0/Rhubarb-Lip-Sync-1.14.0-Windows.zip
+  RHUBARB_SHA256: 62fa416a8d5e382a3828ee4bef358ce520d0b4cabdeaea75a7ac266d098d1fe3
 
 jobs:
   windows:
@@ -108,6 +114,18 @@ jobs:
           Copy-Item "$($ff.FullName)\bin\ffmpeg.exe" $dir
           Copy-Item "$($ff.FullName)\LICENSE" (Join-Path $licenses 'ffmpeg-LICENSE.txt')
 
+          # Rhubarb Lip Sync, checked against its hash: the program and its speech models.
+          $zip = Join-Path $env:RUNNER_TEMP 'rhubarb.zip'
+          Invoke-WebRequest $env:RHUBARB_URL -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash -ne $env:RHUBARB_SHA256) { throw 'Rhubarb: the download is not the one expected' }
+          Expand-Archive $zip (Join-Path $env:RUNNER_TEMP 'rhubarb')
+          $rh = Get-ChildItem (Join-Path $env:RUNNER_TEMP 'rhubarb') -Directory | Select-Object -First 1
+          $rhubarb = Join-Path $dir 'rhubarb'
+          New-Item -ItemType Directory -Force $rhubarb | Out-Null
+          Copy-Item "$($rh.FullName)\rhubarb.exe" $rhubarb
+          Copy-Item "$($rh.FullName)\res" $rhubarb -Recurse
+          Copy-Item "$($rh.FullName)\LICENSE.md" (Join-Path $licenses 'rhubarb-LICENSE.md')
+
           # The licenses of what goes with it.
           if (Test-Path LICENSE) { Copy-Item LICENSE (Join-Path $dir 'LICENSE.txt') }
           Copy-Item resources\fonts\Montserrat-OFL.txt (Join-Path $licenses 'Montserrat-OFL.txt')
@@ -122,6 +140,10 @@ jobs:
           - FFmpeg $env:FFMPEG_VERSION (ffmpeg.exe), the build of https://www.gyan.dev/ffmpeg/builds/, under the GNU GPL 3.0
             (ffmpeg-LICENSE.txt). It is a program of its own, which Mothion runs to export videos.
             Source: https://ffmpeg.org/releases/ffmpeg-$env:FFMPEG_VERSION.tar.xz
+          - Rhubarb Lip Sync $env:RHUBARB_VERSION (the rhubarb folder), Daniel Wolf, under the MIT license; its
+            libraries and speech models under the MIT, BSD and like licenses (rhubarb-LICENSE.md). It is a program of
+            its own, which Mothion runs for the lip sync from the audio.
+            Source: https://github.com/DanielSWolf/rhubarb-lip-sync
           - Eigen 3.4 (built into mothion.exe), under the Mozilla Public License 2.0. Source: https://eigen.tuxfamily.org
           - Montserrat (the font of the splash screen), under the SIL Open Font License 1.1 (Montserrat-OFL.txt).
           - The Microsoft Visual C++ runtime (msvcp140*.dll, vcruntime140*.dll, concrt140.dll), redistributed as
@@ -156,7 +178,8 @@ jobs:
           cat > notes.md <<'EOF'
           **Windows:** download `Mothion-…-windows-x64-setup.exe` and run it (Start menu, `.moth` files open with
           Mothion, uninstall from Windows' settings); or download `Mothion-…-windows-x64.zip`, extract it anywhere and
-          start `mothion.exe`. Nothing else needs installing (ffmpeg, for exporting videos, is in both).
+          start `mothion.exe`. Nothing else needs installing (ffmpeg, for exporting videos, and Rhubarb Lip Sync, for
+          the lip sync from the audio, are in both).
 
           The program is not signed: the first time, Windows may say "Windows protected your PC". Click
           **More info → Run anyway**.

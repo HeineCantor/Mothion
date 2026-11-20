@@ -2537,6 +2537,32 @@ bool DocumentController::setMouthChart(doc::CelId celId, bool on, QString *reaso
     return true;
 }
 
+bool DocumentController::applyMouthCues(const std::vector<doc::MouthCue> &cues, int minFrames, QString *reason)
+{
+    auto fail = [reason](const QString &why) {
+        if (reason)
+            *reason = why;
+        return false;
+    };
+    const doc::Cel *cel = m_document->cel(m_currentCel);
+    if (!cel || !cel->properties().mouthChart)
+        return fail(tr("The current cel is not a mouth chart"));
+    if (cel->properties().locked)
+        return fail(tr("Cel “%1” is locked").arg(QString::fromStdString(cel->properties().name)));
+    const int offset = m_document->audio() ? m_document->audio()->offset : 0;
+    doc::Timing after = doc::lipSyncTiming(*cel, cues, m_document->frameRate().fps(), offset, minFrames,
+                                           m_document->frameCount());
+    if (after == cel->timing())
+        return fail(tr("No mouth to put: the sound gave nothing within the scene"));
+    interruptStroke();
+    stopEditingMouth();
+    std::vector<std::unique_ptr<doc::Command>> steps;
+    steps.push_back(std::make_unique<doc::SetTimingCommand>(m_currentCel, cel->timing(), std::move(after)));
+    execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::LipSync, std::move(steps)));
+    resolveCurrentLayer();
+    return true;
+}
+
 bool DocumentController::editMouthDrawing(doc::DrawingId drawing)
 {
     const doc::Cel *cel = m_document->cel(m_currentCel);
@@ -3047,6 +3073,7 @@ QString DocumentController::commandName(doc::CommandKind kind)
     case doc::CommandKind::RenameDrawing: return tr("rename frame");
     case doc::CommandKind::SetMouthShape: return tr("mouth shape");
     case doc::CommandKind::MouthChart: return tr("mouth chart");
+    case doc::CommandKind::LipSync: return tr("lip sync");
     case doc::CommandKind::ChangeMask: return tr("mask");
     case doc::CommandKind::ClearLayer: return tr("clear");
     case doc::CommandKind::Move: return tr("move");

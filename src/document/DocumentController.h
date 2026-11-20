@@ -3,6 +3,7 @@
 #include <limits>
 #include "core/document/Document.h"
 #include "core/document/History.h"
+#include "core/document/LipSync.h"
 #include "document/Tween.h"
 
 #include <QImage>
@@ -441,6 +442,12 @@ public:
     // current frame on, until the frame where it showed something else next (to the end of the scene on an empty cel).
     // One undo step. False, with `reason`, if the cel has no drawing for the shape (or cannot be changed).
     bool setMouthShape(char shape, QString *reason = nullptr);
+
+    // Lip sync from the sound (Rhubarb Lip Sync's cues, see doc::lipSyncTiming()): the current cel (a mouth chart)
+    // shows the mouths the cues say on the frames the audio track has them (its offset counted), each held at least
+    // `minFrames`. One undo step. False, with `reason`, if the cel is no mouth chart (or cannot be changed) or nothing
+    // would change.
+    bool applyMouthCues(const std::vector<doc::MouthCue> &cues, int minFrames, QString *reason = nullptr);
 
     // Edit > Color > Hue/Saturation/Value on the current layer (inside the selection, if there is one): begun (false,
     // with `reason`, if the layer cannot be changed now), shown on the canvas as it is set (see canvas::HsvShift for the

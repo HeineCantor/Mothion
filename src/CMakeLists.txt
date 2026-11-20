@@ -78,6 +78,7 @@ qt_add_library(mothion_gui STATIC
     io/Autosave.h io/Autosave.cpp
     io/FrameExport.h io/FrameExport.cpp
     io/VideoExport.h io/VideoExport.cpp
+    io/RhubarbLipSync.h io/RhubarbLipSync.cpp
     io/BlenderLinkServer.h io/BlenderLinkServer.cpp
     io/BlenderFrameCache.h io/BlenderFrameCache.cpp
     io/BlenderAddOn.h io/BlenderAddOn.cpp
@@ -140,6 +141,7 @@ qt_add_library(mothion_gui STATIC
     ui/BlenderSessionDialog.h ui/BlenderSessionDialog.cpp
     ui/TweenDialog.h ui/TweenDialog.cpp
     ui/HueSaturationDialog.h ui/HueSaturationDialog.cpp
+    ui/LipSyncDialog.h ui/LipSyncDialog.cpp
     ui/PanelDock.h ui/PanelDock.cpp
     ui/SplashScreen.h ui/SplashScreen.cpp
     ui/SelectionBar.h ui/SelectionBar.cpp

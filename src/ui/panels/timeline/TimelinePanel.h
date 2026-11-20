@@ -48,6 +48,8 @@ private:
     // The shape put at the current frame (see DocumentController::setMouthShape()), then on by the frames chosen.
     void putMouthShape(char shape);
     bool mouthBarShown() const;
+    // Lip sync from the audio (Rhubarb, see LipSyncDialog): asked, run with its progress, put as one undo step.
+    void lipSyncFromAudio();
 
     document::DocumentController *m_document;
     TimelineView *m_view;

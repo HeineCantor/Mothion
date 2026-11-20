@@ -1,4 +1,8 @@
 #include "ui/panels/timeline/TimelinePanel.h"
+#include <QProgressDialog>
+#include <QMessageBox>
+#include "io/RhubarbLipSync.h"
+#include "ui/LipSyncDialog.h"
 #include <QKeyEvent>
 #include <QCursor>
 #include <QToolTip>
@@ -515,6 +519,15 @@ QWidget *TimelinePanel::mouthBar()
     m_mouthStep->setToolTip(tr("Frames to go on by after a shape is put (0: stay; 2: on twos)"));
     row->addWidget(new QLabel(tr("then on by"), m_mouthBar));
     row->addWidget(m_mouthStep);
+    row->addSpacing(8);
+    auto *automatic = new QToolButton(m_mouthBar);
+    automatic->setObjectName(QStringLiteral("mouthAuto"));
+    automatic->setText(tr("From the audio…"));
+    automatic->setToolTip(tr("Lip sync from the audio track with Rhubarb Lip Sync: the mouths put on the frames where "
+                             "they are said"));
+    automatic->setAutoRaise(true);
+    connect(automatic, &QToolButton::clicked, this, &TimelinePanel::lipSyncFromAudio);
+    row->addWidget(automatic);
     row->addStretch(1);
     // Shown while the current cel is a mouth chart; a shape it has no frame for is off.
     auto sync = [this, buttons] {
@@ -563,6 +576,59 @@ bool TimelinePanel::eventFilter(QObject *watched, QEvent *event)
         }
     }
     return QWidget::eventFilter(watched, event);
+}
+
+void TimelinePanel::lipSyncFromAudio()
+{
+    const auto &audio = m_document->document().audio();
+    if (!audio) {
+        QMessageBox::information(this, tr("Lip sync"), tr("The project has no audio: import the voice first."));
+        return;
+    }
+    LipSyncDialog dialog(this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    io::LipSyncOptions options = dialog.options();
+    // Only the extended shapes the mouths have: Rhubarb uses the six basic ones and those.
+    options.extendedShapes.clear();
+    if (const doc::Cel *cel = m_document->document().cel(m_document->currentCel()))
+        for (const char shape : {'G', 'H', 'X'})
+            if (doc::mouthDrawing(*cel, shape) != doc::kNoId)
+                options.extendedShapes += QChar(shape);
+    const int minFrames = dialog.minFrames();
+    const doc::CelId cel = m_document->currentCel();
+
+    auto *job = new io::RhubarbJob(this);
+    auto *progress = new QProgressDialog(tr("Hearing the audio…"), tr("Cancel"), 0, 100, this);
+    progress->setWindowModality(Qt::WindowModal);
+    progress->setMinimumDuration(300);
+    progress->setAttribute(Qt::WA_DeleteOnClose);
+    auto done = [job, progress] {
+        progress->close();
+        job->deleteLater();
+    };
+    connect(job, &io::RhubarbJob::progress, progress, [progress](double f) { progress->setValue(int(f * 100)); });
+    connect(job, &io::RhubarbJob::finished, this, [this, done, minFrames, cel](const std::vector<doc::MouthCue> &cues) {
+        done();
+        if (m_document->currentCel() != cel)
+            m_document->setCurrentCel(cel); // the cel it was asked for
+        QString reason;
+        if (!m_document->applyMouthCues(cues, minFrames, &reason))
+            QMessageBox::warning(this, tr("Lip sync"), reason);
+    });
+    connect(job, &io::RhubarbJob::failed, this, [this, done](const QString &reason) {
+        done();
+        QMessageBox::warning(this, tr("Lip sync"), reason);
+    });
+    connect(progress, &QProgressDialog::canceled, job, [job] {
+        job->cancel();
+        job->deleteLater();
+    });
+    QString reason;
+    if (!job->start(*audio, options, &reason)) {
+        done();
+        QMessageBox::warning(this, tr("Lip sync"), reason);
+    }
 }
 
 } // namespace mothion::ui
