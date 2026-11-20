@@ -505,6 +505,86 @@ private slots:
     }
 
 
+    // A node's select opens its list in the same place each time, whatever was chosen in it last: a list opened over
+    // the box (as some styles do, with the chosen name over it) crept up a little more each time it was opened in the
+    // graph, until it was out of sight.
+    void aNodesSelectOpensWhereItIs()
+    {
+        compositing::Graph network;
+        const compositing::NodeId merge = network.addNode(QStringLiteral("merge"));
+        ui::NodeGraphView view(network);
+        view.resize(700, 900);
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        view.setView(1.0, view.item(merge)->sceneBoundingRect().center()); // the node in the middle, at 100%
+        QComboBox *combo = nullptr;
+        for (QGraphicsItem *child : view.item(merge)->childItems())
+            if (auto *proxy = dynamic_cast<QGraphicsProxyWidget *>(child))
+                if (auto *c = proxy->widget()->findChild<QComboBox *>())
+                    combo = c;
+        QVERIFY(combo);
+        QVERIFY(combo->count() >= 3);
+        std::vector<int> tops;
+        for (int round = 0; round < 6; ++round) {
+            combo->setCurrentIndex((round * 2) % combo->count());
+            combo->showPopup();
+            QCoreApplication::processEvents();
+            QWidget *list = combo->view()->window();
+            QVERIFY(list->isVisible());
+            QPoint top = list->mapToGlobal(QPoint(0, 0));
+            if (QGraphicsProxyWidget *proxy = list->graphicsProxyWidget()) // shown in the scene, as the node is
+                top = view.viewport()->mapToGlobal(view.mapFromScene(proxy->scenePos()));
+            tops.push_back(top.y());
+            combo->hidePopup();
+            QCoreApplication::processEvents();
+        }
+        const QPoint box = view.viewport()->mapToGlobal(
+            view.mapFromScene(combo->parentWidget()->graphicsProxyWidget()->mapToScene(combo->geometry().topLeft())));
+        QString seen;
+        for (int t : tops)
+            seen += QString::number(t - box.y()) + QLatin1Char(' ');
+        for (int t : tops)
+            QVERIFY2(t == tops.front(), qPrintable(seen));
+        QVERIFY2(tops.front() > box.y(), qPrintable(seen)); // under the box
+
+        // Open, the list is drawn over the opacity slider under the select, and over a node next to this one.
+        const compositing::NodeId other = network.addNode(QStringLiteral("merge"));
+        view.item(other)->setPos(view.item(merge)->pos() + QPointF(20, 120)); // under it, a little to the side
+        combo->showPopup();
+        QCoreApplication::processEvents();
+        QGraphicsProxyWidget *listItem = combo->view()->window()->graphicsProxyWidget();
+        QVERIFY(listItem);
+        const QRectF listRect = listItem->sceneBoundingRect();
+        for (const QPointF &at : {listRect.center(), QPointF(listRect.center().x(), listRect.top() + 12),
+                                  QPointF(listRect.center().x(), listRect.bottom() - 6)}) {
+            const QList<QGraphicsItem *> under = view.scene()->items(at, Qt::IntersectsItemShape, Qt::DescendingOrder);
+            QVERIFY(!under.isEmpty());
+            QVERIFY2(under.first() == listItem || listItem->isAncestorOf(under.first()), "something is over the list");
+        }
+        combo->hidePopup();
+        QCoreApplication::processEvents();
+        QCOMPARE(view.item(merge)->zValue(), view.item(other)->zValue()); // back in its place
+        network.removeNode(other);
+
+        // With the node at the bottom of the view, the list is still all in sight (over the box).
+        view.setView(view.viewZoom(), view.item(merge)->sceneBoundingRect().center()
+                                          - QPointF(0, view.viewport()->height() / 2.0 / view.viewZoom() - 60));
+        QCoreApplication::processEvents();
+        combo->showPopup();
+        QCoreApplication::processEvents();
+        QWidget *list = combo->view()->window();
+        QRect shown = list->geometry();
+        if (QGraphicsProxyWidget *proxy = list->graphicsProxyWidget())
+            shown = view.mapFromScene(proxy->sceneBoundingRect()).boundingRect();
+        else
+            shown = QRect(view.viewport()->mapFromGlobal(list->mapToGlobal(QPoint(0, 0))), list->size());
+        QVERIFY2(view.viewport()->rect().contains(shown), "the list goes past the view");
+        QVERIFY(shown.bottom() <= view.mapFromScene(
+                    combo->parentWidget()->graphicsProxyWidget()->mapToScene(combo->geometry().topLeft())).y());
+        combo->hidePopup();
+    }
+
+
     static QCheckBox *toggleOf(ui::NodeGraphView &view, compositing::NodeId id)
     {
         QCheckBox *box = nullptr;

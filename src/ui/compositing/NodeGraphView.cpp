@@ -2,6 +2,7 @@
 
 #include <QCheckBox>
 #include <QColorDialog>
+#include <QAbstractItemView>
 #include <QComboBox>
 #include <QPair>
 #include <QContextMenuEvent>
@@ -35,6 +36,54 @@ constexpr qreal kSocketRadius = 5;
 constexpr qreal kSocketGrab = 18; // how near the pen must be to connect
 constexpr qreal kHotMargin = 10;
 constexpr qreal kParamHeight = 28;
+
+// A node's select. In the graph its list is shown in the scene too, where it would be cut off by the view's edge
+// (Qt places it by the screen, not by the view), and where a list laid over the box crept up a little each time it
+// was opened. So the list drops down under the box, and is placed where the view shows it: under the box if it fits
+// there, else over it, else as far in as it goes. While it is open its row and its node are brought to the front: it
+// is drawn over the node's next settings (a slider under the select) and over the nodes round it.
+class NodeComboBox : public QComboBox
+{
+public:
+    using QComboBox::QComboBox;
+
+    void showPopup() override
+    {
+        QComboBox::showPopup();
+        QGraphicsProxyWidget *list = view()->window()->graphicsProxyWidget();
+        QGraphicsProxyWidget *row = parentWidget() ? parentWidget()->graphicsProxyWidget() : nullptr;
+        if (!list || !row || !row->scene() || row->scene()->views().isEmpty())
+            return; // a window of its own: Qt keeps it on the screen
+        const QGraphicsView *graph = row->scene()->views().constFirst();
+        const QRectF box = row->mapRectToScene(QRectF(geometry()));
+        const QRectF seen = graph->mapToScene(graph->viewport()->rect()).boundingRect();
+        const qreal height = list->sceneBoundingRect().height();
+        qreal top = box.bottom();
+        if (top + height > seen.bottom()) {
+            const qreal above = box.top() - height;
+            top = above >= seen.top() ? above : std::max(seen.top(), seen.bottom() - height);
+        }
+        const QPointF at(box.left(), top);
+        list->setPos(list->parentItem() ? list->parentItem()->mapFromScene(at) : at);
+        // In front: the row over the node's other rows, the node over the other nodes.
+        m_raised.clear();
+        for (QGraphicsItem *item = row; item; item = item->parentItem()) {
+            m_raised.push_back({item, item->zValue()});
+            item->setZValue(1000);
+        }
+    }
+
+    void hidePopup() override
+    {
+        QComboBox::hidePopup();
+        for (const auto &[item, z] : m_raised)
+            item->setZValue(z);
+        m_raised.clear();
+    }
+
+private:
+    std::vector<std::pair<QGraphicsItem *, qreal>> m_raised; // what showPopup() brought to the front, and its place
+};
 
 } // namespace
 
@@ -82,12 +131,14 @@ NodeItem::NodeItem(compositing::Graph &graph, NodeId id)
                 static_cast<QLabel *>(slider->parentWidget()->layout()->itemAt(2)->widget())->setText(QString::number(v.toInt()));
             };
         } else if (param.kind == compositing::ParamInfo::Kind::Choice) {
-            auto *combo = new QComboBox(row);
+            auto *combo = new NodeComboBox(row);
             combo->addItems(param.choices);
             // A long name does not widen the select past the node: it is cut short in the box (the list shows it whole).
             combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
             combo->setMinimumContentsLength(2);
             combo->setMinimumWidth(0);
+            // The list drops down under the box (see NodeComboBox).
+            combo->setStyleSheet(QStringLiteral("QComboBox { combobox-popup: 0; }"));
             label->setMinimumWidth(0); // (a short label leaves the select more room)
             combo->setCurrentIndex(initial.toInt());
             layout->addWidget(combo, 1);
