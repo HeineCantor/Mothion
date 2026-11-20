@@ -385,7 +385,8 @@ void AutoplayWindow::updateRange()
     int last = 0;
     for (int i = 0; i < d.celCount(); ++i)
         last = std::max(last, d.celAt(i).timing().lastFrame());
-    m_frameCount = std::clamp(last == 0 ? d.frameCount() : last, 1, d.frameCount());
+    // The drawn frames, past the scene's end too: its To can be dragged back out to them.
+    m_frameCount = std::max(1, last == 0 ? d.frameCount() : last);
     const QSignalBlocker block(m_slider);
     m_slider->setRange(0, m_frameCount - 1);
     m_slider->setValue(std::min(m_frame, m_frameCount - 1));
@@ -406,8 +407,7 @@ void AutoplayWindow::setLoopRange(int first, int last)
 {
     last = std::clamp(last, 0, m_frameCount - 1);
     first = std::clamp(first, 0, last);
-    // At the end: it follows it as the scene grows.
-    m_document->setPlayRange(first, last >= m_frameCount - 1 ? document::DocumentController::kSceneEnd : last);
+    m_document->setPlayRange(first, last); // the scene's From and To
 }
 
 void AutoplayWindow::updateLoopBar()

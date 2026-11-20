@@ -57,6 +57,8 @@ namespace mothion::io {
 // Format 15 adds the parent of a trajectory cel: the table "trajectory_parents". Older files have none.
 //
 // Format 17 adds the table "play_range": the Timeline's From and To (one row, none for the whole scene; a null last frame is the end of the scene).
+// They are the scene's first and last frames now: a file saved since has a null last frame (the end is the frame count), and
+// a last frame of an older file is where its scene ends.
 // Format 16 adds the vector layers (kind "vector"): the table "vector_strokes" holds the strokes of each as JSON
 // text (see doc::VectorStroke); their tiles are saved as the raster layers' are. Older files have none.
 // Format 18 adds the table "symmetry": the axes of the brushes' symmetry, once placed.

@@ -267,16 +267,17 @@ public:
     // Goes to the next marker after the current frame (direction > 0) or the previous one; false, staying put, if there
     // is none that way.
     bool goToMarker(int direction);
-    // The scene's length, in frames (1 or more; exposures past it stay, they are just not part of the scene).
+    // The scene's end: the frame after its last one, frame 0 counting (1 or more; exposures past it stay, they are just not
+    // part of the scene). A From past the new end is brought back to it.
     void setSceneLength(int frames);
     // Whole frames per second (one undo step); a rate the document already has changes nothing.
     void setFrameRate(int fps);
     int sceneLength() const;
-    // The frames that play (the Timeline, Autoplay and the Compositing window all go through this one range): from
-    // `first` to `last`, 0-based, both included, any whole numbers (before the scene or past it too). `last` of
-    // kSceneEnd is the end of the scene, wherever it is put. Saved with the project (not an undo step); a new project
-    // plays the whole scene.
-    static constexpr int kSceneEnd = doc::Document::kSceneEnd;
+    // The scene's From and To, the frames that play and are exported (the Timeline, Autoplay and the Compositing window
+    // all go through them): from `first` to `last`, 0-based, both included. The To is the scene's end: moving it changes
+    // the scene's length (an undo step, as setSceneLength); `last` of kSceneEnd leaves it where it is. The From is saved
+    // with the project, not an undo step; it is never before frame 0, and a To before it is pushed on to it.
+    static constexpr int kSceneEnd = std::numeric_limits<int>::min();
     void setPlayRange(int first, int last);
     // The symmetry's axes (doc::Document::symmetryAxes()), resolved: where they are on the page, the middle until
     // placed. Setting them places them; resetSymmetryAxes() puts them back in the middle, upright.
@@ -284,9 +285,8 @@ public:
     double symmetryAngle() const { return m_document->symmetryAxes().angle; }
     void setSymmetryAxes(const QPointF &center, double angle);
     void resetSymmetryAxes();
-    int playRangeFirst() const { return m_document->playFirst(); }
-    int playRangeLast() const; // resolved, and never before the first
-    bool playRangeFollowsSceneEnd() const { return m_document->playLast() == kSceneEnd; }
+    int playRangeFirst() const { return m_document->sceneStart(); }
+    int playRangeLast() const; // the scene's last frame, never before the first
     // The frame after the last exposure of any cel: how short the scene can be without leaving some out.
     int usedFrames() const;
     void setCameraVisible(bool visible);
@@ -647,7 +647,7 @@ signals:
     void pixelsChanged(doc::CelId cel, doc::DrawingId drawing, const QRect &rect);
     // Cels, drawings, layers, timing or document properties changed.
     void structureChanged();
-    // The play range was set (see setPlayRange()), or went back to the whole scene with a new project.
+    // The scene's From or To moved (see setPlayRange(), setSceneLength()), or a new project came.
     void playRangeChanged();
     // The symmetry's axes were moved or turned (or another document came).
     void symmetryAxesChanged();

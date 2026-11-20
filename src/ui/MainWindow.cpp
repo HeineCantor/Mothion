@@ -1399,24 +1399,28 @@ void MainWindow::exportFrames()
 
 void MainWindow::sceneLength()
 {
+    // The scene's length is from its From to its To (the Timeline's): changing it moves the To.
     const doc::Document &d = m_document->document();
     const double fps = d.frameRate().fps();
+    const int start = m_document->playRangeFirst();
+    const int length = m_document->playRangeLast() - start + 1;
     bool ok = false;
     const int frames = QInputDialog::getInt(
-        this, tr("Scene length"), tr("Frames (at %1 fps, %2 s now):").arg(fps, 0, 'g', 5).arg(d.frameCount() / fps, 0, 'f', 1),
-        d.frameCount(), 1, 100000, 1, &ok);
-    if (!ok || frames == d.frameCount())
+        this, tr("Scene length"), tr("Frames (at %1 fps, %2 s now):").arg(fps, 0, 'g', 5).arg(length / fps, 0, 'f', 1),
+        length, 1, 100000, 1, &ok);
+    if (!ok || frames == length)
         return;
+    const int end = start + frames; // the frame after the last
     const int used = m_document->usedFrames();
-    if (frames < used &&
+    if (end < used &&
         QMessageBox::question(this, tr("Scene length"),
                               tr("Some frames are drawn past frame %1. They stay in the project, but the scene, the "
-                                 "playback and the exports end at frame %1.").arg(frames),
+                                 "playback and the exports end at frame %1.").arg(end),
                               QMessageBox::Ok | QMessageBox::Cancel) != QMessageBox::Ok)
         return;
-    m_document->setSceneLength(frames);
-    if (m_document->currentFrame() >= frames)
-        m_document->setCurrentFrame(frames - 1);
+    m_document->setSceneLength(end);
+    if (m_document->currentFrame() >= end)
+        m_document->setCurrentFrame(end - 1);
     statusBar()->showMessage(tr("Scene length: %n frame(s)", "", frames), 6000);
 }
 

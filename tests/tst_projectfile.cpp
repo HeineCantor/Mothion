@@ -117,7 +117,7 @@ std::unique_ptr<doc::Document> sampleDocument()
     d->setCompositing(graph);
     d->setCompositingView({true, 1.5, -120.25, 40});
     d->setFrameRate({30, 1});
-    d->setPlayRange(-5, 40); // the Timeline's From and To, before the scene too
+    d->setSceneStart(5); // the Timeline's From
     d->setSymmetryAxes({true, 300.5, -20.25, 30}); // the symmetry's axes, placed
     d->allocateCelId(); // ids used by a cel and a layer since deleted: must not come back
     d->allocateLayerId();
@@ -132,8 +132,7 @@ void compareDocuments(const doc::Document &x, const doc::Document &y)
     QCOMPARE(x.frameCount(), y.frameCount());
     QCOMPARE(x.paperColor(), y.paperColor());
     QVERIFY(x.markers() == y.markers());
-    QCOMPARE(x.playFirst(), y.playFirst());
-    QCOMPARE(x.playLast(), y.playLast());
+    QCOMPARE(x.sceneStart(), y.sceneStart());
     QVERIFY(x.symmetryAxes() == y.symmetryAxes());
     QCOMPARE(x.nextCelId(), y.nextCelId());
     QCOMPARE(x.nextDrawingId(), y.nextDrawingId());
@@ -274,7 +273,7 @@ private slots:
         original->setCompositingView({});
         original->setCamera(std::nullopt); // and the camera with format 8
         original->setMarkers({}); // and the markers with format 10
-        original->setPlayRange(0, doc::Document::kSceneEnd); // and the play range with format 17
+        original->setSceneStart(0); // and the play range with format 17
         original->setSymmetryAxes({}); // and the symmetry's axes with format 18
         for (int i = 0; i < original->celCount(); ++i) // and the motion of the cels with format 11
             original->celAt(i).setMotion({});
@@ -331,29 +330,45 @@ private slots:
         compareDocuments(*original, *loaded);
     }
 
-    // Format 17: the frame rate and the play range come back; a last frame at the end of the scene stays so (it follows the
-    // scene), and a project that never set a range has the whole scene.
+    // Format 17: the frame rate and the scene's From come back (its To is the frame count), and a project that never set
+    // a From begins at frame 0. A file from before the From and To were the scene, with a To of its own: the scene ends
+    // there.
     void thePlayRangeAndTheRateSurviveTheFile()
     {
         QTemporaryDir dir;
         const QString path = dir.filePath(QStringLiteral("range.moth"));
         const auto original = sampleDocument();
         original->setFrameRate({12, 1});
-        original->setPlayRange(7, doc::Document::kSceneEnd);
+        original->setSceneStart(7);
         QString error;
         QVERIFY2(io::saveProject(*original, path, &error), qPrintable(error));
         auto loaded = io::loadProject(path, &error);
         QVERIFY2(loaded, qPrintable(error));
         QCOMPARE(loaded->frameRate().fps(), 12.0);
-        QCOMPARE(loaded->playFirst(), 7);
-        QCOMPARE(loaded->playLast(), doc::Document::kSceneEnd);
+        QCOMPARE(loaded->sceneStart(), 7);
+        QCOMPARE(loaded->frameCount(), 48);
 
-        original->setPlayRange(0, doc::Document::kSceneEnd); // nothing set: nothing written
+        // An older file: scene length 48, From 2, To 99 (past it).
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), QStringLiteral("old-range"));
+            db.setDatabaseName(path);
+            QVERIFY(db.open());
+            QSqlQuery q(db);
+            QVERIFY(q.exec(QStringLiteral("update play_range set first = 2, last = 99")));
+            db.close();
+        }
+        QSqlDatabase::removeDatabase(QStringLiteral("old-range"));
+        loaded = io::loadProject(path, &error);
+        QVERIFY2(loaded, qPrintable(error));
+        QCOMPARE(loaded->sceneStart(), 2);
+        QCOMPARE(loaded->frameCount(), 100); // the To is where the scene ends
+
+        original->setSceneStart(0); // nothing set: nothing written
         QVERIFY2(io::saveProject(*original, path, &error), qPrintable(error));
         loaded = io::loadProject(path, &error);
         QVERIFY2(loaded, qPrintable(error));
-        QCOMPARE(loaded->playFirst(), 0);
-        QCOMPARE(loaded->playLast(), doc::Document::kSceneEnd);
+        QCOMPARE(loaded->sceneStart(), 0);
+        QCOMPARE(loaded->frameCount(), 48);
     }
 
     // Format 13: the layers clipped to the one below, and only those.

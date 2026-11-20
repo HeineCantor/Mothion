@@ -54,17 +54,11 @@ public:
 
     // Markers: a name on a frame of the timeline (frame -> name; the name may be empty), to find one's way in a long
     // scene. They are not tied to a cel: they stay where they are as frames are added or taken away.
-    // The frames that play (from `first` to `last`, 0-based, both included, any whole numbers): the Timeline's From and To,
-    // which Autoplay and the Compositing window go by too. `last` of kSceneEnd is the end of the scene, wherever it is put.
-    // Saved with the project, but not an edit: it is not an undo step.
-    static constexpr int kSceneEnd = std::numeric_limits<int>::min();
-    int playFirst() const { return m_playFirst; }
-    int playLast() const { return m_playLast; }
-    void setPlayRange(int first, int last)
-    {
-        m_playFirst = first;
-        m_playLast = last;
-    }
+    // The scene's first frame (0-based; the Timeline's From): the scene is from it to its last frame, frameCount() - 1
+    // (the To). Frames before it stay in the project; they are not part of the scene. Saved with the project, but not an
+    // edit: it is not an undo step.
+    int sceneStart() const { return m_sceneStart; }
+    void setSceneStart(int first) { m_sceneStart = first < 0 ? 0 : first; }
     // The axes of the brushes' symmetry (tools::SymmetrySettings): a center on the page and an angle (degrees). Until
     // they are placed (`placed` false) they are at the middle of the page, upright. Saved with the project, but not an
     // edit: it is not an undo step.
@@ -145,8 +139,7 @@ private:
     std::optional<Camera> m_camera;
     std::map<int, std::string> m_markers;
     SymmetryAxes m_symmetryAxes;
-    int m_playFirst = 0;
-    int m_playLast = kSceneEnd;
+    int m_sceneStart = 0;
     GraphData m_compositing;
     GraphView m_compositingView;
     std::vector<std::unique_ptr<Cel>> m_cels;

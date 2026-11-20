@@ -316,13 +316,19 @@ private slots:
         QCOMPARE(window.loopStart(), 0);
         QCOMPARE(window.loopEnd(), 5);
 
-        // A range that reaches the end follows it as the animation grows.
+        // The range is the scene's From and To: a frame drawn past its end is not in it, but the bar reaches it, and
+        // the To dragged out to it makes the scene longer.
         window.setLoopRange(1, 5);
+        QCOMPARE(controller.document().frameCount(), 6);
         QImage more(40, 40, QImage::Format_ARGB32);
         more.fill(Qt::yellow);
         controller.setCurrentFrame(6);
         QVERIFY(controller.pasteImage(more, QPoint(940, 520)));
-        QTRY_COMPARE(window.loopEnd(), 6);
+        QTRY_COMPARE(window.frameCount(), 7);
+        QCOMPARE(window.loopEnd(), 5);
+        window.setLoopRange(1, 6);
+        QCOMPARE(window.loopEnd(), 6);
+        QCOMPARE(controller.document().frameCount(), 7);
         QCOMPARE(window.loopStart(), 1);
     }
 
@@ -1323,11 +1329,17 @@ private slots:
         QCOMPARE(controller.document().frameRate().fps(), 24.0);
         QCOMPARE(speed->value(), 24);
 
-        // The range: the player goes round only through it, from the start of it if the frame is out.
+        // The From and To are the scene: the player goes round only through it, from its start if the frame is out;
+        // the To is the scene's end (an undo step, as the scene's length).
         from->setValue(5);
         to->setValue(8);
         QCOMPARE(panel.player()->firstFrame(), 4);
         QCOMPARE(panel.player()->lastFrame(), 7);
+        QCOMPARE(controller.document().frameCount(), 8);
+        controller.undo();
+        QCOMPARE(controller.document().frameCount(), count);
+        QCOMPARE(to->value(), count);
+        to->setValue(8);
         from->setValue(10); // past the last: it pushes it on
         QCOMPARE(panel.player()->lastFrame(), 9);
         QCOMPARE(to->value(), 10);
@@ -1343,22 +1355,29 @@ private slots:
         QVERIFY(controller.currentFrame() >= 4 && controller.currentFrame() <= 7);
         panel.player()->stop();
 
-        // Free numbers: negative ones and past the scene, and any speed.
+        // Never before the first frame; a To past the scene makes it longer, and the timeline shows it all (the cursor
+        // goes where the playback does). Any speed.
         from->setValue(-30);
+        QCOMPARE(panel.player()->firstFrame(), 0);
+        QCOMPARE(from->value(), 1);
         to->setValue(count + 500);
-        QCOMPARE(panel.player()->firstFrame(), -31);
         QCOMPARE(panel.player()->lastFrame(), count + 499);
+        QCOMPARE(controller.document().frameCount(), count + 500);
+        auto *view = panel.findChild<ui::TimelineView *>();
+        QVERIFY(view);
+        QVERIFY(view->displayedFrames() >= count + 500);
         speed->setValue(200);
         QCOMPARE(controller.document().frameRate().fps(), 200.0);
         controller.undo();
 
-        // The range is the document's: other windows see it. Left at the end of the scene, it follows it.
-        QCOMPARE(controller.playRangeFirst(), -31);
-        controller.setPlayRange(0, document::DocumentController::kSceneEnd);
-        QVERIFY(panel.player()->followsSceneEnd());
+        // The scene's length set elsewhere moves the To; a From past the new end comes back to it.
         controller.setSceneLength(count + 10);
         QCOMPARE(panel.player()->lastFrame(), count + 9);
         QCOMPARE(to->value(), count + 10);
+        from->setValue(count + 5);
+        controller.setSceneLength(count);
+        QCOMPARE(panel.player()->firstFrame(), count - 1);
+        QCOMPARE(from->value(), count);
     }
 
 

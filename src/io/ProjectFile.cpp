@@ -780,11 +780,11 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
             return false;
         }
     }
-    if (d.playFirst() != 0 || d.playLast() != doc::Document::kSceneEnd) { // (the whole scene is what a file without it has)
+    if (d.sceneStart() != 0) { // (a scene from the first frame is what a file without it has)
         QSqlQuery range(db);
         range.prepare(QStringLiteral("insert into play_range values (?, ?)"));
-        range.addBindValue(d.playFirst());
-        range.addBindValue(d.playLast() == doc::Document::kSceneEnd ? QVariant() : QVariant(d.playLast()));
+        range.addBindValue(d.sceneStart());
+        range.addBindValue(QVariant()); // (the scene's end: the frame count)
         if (!range.exec()) {
             failure = sqlError(range);
             return false;
@@ -1082,8 +1082,13 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
         d->setMarkers(std::move(markers));
     }
 
-    if (version >= 17 && q.exec(QStringLiteral("select first, last from play_range")) && q.next())
-        d->setPlayRange(q.value(0).toInt(), q.value(1).isNull() ? doc::Document::kSceneEnd : q.value(1).toInt());
+    // The scene's From and To. A file made before they were one with the scene's length may have a To of its own: then
+    // it is where the scene ends.
+    if (version >= 17 && q.exec(QStringLiteral("select first, last from play_range")) && q.next()) {
+        if (!q.value(1).isNull())
+            d->setFrameCount(std::max({q.value(1).toInt(), q.value(0).toInt(), 0}) + 1);
+        d->setSceneStart(std::clamp(q.value(0).toInt(), 0, d->frameCount() - 1));
+    }
 
     if (version >= 18 && q.exec(QStringLiteral("select x, y, angle from symmetry")) && q.next())
         d->setSymmetryAxes({true, q.value(0).toDouble(), q.value(1).toDouble(), q.value(2).toDouble()});

@@ -38,7 +38,6 @@ public:
     void setRange(int first, int last) { m_document->setPlayRange(first, last); }
     int firstFrame() const { return m_document->playRangeFirst(); }
     int lastFrame() const { return m_document->playRangeLast(); }
-    bool followsSceneEnd() const { return m_document->playRangeFollowsSceneEnd(); }
 
 signals:
     void playingChanged(bool playing);

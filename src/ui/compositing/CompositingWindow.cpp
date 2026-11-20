@@ -193,7 +193,7 @@ CompositingWindow::CompositingWindow(document::DocumentController *document, QWi
     // The range is the document's (the Timeline's boxes set it too): the handles write it, and show it.
     connect(m_range, &RangeSlider::rangeChanged, this, [this](int first, int last) {
         if (m_document)
-            m_document->setPlayRange(first, last >= m_range->maximum() ? document::DocumentController::kSceneEnd : last);
+            m_document->setPlayRange(first, last); // the scene's From and To
     });
     if (m_document)
         connect(m_document, &document::DocumentController::playRangeChanged, this, [this] {
@@ -372,9 +372,13 @@ void CompositingWindow::syncBars()
     const QSignalBlocker blockPlaybar(m_playbar);
     m_playbar->setRange(0, last);
     m_playbar->setValue(std::clamp(m_document->currentFrame(), 0, last));
-    m_range->setMaximum(last);
+    // The range is the scene's From and To; its bar goes to the last drawn frame too, past the scene's end, so that the
+    // To can be dragged back out.
+    const int reach = std::max(last, m_document->usedFrames() - 1);
+    const QSignalBlocker blockRange(m_range);
+    m_range->setMaximum(reach);
     const int first = std::clamp(m_document->playRangeFirst(), 0, last);
-    m_range->setRange(first, std::clamp(m_document->playRangeLast(), first, last)); // the Timeline's range, kept to the scene
+    m_range->setRange(first, std::clamp(m_document->playRangeLast(), first, last));
     updateLabels();
 }
 

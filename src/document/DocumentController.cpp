@@ -1722,6 +1722,9 @@ void DocumentController::setSceneLength(int frames)
     if (frames == m_document->frameCount())
         return;
     execute(std::make_unique<doc::SetFrameCountCommand>(frames));
+    if (m_document->sceneStart() > frames - 1)
+        m_document->setSceneStart(frames - 1);
+    emit playRangeChanged();
 }
 
 void DocumentController::setFrameRate(int fps)
@@ -1760,19 +1763,19 @@ void DocumentController::resetSymmetryAxes()
 
 int DocumentController::playRangeLast() const
 {
-    const int last = m_document->playLast();
-    const int end = last == kSceneEnd ? std::max(0, m_document->frameCount() - 1) : last;
-    return std::max(end, m_document->playFirst());
+    return std::max(m_document->frameCount() - 1, m_document->sceneStart());
 }
 
 void DocumentController::setPlayRange(int first, int last)
 {
-    if (last != kSceneEnd)
-        last = std::max(last, first);
-    if (first == m_document->playFirst() && last == m_document->playLast())
-        return;
-    m_document->setPlayRange(first, last);
-    emit playRangeChanged();
+    first = std::max(0, first);
+    last = std::max(last == kSceneEnd ? m_document->frameCount() - 1 : last, first);
+    const bool moved = first != m_document->sceneStart();
+    m_document->setSceneStart(first);
+    if (last + 1 != m_document->frameCount())
+        setSceneLength(last + 1); // (tells of the range itself)
+    else if (moved)
+        emit playRangeChanged();
 }
 
 int DocumentController::sceneLength() const { return m_document->frameCount(); }

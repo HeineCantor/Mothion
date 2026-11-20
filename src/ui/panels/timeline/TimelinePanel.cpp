@@ -342,8 +342,8 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
     layout->addWidget(m_view, 1);
     m_view->installEventFilter(this); // the shapes' letters, while the mouth bar is shown
 
-    // The number boxes show the player's range and the document's rate; changing them changes those. The last frame
-    // stays "the end of the scene" until it is set, so a longer scene plays whole.
+    // The number boxes show the scene's From and To (the frames that play) and the document's rate; changing them changes
+    // those: the To is the scene's end.
     auto syncRange = [this, rangeFrom, rangeTo, fpsSpin] {
         const QSignalBlocker b1(rangeFrom), b2(rangeTo), b3(fpsSpin);
         rangeFrom->setValue(m_player->firstFrame() + 1);
@@ -357,7 +357,7 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
     connect(m_document, &DocumentController::documentReplaced, this, syncRange);
     connect(rangeFrom, &QSpinBox::valueChanged, this, [this, rangeFrom] {
         const int first = rangeFrom->value() - 1;
-        m_player->setRange(first, m_player->followsSceneEnd() ? TimelinePlayer::kSceneEnd : m_player->lastFrame()); // pushes the last on
+        m_player->setRange(first, TimelinePlayer::kSceneEnd); // the To stays (pushed on if the From passes it)
     });
     connect(rangeTo, &QSpinBox::valueChanged, this, [this, rangeTo] {
         const int last = rangeTo->value() - 1;
