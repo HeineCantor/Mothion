@@ -24,6 +24,7 @@ struct WorkspacePanels
     QWidget *navigator = nullptr;
     QWidget *layers = nullptr;
     QWidget *timeline = nullptr;
+    QWidget *mouthChart = nullptr;
 };
 
 // Owns the arrangement of the dock panels around the canvas:
@@ -65,6 +66,7 @@ private:
     PanelDock *m_navigator = nullptr;
     PanelDock *m_layers = nullptr;
     PanelDock *m_timeline = nullptr;
+    PanelDock *m_mouthChart = nullptr;
     bool m_defaultSizesPending = false;
 };
 

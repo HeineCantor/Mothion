@@ -4,6 +4,8 @@
 
 class QLayout;
 
+class QSpinBox;
+
 namespace mothion::audio {
 class AudioPlayer;
 }
@@ -36,12 +38,22 @@ public:
     TimelineView *view() const { return m_view; }
     TimelinePlayer *player() const { return m_player; }
 
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override;
+
 private:
     QLayout *celBar();
+    // Lip sync by hand: a button for each mouth shape (doc::LipSync.h), shown while the current cel is a mouth chart.
+    QWidget *mouthBar();
+    // The shape put at the current frame (see DocumentController::setMouthShape()), then on by the frames chosen.
+    void putMouthShape(char shape);
+    bool mouthBarShown() const;
 
     document::DocumentController *m_document;
     TimelineView *m_view;
     TimelinePlayer *m_player;
+    QWidget *m_mouthBar = nullptr;
+    QSpinBox *m_mouthStep = nullptr;
 };
 
 } // namespace mothion::ui

@@ -84,6 +84,29 @@ RemoveDrawingCommand::RemoveDrawingCommand(CelId cel, DrawingId drawing)
 {
 }
 
+// --- RenameDrawingCommand ----------------------------------------------------------
+
+RenameDrawingCommand::RenameDrawingCommand(CelId cel, DrawingId drawing, std::string before, std::string after)
+    : m_cel(cel)
+    , m_id(drawing)
+    , m_before(std::move(before))
+    , m_after(std::move(after))
+{
+}
+
+ChangeSet RenameDrawingCommand::set(Document &doc, const std::string &name)
+{
+    Cel *cel = doc.cel(m_cel);
+    Drawing *drawing = cel ? cel->drawing(m_id) : nullptr;
+    if (!drawing)
+        return {};
+    drawing->name = name;
+    return structural();
+}
+
+ChangeSet RenameDrawingCommand::apply(Document &doc) { return set(doc, m_after); }
+ChangeSet RenameDrawingCommand::revert(Document &doc) { return set(doc, m_before); }
+
 ChangeSet RemoveDrawingCommand::apply(Document &doc)
 {
     Cel *cel = doc.cel(m_cel);

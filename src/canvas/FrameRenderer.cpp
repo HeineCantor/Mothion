@@ -409,6 +409,14 @@ void FrameRenderer::render(const doc::Document &doc, int frame, const QRect &rec
     }
 }
 
+const doc::Drawing *FrameRenderer::drawingOf(const doc::Cel &cel, int frame) const
+{
+    if (m_shownDrawing != doc::kNoId && cel.id() == m_shownCel)
+        if (const doc::Drawing *shown = cel.drawing(m_shownDrawing))
+            return shown;
+    return cel.drawingAt(frame);
+}
+
 QRect FrameRenderer::contentBounds(const doc::Document &doc, int frame) const
 {
     QRect bounds;
@@ -416,7 +424,7 @@ QRect FrameRenderer::contentBounds(const doc::Document &doc, int frame) const
         const doc::Cel &cel = doc.celAt(i);
         if ((m_only != doc::kNoId && cel.id() != m_only) || cel.properties().trajectory || !cel.properties().visible)
             continue;
-        const doc::Drawing *drawing = cel.drawingAt(frame);
+        const doc::Drawing *drawing = drawingOf(cel, frame);
         if (!drawing)
             continue;
         const QRect own = drawingBounds(*drawing, m_guides);
@@ -452,7 +460,7 @@ void FrameRenderer::compose(QImage &target, const QPoint &origin, const doc::Doc
         if (cel.properties().trajectory)
             continue; // not drawn: it only moves what follows it
         const doc::CelProperties &props = cel.properties();
-        const doc::Drawing *drawing = cel.drawingAt(frame);
+        const doc::Drawing *drawing = drawingOf(cel, frame);
         // What the animation does to the cel on this frame (nothing for a cel with no keys, or one shown as drawn).
         const bool animated = !cel.motion().isEmpty() && cel.id() != m_asDrawn;
         const doc::CelPose pose = animated ? cel.motion().poseAt(frame) : doc::CelPose{};

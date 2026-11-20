@@ -8,6 +8,8 @@
 #include "ui/Shortcuts.h"
 #include "ui/Theme.h"
 
+#include <QLineEdit>
+#include <QMessageBox>
 #include <QActionGroup>
 #include <QApplication>
 #include <QCursor>
@@ -2297,6 +2299,17 @@ void TimelineView::addCelActions(QMenu &menu, const doc::Cel &cel)
             action->setChecked(followed && followed->id() == id);
         }
         follow->setEnabled(any);
+        // Lip sync: the cel's drawings are mouths (A to H, X), drawn in the Mouth chart panel and put by the mouth bar.
+        QAction *chart = menu.addAction(tr("Mouth chart (lip sync)"), this, [this, celId](bool on) {
+            QString reason;
+            if (!m_document->setMouthChart(celId, on, &reason) && !reason.isEmpty())
+                QMessageBox::warning(this, tr("Mouth chart"), reason);
+        });
+        chart->setCheckable(true);
+        chart->setChecked(cel.properties().mouthChart);
+        chart->setToolTip(tr("The cel's frames are a character's mouths, one for each shape (A to H, X): the empty "
+                             "ones it lacks are made, to draw in the Mouth chart panel. The Timeline's mouth bar then "
+                             "puts them frame by frame."));
     }
 }
 
@@ -2433,6 +2446,19 @@ void TimelineView::contextMenuEvent(QContextMenuEvent *event)
     if (drawing) {
         menu.addSeparator();
         const doc::DrawingId id = drawing->id;
+        // Its name, shown in its cells (a mouth chart's drawings are named after the shapes: A, B... X).
+        menu.addAction(tr("Rename frame “%1”…").arg(QString::fromStdString(drawing->name)), this, [this, celId, id] {
+            const doc::Cel *c = m_document->document().cel(celId);
+            const doc::Drawing *d = c ? c->drawing(id) : nullptr;
+            if (!d)
+                return;
+            bool ok = false;
+            const QString name = QInputDialog::getText(this, tr("Rename frame"), tr("Name:"), QLineEdit::Normal,
+                                                       QString::fromStdString(d->name), &ok);
+            QString reason;
+            if (ok && !m_document->renameDrawing(celId, id, name, &reason))
+                QMessageBox::warning(this, tr("Rename frame"), reason);
+        });
         menu.addAction(tr("Delete frame “%1” (from the whole timeline)").arg(QString::fromStdString(drawing->name)),
                        this, [this, celId, id] {
                            m_document->execute(std::make_unique<doc::RemoveDrawingCommand>(celId, id));

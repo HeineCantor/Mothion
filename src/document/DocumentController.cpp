@@ -7,6 +7,7 @@
 #include "canvas/SelectionGrow.h"
 #include "canvas/VectorRender.h"
 #include "canvas/TileQt.h"
+#include "core/document/LipSync.h"
 #include "core/document/commands/DrawingCommands.h"
 #include "core/Parallel.h"
 #include "core/document/commands/GroupCommand.h"
@@ -162,6 +163,7 @@ void DocumentController::replaceDocument(std::unique_ptr<doc::Document> document
     m_currentCel = m_document->celCount() > 0 ? m_document->celAt(m_document->celCount() - 1).id()
                                                   : doc::kNoId;
     m_currentFrame = 0;
+    m_mouthEdit = doc::kNoId;
     m_currentLayer = doc::kNoId;
     m_currentLayerName.clear();
     m_lastLayerOf.clear();
@@ -1096,7 +1098,7 @@ bool DocumentController::drawingBlocked() const
     if (m_layerChosen)
         return false;
     const doc::Cel *cel = m_document->cel(m_currentCel);
-    return cel && cel->timing().drawingAt(m_currentFrame) != doc::kNoId;
+    return cel && shownDrawingId(*cel) != doc::kNoId;
 }
 
 void DocumentController::setMaskEditing(doc::LayerId layer)
@@ -2234,13 +2236,20 @@ std::optional<DocumentController::PerspectiveLayerInfo> DocumentController::pers
 const doc::Drawing *DocumentController::currentDrawing() const
 {
     const doc::Cel *cel = m_document->cel(m_currentCel);
-    return cel ? cel->drawingAt(m_currentFrame) : nullptr;
+    return cel ? cel->drawing(shownDrawingId(*cel)) : nullptr;
 }
 
 doc::DrawingId DocumentController::currentDrawingId() const
 {
     const doc::Cel *cel = m_document->cel(m_currentCel);
-    return cel ? cel->timing().drawingAt(m_currentFrame) : doc::kNoId;
+    return cel ? shownDrawingId(*cel) : doc::kNoId;
+}
+
+doc::DrawingId DocumentController::shownDrawingId(const doc::Cel &cel) const
+{
+    if (m_mouthEdit != doc::kNoId && cel.id() == m_currentCel && cel.drawing(m_mouthEdit))
+        return m_mouthEdit;
+    return cel.timing().drawingAt(m_currentFrame);
 }
 
 doc::Layer *DocumentController::workLayer(bool changesIt, const QString &nothing, QString *reason, bool vectorOk)
@@ -2466,6 +2475,134 @@ bool DocumentController::eraseBySelection(bool insideIt, QString *reason)
     m_history.pushApplied(std::make_unique<doc::GroupCommand>(doc::CommandKind::ClearLayer, std::move(steps)));
     emit pixelsChanged(m_currentCel, drawingId, area);
     emit historyChanged();
+    return true;
+}
+
+bool DocumentController::renameDrawing(doc::CelId celId, doc::DrawingId drawingId, const QString &name, QString *reason)
+{
+    const doc::Cel *cel = m_document->cel(celId);
+    const doc::Drawing *drawing = cel ? cel->drawing(drawingId) : nullptr;
+    const std::string wanted = name.trimmed().toStdString();
+    auto fail = [reason](const QString &why) {
+        if (reason)
+            *reason = why;
+        return false;
+    };
+    if (!drawing)
+        return fail(tr("No such frame"));
+    if (wanted.empty())
+        return fail(tr("A frame needs a name"));
+    if (wanted == drawing->name)
+        return true;
+    for (const auto &[id, other] : cel->drawings())
+        if (id != drawingId && other.name == wanted)
+            return fail(tr("Another frame of “%1” is named “%2”")
+                            .arg(QString::fromStdString(cel->properties().name), QString::fromStdString(wanted)));
+    interruptStroke();
+    execute(std::make_unique<doc::RenameDrawingCommand>(celId, drawingId, drawing->name, wanted));
+    return true;
+}
+
+bool DocumentController::setMouthChart(doc::CelId celId, bool on, QString *reason)
+{
+    const doc::Cel *cel = m_document->cel(celId);
+    if (!cel || cel->properties().trajectory) {
+        if (reason)
+            *reason = cel ? tr("A trajectory has no drawings: it cannot be a mouth chart") : tr("No such cel");
+        return false;
+    }
+    if (cel->properties().mouthChart == on)
+        return true;
+    interruptStroke();
+    if (!on)
+        stopEditingMouth();
+    std::vector<std::unique_ptr<doc::Command>> steps;
+    doc::CelProperties properties = cel->properties();
+    properties.mouthChart = on;
+    steps.push_back(doc::makeSetCelProperties(*m_document, celId, properties));
+    if (on)
+        for (const char shape : doc::kMouthShapes) {
+            if (doc::mouthDrawing(*cel, shape) != doc::kNoId)
+                continue;
+            doc::Drawing drawing;
+            drawing.id = m_document->allocateDrawingId();
+            drawing.name = std::string(1, shape);
+            doc::Layer layer;
+            layer.id = m_document->allocateLayerId();
+            layer.properties.name = tr("Mouth").toStdString();
+            drawing.layers.push_back(std::move(layer));
+            steps.push_back(std::make_unique<doc::AddDrawingCommand>(celId, std::move(drawing)));
+        }
+    execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::MouthChart, std::move(steps)));
+    return true;
+}
+
+bool DocumentController::editMouthDrawing(doc::DrawingId drawing)
+{
+    const doc::Cel *cel = m_document->cel(m_currentCel);
+    if (!cel || !cel->properties().mouthChart || !cel->drawing(drawing))
+        return false;
+    if (m_mouthEdit == drawing)
+        return true;
+    interruptStroke();
+    m_mouthEdit = drawing;
+    resolveCurrentLayer();
+    emit mouthEditChanged();
+    emit pixelsChanged(m_currentCel, doc::kNoId, kWholeCanvas); // the canvas shows another drawing
+    return true;
+}
+
+void DocumentController::stopEditingMouth()
+{
+    if (m_mouthEdit == doc::kNoId)
+        return;
+    interruptStroke();
+    m_mouthEdit = doc::kNoId;
+    resolveCurrentLayer();
+    emit mouthEditChanged();
+    emit pixelsChanged(m_currentCel, doc::kNoId, kWholeCanvas);
+}
+
+bool DocumentController::setMouthShape(char shape, QString *reason)
+{
+    auto fail = [reason](const QString &why) {
+        if (reason)
+            *reason = why;
+        return false;
+    };
+    const doc::Cel *cel = m_document->cel(m_currentCel);
+    if (!cel)
+        return fail(tr("No cel selected"));
+    if (!cel->properties().mouthChart)
+        return fail(tr("“%1” is not a mouth chart").arg(QString::fromStdString(cel->properties().name)));
+    if (cel->properties().locked)
+        return fail(tr("Cel “%1” is locked").arg(QString::fromStdString(cel->properties().name)));
+    stopEditingMouth(); // the timeline is what is seen again
+    const doc::DrawingId drawing = doc::mouthDrawing(*cel, shape);
+    if (drawing == doc::kNoId)
+        return fail(tr("“%1” has no frame named %2").arg(QString::fromStdString(cel->properties().name)).arg(QChar(shape)));
+    // From here to where the cel showed something else next: the hold the frame is in, or the gap up to the next one.
+    const int frame = m_currentFrame;
+    int end = std::max(frame + 1, m_document->frameCount());
+    if (const doc::Exposure *e = cel->timing().exposureAt(frame)) {
+        end = e->end();
+    } else {
+        for (const doc::Exposure &next : cel->timing().exposures())
+            if (next.start > frame) {
+                end = next.start;
+                break;
+            }
+    }
+    if (cel->timing().drawingAt(frame) == drawing)
+        return true; // that shape already
+    interruptStroke();
+    auto command = doc::makeSetExposure(*m_document, m_currentCel, frame, end - frame, drawing);
+    if (!command)
+        return true;
+    std::vector<std::unique_ptr<doc::Command>> steps;
+    steps.push_back(std::move(command));
+    execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::SetMouthShape, std::move(steps)));
+    resolveCurrentLayer(); // another drawing shown: its layer
     return true;
 }
 
@@ -2907,6 +3044,9 @@ QString DocumentController::commandName(doc::CommandKind kind)
     case doc::CommandKind::EditMotion: return tr("keyframes");
     case doc::CommandKind::EditBlenderLink: return tr("Blender link");
     case doc::CommandKind::AdjustColor: return tr("hue/saturation/value");
+    case doc::CommandKind::RenameDrawing: return tr("rename frame");
+    case doc::CommandKind::SetMouthShape: return tr("mouth shape");
+    case doc::CommandKind::MouthChart: return tr("mouth chart");
     case doc::CommandKind::ChangeMask: return tr("mask");
     case doc::CommandKind::ClearLayer: return tr("clear");
     case doc::CommandKind::Move: return tr("move");
@@ -2943,6 +3083,13 @@ QString DocumentController::redoText() const
 
 void DocumentController::publish(const doc::ChangeSet &changes)
 {
+    if (m_mouthEdit != doc::kNoId) { // the mouth drawn, gone with an undo (or its cel no chart any more)
+        const doc::Cel *cel = m_document->cel(m_currentCel);
+        if (!cel || !cel->properties().mouthChart || !cel->drawing(m_mouthEdit)) {
+            m_mouthEdit = doc::kNoId;
+            emit mouthEditChanged();
+        }
+    }
     if (changes.camera) {
         if (m_cameraSelected && !m_document->camera()) {
             m_cameraSelected = false;
@@ -3011,6 +3158,7 @@ void DocumentController::setCurrentFrame(int frame)
         return;
     interruptStroke();
     clearTemporaryPose(); // a pose left on a frame that is not a key goes with the frame
+    stopEditingMouth();
     m_currentFrame = frame;
     emit currentFrameChanged(frame);
     resolveCurrentLayer();
@@ -3022,6 +3170,7 @@ void DocumentController::setCurrentCel(doc::CelId cel)
         return;
     interruptStroke();
     clearTemporaryPose();
+    stopEditingMouth();
     m_currentCel = cel;
     emit currentCelChanged(cel);
     resolveCurrentLayer();
@@ -3063,7 +3212,7 @@ std::optional<DocumentController::PaintTarget> DocumentController::beginPaint(bo
     if (forDrawing && m_cameraSelected)
         return fail(tr("The camera is selected: choose a layer to draw on"));
     PaintState state;
-    doc::DrawingId drawing = cel->timing().drawingAt(m_currentFrame);
+    doc::DrawingId drawing = shownDrawingId(*cel);
     if (forDrawing && !m_layerChosen && drawing != doc::kNoId)
         return fail(tr("Choose a layer to draw on: a cel or a frame is selected"));
     if (drawing == doc::kNoId) {

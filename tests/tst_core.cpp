@@ -4,6 +4,8 @@
 #include "core/RateMeter.h"
 #include "core/StrokeSmoother.h"
 #include "core/fill/FloodFill.h"
+#include "core/document/Document.h"
+#include "core/document/LipSync.h"
 #include "core/perspective/PerspectiveGrid.h"
 
 #include <QTest>
@@ -128,6 +130,40 @@ private slots:
         g.fisheye = 0.8;
         QVERIFY(perspective::horizonSegments(g, 100.0).size() > 10);
         QVERIFY(perspective::gridSegments(g).size() > 18); // lines cut in pieces
+    }
+
+    // Lip sync: a drawing named after a mouth shape (its letter alone, or first and set apart) is that shape's.
+    void mouthShapesAreKnownByTheDrawingsNames()
+    {
+        using doc::mouthShapeOf;
+        QCOMPARE(mouthShapeOf("A"), std::optional<char>('A'));
+        QCOMPARE(mouthShapeOf("x"), std::optional<char>('X'));
+        QCOMPARE(mouthShapeOf("  D"), std::optional<char>('D'));
+        QCOMPARE(mouthShapeOf("A - MBP"), std::optional<char>('A'));
+        QCOMPARE(mouthShapeOf("G_fv"), std::optional<char>('G'));
+        QCOMPARE(mouthShapeOf("Alpha"), std::nullopt); // a word
+        QCOMPARE(mouthShapeOf("A2"), std::nullopt);
+        QCOMPARE(mouthShapeOf("I"), std::nullopt); // not a shape
+        QCOMPARE(mouthShapeOf("1"), std::nullopt);
+        QCOMPARE(mouthShapeOf(""), std::nullopt);
+
+        doc::Document d(100, 100);
+        const doc::CelId id = d.allocateCelId();
+        doc::Cel cel(id, doc::CelProperties{"Mouth"});
+        auto add = [&](const std::string &name) {
+            doc::Drawing drawing;
+            drawing.id = d.allocateDrawingId();
+            drawing.name = name;
+            cel.addDrawing(drawing);
+            return drawing.id;
+        };
+        const doc::DrawingId a = add("A");
+        add("1");
+        const doc::DrawingId x = add("X rest");
+        add("a"); // the same shape again: the first one counts
+        QCOMPARE(doc::mouthDrawing(cel, 'A'), a);
+        QCOMPARE(doc::mouthDrawing(cel, 'X'), x);
+        QCOMPARE(doc::mouthDrawing(cel, 'D'), doc::kNoId);
     }
 
     void floodFillStopsAtLinesAndGrows()

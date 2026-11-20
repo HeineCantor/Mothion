@@ -2,6 +2,7 @@
 // and exporting frames as PNG/JPEG.
 
 #include "core/document/Document.h"
+#include "core/document/LipSync.h"
 #include "document/DocumentController.h"
 #include "io/FrameExport.h"
 #include "io/ProjectFile.h"
@@ -457,6 +458,33 @@ private slots:
         QVERIFY(!loaded->celAt(2).properties().trajectory);
         QCOMPARE(loaded->celAt(2).properties().parent, loaded->celAt(0).id()); // a plain cel that follows the path
         QVERIFY(loaded->celAt(0).motion().hasKeyAt(3));
+    }
+
+    // Format 19: the cels that are mouth charts (and no others), with their drawings named after the shapes, those
+    // the timeline does not show too.
+    void mouthChartsSurviveTheFile()
+    {
+        QTemporaryDir dir;
+        const QString path = dir.filePath(QStringLiteral("mouth.moth"));
+        const auto original = sampleDocument();
+        doc::Cel &cel = original->celAt(0);
+        doc::CelProperties properties = cel.properties();
+        properties.mouthChart = true;
+        cel.setProperties(properties);
+        doc::Drawing off;
+        off.id = original->allocateDrawingId();
+        off.name = "D";
+        off.layers.push_back({original->allocateLayerId(), {"Mouth"}, {}});
+        cel.addDrawing(off); // on no frame
+        QString error;
+        QVERIFY2(io::saveProject(*original, path, &error), qPrintable(error));
+        const auto loaded = io::loadProject(path, &error);
+        QVERIFY2(loaded, qPrintable(error));
+        compareDocuments(*original, *loaded);
+        QVERIFY(loaded->celAt(0).properties().mouthChart);
+        for (int i = 1; i < loaded->celCount(); ++i)
+            QVERIFY(!loaded->celAt(i).properties().mouthChart);
+        QCOMPARE(doc::mouthDrawing(loaded->celAt(0), 'D'), off.id);
     }
 
     void everyBlendModeSurvivesTheFile()

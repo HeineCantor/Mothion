@@ -423,6 +423,25 @@ public:
     bool cutSelectionToLayer(QString *reason = nullptr);
     bool copySelectionToLayer(QString *reason = nullptr);
 
+    // A drawing of a cel given another name (one undo step). False, with `reason`, if the name is empty or another
+    // drawing of the cel has it already.
+    bool renameDrawing(doc::CelId cel, doc::DrawingId drawing, const QString &name, QString *reason = nullptr);
+    // Makes the cel a mouth chart, or not (see doc::CelProperties::mouthChart): made one, it gets an empty drawing (one
+    // layer) for each mouth shape it has no drawing named for, off the timeline (drawn from the Mouth chart panel). One
+    // undo step. False, with `reason`, for a trajectory or a cel that is not there.
+    bool setMouthChart(doc::CelId cel, bool on, QString *reason = nullptr);
+    // A drawing of the current cel (a mouth chart) drawn on whatever the timeline shows: the canvas shows it, and the
+    // tools paint it, at the current frame, the timeline as it is. Until stopEditingMouth(), another cel or frame chosen,
+    // a shape put, or the cel no mouth chart any more. False if the drawing is not the current cel's or the cel no chart.
+    bool editMouthDrawing(doc::DrawingId drawing);
+    void stopEditingMouth();
+    // The drawing edited so, kNoId when none.
+    doc::DrawingId mouthDrawingEdited() const { return m_mouthEdit; }
+    // Lip sync by hand: the current cel (a mouth chart, see doc::LipSync.h) shows its drawing for `shape` from the
+    // current frame on, until the frame where it showed something else next (to the end of the scene on an empty cel).
+    // One undo step. False, with `reason`, if the cel has no drawing for the shape (or cannot be changed).
+    bool setMouthShape(char shape, QString *reason = nullptr);
+
     // Edit > Color > Hue/Saturation/Value on the current layer (inside the selection, if there is one): begun (false,
     // with `reason`, if the layer cannot be changed now), shown on the canvas as it is set (see canvas::HsvShift for the
     // ranges), then applied as one undo step or dropped. A vector layer's strokes take the colors too, so that drawing
@@ -598,6 +617,8 @@ public slots:
     bool drawingBlocked() const;
 
 signals:
+    // A drawing of a mouth chart began or stopped being drawn off the timeline (see editMouthDrawing()).
+    void mouthEditChanged();
     // The Hue/Saturation/Value begun is over: applied, dropped or interrupted (see beginColorAdjust()).
     void colorAdjustFinished();
     // The audio track changed without a structure change (a volume being dragged): the views and the player take it up.
@@ -732,6 +753,9 @@ private:
         int hue = 0, saturation = 0, value = 0;
     };
     std::optional<ColorAdjust> m_colorAdjust;
+    doc::DrawingId m_mouthEdit = doc::kNoId; // (see editMouthDrawing())
+    // The drawing the current cel shows to the tools at the current frame: the one in the timeline, or the mouth drawn.
+    doc::DrawingId shownDrawingId(const doc::Cel &cel) const;
 };
 
 } // namespace mothion::document

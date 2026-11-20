@@ -123,7 +123,10 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
                 // transform of a whole cel tells of every one of them) at most the onion skin, painted over it.
                 const doc::Cel *cel = m_document->document().cel(celId);
                 // doc::kNoId: a change of the cel itself (its opacity, say), which every drawing of it shows.
-                const doc::DrawingId shown = cel ? cel->timing().drawingAt(m_document->currentFrame()) : doc::kNoId;
+                // The current cel's is what the tools work on (a mouth of a mouth chart drawn off the timeline, say).
+                const doc::DrawingId shown = !cel                                    ? doc::kNoId
+                                             : celId == m_document->currentCel() ? m_document->currentDrawingId()
+                                                                                 : cel->timing().drawingAt(m_document->currentFrame());
                 if (cel && shown != doc::kNoId && (drawing == doc::kNoId || shown == drawing)) {
                     // A cel moved by its keys shows these pixels somewhere else: where the pose puts them.
                     if (cel->id() == m_document->currentCel())
@@ -154,6 +157,7 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
         renderWholeFrame();
     });
     connect(m_document, &DocumentController::currentFrameChanged, this, &CanvasView::renderWholeFrame);
+    connect(m_document, &DocumentController::mouthEditChanged, this, &CanvasView::renderWholeFrame);
     connect(m_document, &DocumentController::currentCelChanged, this, &CanvasView::syncPoseMode);
     connect(m_document, &DocumentController::celSelectionChanged, this, &CanvasView::syncPoseMode);
     connect(m_document, &DocumentController::documentReplaced, this, &CanvasView::syncPoseMode);
@@ -650,6 +654,9 @@ void CanvasView::syncCelAsDrawn()
     // A cel moved by its keys is always shown moved, at rest and with a pixel tool too: the pen works on it as shown (see
     // toCel()).
     m_frame.setCelAsDrawn(doc::kNoId);
+    // A mouth of a mouth chart drawn off the timeline is what the canvas shows of the cel.
+    m_frame.setDrawingShown(m_document->currentCel(), m_document->mouthDrawingEdited());
+    m_page.setDrawingShown(m_document->currentCel(), m_document->mouthDrawingEdited());
 }
 
 doc::Matrix2x3 CanvasView::celPose() const
@@ -674,6 +681,7 @@ QImage CanvasView::frameArea(const QRect &area) const
     if (m_frame.step() == 1 && m_frame.area().contains(area) && !m_frameStale.intersects(area))
         return m_frame.image().copy(area.translated(-m_frame.area().topLeft()));
     FrameRenderer renderer;
+    renderer.setDrawingShown(m_document->currentCel(), m_document->mouthDrawingEdited());
     renderer.setArea(m_document->document(), m_document->currentFrame(), area);
     return renderer.image();
 }

@@ -1,4 +1,8 @@
 #include "ui/panels/timeline/TimelinePanel.h"
+#include <QKeyEvent>
+#include <QCursor>
+#include <QToolTip>
+#include "core/document/LipSync.h"
 
 #include "core/document/commands/CelCommands.h"
 #include "document/DocumentController.h"
@@ -117,6 +121,22 @@ QToolButton *celButton(IconId id, const QString &name, const QString &tip, QWidg
     b->setAutoRaise(true);
     b->setToolTip(tip);
     return b;
+}
+
+// What each mouth shape is for, as its button's tip.
+QString mouthShapeTip(char shape)
+{
+    switch (shape) {
+    case 'A': return TimelinePanel::tr("A: M, B, P (lips closed)");
+    case 'B': return TimelinePanel::tr("B: most consonants (K, S, T, D...) and EE: teeth together");
+    case 'C': return TimelinePanel::tr("C: E, open");
+    case 'D': return TimelinePanel::tr("D: A, wide open");
+    case 'E': return TimelinePanel::tr("E: O, rounded");
+    case 'F': return TimelinePanel::tr("F: U, W, puckered");
+    case 'G': return TimelinePanel::tr("G: F, V (teeth on the lower lip)");
+    case 'H': return TimelinePanel::tr("H: L (the tongue up)");
+    default: return TimelinePanel::tr("X: at rest, silence");
+    }
 }
 
 } // namespace
@@ -313,7 +333,9 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
     layout->setSpacing(0);
     layout->addLayout(bar);
     layout->addLayout(celBar());
+    layout->addWidget(mouthBar());
     layout->addWidget(m_view, 1);
+    m_view->installEventFilter(this); // the shapes' letters, while the mouth bar is shown
 
     // The number boxes show the player's range and the document's rate; changing them changes those. The last frame
     // stays "the end of the scene" until it is set, so a longer scene plays whole.
@@ -459,6 +481,88 @@ QLayout *TimelinePanel::celBar()
     connect(m_document, &DocumentController::structureChanged, this, sync);
     sync();
     return row;
+}
+
+QWidget *TimelinePanel::mouthBar()
+{
+    m_mouthBar = new QWidget(this);
+    m_mouthBar->setObjectName(QStringLiteral("mouthBar"));
+    auto *row = new QHBoxLayout(m_mouthBar);
+    row->setContentsMargins(4, 0, 4, 2);
+    row->setSpacing(2);
+    auto *label = new QLabel(tr("Mouth"), m_mouthBar);
+    label->setToolTip(tr("Lip sync on a mouth chart cel (its frames named after the mouth shapes, A to H, X). A shape "
+                         "is put at the current frame and held until the next change; with the focus in the timeline, "
+                         "its letter does the same."));
+    row->addWidget(label);
+    std::vector<std::pair<char, QToolButton *>> buttons;
+    for (const char shape : doc::kMouthShapes) {
+        auto *b = new QToolButton(m_mouthBar);
+        b->setObjectName(QStringLiteral("mouth%1").arg(QChar(shape)));
+        b->setText(QString(QChar(shape)));
+        b->setToolTip(mouthShapeTip(shape));
+        b->setAutoRaise(true);
+        b->setMinimumWidth(24);
+        connect(b, &QToolButton::clicked, this, [this, shape] { putMouthShape(shape); });
+        row->addWidget(b);
+        buttons.emplace_back(shape, b);
+    }
+    row->addSpacing(8);
+    m_mouthStep = new QSpinBox(m_mouthBar);
+    m_mouthStep->setObjectName(QStringLiteral("mouthStep"));
+    m_mouthStep->setRange(0, 12);
+    m_mouthStep->setValue(0);
+    m_mouthStep->setToolTip(tr("Frames to go on by after a shape is put (0: stay; 2: on twos)"));
+    row->addWidget(new QLabel(tr("then on by"), m_mouthBar));
+    row->addWidget(m_mouthStep);
+    row->addStretch(1);
+    // Shown while the current cel is a mouth chart; a shape it has no frame for is off.
+    auto sync = [this, buttons] {
+        const doc::Cel *cel = m_document->document().cel(m_document->currentCel());
+        const bool chart = cel && cel->properties().mouthChart;
+        m_mouthBar->setVisible(chart);
+        if (chart)
+            for (const auto &[shape, b] : buttons)
+                b->setEnabled(doc::mouthDrawing(*cel, shape) != doc::kNoId);
+    };
+    connect(m_document, &DocumentController::currentCelChanged, m_mouthBar, sync);
+    connect(m_document, &DocumentController::structureChanged, m_mouthBar, sync);
+    connect(m_document, &DocumentController::documentReplaced, m_mouthBar, sync);
+    sync();
+    return m_mouthBar;
+}
+
+bool TimelinePanel::mouthBarShown() const { return m_mouthBar && !m_mouthBar->isHidden(); }
+
+void TimelinePanel::putMouthShape(char shape)
+{
+    QString reason;
+    if (!m_document->setMouthShape(shape, &reason)) {
+        QToolTip::showText(QCursor::pos(), reason, this);
+        return;
+    }
+    if (const int step = m_mouthStep->value(); step > 0)
+        m_document->setCurrentFrame(m_document->currentFrame() + step);
+}
+
+bool TimelinePanel::eventFilter(QObject *watched, QEvent *event)
+{
+    // With the mouth bar shown, a shape's letter (alone) puts it, before a tool's key would take it.
+    if (watched == m_view && mouthBarShown()
+        && (event->type() == QEvent::ShortcutOverride || event->type() == QEvent::KeyPress)) {
+        auto *key = static_cast<QKeyEvent *>(event);
+        const int k = key->key();
+        const bool shape = key->modifiers() == Qt::NoModifier && k >= Qt::Key_A && k <= Qt::Key_Z
+                           && std::find(doc::kMouthShapes.begin(), doc::kMouthShapes.end(), char('A' + (k - Qt::Key_A)))
+                                  != doc::kMouthShapes.end();
+        if (shape) {
+            event->accept();
+            if (event->type() == QEvent::KeyPress && !key->isAutoRepeat())
+                putMouthShape(char('A' + (k - Qt::Key_A)));
+            return true;
+        }
+    }
+    return QWidget::eventFilter(watched, event);
 }
 
 } // namespace mothion::ui

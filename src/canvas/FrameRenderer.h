@@ -56,6 +56,13 @@ public:
     doc::CelId celAsDrawn() const { return m_asDrawn; }
     // Only this cel is drawn (kNoId: all of them), to see what one cel makes of the frame by itself.
     void setOnlyCel(doc::CelId cel) { m_only = cel; }
+    // This cel shows this drawing whatever its timing says (a mouth of a mouth chart drawn off the timeline); kNoId: as
+    // the timing says.
+    void setDrawingShown(doc::CelId cel, doc::DrawingId drawing)
+    {
+        m_shownCel = cel;
+        m_shownDrawing = drawing;
+    }
 
     // The whole page, a pixel for a pixel (frame changed, cels changed, document resized...).
     void renderAll(const doc::Document &doc, int frame);
@@ -82,6 +89,9 @@ private:
     ResampleFilter m_filter = ResampleFilter::Bilinear;
     doc::CelId m_asDrawn = doc::kNoId;
     doc::CelId m_only = doc::kNoId;
+    doc::CelId m_shownCel = doc::kNoId;
+    doc::DrawingId m_shownDrawing = doc::kNoId;
+    const doc::Drawing *drawingOf(const doc::Cel &cel, int frame) const;
 };
 
 } // namespace mothion::canvas

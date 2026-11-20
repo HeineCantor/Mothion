@@ -82,6 +82,8 @@ const char *const kSchema[] = {
     "create table play_range (first integer not null, last integer)",
     // Format 18: the axes of the brushes' symmetry, once placed.
     "create table symmetry (x real not null, y real not null, angle real not null)",
+    // Format 19: the cels that are mouth charts (the lip sync).
+    "create table mouth_charts (cel integer primary key references cels(id))",
 };
 
 // Stored by name, so reordering the enum cannot change old files.
@@ -624,7 +626,7 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
         return false;
     }
 
-    QSqlQuery cel(db), drawing(db), layer(db), exposure(db), tile(db), mask(db), maskTile(db), clipped(db), trajectory(db), trajectoryParent(db), vectorStrokes(db);
+    QSqlQuery cel(db), drawing(db), layer(db), exposure(db), tile(db), mask(db), maskTile(db), clipped(db), trajectory(db), trajectoryParent(db), vectorStrokes(db), mouthChart(db);
     cel.prepare(QStringLiteral("insert into cels values (?, ?, ?, ?, ?, ?, ?)"));
     drawing.prepare(QStringLiteral("insert into drawings values (?, ?, ?)"));
     layer.prepare(QStringLiteral("insert into layers values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
@@ -635,6 +637,7 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
     clipped.prepare(QStringLiteral("insert into clipped_layers values (?)"));
     trajectory.prepare(QStringLiteral("insert into trajectory_cels values (?)"));
     trajectoryParent.prepare(QStringLiteral("insert into trajectory_parents values (?, ?)"));
+    mouthChart.prepare(QStringLiteral("insert into mouth_charts values (?)"));
     vectorStrokes.prepare(QStringLiteral("insert into vector_strokes values (?, ?)"));
     auto exec = [&](QSqlQuery &query, std::initializer_list<QVariant> values) {
         for (const QVariant &v : values)
@@ -650,6 +653,8 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
         const doc::CelProperties &p = l.properties();
         if (!exec(cel, {idValue(l.id()), i, QString::fromStdString(p.name), p.visible, p.locked,
                           double(p.opacity), blendName(p.blend)}))
+            return false;
+        if (p.mouthChart && !exec(mouthChart, {idValue(l.id())}))
             return false;
         if (p.trajectory && !exec(trajectory, {idValue(l.id())}))
             return false;
@@ -972,6 +977,15 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
             if (doc::Cel *cel = d->cel(idFrom(q.value(0)))) {
                 doc::CelProperties properties = cel->properties();
                 properties.parent = idFrom(q.value(1));
+                cel->setProperties(std::move(properties));
+            }
+    }
+
+    if (version >= 19 && q.exec(QStringLiteral("select cel from mouth_charts"))) {
+        while (q.next())
+            if (doc::Cel *cel = d->cel(idFrom(q.value(0)))) {
+                doc::CelProperties properties = cel->properties();
+                properties.mouthChart = true;
                 cel->setProperties(std::move(properties));
             }
     }

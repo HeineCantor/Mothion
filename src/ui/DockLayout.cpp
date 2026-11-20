@@ -47,6 +47,8 @@ DockLayout::DockLayout(QMainWindow *window, const WorkspacePanels &panels)
     m_navigator = addDock(QStringLiteral("dock.navigator"), tr("Navigator"), panels.navigator);
     m_layers = addDock(QStringLiteral("dock.layers"), tr("Layers"), panels.layers);
     m_timeline = addDock(QStringLiteral("dock.timeline"), tr("Timeline"), panels.timeline);
+    if (panels.mouthChart)
+        m_mouthChart = addDock(QStringLiteral("dock.mouthChart"), tr("Mouth chart"), panels.mouthChart);
 
     applyDefault();
 }
@@ -80,12 +82,15 @@ void DockLayout::applyDefault()
     // Right: navigator on top, layers below.
     m_window->addDockWidget(Qt::RightDockWidgetArea, m_navigator);
     m_window->splitDockWidget(m_navigator, m_layers, Qt::Vertical);
+    if (m_mouthChart)
+        m_window->tabifyDockWidget(m_layers, m_mouthChart); // a tab behind the layers
     // Bottom (under the canvas): timeline.
     m_window->addDockWidget(Qt::BottomDockWidgetArea, m_timeline);
 
     for (PanelDock *dock : m_docks)
         dock->show();
     m_subTools->raise(); // front tab of the sub tool / properties group
+    m_layers->raise();
 
     // resizeDocks() is ignored until the main window has laid itself out once,
     // so the default sizes are applied on the next event-loop turn.
@@ -118,6 +123,22 @@ void DockLayout::applyDefault()
     });
 }
 
+namespace {
+
+// Whether a QMainWindow::saveState() holds the dock named `name` (it keeps the docks by their object names, as
+// QDataStream writes a QString: UTF-16, big endian).
+bool stateHas(const QByteArray &state, const QString &name)
+{
+    QByteArray utf16;
+    for (const QChar c : name) {
+        utf16.append(char(c.unicode() >> 8));
+        utf16.append(char(c.unicode() & 0xff));
+    }
+    return state.contains(utf16);
+}
+
+} // namespace
+
 bool DockLayout::restore()
 {
     QSettings settings;
@@ -129,6 +150,12 @@ bool DockLayout::restore()
     m_window->restoreGeometry(geometry);
     if (!m_window->restoreState(state, kLayoutVersion))
         return false;
+    // A panel newer than the arrangement saved: where the default puts it, the rest as it was.
+    if (m_mouthChart && !stateHas(state, m_mouthChart->objectName())) {
+        m_window->tabifyDockWidget(m_layers, m_mouthChart);
+        m_mouthChart->show();
+        m_layers->raise();
+    }
     m_defaultSizesPending = false;
 
     const QStringList collapsed = settings.value(kCollapsedKey).toStringList();

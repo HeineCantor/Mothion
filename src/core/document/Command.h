@@ -85,6 +85,9 @@ enum class CommandKind {
     EditMotion,
     EditBlenderLink,
     AdjustColor,
+    RenameDrawing,
+    SetMouthShape,
+    MouthChart,
 };
 
 // An undoable change to a Document.

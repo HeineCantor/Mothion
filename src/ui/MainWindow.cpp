@@ -29,6 +29,7 @@
 #include "ui/ExportDialog.h"
 #include "ui/TweenDialog.h"
 #include "ui/HueSaturationDialog.h"
+#include "ui/panels/MouthChartPanel.h"
 #include "ui/VideoExportDialog.h"
 #include "ui/IconFactory.h"
 #include "ui/PanelDock.h"
@@ -197,6 +198,7 @@ MainWindow::MainWindow(QWidget *parent)
     panels.navigator = new NavigatorPanel(m_canvas, this);
     panels.layers = new LayersPanel(m_document, this);
     panels.timeline = new TimelinePanel(m_document, m_toolState, m_audioPlayer, this);
+    panels.mouthChart = new MouthChartPanel(m_document, this);
     connect(static_cast<TimelinePanel *>(panels.timeline)->player(), &TimelinePlayer::playingChanged, m_canvas,
             &canvas::CanvasView::setPlaying); // played, the cels are shown moved by their keys
 

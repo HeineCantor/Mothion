@@ -24,6 +24,9 @@ struct CelProperties
     // The trajectory it follows (kNoId: none, or one that is not there any more; a cel that is no trajectory can follow one
     // too). Its own keys come on top of what the trajectory does. For a trajectory `visible` is "active": an inactive one does nothing of its own.
     CelId parent = kNoId;
+    // A mouth chart, for the lip sync (see LipSync.h): a drawing for each mouth shape, named after it, shown frame by
+    // frame as the sound says. The Timeline's mouth bar and the Mouth chart panel are for these cels only.
+    bool mouthChart = false;
 
     bool operator==(const CelProperties &) const = default;
 };

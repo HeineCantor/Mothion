@@ -55,6 +55,7 @@ add_library(mothion_core STATIC
     core/document/commands/MotionCommands.h core/document/commands/MotionCommands.cpp
     core/document/commands/BlenderLinkCommands.h core/document/commands/BlenderLinkCommands.cpp
     core/document/CelMotion.h core/document/CelMotion.cpp
+    core/document/LipSync.h core/document/LipSync.cpp
     core/document/Compositing.h
 )
 set_target_properties(mothion_core PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
@@ -197,6 +198,7 @@ qt_add_library(mothion_gui STATIC
     ui/panels/ColorWheelPanel.h ui/panels/ColorWheelPanel.cpp
     ui/panels/ColorSetPanel.h ui/panels/ColorSetPanel.cpp
     ui/panels/NavigatorPanel.h ui/panels/NavigatorPanel.cpp
+    ui/panels/MouthChartPanel.h ui/panels/MouthChartPanel.cpp
     ui/panels/BlendModes.h
     ui/panels/LayersPanel.h ui/panels/LayersPanel.cpp
     ui/panels/timeline/TimelineMetrics.h
@@ -283,4 +285,7 @@ if(MOTHION_BUILD_DEVTOOLS)
     qt_add_executable(mothion_brushsheet devtools/brushsheet.cpp)
     target_link_libraries(mothion_brushsheet PRIVATE mothion_gui)
     mothion_set_warnings(mothion_brushsheet)
+    qt_add_executable(mothion_lipsyncsample devtools/lipsyncsample.cpp)
+    target_link_libraries(mothion_lipsyncsample PRIVATE mothion_gui)
+    mothion_set_warnings(mothion_lipsyncsample)
 endif()

@@ -1,6 +1,9 @@
 // Tests for the UI layer: the timeline and the animation playback.
 
 #include "test_common.h"
+#include "ui/panels/MouthChartPanel.h"
+#include "core/document/LipSync.h"
+#include "canvas/FrameRenderer.h"
 
 class TestUiTimeline : public QObject
 {
@@ -1390,6 +1393,218 @@ private slots:
             bar->setValue(bar->minimum());
         QVERIFY(bar->minimum() < 0);
         QVERIFY(bar->value() < 0);
+    }
+
+
+    // Lip sync by hand: a cel made a mouth chart (its menu) gets an empty frame for each shape it lacks, off the
+    // timeline, and the mouth bar shows for it only (a cel with frames named A, B, C... is not taken for a mouth); a
+    // shape (its button, or its letter with the focus in the timeline) is put at the current frame and held until the
+    // next change, one undo step each; then the current frame goes on by the frames chosen.
+    void mouthShapesArePutByHand()
+    {
+        ui::Shortcuts::instance().resetAll();
+        tools::ToolState state;
+        document::DocumentController controller;
+        ui::TimelinePanel panel(&controller, &state);
+        panel.resize(900, 400);
+        panel.show();
+        panel.activateWindow();
+        QVERIFY(QTest::qWaitForWindowActive(&panel));
+        auto *bar = panel.findChild<QWidget *>(QStringLiteral("mouthBar"));
+        QVERIFY(bar);
+        QVERIFY(!bar->isVisible());
+
+        doc::Document &d = controller.documentForCommands();
+        const doc::CelId cel = controller.currentCel();
+        std::vector<doc::DrawingId> made;
+        for (int f = 0; f < 3; ++f) {
+            doc::NewDrawing nd = doc::makeNewDrawing(d, cel, f, 1);
+            made.push_back(nd.id);
+            controller.execute(std::move(nd.command));
+        }
+        QString reason;
+        QVERIFY(controller.renameDrawing(cel, made[0], QStringLiteral("A"), &reason));
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo rename frame"));
+        QVERIFY(!controller.renameDrawing(cel, made[1], QStringLiteral("A"), &reason)); // taken
+        QVERIFY(!reason.isEmpty());
+        QVERIFY(!controller.renameDrawing(cel, made[1], QStringLiteral("  "), &reason)); // empty
+        QVERIFY(controller.renameDrawing(cel, made[1], QStringLiteral(" B "), &reason));
+        QCOMPARE(d.cel(cel)->drawing(made[1])->name, std::string("B")); // trimmed
+        QVERIFY(controller.renameDrawing(cel, made[2], QStringLiteral("C"), &reason));
+        QVERIFY(!bar->isVisible()); // frames named A, B, C: not a mouth chart for that
+        QVERIFY(!controller.setMouthShape('A', &reason));
+
+        // Made one: the shapes it lacks come as empty frames, on no frame of the timeline; one undo step.
+        QVERIFY(controller.setMouthChart(cel, true, &reason));
+        QVERIFY(bar->isVisible());
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo mouth chart"));
+        for (const char shape : doc::kMouthShapes)
+            QVERIFY(doc::mouthDrawing(*d.cel(cel), shape) != doc::kNoId);
+        QCOMPARE(doc::mouthDrawing(*d.cel(cel), 'A'), made[0]); // those it had are kept
+        QCOMPARE(d.cel(cel)->drawings().size(), std::size_t(9));
+        QVERIFY(!d.cel(cel)->timing().usesDrawing(doc::mouthDrawing(*d.cel(cel), 'X')));
+        controller.undo();
+        QVERIFY(!bar->isVisible());
+        QCOMPARE(d.cel(cel)->drawings().size(), std::size_t(3));
+        controller.redo();
+        QVERIFY(bar->isVisible());
+
+        controller.execute(doc::makeSetExposure(d, cel, 0, 3, doc::kNoId)); // the timeline empty
+        auto shown = [&](int frame) {
+            const doc::Drawing *drawing = d.cel(cel)->drawingAt(frame);
+            return drawing ? QString::fromStdString(drawing->name) : QString();
+        };
+        const int last = d.frameCount() - 1;
+
+        // An empty cel: held to the end of the scene.
+        controller.setCurrentFrame(0);
+        panel.findChild<QToolButton *>(QStringLiteral("mouthX"))->click();
+        QCOMPARE(shown(0), QStringLiteral("X"));
+        QCOMPARE(shown(last), QStringLiteral("X"));
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo mouth shape"));
+        // Later in the hold: from there to its end.
+        controller.setCurrentFrame(10);
+        QVERIFY(controller.setMouthShape('D'));
+        QCOMPARE(shown(9), QStringLiteral("X"));
+        QCOMPARE(shown(10), QStringLiteral("D"));
+        QCOMPARE(shown(last), QStringLiteral("D"));
+        // Before it: up to where the next shape begins.
+        controller.setCurrentFrame(4);
+        QVERIFY(controller.setMouthShape('A'));
+        QCOMPARE(shown(3), QStringLiteral("X"));
+        QCOMPARE(shown(4), QStringLiteral("A"));
+        QCOMPARE(shown(9), QStringLiteral("A"));
+        QCOMPARE(shown(10), QStringLiteral("D"));
+        controller.undo(); // one step
+        QCOMPARE(shown(4), QStringLiteral("X"));
+        QCOMPARE(shown(10), QStringLiteral("D"));
+
+        // The letters, with the focus in the timeline (before the tools' keys), and on by two frames after each.
+        panel.findChild<QSpinBox *>(QStringLiteral("mouthStep"))->setValue(2);
+        controller.setCurrentFrame(20);
+        panel.view()->setFocus();
+        QVERIFY(panel.view()->hasFocus());
+        QTest::keyClick(panel.view(), Qt::Key_A);
+        QCOMPARE(shown(20), QStringLiteral("A"));
+        QCOMPARE(controller.currentFrame(), 22);
+        QTest::keyClick(panel.view(), Qt::Key_E);
+        QCOMPARE(shown(21), QStringLiteral("A"));
+        QCOMPARE(shown(22), QStringLiteral("E"));
+        QCOMPARE(controller.currentFrame(), 24);
+
+        // Another cel, no mouth chart: the bar goes, and the letters are the tools' again.
+        controller.addCel(); // it becomes current
+        QVERIFY(!bar->isVisible());
+        QTest::keyClick(panel.view(), Qt::Key_A);
+        QCOMPARE(controller.currentFrame(), 24);
+    }
+
+    // The Mouth chart panel: on a cel that is no chart, a button makes it one; then a picture of each mouth, and a
+    // click on one draws it on the canvas whatever the timeline shows (the tools paint it, the timeline as it was); a
+    // click again, another frame, or the drawing gone with an undo goes back to the timeline.
+    void mouthChartPanelDrawsTheMouthsOffTheTimeline()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        ui::MouthChartPanel panel(&controller);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        doc::Document &d = controller.documentForCommands();
+        const doc::CelId cel = controller.currentCel();
+        controller.execute(doc::makeNewDrawing(d, cel, 0, d.frameCount()).command); // drawing "1" on every frame
+        const doc::DrawingId one = d.cel(cel)->timing().drawingAt(0);
+
+        auto *make = panel.findChild<QPushButton *>(QStringLiteral("makeMouthChart"));
+        QVERIFY(make && make->isVisible());
+        QVERIFY(!panel.shapeButton('D')->isVisible());
+        make->click();
+        QVERIFY(d.cel(cel)->properties().mouthChart);
+        QVERIFY(panel.shapeButton('D')->isVisible());
+        const doc::DrawingId mouthD = doc::mouthDrawing(*d.cel(cel), 'D');
+        QVERIFY(mouthD != doc::kNoId);
+
+        // Drawn on the canvas: it is the drawing the tools work on, the timeline as it was.
+        controller.setCurrentFrame(5);
+        panel.shapeButton('D')->click();
+        QCOMPARE(controller.mouthDrawingEdited(), mouthD);
+        QVERIFY(panel.shapeButton('D')->isChecked());
+        QCOMPARE(controller.currentDrawingId(), mouthD);
+        const doc::Timing timing = d.cel(cel)->timing();
+        const auto target = controller.beginPaint(false);
+        QVERIFY(target);
+        QCOMPARE(target->drawing, mouthD);
+        const doc::TiledImage before = *target->image;
+        target->image->setPixel(40, 40, 0xffff0000u);
+        controller.notifyPainted(QRect(40, 40, 1, 1));
+        controller.endPaint(before);
+        QCOMPARE(d.cel(cel)->drawing(mouthD)->layers.front().image.pixel(40, 40), doc::Pixel(0xffff0000u));
+        QCOMPARE(qAlpha(d.cel(cel)->drawing(one)->layers.front().image.pixel(40, 40)), 0);
+        QVERIFY(d.cel(cel)->timing() == timing); // the timeline untouched
+        controller.undo(); // the stroke, the mouth still drawn
+        QCOMPARE(controller.mouthDrawingEdited(), mouthD);
+        QCOMPARE(qAlpha(d.cel(cel)->drawing(mouthD)->layers.front().image.pixel(40, 40)), 0);
+        // The renderer shows it in place of what the timeline has.
+        canvas::FrameRenderer renderer;
+        controller.redo();
+        renderer.setDrawingShown(cel, mouthD);
+        renderer.renderAll(d, 5);
+        QCOMPARE(renderer.image().pixel(40, 40), qRgba(255, 0, 0, 255));
+        renderer.setDrawingShown(doc::kNoId, doc::kNoId);
+        renderer.renderAll(d, 5);
+        QVERIFY(renderer.image().pixel(40, 40) != qRgba(255, 0, 0, 255));
+
+        // Clicked again: back to the timeline.
+        panel.shapeButton('D')->click();
+        QCOMPARE(controller.mouthDrawingEdited(), doc::kNoId);
+        QCOMPARE(controller.currentDrawingId(), one);
+        // Another frame chosen: back too.
+        panel.shapeButton('X')->click();
+        QCOMPARE(controller.mouthDrawingEdited(), doc::mouthDrawing(*d.cel(cel), 'X'));
+        controller.setCurrentFrame(6);
+        QCOMPARE(controller.mouthDrawingEdited(), doc::kNoId);
+        QVERIFY(!panel.shapeButton('X')->isChecked());
+        // The chart taken back with an undo, while a mouth is drawn: back to the timeline, and the button again.
+        controller.undo(); // the stroke on D
+        QVERIFY(d.cel(cel)->properties().mouthChart);
+        panel.shapeButton('X')->click();
+        QVERIFY(controller.mouthDrawingEdited() != doc::kNoId);
+        controller.undo(); // the chart
+        QVERIFY(!d.cel(cel)->properties().mouthChart);
+        QCOMPARE(controller.mouthDrawingEdited(), doc::kNoId);
+        QVERIFY(make->isVisible());
+    }
+
+
+    // A mouth drawn off the timeline shows on the canvas as it is drawn, the first time too (the canvas took only the
+    // drawings of the timeline for those it shows).
+    void aMouthDrawnOffTheTimelineShowsAsItIsDrawn()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(500, 400);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        const doc::CelId cel = controller.currentCel();
+        QVERIFY(controller.setMouthChart(cel, true));
+        QVERIFY(controller.editMouthDrawing(doc::mouthDrawing(*controller.document().cel(cel), 'D')));
+        QCoreApplication::processEvents();
+        const QColor paper = QColor::fromRgba(controller.document().paperColor());
+        QCOMPARE(canvas.documentImage().pixelColor(960, 540), paper);
+
+        state.setActiveTool(tools::ToolId::Brush);
+        state.setSize(tools::ToolId::Brush, 20);
+        state.setColor(QColor(0, 0, 0));
+        const QTransform toView = canvas.view().documentToView();
+        const QPoint a = toView.map(QPointF(900, 540)).toPoint(), b = toView.map(QPointF(1020, 540)).toPoint();
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, a);
+        for (int i = 1; i <= 20; ++i)
+            QTest::mouseMove(&canvas, a + (b - a) * i / 20);
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, b);
+        QCoreApplication::processEvents();
+        const doc::Drawing *mouth = controller.document().cel(cel)->drawing(controller.mouthDrawingEdited());
+        QVERIFY(qAlpha(mouth->layers.front().image.pixel(960, 540)) > 0); // drawn on the mouth
+        QVERIFY(canvas.documentImage().pixelColor(960, 540) != paper);    // and seen at once
     }
 
 

@@ -45,6 +45,25 @@ private:
     Timing m_timingBefore;
 };
 
+// A drawing's name changed (what the timeline's cells show; a mouth shape's letter for the lip sync).
+class RenameDrawingCommand : public Command
+{
+public:
+    RenameDrawingCommand(CelId cel, DrawingId drawing, std::string before, std::string after);
+
+    CommandKind kind() const override { return CommandKind::RenameDrawing; }
+    ChangeSet apply(Document &doc) override;
+    ChangeSet revert(Document &doc) override;
+    std::size_t memoryBytes() const override { return sizeof(*this) + m_before.size() + m_after.size(); }
+
+private:
+    ChangeSet set(Document &doc, const std::string &name);
+
+    CelId m_cel;
+    DrawingId m_id;
+    std::string m_before, m_after;
+};
+
 // "New drawing here": a new drawing on `cel` with one empty layer, named
 // with the cel's next free number and exposed on [frame, frame+length).
 // Returns the command (not yet applied) and the new drawing's and layer's ids.
