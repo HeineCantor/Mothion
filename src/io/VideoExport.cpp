@@ -8,6 +8,7 @@
 #include <QObject>
 #include <QPainter>
 #include <QProcess>
+#include <QTemporaryDir>
 #include <QStandardPaths>
 
 #include <algorithm>
@@ -92,7 +93,48 @@ bool exportVideo(const doc::Document &document, int first, int last, const QStri
                      QStringLiteral("-f"), QStringLiteral("rawvideo"), QStringLiteral("-pix_fmt"), QStringLiteral("bgra"),
                      QStringLiteral("-s"), QStringLiteral("%1x%2").arg(document.width()).arg(document.height()),
                      QStringLiteral("-r"), QStringLiteral("%1/%2").arg(rate.numerator).arg(rate.denominator),
-                     QStringLiteral("-i"), QStringLiteral("-"), QStringLiteral("-an")};
+                     QStringLiteral("-i"), QStringLiteral("-")};
+
+    // The sound: the track's file as it is, read by ffmpeg as a second input, lined up with the frames exported.
+    const auto &track = document.audio();
+    const bool sound = options.audio && track && track->data && !track->data->empty();
+    QTemporaryDir soundDir;
+    if (sound) {
+        if (!soundDir.isValid())
+            return fail(QObject::tr("No temporary folder for the sound: %1").arg(soundDir.errorString()));
+        const QString format = QString::fromStdString(track->format).toLower();
+        const QString soundFile = soundDir.filePath(QStringLiteral("sound.") + (format.isEmpty() ? QStringLiteral("bin") : format));
+        QFile file(soundFile);
+        if (!file.open(QIODevice::WriteOnly)
+            || file.write(reinterpret_cast<const char *>(track->data->data()), qint64(track->data->size()))
+                   != qint64(track->data->size()))
+            return fail(QObject::tr("The sound cannot be written for ffmpeg: %1").arg(file.errorString()));
+        file.close();
+        // Where the frames exported begin in the sound (seconds): after its beginning, it is cut there; before it,
+        // silence comes first.
+        const double fps = rate.fps();
+        const double into = (first - track->offset) / fps;
+        if (into > 0)
+            args << QStringLiteral("-ss") << QString::number(into, 'f', 6);
+        args << QStringLiteral("-i") << soundFile;
+        QStringList filters;
+        if (into < 0)
+            filters << QStringLiteral("adelay=%1:all=1").arg(qRound64(-into * 1000.0));
+        if (track->volume != 1.0f)
+            filters << QStringLiteral("volume=%1").arg(double(std::max(0.0f, track->volume)), 0, 'f', 4);
+        args << QStringLiteral("-map") << QStringLiteral("0:v:0") << QStringLiteral("-map") << QStringLiteral("1:a:0");
+        if (!filters.isEmpty())
+            args << QStringLiteral("-af") << filters.join(QLatin1Char(','));
+        switch (options.codec) {
+        case VideoCodec::H264: args << QStringLiteral("-c:a") << QStringLiteral("aac") << QStringLiteral("-b:a") << QStringLiteral("192k"); break;
+        case VideoCodec::Vp9: args << QStringLiteral("-c:a") << QStringLiteral("libopus") << QStringLiteral("-b:a") << QStringLiteral("160k"); break;
+        case VideoCodec::ProRes4444: args << QStringLiteral("-c:a") << QStringLiteral("pcm_s16le"); break;
+        }
+        // As long as the video, the sound longer or not.
+        args << QStringLiteral("-t") << QString::number(total / fps, 'f', 6);
+    } else {
+        args << QStringLiteral("-an");
+    }
     const QString crf = QString::number(std::clamp(options.crf, 0, 51));
     switch (options.codec) {
     case VideoCodec::H264:

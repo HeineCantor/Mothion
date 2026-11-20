@@ -1447,6 +1447,7 @@ void MainWindow::exportVideo()
     const QString name = m_filePath.isEmpty() ? QString() : QFileInfo(m_filePath).completeBaseName();
     VideoExportDialog dialog(d.frameCount(), !d.compositing().nodes.empty(), name, this);
     dialog.setPlayRange(m_document->playRangeFirst(), m_document->playRangeLast());
+    dialog.setAudio(d.audio().has_value(), d.audio() && d.audio()->muted);
     if (dialog.exec() != QDialog::Accepted)
         return;
 

@@ -407,6 +407,111 @@ private slots:
     }
 
 
+    // The video with the project's audio: lined up with the frames exported by the track's offset (cut where they
+    // begin after the sound, silence first where it begins after them), as long as the video; without it if not asked.
+    void videoCarriesTheAudioLinedUp()
+    {
+        if (io::findFfmpeg().isEmpty())
+            QSKIP("ffmpeg is not installed");
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        // A sound of 1 s: silence, then a tone from 0.5 s.
+        constexpr int rate = 8000;
+        QByteArray wav;
+        auto put = [&wav](quint32 v, int bytes) {
+            for (int i = 0; i < bytes; ++i)
+                wav.append(char((v >> (8 * i)) & 0xff));
+        };
+        wav.append("RIFF");
+        put(36 + rate * 2, 4);
+        wav.append("WAVEfmt ");
+        put(16, 4);
+        put(1, 2);
+        put(1, 2);
+        put(rate, 4);
+        put(rate * 2, 4);
+        put(2, 2);
+        put(16, 2);
+        wav.append("data");
+        put(rate * 2, 4);
+        for (int i = 0; i < rate; ++i)
+            put(quint16(qint16(i < rate / 2 ? 0 : std::lround(12000 * std::sin(2 * std::numbers::pi * 440 * i / rate)))), 2);
+        doc::Document d(64, 48, doc::FrameRate{24, 1});
+        d.setFrameCount(48);
+        doc::AudioTrack track;
+        track.name = "tone";
+        track.format = "wav";
+        track.data = std::make_shared<const std::vector<unsigned char>>(wav.cbegin(), wav.cend());
+        d.setAudio(track);
+
+        // The video's sound, decoded: how loud it is from `from` to `to` seconds (root mean square, 0..1); -1 if the
+        // video has none.
+        auto loudness = [&](const QString &video, double from, double to) {
+            QProcess ffmpeg;
+            ffmpeg.start(io::findFfmpeg(), {QStringLiteral("-loglevel"), QStringLiteral("error"), QStringLiteral("-i"), video,
+                                            QStringLiteral("-vn"), QStringLiteral("-ac"), QStringLiteral("1"),
+                                            QStringLiteral("-ar"), QString::number(rate), QStringLiteral("-f"),
+                                            QStringLiteral("s16le"), QStringLiteral("-")});
+            if (!ffmpeg.waitForFinished(20000) || ffmpeg.exitCode() != 0)
+                return -1.0;
+            const QByteArray pcm = ffmpeg.readAllStandardOutput();
+            const auto *samples = reinterpret_cast<const qint16 *>(pcm.constData());
+            const qsizetype count = pcm.size() / 2;
+            if (count == 0)
+                return -1.0;
+            double sum = 0;
+            int n = 0;
+            for (qsizetype i = qsizetype(from * rate); i < qsizetype(to * rate) && i < count; ++i, ++n)
+                sum += double(samples[i]) * samples[i];
+            return n ? std::sqrt(sum / n) / 32768.0 : 0.0;
+        };
+        auto duration = [&](const QString &video) { // of the sound, seconds
+            QProcess ffmpeg;
+            ffmpeg.start(io::findFfmpeg(), {QStringLiteral("-loglevel"), QStringLiteral("error"), QStringLiteral("-i"), video,
+                                            QStringLiteral("-vn"), QStringLiteral("-ac"), QStringLiteral("1"),
+                                            QStringLiteral("-ar"), QString::number(rate), QStringLiteral("-f"),
+                                            QStringLiteral("s16le"), QStringLiteral("-")});
+            ffmpeg.waitForFinished(20000);
+            return ffmpeg.readAllStandardOutput().size() / 2.0 / rate;
+        };
+        QString error;
+        const QString file = dir.filePath(QStringLiteral("sound.mp4"));
+
+        // From the first frame, the sound where it is: silent half a second, then the tone.
+        QVERIFY2(io::exportVideo(d, 0, 23, file, {}, {}, &error), qPrintable(error));
+        QVERIFY(loudness(file, 0.05, 0.4) < 0.01);
+        QVERIFY(loudness(file, 0.6, 0.9) > 0.1);
+        QVERIFY(std::abs(duration(file) - 1.0) < 0.1);
+        // From frame 12 (0.5 s): the sound cut there, the tone at once; as long as the video (0.5 s), not the sound.
+        QVERIFY2(io::exportVideo(d, 12, 17, file, {}, {}, &error), qPrintable(error));
+        QVERIFY(loudness(file, 0.02, 0.2) > 0.1);
+        QVERIFY(duration(file) < 0.35);
+        // The track beginning at frame 12: a second of silence before the tone.
+        track.offset = 12;
+        d.setAudio(track);
+        QVERIFY2(io::exportVideo(d, 0, 35, file, {}, {}, &error), qPrintable(error));
+        QVERIFY(loudness(file, 0.1, 0.9) < 0.01);
+        QVERIFY(loudness(file, 1.1, 1.4) > 0.1);
+        // WebM and MOV have it too.
+        for (const auto codec : {io::VideoCodec::Vp9, io::VideoCodec::ProRes4444}) {
+            io::VideoOptions options;
+            options.codec = codec;
+            const QString other = dir.filePath(QStringLiteral("sound.") + io::videoSuffix(codec));
+            if (!io::exportVideo(d, 0, 35, other, options, {}, &error)) {
+                if (error.contains(QStringLiteral("ncoder"), Qt::CaseInsensitive))
+                    continue; // this ffmpeg has no such encoder
+                QFAIL(qPrintable(error));
+            }
+            QVERIFY2(loudness(other, 1.1, 1.4) > 0.1, qPrintable(other));
+        }
+        // Not asked: no sound in it.
+        io::VideoOptions silent;
+        silent.audio = false;
+        QVERIFY2(io::exportVideo(d, 0, 35, file, silent, {}, &error), qPrintable(error));
+        QCOMPARE(loudness(file, 0.0, 1.0), -1.0);
+    }
+
+
     // An animation without the paper: WebM (VP9) and MOV (ProRes 4444) keep the alpha, and the first frame decoded
     // again is see-through where nothing is drawn; with the paper it is white there; H.264 has no alpha to give.
     void videoWithoutPaperKeepsTheTransparency()

@@ -819,7 +819,7 @@ private slots:
 
 
     // The video dialog offers H.264, VP9 and ProRes 4444; the last two keep transparency and can leave the paper out;
-    // the file's suffix follows the format.
+    // the file's suffix follows the format; the audio goes with it when the project has some.
     void videoDialogOffersFormatsWithTransparency()
     {
         QSettings().remove(QStringLiteral("videoExport"));
@@ -846,6 +846,18 @@ private slots:
         format->setCurrentIndex(0); // back: the option is not used with H.264, though the box stays ticked
         QVERIFY(!dialog.options().withoutPaper);
         QVERIFY(dialog.path().endsWith(QStringLiteral(".mp4")));
+
+        // The audio: offered when the project has a track, ticked unless it is muted.
+        auto *audio = dialog.findChild<QCheckBox *>(QStringLiteral("withAudio"));
+        QVERIFY(audio);
+        QVERIFY(!audio->isEnabled()); // no track
+        QVERIFY(!dialog.options().audio);
+        dialog.setAudio(true, false);
+        QVERIFY(audio->isEnabled() && audio->isChecked());
+        QVERIFY(dialog.options().audio);
+        dialog.setAudio(true, true); // muted
+        QVERIFY(audio->isEnabled() && !audio->isChecked());
+        QVERIFY(!dialog.options().audio);
         QSettings().remove(QStringLiteral("videoExport"));
     }
 

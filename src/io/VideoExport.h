@@ -28,6 +28,10 @@ struct VideoOptions
     VideoCodec codec = VideoCodec::H264;
     // The paper left out (the layers over nothing): the video keeps the alpha. Only with a codec that has it.
     bool withoutPaper = false;
+    // The project's audio track with it, if it has one: where the track's offset puts it against the frames exported
+    // (cut where they begin after it, silence first where it begins after them), at the track's volume, as long as
+    // the video. AAC in an MP4, Opus in a WebM, PCM in a MOV (as ProRes goes with).
+    bool audio = true;
 };
 
 // The ffmpeg program, if it can be found (the search path, then next to the application); empty if not.
@@ -44,7 +48,8 @@ QImage renderFinalFrame(const doc::Document &document, int frame, compositing::E
 // Writes frames [first, last] (0-based) as a video (H.264 by default, see VideoOptions) at the document's frame rate, through ffmpeg: the
 // frames are handed to it one by one, nothing is written to disk but the video. `progress(done, total)` is
 // called after each frame; returning false stops the export and removes the file (that is not an error).
-// A video with an odd width or height loses one pixel of it: H.264 and VP9 want even sizes. No sound yet.
+// A video with an odd width or height loses one pixel of it: H.264 and VP9 want even sizes. The sound: see
+// VideoOptions::audio.
 bool exportVideo(const doc::Document &document, int first, int last, const QString &path, const VideoOptions &options,
                  const std::function<bool(int, int)> &progress, QString *error);
 

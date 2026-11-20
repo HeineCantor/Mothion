@@ -30,6 +30,7 @@ const QString kQualityKey = QStringLiteral("videoExport/quality");
 const QString kFormatKey = QStringLiteral("videoExport/format");
 const QString kWithoutPaperKey = QStringLiteral("videoExport/withoutPaper");
 const QString kCompositingKey = QStringLiteral("videoExport/compositing");
+const QString kAudioKey = QStringLiteral("videoExport/audio");
 
 } // namespace
 
@@ -91,6 +92,11 @@ VideoExportDialog::VideoExportDialog(int frameCount, bool hasCompositing, const 
     if (!hasCompositing)
         m_compositing->setToolTip(tr("This project has no compositing network yet."));
 
+    m_audio = new QCheckBox(tr("With the audio"), this);
+    m_audio->setObjectName(QStringLiteral("withAudio"));
+    m_audio->setEnabled(false); // until setAudio() says there is a track
+    m_audio->setToolTip(tr("This project has no audio."));
+
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     buttons->button(QDialogButtonBox::Ok)->setText(tr("Export"));
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
@@ -106,6 +112,7 @@ VideoExportDialog::VideoExportDialog(int frameCount, bool hasCompositing, const 
     form->addRow(rangeRow);
     form->addRow(tr("Quality"), m_quality);
     form->addRow(m_compositing);
+    form->addRow(m_audio);
     if (io::findFfmpeg().isEmpty()) {
         auto *warning = new QLabel(tr("ffmpeg was not found: install it and make sure it is on the PATH."), this);
         warning->setWordWrap(true);
@@ -147,7 +154,17 @@ io::VideoOptions VideoExportDialog::options() const
     options.compositing = m_compositing->isChecked();
     options.codec = io::VideoCodec(m_format->currentData().toInt());
     options.withoutPaper = io::videoHasAlpha(options.codec) && m_withoutPaper->isChecked();
+    options.audio = m_audio->isEnabled() && m_audio->isChecked();
     return options;
+}
+
+void VideoExportDialog::setAudio(bool hasAudio, bool muted)
+{
+    m_audio->setEnabled(hasAudio);
+    m_audio->setChecked(hasAudio && !muted && QSettings().value(kAudioKey, true).toBool());
+    m_audio->setToolTip(!hasAudio ? tr("This project has no audio.")
+                        : muted   ? tr("The audio track is muted: tick this to have it in the video all the same.")
+                                  : tr("The audio track, where it is on the timeline, at its volume"));
 }
 
 void VideoExportDialog::setPlayRange(int first, int last)
@@ -202,6 +219,8 @@ void VideoExportDialog::accept()
     settings.setValue(kWithoutPaperKey, m_withoutPaper->isChecked());
     if (m_compositing->isEnabled())
         settings.setValue(kCompositingKey, m_compositing->isChecked());
+    if (m_audio->isEnabled())
+        settings.setValue(kAudioKey, m_audio->isChecked());
     QDialog::accept();
 }
 

@@ -28,6 +28,8 @@ public:
     io::VideoOptions options() const;
     // The Timeline's From and To (0-based, both included): the frames offered, chosen when they are not the whole scene.
     void setPlayRange(int first, int last);
+    // The project's audio track, if it has one: offered to go with the video (not at first if it is muted).
+    void setAudio(bool hasAudio, bool muted);
     int firstFrame() const; // 0-based, inclusive
     int lastFrame() const;
 
@@ -47,6 +49,7 @@ private:
     QComboBox *m_quality = nullptr;
     QCheckBox *m_withoutPaper = nullptr;
     QCheckBox *m_compositing = nullptr;
+    QCheckBox *m_audio = nullptr;
 };
 
 } // namespace mothion::ui
