@@ -2552,8 +2552,17 @@ bool DocumentController::applyMouthCues(const std::vector<doc::MouthCue> &cues, 
     const int offset = m_document->audio() ? m_document->audio()->offset : 0;
     doc::Timing after = doc::lipSyncTiming(*cel, cues, m_document->frameRate().fps(), offset, minFrames,
                                            m_document->frameCount());
-    if (after == cel->timing())
-        return fail(tr("No mouth to put: the sound gave nothing within the scene"));
+    if (after == cel->timing()) {
+        // Nothing changes: either the sound gave no mouth within the scene, or the mouths are those it says already
+        // (lip synced before), which is no failure.
+        const double fps = m_document->frameRate().fps();
+        const bool reaches = std::any_of(cues.begin(), cues.end(), [&](const doc::MouthCue &cue) {
+            return doc::mouthDrawing(*cel, cue.shape) != doc::kNoId
+                   && offset + std::lround(cue.end * fps) > 0
+                   && offset + std::lround(cue.start * fps) < m_document->frameCount();
+        });
+        return reaches || fail(tr("No mouth to put: the sound gave nothing within the scene"));
+    }
     interruptStroke();
     stopEditingMouth();
     std::vector<std::unique_ptr<doc::Command>> steps;

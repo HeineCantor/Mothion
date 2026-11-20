@@ -1681,6 +1681,10 @@ private slots:
         // Put on the chart from frame 10 (the audio's offset): X 10..15, D 16..21, A 22..27, X 28..33.
         QVERIFY(controller.applyMouthCues(cues, 1, &reason));
         QCOMPARE(controller.undoText(), QStringLiteral("Undo lip sync"));
+        // Again with the same sound: the mouths are those already, which is no failure (and no step more).
+        reason.clear();
+        QVERIFY2(controller.applyMouthCues(cues, 1, &reason), qPrintable(reason));
+        QVERIFY(reason.isEmpty());
         auto shown = [&](int frame) {
             const doc::Drawing *drawing = d.cel(cel)->drawingAt(frame);
             return drawing ? QString::fromStdString(drawing->name) : QString();
