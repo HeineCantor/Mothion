@@ -40,4 +40,29 @@ struct MouthCue
 Timing lipSyncTiming(const Cel &cel, const std::vector<MouthCue> &cues, double fps, int offset, int minFrames,
                      int frameCount);
 
+// Lip sync from phones (what a phone recognizer such as ZIPA hears): each phone, in IPA, from `start` to `end` seconds.
+struct TimedPhone
+{
+    std::string phone; // UTF-8 ("a", "ʃ", "ɛː")
+    double start = 0.0;
+    double end = 0.0;
+};
+
+// The phones in a CTC recognizer's output: `logProbs` holds `frames` rows of `tokens.size()` scores, frame `t` at
+// `firstFrameSeconds + t * frameSeconds`; token 0 is the blank, and tokens in angle brackets ("<unk>") or the word
+// boundary "▁" are no phones. Each phone begins where its run of frames does and lasts to the next one, or, when a
+// pause follows, a little past its run.
+std::vector<TimedPhone> ctcPhones(const float *logProbs, int frames, const std::vector<std::string> &tokens,
+                                  double frameSeconds, double firstFrameSeconds = 0.0);
+
+// The mouth shape a phone is said with: A for P B M, B for most consonants and I, C for E, D for A, E for O, F for U W,
+// G for F V, H for L. Nothing for a mark alone (a length, a nasalization). Its marks do not count ("aː" is "a").
+std::optional<char> mouthShapeOfPhone(const std::string &phone);
+
+// The mouths of `phones`, laid over `duration` seconds: rests (X) where nothing is said, a pause too short to close the
+// mouth bridged by the mouth before. The shapes past A to F that the mouths lack (not in `extendedShapes`) are said
+// with the nearest of them, as Rhubarb does: G as B, H as C, X as A.
+std::vector<MouthCue> mouthCuesFromPhones(const std::vector<TimedPhone> &phones, double duration,
+                                          const std::string &extendedShapes = "GHX");
+
 } // namespace mothion::doc

@@ -78,7 +78,10 @@ qt_add_library(mothion_gui STATIC
     io/Autosave.h io/Autosave.cpp
     io/FrameExport.h io/FrameExport.cpp
     io/VideoExport.h io/VideoExport.cpp
+    io/LipSyncJob.h
     io/RhubarbLipSync.h io/RhubarbLipSync.cpp
+    io/Fbank.h io/Fbank.cpp
+    io/ZipaLipSync.h io/ZipaLipSync.cpp
     io/BlenderLinkServer.h io/BlenderLinkServer.cpp
     io/BlenderFrameCache.h io/BlenderFrameCache.cpp
     io/BlenderAddOn.h io/BlenderAddOn.cpp
@@ -247,12 +250,40 @@ find_package(Qt6 REQUIRED COMPONENTS Network) # the local socket of Discord's Ri
 target_link_libraries(mothion_gui PUBLIC mothion_core Qt6::Widgets Qt6::Network PRIVATE Qt6::Sql Qt6::Multimedia) # (Network is public: the link server is in a header the tests use)
 mothion_set_warnings(mothion_gui)
 
+# ONNX Runtime (MIT), which runs the ZIPA phone recognizer of the lip sync from the audio. Optional: without it the lip
+# sync has Rhubarb alone. scripts/fetch-onnxruntime.sh puts it in third_party/onnxruntime (include/, lib/).
+set(MOTHION_ONNXRUNTIME_DIR "${PROJECT_SOURCE_DIR}/third_party/onnxruntime" CACHE PATH
+    "ONNX Runtime for the ZIPA lip sync (a folder with include/ and lib/)")
+find_path(MOTHION_ONNXRUNTIME_INCLUDE onnxruntime_cxx_api.h PATHS "${MOTHION_ONNXRUNTIME_DIR}/include" NO_DEFAULT_PATH)
+find_library(MOTHION_ONNXRUNTIME_LIBRARY onnxruntime PATHS "${MOTHION_ONNXRUNTIME_DIR}/lib" NO_DEFAULT_PATH)
+if(MOTHION_ONNXRUNTIME_INCLUDE AND MOTHION_ONNXRUNTIME_LIBRARY)
+    message(STATUS "ONNX Runtime: ${MOTHION_ONNXRUNTIME_LIBRARY} (the lip sync can use ZIPA)")
+    # ORT_API_MANUAL_INIT: the API is looked up when ZIPA is first loaded, not as the program starts.
+    target_compile_definitions(mothion_gui PRIVATE MOTHION_HAVE_ONNXRUNTIME ORT_API_MANUAL_INIT)
+    target_include_directories(mothion_gui SYSTEM PRIVATE "${MOTHION_ONNXRUNTIME_INCLUDE}")
+    target_link_libraries(mothion_gui PRIVATE "${MOTHION_ONNXRUNTIME_LIBRARY}")
+    if(WIN32)
+        # Loaded when ZIPA first runs (so the tests and a Mothion without the DLL start all the same), from beside
+        # mothion.exe (which the DLL is copied to): Windows has an onnxruntime.dll of its own in System32.
+        target_link_libraries(mothion_gui PUBLIC delayimp)
+        target_link_options(mothion_gui INTERFACE "/DELAYLOAD:onnxruntime.dll")
+        find_file(MOTHION_ONNXRUNTIME_DLL onnxruntime.dll PATHS "${MOTHION_ONNXRUNTIME_DIR}/lib" NO_DEFAULT_PATH)
+    endif()
+else()
+    message(STATUS "ONNX Runtime not found in ${MOTHION_ONNXRUNTIME_DIR}: the lip sync has Rhubarb alone "
+                   "(scripts/fetch-onnxruntime.sh fetches it)")
+endif()
+
 # ---------------------------------------------------------------------------
 # mothion: the executable, just main().
 # ---------------------------------------------------------------------------
 qt_add_executable(mothion WIN32 MACOSX_BUNDLE app/main.cpp)
 target_compile_definitions(mothion PRIVATE MOTHION_VERSION="${MOTHION_VERSION}")
 target_link_libraries(mothion PRIVATE mothion_gui)
+if(MOTHION_ONNXRUNTIME_DLL)
+    add_custom_command(TARGET mothion POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                       "${MOTHION_ONNXRUNTIME_DLL}" "$<TARGET_FILE_DIR:mothion>")
+endif()
 if(WIN32)
     target_link_libraries(mothion_gui PRIVATE dbghelp) # the minidump a crash writes
 else()

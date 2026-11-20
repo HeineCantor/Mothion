@@ -28,6 +28,13 @@ mothion_add_test(tst_canvas mothion_gui)
 mothion_add_test(tst_compositing mothion_gui)
 mothion_add_test(tst_colorsets mothion_gui)
 mothion_add_test(tst_autosave mothion_gui Qt6::Sql)
+mothion_add_test(tst_lipsync mothion_gui)
+# ZIPA's model, where scripts/fetch-zipa.sh puts it for this build (the test that runs it skips when it is not there).
+target_compile_definitions(tst_lipsync PRIVATE MOTHION_TEST_ZIPA_DIR="${PROJECT_BINARY_DIR}/src/zipa")
+if(MOTHION_ONNXRUNTIME_DLL) # beside the test, as beside mothion.exe (not Windows' own onnxruntime.dll)
+    add_custom_command(TARGET tst_lipsync POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                       "${MOTHION_ONNXRUNTIME_DLL}" "$<TARGET_FILE_DIR:tst_lipsync>")
+endif()
 mothion_add_test(tst_diagnostics mothion_gui Qt6::Sql)
 find_package(Qt6 REQUIRED COMPONENTS Sql)
 mothion_add_test(tst_brushimport mothion_gui Qt6::Sql)

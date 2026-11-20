@@ -1,8 +1,9 @@
 # A tag v<version> pushed (git tag v0.2.0 && git push origin v0.2.0) builds Mothion for Windows and publishes a GitHub
 # Release with it: Mothion-<version>-windows-x64-setup.exe, the installer (installer/mothion.iss), and
-# Mothion-<version>-windows-x64.zip, which runs as it is extracted (Qt, the C++ runtime, ffmpeg and Rhubarb Lip Sync
-# are in both). The version the program shows is the tag's (see MOTHION_VERSION in CMakeLists.txt). A tag with a dash
-# (v0.2.0-beta1) makes a pre-release. Run again by hand (Actions > Release > Run workflow) on a tag, it replaces the files.
+# Mothion-<version>-windows-x64.zip, which runs as it is extracted (Qt, the C++ runtime, ffmpeg, Rhubarb Lip Sync, ONNX
+# Runtime and the ZIPA model are in both). The version the program shows is the tag's (see MOTHION_VERSION in
+# CMakeLists.txt). A tag with a dash (v0.2.0-beta1) makes a pre-release. Run again by hand (Actions > Release > Run
+# workflow) on a tag, it replaces the files.
 name: Release
 
 on:
@@ -29,6 +30,17 @@ env:
   RHUBARB_VERSION: 1.14.0
   RHUBARB_URL: https://github.com/DanielSWolf/rhubarb-lip-sync/releases/download/v1.14.0/Rhubarb-Lip-Sync-1.14.0-Windows.zip
   RHUBARB_SHA256: 62fa416a8d5e382a3828ee4bef358ce520d0b4cabdeaea75a7ac266d098d1fe3
+  # ONNX Runtime, which runs ZIPA inside Mothion (onnxruntime.dll beside mothion.exe). MIT. From Microsoft's NuGet
+  # package, pinned to its hash (the GitHub repository of ONNX Runtime has been gone since November 2026; this package
+  # was published in October 2025 and is signed by Microsoft).
+  ONNXRUNTIME_VERSION: 1.23.2
+  ONNXRUNTIME_URL: https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/1.23.2/microsoft.ml.onnxruntime.1.23.2.nupkg
+  ONNXRUNTIME_SHA256: 25fe172f7fcdf34f2b5b02c8b997f6b88abc282956849d4af4335af23d0c4e4a
+  # ZIPA (ZIPA-CR small, int8), the phone recognizer of the lip sync from the audio, in "zipa" beside mothion.exe.
+  # CC BY 4.0; https://github.com/lingjzhu/zipa. Its Hugging Face repository at a fixed revision.
+  ZIPA_URL: https://huggingface.co/anyspeech/zipa-small-crctc-500k/resolve/dfe87c97662606fa6db90ad06f627d4363314744
+  ZIPA_MODEL_SHA256: d0e28b68164e8b1fbd6105100c01798828aa0855000ce9bbbd1a2cec233adf13
+  ZIPA_TOKENS_SHA256: f8e042a0c9130532b22d03ec7cae2f75a23fbec70c450c31a8efb51787b2b8fe
 
 jobs:
   windows:
@@ -60,6 +72,22 @@ jobs:
           arch: win64_msvc2022_64
           modules: qtmultimedia
           cache: true
+
+      - name: Fetch ONNX Runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # The NuGet package, checked against its hash, laid out as the build looks for it (third_party\onnxruntime).
+          $zip = Join-Path $env:RUNNER_TEMP 'onnxruntime.zip'
+          Invoke-WebRequest $env:ONNXRUNTIME_URL -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash -ne $env:ONNXRUNTIME_SHA256) { throw 'ONNX Runtime: the download is not the one expected' }
+          $x = Join-Path $env:RUNNER_TEMP 'onnxruntime'
+          Expand-Archive $zip $x
+          $ort = 'third_party\onnxruntime'
+          New-Item -ItemType Directory -Force "$ort\include", "$ort\lib" | Out-Null
+          Copy-Item "$x\build\native\include\*.h" "$ort\include"
+          Copy-Item "$x\runtimes\win-x64\native\onnxruntime.lib", "$x\runtimes\win-x64\native\onnxruntime.dll" "$ort\lib"
+          Copy-Item "$x\LICENSE", "$x\ThirdPartyNotices.txt" $ort
 
       - name: Configure
         run: >
@@ -126,6 +154,18 @@ jobs:
           Copy-Item "$($rh.FullName)\res" $rhubarb -Recurse
           Copy-Item "$($rh.FullName)\LICENSE.md" (Join-Path $licenses 'rhubarb-LICENSE.md')
 
+          # ONNX Runtime (fetched before the build) and the ZIPA model, checked against its hashes.
+          Copy-Item third_party\onnxruntime\lib\onnxruntime.dll $dir
+          Copy-Item third_party\onnxruntime\LICENSE (Join-Path $licenses 'onnxruntime-LICENSE.txt')
+          Copy-Item third_party\onnxruntime\ThirdPartyNotices.txt (Join-Path $licenses 'onnxruntime-ThirdPartyNotices.txt')
+          $zipa = Join-Path $dir 'zipa'
+          New-Item -ItemType Directory -Force $zipa | Out-Null
+          Invoke-WebRequest "$env:ZIPA_URL/model.int8.onnx" -OutFile (Join-Path $zipa 'model.int8.onnx')
+          Invoke-WebRequest "$env:ZIPA_URL/tokens.txt" -OutFile (Join-Path $zipa 'tokens.txt')
+          if ((Get-FileHash (Join-Path $zipa 'model.int8.onnx') -Algorithm SHA256).Hash -ne $env:ZIPA_MODEL_SHA256) { throw 'ZIPA: the model is not the one expected' }
+          if ((Get-FileHash (Join-Path $zipa 'tokens.txt') -Algorithm SHA256).Hash -ne $env:ZIPA_TOKENS_SHA256) { throw 'ZIPA: the phones are not the ones expected' }
+          Invoke-WebRequest https://creativecommons.org/licenses/by/4.0/legalcode.txt -OutFile (Join-Path $licenses 'CC-BY-4.0.txt')
+
           # The licenses of what goes with it.
           if (Test-Path LICENSE) { Copy-Item LICENSE (Join-Path $dir 'LICENSE.txt') }
           Copy-Item resources\fonts\Montserrat-OFL.txt (Join-Path $licenses 'Montserrat-OFL.txt')
@@ -144,6 +184,14 @@ jobs:
             libraries and speech models under the MIT, BSD and like licenses (rhubarb-LICENSE.md). It is a program of
             its own, which Mothion runs for the lip sync from the audio.
             Source: https://github.com/DanielSWolf/rhubarb-lip-sync
+          - ONNX Runtime $env:ONNXRUNTIME_VERSION (onnxruntime.dll), Microsoft, under the MIT license
+            (onnxruntime-LICENSE.txt; what it is built of: onnxruntime-ThirdPartyNotices.txt). Mothion uses it as it is,
+            from the NuGet package Microsoft.ML.OnnxRuntime $env:ONNXRUNTIME_VERSION.
+          - ZIPA-CR small (the zipa folder: model.int8.onnx, tokens.txt), by Jian Zhu, Farhan Samir, Eleanor Chodroff and
+            David R. Mortensen, "ZIPA: A family of efficient models for multilingual phone recognition" (ACL 2025),
+            under the Creative Commons Attribution 4.0 license (CC-BY-4.0.txt). Mothion uses the int8 model its authors
+            published, as it is, for the lip sync from the audio. Source: https://github.com/lingjzhu/zipa and
+            https://huggingface.co/anyspeech/zipa-small-crctc-500k
           - Eigen 3.4 (built into mothion.exe), under the Mozilla Public License 2.0. Source: https://eigen.tuxfamily.org
           - Montserrat (the font of the splash screen), under the SIL Open Font License 1.1 (Montserrat-OFL.txt).
           - The Microsoft Visual C++ runtime (msvcp140*.dll, vcruntime140*.dll, concrt140.dll), redistributed as
@@ -178,8 +226,8 @@ jobs:
           cat > notes.md <<'EOF'
           **Windows:** download `Mothion-…-windows-x64-setup.exe` and run it (Start menu, `.moth` files open with
           Mothion, uninstall from Windows' settings); or download `Mothion-…-windows-x64.zip`, extract it anywhere and
-          start `mothion.exe`. Nothing else needs installing (ffmpeg, for exporting videos, and Rhubarb Lip Sync, for
-          the lip sync from the audio, are in both).
+          start `mothion.exe`. Nothing else needs installing (ffmpeg, for exporting videos, and ZIPA and Rhubarb Lip
+          Sync, for the lip sync from the audio, are in both).
 
           The program is not signed: the first time, Windows may say "Windows protected your PC". Click
           **More info → Run anyway**.

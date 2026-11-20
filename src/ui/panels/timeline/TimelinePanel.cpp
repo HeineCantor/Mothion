@@ -2,6 +2,7 @@
 #include <QProgressDialog>
 #include <QMessageBox>
 #include "io/RhubarbLipSync.h"
+#include "io/ZipaLipSync.h"
 #include "ui/LipSyncDialog.h"
 #include <QKeyEvent>
 #include <QCursor>
@@ -523,8 +524,8 @@ QWidget *TimelinePanel::mouthBar()
     auto *automatic = new QToolButton(m_mouthBar);
     automatic->setObjectName(QStringLiteral("mouthAuto"));
     automatic->setText(tr("From the audio…"));
-    automatic->setToolTip(tr("Lip sync from the audio track with Rhubarb Lip Sync: the mouths put on the frames where "
-                             "they are said"));
+    automatic->setToolTip(tr("Lip sync from the audio track (ZIPA or Rhubarb Lip Sync): the mouths put on the frames "
+                             "where they are said"));
     automatic->setAutoRaise(true);
     connect(automatic, &QToolButton::clicked, this, &TimelinePanel::lipSyncFromAudio);
     row->addWidget(automatic);
@@ -589,7 +590,7 @@ void TimelinePanel::lipSyncFromAudio()
     if (dialog.exec() != QDialog::Accepted)
         return;
     io::LipSyncOptions options = dialog.options();
-    // Only the extended shapes the mouths have: Rhubarb uses the six basic ones and those.
+    // Only the extended shapes the mouths have: the others are said with the nearest basic one.
     options.extendedShapes.clear();
     if (const doc::Cel *cel = m_document->document().cel(m_document->currentCel()))
         for (const char shape : {'G', 'H', 'X'})
@@ -598,7 +599,11 @@ void TimelinePanel::lipSyncFromAudio()
     const int minFrames = dialog.minFrames();
     const doc::CelId cel = m_document->currentCel();
 
-    auto *job = new io::RhubarbJob(this);
+    io::LipSyncJob *job = nullptr;
+    if (options.recognizer == io::LipSyncRecognizer::Zipa)
+        job = new io::ZipaJob(this);
+    else
+        job = new io::RhubarbJob(this);
     auto *progress = new QProgressDialog(tr("Hearing the audio…"), tr("Cancel"), 0, 100, this);
     progress->setWindowModality(Qt::WindowModal);
     progress->setMinimumDuration(300);
@@ -607,8 +612,8 @@ void TimelinePanel::lipSyncFromAudio()
         progress->close();
         job->deleteLater();
     };
-    connect(job, &io::RhubarbJob::progress, progress, [progress](double f) { progress->setValue(int(f * 100)); });
-    connect(job, &io::RhubarbJob::finished, this, [this, done, minFrames, cel](const std::vector<doc::MouthCue> &cues) {
+    connect(job, &io::LipSyncJob::progress, progress, [progress](double f) { progress->setValue(int(f * 100)); });
+    connect(job, &io::LipSyncJob::finished, this, [this, done, minFrames, cel](const std::vector<doc::MouthCue> &cues) {
         done();
         if (m_document->currentCel() != cel)
             m_document->setCurrentCel(cel); // the cel it was asked for
@@ -616,7 +621,7 @@ void TimelinePanel::lipSyncFromAudio()
         if (!m_document->applyMouthCues(cues, minFrames, &reason))
             QMessageBox::warning(this, tr("Lip sync"), reason);
     });
-    connect(job, &io::RhubarbJob::failed, this, [this, done](const QString &reason) {
+    connect(job, &io::LipSyncJob::failed, this, [this, done](const QString &reason) {
         done();
         QMessageBox::warning(this, tr("Lip sync"), reason);
     });
@@ -625,7 +630,10 @@ void TimelinePanel::lipSyncFromAudio()
         job->deleteLater();
     });
     QString reason;
-    if (!job->start(*audio, options, &reason)) {
+    const bool started = options.recognizer == io::LipSyncRecognizer::Zipa
+                             ? static_cast<io::ZipaJob *>(job)->start(*audio, options, &reason)
+                             : static_cast<io::RhubarbJob *>(job)->start(*audio, options, &reason);
+    if (!started) {
         done();
         QMessageBox::warning(this, tr("Lip sync"), reason);
     }

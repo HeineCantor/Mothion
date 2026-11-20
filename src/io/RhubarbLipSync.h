@@ -1,9 +1,8 @@
 #pragma once
 
 #include "core/document/Audio.h"
-#include "core/document/LipSync.h"
+#include "io/LipSyncJob.h"
 
-#include <QObject>
 #include <QString>
 
 #include <memory>
@@ -33,16 +32,10 @@ struct RhubarbStatus
 };
 RhubarbStatus parseRhubarbStatus(const QByteArray &line);
 
-struct LipSyncOptions
-{
-    QString dialog;               // what is said, if known: it helps (may be empty)
-    bool english = false;         // English words (PocketSphinx), else any language (its phonetic recognizer)
-    QString extendedShapes = QStringLiteral("GHX"); // the shapes past A to F the mouths have (any of G, H and X)
-};
-
 // One run of Rhubarb on an audio track, in the background: the sound written out (a WAV or an Ogg file as it is,
-// another kind made a WAV by ffmpeg first), Rhubarb run on it, its progress told, its cues given at the end.
-class RhubarbJob : public QObject
+// another kind made a WAV by ffmpeg first), Rhubarb run on it (by English words when the options' recognizer is
+// RhubarbEnglish, else by its sounds), its progress told, its cues given at the end.
+class RhubarbJob : public LipSyncJob
 {
     Q_OBJECT
 
@@ -54,13 +47,8 @@ public:
     // program (findRhubarb() if empty).
     bool start(const doc::AudioTrack &track, const LipSyncOptions &options, QString *reason,
                const QString &rhubarb = {});
-    void cancel();
-    bool isRunning() const;
-
-signals:
-    void progress(double fraction); // 0..1
-    void finished(const std::vector<mothion::doc::MouthCue> &cues);
-    void failed(const QString &reason);
+    void cancel() override;
+    bool isRunning() const override;
 
 private:
     void runRhubarb(const QString &soundFile);

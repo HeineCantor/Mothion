@@ -52,6 +52,12 @@ jobs:
           arch: linux_gcc_64
           cache: true
 
+      # ONNX Runtime and the ZIPA model, for the lip sync from the audio (and the test that runs it).
+      - name: Fetch ONNX Runtime and ZIPA
+        run: |
+          scripts/fetch-onnxruntime.sh
+          scripts/fetch-zipa.sh build-ci/src
+
       - name: Configure
         run: >
           cmake -S . -B build-ci -G Ninja
@@ -147,6 +153,24 @@ jobs:
           arch: win64_msvc2022_64
           modules: qtmultimedia
           cache: true
+
+      # ONNX Runtime (its NuGet package, checked against its hash) and the ZIPA model, as the release has them.
+      - name: Fetch ONNX Runtime and ZIPA
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = Join-Path $env:RUNNER_TEMP 'onnxruntime.zip'
+          Invoke-WebRequest https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/1.23.2/microsoft.ml.onnxruntime.1.23.2.nupkg -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash -ne '25fe172f7fcdf34f2b5b02c8b997f6b88abc282956849d4af4335af23d0c4e4a') { throw 'ONNX Runtime: the download is not the one expected' }
+          $x = Join-Path $env:RUNNER_TEMP 'onnxruntime'
+          Expand-Archive $zip $x
+          New-Item -ItemType Directory -Force third_party\onnxruntime\include, third_party\onnxruntime\lib, build-ci\src\zipa | Out-Null
+          Copy-Item "$x\build\native\include\*.h" third_party\onnxruntime\include
+          Copy-Item "$x\runtimes\win-x64\native\onnxruntime.lib", "$x\runtimes\win-x64\native\onnxruntime.dll" third_party\onnxruntime\lib
+          $zipa = 'https://huggingface.co/anyspeech/zipa-small-crctc-500k/resolve/dfe87c97662606fa6db90ad06f627d4363314744'
+          Invoke-WebRequest "$zipa/model.int8.onnx" -OutFile build-ci\src\zipa\model.int8.onnx
+          Invoke-WebRequest "$zipa/tokens.txt" -OutFile build-ci\src\zipa\tokens.txt
+          if ((Get-FileHash build-ci\src\zipa\model.int8.onnx -Algorithm SHA256).Hash -ne 'd0e28b68164e8b1fbd6105100c01798828aa0855000ce9bbbd1a2cec233adf13') { throw 'ZIPA: the model is not the one expected' }
 
       - name: Configure
         run: >

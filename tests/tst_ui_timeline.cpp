@@ -3,8 +3,12 @@
 #include "test_common.h"
 #include "ui/panels/MouthChartPanel.h"
 #include "io/RhubarbLipSync.h"
+#include "io/ZipaLipSync.h"
+#include "ui/LipSyncDialog.h"
 #include "core/document/LipSync.h"
 #include "canvas/FrameRenderer.h"
+
+#include <QPlainTextEdit>
 
 class TestUiTimeline : public QObject
 {
@@ -1654,6 +1658,7 @@ private slots:
         QSignalSpy finished(&job, &io::RhubarbJob::finished);
         QSignalSpy failed(&job, &io::RhubarbJob::failed);
         io::LipSyncOptions options;
+        options.recognizer = io::LipSyncRecognizer::RhubarbPhonetic;
         options.dialog = QStringLiteral("mamma ho fame");
         options.extendedShapes = QStringLiteral("GX");
         QString reason;
@@ -1703,6 +1708,64 @@ private slots:
         QVERIFY(!reason.isEmpty());
         // No Rhubarb: refused at once, with where to put it.
         QVERIFY(!job.start(track, options, &reason, QString()) || !io::findRhubarb().isEmpty());
+    }
+
+    // The lip sync dialog: ZIPA first when it can run (built with ONNX Runtime, its model found), Rhubarb otherwise;
+    // what is said only for Rhubarb; the choice remembered; no running a recognizer that is missing.
+    void lipSyncDialogChoosesWhoHears()
+    {
+        QSettings().remove(QStringLiteral("lipsync"));
+        const QByteArray zipaBefore = qgetenv("MOTHION_ZIPA");
+        QTemporaryDir dir;
+        for (const QString name : {QStringLiteral("model.int8.onnx"), QStringLiteral("tokens.txt")}) {
+            QFile file(dir.filePath(name));
+            QVERIFY(file.open(QIODevice::WriteOnly));
+        }
+        qputenv("MOTHION_ZIPA", dir.path().toLocal8Bit()); // a model (found, not loaded: the dialog only looks)
+        {
+            ui::LipSyncDialog dialog;
+            auto *recognizer = dialog.findChild<QComboBox *>(QStringLiteral("lipSyncRecognizer"));
+            auto *text = dialog.findChild<QPlainTextEdit *>(QStringLiteral("lipSyncDialogText"));
+            auto *ok = dialog.findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok);
+            QVERIFY(recognizer && text && ok);
+            QCOMPARE(recognizer->count(), 3);
+            if (io::zipaBuiltIn()) {
+                QCOMPARE(dialog.options().recognizer, io::LipSyncRecognizer::Zipa);
+                QVERIFY(ok->isEnabled());
+            } else {
+                QCOMPARE(dialog.options().recognizer, io::LipSyncRecognizer::RhubarbPhonetic);
+                recognizer->setCurrentIndex(0); // ZIPA chosen all the same: it cannot run
+                QVERIFY(!ok->isEnabled());
+            }
+            recognizer->setCurrentIndex(0);
+            QVERIFY(!text->isEnabled()); // ZIPA hears the sound alone
+            text->setPlainText(QStringLiteral("ciao"));
+            QVERIFY(dialog.options().dialog.isEmpty());
+            recognizer->setCurrentIndex(2);
+            QVERIFY(text->isEnabled());
+            QCOMPARE(dialog.options().recognizer, io::LipSyncRecognizer::RhubarbEnglish);
+            QCOMPARE(dialog.options().dialog, QStringLiteral("ciao"));
+            QCOMPARE(ok->isEnabled(), !io::findRhubarb().isEmpty());
+            dialog.accept();
+        }
+        {
+            ui::LipSyncDialog dialog; // remembered
+            QCOMPARE(dialog.options().recognizer, io::LipSyncRecognizer::RhubarbEnglish);
+        }
+        QSettings().remove(QStringLiteral("lipsync"));
+        qputenv("MOTHION_ZIPA", QByteArray("/nowhere"));
+        {
+            ui::LipSyncDialog dialog; // no model: Rhubarb first, and ZIPA cannot be run
+            QCOMPARE(dialog.options().recognizer, io::LipSyncRecognizer::RhubarbPhonetic);
+            dialog.findChild<QComboBox *>(QStringLiteral("lipSyncRecognizer"))->setCurrentIndex(0);
+            QVERIFY(!dialog.findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->isEnabled());
+            QVERIFY(dialog.findChild<QLabel *>(QStringLiteral("lipSyncWhere"))->text().contains(QStringLiteral("ZIPA")));
+        }
+        if (zipaBefore.isEmpty())
+            qunsetenv("MOTHION_ZIPA");
+        else
+            qputenv("MOTHION_ZIPA", zipaBefore);
+        QSettings().remove(QStringLiteral("lipsync"));
     }
 
 

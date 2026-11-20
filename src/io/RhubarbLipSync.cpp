@@ -63,7 +63,7 @@ RhubarbStatus parseRhubarbStatus(const QByteArray &line)
 }
 
 RhubarbJob::RhubarbJob(QObject *parent)
-    : QObject(parent)
+    : LipSyncJob(parent)
 {
 }
 
@@ -131,7 +131,7 @@ bool RhubarbJob::start(const doc::AudioTrack &track, const LipSyncOptions &optio
 void RhubarbJob::runRhubarb(const QString &soundFile)
 {
     QStringList args{QStringLiteral("--machineReadable"), QStringLiteral("-f"), QStringLiteral("json"),
-                     QStringLiteral("-r"), m_options.english ? QStringLiteral("pocketSphinx") : QStringLiteral("phonetic"),
+                     QStringLiteral("-r"), m_options.recognizer == LipSyncRecognizer::RhubarbEnglish ? QStringLiteral("pocketSphinx") : QStringLiteral("phonetic"),
                      QStringLiteral("--extendedShapes"), m_options.extendedShapes};
     if (!m_options.dialog.trimmed().isEmpty()) {
         const QString dialog = m_dir->filePath(QStringLiteral("dialog.txt"));

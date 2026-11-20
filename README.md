@@ -41,6 +41,8 @@ Qt's SQLite driver (`qsqlite`) is used to read `.sut` brush files. Qt must be dy
 
 Eigen is used by the puppet warp implementation. CMake looks for a system installation first and downloads it during configuration if none is available.
 
+The lip sync from the audio hears the voice with ZIPA, which needs [ONNX Runtime](https://onnxruntime.ai) (MIT): `scripts/fetch-onnxruntime.sh` puts Microsoft's NuGet package of it (1.23.2, checked against its hash) in `third_party/onnxruntime`, where CMake finds it (or pass `-DMOTHION_ONNXRUNTIME_DIR`). Without it Mothion builds all the same, and the lip sync has Rhubarb Lip Sync alone. ZIPA's model is not part of the build: `scripts/fetch-zipa.sh` puts it beside the executable (the tests that run it skip when it is not there).
+
 ## Continuous integration
 
 GitHub Actions runs three jobs on every pull request and every push to `main` (and by hand from the Actions tab):
@@ -309,7 +311,7 @@ recover the work; a copy older than the project's file is dropped without asking
 | Undo / Redo | Ctrl+Z / Ctrl+Shift+Z or Ctrl+Y. History is limited to 500 steps or 1 GB. |
 | Input debug overlay | F12 |
 | Timeline | Click or drag to select frame/layer. Arrow keys navigate; Home/End go to the first/last frame. Ctrl+wheel changes frame zoom. |
-| Lip sync | Make a cel a mouth chart (its menu: *Mouth chart*); draw its mouths A–H and X in the Mouth chart panel. The Timeline's mouth bar puts a shape at the current frame (or its letter, with the focus in the timeline); *From the audio…* puts them all with [Rhubarb Lip Sync](https://github.com/DanielSWolf/rhubarb-lip-sync), which comes with the Windows releases (for a Linux build: `scripts/fetch-rhubarb.sh`). |
+| Lip sync | Make a cel a mouth chart (its menu: *Mouth chart*); draw its mouths A–H and X in the Mouth chart panel. The Timeline's mouth bar puts a shape at the current frame (or its letter, with the focus in the timeline); *From the audio…* puts them all: heard by [ZIPA](https://github.com/lingjzhu/zipa), a phone recognizer of any language run inside Mothion, or by [Rhubarb Lip Sync](https://github.com/DanielSWolf/rhubarb-lip-sync). Both come with the Windows releases; for a Linux build, `scripts/fetch-onnxruntime.sh` before building and `scripts/fetch-zipa.sh` (ZIPA), `scripts/fetch-rhubarb.sh` (Rhubarb). |
 | Hold | Drag the right edge of an exposure block to extend it and shift later frames. |
 | Drawings | Drawing on an empty frame creates a new drawing. Right-click the timeline for drawing/frame operations. |
 | Layers | Add, delete and reorder using the timeline controls. Eye toggles visibility; padlock toggles locking; double-click to rename. |

@@ -51,3 +51,6 @@ aqtinstall.log
 
 # Python
 __pycache__/
+
+# Dependencies fetched by scripts/ (scripts/fetch-onnxruntime.sh)
+third_party/
