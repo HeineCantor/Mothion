@@ -2,6 +2,9 @@
 
 #include "canvas/CanvasTool.h"
 #include "core/document/Tile.h"
+#include "core/document/TiledImage.h"
+#include "core/document/VectorStroke.h"
+#include "document/DocumentController.h"
 
 #include <QImage>
 #include <QPolygonF>
@@ -10,9 +13,6 @@
 #include <functional>
 #include <vector>
 
-namespace mothion::document {
-class DocumentController;
-}
 namespace mothion::tools {
 class ToolState;
 }
@@ -58,6 +58,10 @@ public:
 private:
     void fillAround(const QPointF &docPos);
     void fillLasso();
+    // On a vector layer: `fill` (a shape of colour) put on the layer, above its other fills and under its lines, and the
+    // layer drawn again; one undo step with `before`, the layer's pixels at beginPaint().
+    void putFill(const document::DocumentController::PaintTarget &target, doc::VectorStroke fill,
+                 const doc::TiledImage &before);
     // The main color at the fill opacity, premultiplied.
     doc::Pixel fillColor(const QColor &color) const; // the main color (a mask's: its gray) with the opacity
 

@@ -3,6 +3,7 @@
 #include "core/PressureCurve.h"
 #include "core/RateMeter.h"
 #include "core/StrokeSmoother.h"
+#include "core/fill/FillShape.h"
 #include "core/fill/FloodFill.h"
 #include "core/document/Document.h"
 #include "core/document/LipSync.h"
@@ -205,6 +206,65 @@ private slots:
         cel.timing().setExposure(40, 5, ids['A']);
         QCOMPARE(std::get<0>(runs(doc::lipSyncTiming(cel, cues, 24.0, 0, 1, 100)).back()), 40);
         QVERIFY(doc::lipSyncTiming(cel, {}, 24.0, 0, 1, 100) == cel.timing());
+    }
+
+    // The shape of colour of a vector layer: the area clicked grown under the line round it up to the line's middle (each
+    // pixel of the line to the side it is nearer), and its outlines, holes too, which filled by the even-odd rule give
+    // the area back.
+    void aFillShapeReachesTheLinesMiddleAndHasItsHoles()
+    {
+        using mothion::doc::Pixel;
+        constexpr int w = 40, h = 40;
+        std::vector<Pixel> px(w * h, 0xffffffffu); // white paper
+        auto put = [&](int x, int y) { px[std::size_t(y * w + x)] = 0xff000000u; };
+        for (int i = 5; i < 35; ++i) // a square line 6 px wide: x and y 5..10 and 29..34
+            for (int t = 0; t < 6; ++t) {
+                put(i, 5 + t);
+                put(i, 29 + t);
+                put(5 + t, i);
+                put(29 + t, i);
+            }
+        for (int y = 18; y < 22; ++y) // and a small square of line in the middle: a hole in the area
+            for (int x = 18; x < 22; ++x)
+                put(x, y);
+        mothion::fill::Region area = mothion::fill::floodRegion(px.data(), w, h, 15, 15, 0);
+        QVERIFY(!area.isEmpty());
+        QCOMPARE(int(area.at(11, 15)), 255);
+        QCOMPARE(int(area.at(10, 15)), 0);
+        const auto grown = mothion::fill::grownToLineMiddle(area, px.data(), 0xffffffffu, 0, 64);
+        QCOMPARE(int(grown.at(8, 15)), 255); // the inner half of the line
+        QCOMPARE(int(grown.at(7, 15)), 0);   // the outer half goes to the other side
+        QCOMPARE(int(grown.at(31, 15)), 255);
+        QCOMPARE(int(grown.at(32, 15)), 0);
+        QCOMPARE(int(grown.at(19, 19)), 255); // the hole's line has nothing beyond it: all of it
+        QCOMPARE(int(grown.at(2, 2)), 0);
+
+        // The outlines of a ring (a square with a square hole): two, which by the even-odd rule hold the ring's pixels.
+        mothion::fill::Region ring;
+        ring.width = ring.height = 10;
+        ring.mask.assign(100, 0);
+        for (int y = 1; y < 9; ++y)
+            for (int x = 1; x < 9; ++x)
+                if (x < 3 || x > 6 || y < 3 || y > 6)
+                    ring.mask[std::size_t(y * 10 + x)] = 255;
+        ring.left = ring.top = 1;
+        ring.right = ring.bottom = 8;
+        const auto outlines = mothion::fill::regionOutlines(ring);
+        QCOMPARE(int(outlines.size()), 2);
+        for (const auto &outline : outlines)
+            QCOMPARE(int(outline.size()), 4); // four corners each, no points along the straight edges
+        auto insideEvenOdd = [&](double px0, double py0) {
+            bool in = false;
+            for (const auto &outline : outlines)
+                for (std::size_t i = 0, j = outline.size() - 1; i < outline.size(); j = i++)
+                    if ((outline[i].y > py0) != (outline[j].y > py0)
+                        && px0 < (outline[j].x - outline[i].x) * (py0 - outline[i].y) / (outline[j].y - outline[i].y) + outline[i].x)
+                        in = !in;
+            return in;
+        };
+        for (int y = 0; y < 10; ++y)
+            for (int x = 0; x < 10; ++x)
+                QCOMPARE(insideEvenOdd(x + 0.5, y + 0.5), ring.at(x, y) == 255);
     }
 
     void floodFillStopsAtLinesAndGrows()

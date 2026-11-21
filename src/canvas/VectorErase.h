@@ -23,7 +23,8 @@ struct VectorErasure
 };
 
 // `strokes` after an eraser of `radius` went along `path` (document coordinates). A stroke is touched where its
-// line comes within `radius` plus half its width of the path. Strokes that erase (the eraser's own) are left alone.
+// line comes within `radius` plus half its width of the path. Strokes that erase (the eraser's own) and fills (shapes of
+// colour) are left alone, and a line does not stop at a fill's edge.
 // A cut stroke ends where it was cut, at a point put on the line.
 //
 // For an eraser that goes on: the strokes as the eraser has left them so far, kept between calls so that each new

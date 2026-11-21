@@ -1,5 +1,6 @@
 #include "canvas/VectorWarp.h"
 
+#include "canvas/VectorRender.h"
 #include "core/brush/DabGenerator.h"
 
 #include <algorithm>
@@ -127,6 +128,29 @@ std::vector<doc::VectorStroke> warpedStrokes(const std::vector<doc::VectorStroke
     std::vector<doc::VectorStroke> out;
     out.reserve(strokes.size());
     for (const doc::VectorStroke &stroke : strokes) {
+        if (stroke.fill) { // a shape of colour: its outlines, closing edges too, bent point by point
+            doc::VectorStroke moved = stroke;
+            moved.points.clear();
+            moved.outlines.clear();
+            for (const std::vector<QPointF> &outline : fillOutlines(stroke)) {
+                if (!moved.points.empty())
+                    moved.outlines.push_back(int(moved.points.size()));
+                for (std::size_t i = 0; i < outline.size(); ++i) {
+                    const QPointF a = outline[i], b = outline[(i + 1) % outline.size()];
+                    const int parts = std::max(1, int(std::ceil(std::hypot(b.x() - a.x(), b.y() - a.y()) / kMaxSegment)));
+                    for (int k = 0; k < parts; ++k) {
+                        MeshIndex::Linear unused;
+                        const Vec2 to = index.map({a.x() + (b.x() - a.x()) * k / parts, a.y() + (b.y() - a.y()) * k / parts}, unused);
+                        brush::BrushInput in;
+                        in.x = to.x;
+                        in.y = to.y;
+                        moved.points.push_back(in);
+                    }
+                }
+            }
+            out.push_back(std::move(moved));
+            continue;
+        }
         doc::VectorStroke moved = stroke;
         moved.points.clear();
         for (std::size_t i = 0; i < stroke.points.size(); ++i) {

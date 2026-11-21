@@ -18,6 +18,7 @@ add_library(mothion_core STATIC
 
     core/document/Blend.h core/document/Blend.cpp
     core/fill/FloodFill.h core/fill/FloodFill.cpp
+    core/fill/FillShape.h core/fill/FillShape.cpp
     core/tween/Flow.h core/tween/Flow.cpp
     core/tween/Morph.h core/tween/Morph.cpp
     core/perspective/PerspectiveGrid.h core/perspective/PerspectiveGrid.cpp

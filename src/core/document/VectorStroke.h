@@ -28,6 +28,13 @@ struct VectorStroke
     bool cornerTips = true;           // sharp corners keep a point
     bool startCorrectedAfter = false; // the start is corrected after the stroke, not tapered live
     std::vector<brush::BrushInput> points; // before brush::finalPoints()
+    // A fill (a shape of colour, as the bucket makes on a vector layer): not a line drawn with a brush but the closed
+    // outlines in `points` (only x and y count) filled with `color` at `opacity`, holes by the even-odd rule. Each
+    // outline after the first starts at the point whose index is in `outlines`. The brush, size and seed are unused.
+    // It is moved, turned, scaled and warped point by point as a line is, so its edge stays under the line it was
+    // filled up to.
+    bool fill = false;
+    std::vector<int> outlines;
 
     bool operator==(const VectorStroke &) const = default;
 };

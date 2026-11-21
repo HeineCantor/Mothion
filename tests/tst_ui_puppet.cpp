@@ -120,6 +120,102 @@ private slots:
         QCOMPARE(gaps, 0);
     }
 
+    // A colour filled as a shape on a vector layer (the bucket, referring to the lines on the layer above) has its edge
+    // under the middle of the line, and the puppet warp carries it point by point as it carries the line: pulled into a
+    // spike, as far as a line drawn again cannot follow the warp's preview, no white opens between line and colour.
+    void aVectorColourStaysUnderItsLineThroughAWarp()
+    {
+        tools::ToolState state;
+        tools::BrushLibrary library;
+        tools::BrushDefinitionPtr flat;
+        for (const tools::BrushPreset &preset : library.presets(tools::ToolId::Brush))
+            if (preset.brush && preset.brush->name == QStringLiteral("Flat brush"))
+                flat = preset.brush;
+        QVERIFY(flat);
+        state.setBrushResolver([flat](const QString &name) { return name == flat->name ? flat : nullptr; });
+        document::DocumentController controller;
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 1, "Paper").command);
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Vector));
+        const doc::LayerId colourId = controller.currentLayer();
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Vector));
+        const doc::LayerId lineId = controller.currentLayer();
+        const doc::CelId cel = controller.currentCel();
+        const doc::DrawingId drawing = controller.currentDrawingId();
+
+        // The line: a ring of the flat brush.
+        const QPointF centre(960, 540);
+        const double r = 220;
+        doc::VectorStroke ring;
+        ring.brush = flat->name.toStdString();
+        ring.size = 30;
+        for (int i = 0; i <= 400; ++i) {
+            const double a = i * 2 * std::numbers::pi / 400;
+            brush::BrushInput in;
+            in.x = centre.x() + r * std::cos(a);
+            in.y = centre.y() + r * std::sin(a);
+            in.pressure = 0.8;
+            ring.points.push_back(in);
+        }
+        doc::Layer &line = *d.layer(cel, drawing, lineId);
+        line.strokes = {ring};
+        canvas::drawStrokes(line.image, line.strokes, state, {});
+
+        // The colour: the bucket on the vector layer below, referring to the lines.
+        controller.setCurrentLayer(colourId);
+        state.setColor(QColor(110, 110, 210));
+        state.setOpacity(tools::ToolId::Fill, 1.0);
+        tools::applyPreset(state, tools::builtInPresets(tools::ToolId::Fill)[1]); // refer to other layers
+        canvas::FrameRenderer frame;
+        canvas::FillTool bucket(&controller, &state, [&](const QPoint &, bool) {
+            frame.renderAll(controller.document(), controller.currentFrame());
+            return canvas::FillTool::Shown{frame.area(), frame.image()};
+        }, [](const QString &) {});
+        bucket.press(centre, Qt::NoModifier);
+        const doc::Layer &colour = *controller.document().layer(cel, drawing, colourId);
+        QCOMPARE(colour.strokes.size(), std::size_t(1));
+        QVERIFY(colour.strokes.front().fill);
+        QCOMPARE(qAlpha(colour.image.pixel(int(centre.x()), int(centre.y()))), 255);
+        QCOMPARE(qAlpha(colour.image.pixel(int(centre.x() + r + 30), int(centre.y()))), 0); // not beyond the line
+        // Its edge is under the middle of the line: where the ring's middle is, and not much beyond.
+        QVERIFY(qAlpha(colour.image.pixel(int(centre.x() + r - 3), int(centre.y()))) > 200);
+        QCOMPARE(qAlpha(colour.image.pixel(int(centre.x() + r + 6), int(centre.y()))), 0);
+        controller.undo(); // one step
+        QVERIFY(controller.document().layer(cel, drawing, colourId)->strokes.empty());
+        controller.redo();
+
+        // Both layers warped: a pin on the top of the line pulled far up, three holding the rest.
+        controller.setLayerSelection({{cel, drawing, lineId}, {cel, drawing, colourId}});
+        canvas::PuppetTool warp(&controller, &state, [](const QString &) {}, [] {});
+        for (const QPointF &p : {QPointF(centre.x() - 0.7 * r, centre.y() + 0.3 * r), QPointF(centre.x() + 0.8 * r, centre.y()),
+                                 QPointF(centre.x() + 0.1 * r, centre.y() - 0.55 * r)}) {
+            warp.press(p, Qt::NoModifier);
+            warp.release(p, Qt::NoModifier);
+        }
+        const QPointF top(centre.x(), centre.y() - r);
+        warp.press(top, Qt::NoModifier);
+        for (int i = 1; i <= 10; ++i)
+            warp.move(top + QPointF(-10 * i / 10.0, -130.0 * i / 10.0), Qt::NoModifier);
+        warp.release(top + QPointF(-10, -130), Qt::NoModifier);
+        warp.commit();
+        const doc::Layer &lineNow = *controller.document().layer(cel, drawing, lineId);
+        const doc::Layer &colourNow = *controller.document().layer(cel, drawing, colourId);
+        QVERIFY(colourNow.strokes.front().fill);
+        QVERIFY(qAlpha(colourNow.image.pixel(int(top.x() - 8), int(top.y() - 80))) > 0); // the colour went up the spike
+
+        // White between line and colour: a pixel with neither, closed in by them on all four sides.
+        const QRect box(int(centre.x() - r - 80), int(centre.y() - r - 220), int(2 * r + 160), int(2 * r + 300));
+        auto inked = [&](int x, int y) {
+            return qAlpha(lineNow.image.pixel(x, y)) > 60 || qAlpha(colourNow.image.pixel(x, y)) > 60;
+        };
+        int gaps = 0;
+        for (int y = box.top(); y <= box.bottom(); ++y)
+            for (int x = box.left(); x <= box.right(); ++x)
+                if (!inked(x, y) && inked(x - 6, y) && inked(x + 6, y) && inked(x, y - 6) && inked(x, y + 6))
+                    ++gaps;
+        QCOMPARE(gaps, 0);
+    }
+
     // Radius mode: no pins, a drag bends only what lies around the pen; the
     // wheel over the canvas sizes the radius instead of zooming.
     void puppetRadiusModeBendsAroundThePen()

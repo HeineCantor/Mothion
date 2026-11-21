@@ -4,6 +4,7 @@
 #include "core/document/TiledImage.h"
 #include "core/document/VectorStroke.h"
 
+#include <QPainterPath>
 #include <QRect>
 #include <QTransform>
 
@@ -39,6 +40,13 @@ doc::VectorStroke transformedStroke(const doc::VectorStroke &stroke, const QTran
 // outside `clip` (empty: no limit). Returns the area painted.
 QRect drawStrokes(doc::TiledImage &target, const std::vector<doc::VectorStroke> &strokes, const tools::ToolState &state,
                   const QRect &clip);
+// The closed outlines of a fill (see doc::VectorStroke::fill), each as its points.
+std::vector<std::vector<QPointF>> fillOutlines(const doc::VectorStroke &fill);
+// A fill made of `outlines` (holes by the even-odd rule), in `color` (ARGB, straight) at `opacity`.
+doc::VectorStroke makeFill(const std::vector<std::vector<QPointF>> &outlines, std::uint32_t color, double opacity);
+// A fill's shape as a path (even-odd), and back: the fill `like` (its colour and opacity) with the shape of `path`.
+QPainterPath fillPath(const doc::VectorStroke &fill);
+doc::VectorStroke fillShaped(const doc::VectorStroke &like, const QPainterPath &path);
 
 // A stroke cut along a selection: the runs of its points inside the mask and those outside, each a stroke of its
 // own with the stroke's brush, colors and seed. Where the path crosses the outline a point is put on it (found
@@ -47,6 +55,9 @@ struct SplitStroke
 {
     std::vector<doc::VectorStroke> inside, outside;
 };
-SplitStroke splitStrokeByMask(const doc::VectorStroke &stroke, const SelectionMask &mask);
+// A fill (a shape of colour) is cut along `outline`, the selection's own path, when it is given; without it, it goes
+// wholly inside only when all of it lies in the mask.
+SplitStroke splitStrokeByMask(const doc::VectorStroke &stroke, const SelectionMask &mask,
+                              const QPainterPath &outline = QPainterPath());
 
 } // namespace mothion::canvas

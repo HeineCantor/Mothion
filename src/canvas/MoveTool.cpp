@@ -52,7 +52,7 @@ void MoveTool::press(const QPointF &docPos, Qt::KeyboardModifiers)
                     m.strokes = layer->strokes;
                 } else { // cut along the outline: the strokes inside move, the rest stays
                     for (const doc::VectorStroke &stroke : layer->strokes) {
-                        SplitStroke cut = splitStrokeByMask(stroke, *mask);
+                        SplitStroke cut = splitStrokeByMask(stroke, *mask, m_document->selection());
                         m.strokes.insert(m.strokes.end(), cut.inside.begin(), cut.inside.end());
                         m.restStrokes.insert(m.restStrokes.end(), cut.outside.begin(), cut.outside.end());
                     }

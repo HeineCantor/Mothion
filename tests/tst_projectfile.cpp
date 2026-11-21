@@ -192,6 +192,8 @@ void compareDocuments(const doc::Document &x, const doc::Document &y)
                     QCOMPARE(sy.erase, sx.erase);
                     QCOMPARE(sy.cornerTips, sx.cornerTips);
                     QCOMPARE(sy.startCorrectedAfter, sx.startCorrectedAfter);
+                    QCOMPARE(sy.fill, sx.fill);
+                    QCOMPARE(sy.outlines, sx.outlines);
                     QCOMPARE(sy.points.size(), sx.points.size());
                     for (std::size_t m = 0; m < sx.points.size(); ++m) {
                         const brush::BrushInput &px = sx.points[m], &py = sy.points[m];
@@ -432,6 +434,21 @@ private slots:
             }
             vector.strokes.push_back(std::move(st));
         }
+        { // a shape of colour: two outlines, the second a hole
+            doc::VectorStroke shape;
+            shape.fill = true;
+            shape.color = 0xff7070d0u;
+            shape.opacity = 0.5;
+            for (const QPointF p : {QPointF(0, 0), QPointF(40, 0), QPointF(40, 40), QPointF(0, 40), QPointF(10, 10),
+                                    QPointF(30, 10), QPointF(30, 30), QPointF(10, 30)}) {
+                brush::BrushInput in;
+                in.x = p.x();
+                in.y = p.y();
+                shape.points.push_back(in);
+            }
+            shape.outlines = {4};
+            vector.strokes.insert(vector.strokes.begin(), std::move(shape));
+        }
         QString error;
         QVERIFY2(io::saveProject(*original, path, &error), qPrintable(error));
         const auto loaded = io::loadProject(path, &error);
@@ -439,7 +456,9 @@ private slots:
         compareDocuments(*original, *loaded); // kinds, pixels and strokes
         const doc::Drawing &back = loaded->celAt(1).drawings().begin()->second;
         QVERIFY(back.layers.back().kind == doc::LayerKind::Vector);
-        QCOMPARE(back.layers.back().strokes.size(), std::size_t(2));
+        QCOMPARE(back.layers.back().strokes.size(), std::size_t(3));
+        QVERIFY(back.layers.back().strokes.front().fill);
+        QCOMPARE(back.layers.back().strokes.front().outlines, std::vector<int>({4}));
         QVERIFY(back.layers.front().strokes.empty());
     }
 

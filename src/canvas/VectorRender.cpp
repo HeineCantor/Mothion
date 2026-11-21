@@ -6,7 +6,11 @@
 #include "tools/ToolState.h"
 
 #include <QColor>
+#include <QImage>
+#include <QPainter>
+#include <QPainterPath>
 
+#include <algorithm>
 #include <cmath>
 #include <map>
 #include <memory>
@@ -32,7 +36,7 @@ doc::VectorStroke transformedStroke(const doc::VectorStroke &stroke, const QTran
     return out;
 }
 
-SplitStroke splitStrokeByMask(const doc::VectorStroke &stroke, const SelectionMask &mask)
+SplitStroke splitStrokeByMask(const doc::VectorStroke &stroke, const SelectionMask &mask, const QPainterPath &outline)
 {
     SplitStroke out;
     if (stroke.points.empty())
@@ -40,6 +44,19 @@ SplitStroke splitStrokeByMask(const doc::VectorStroke &stroke, const SelectionMa
     auto in = [&](const brush::BrushInput &p) {
         return mask.at(int(std::floor(p.x)), int(std::floor(p.y))) >= 128;
     };
+    if (stroke.fill) {
+        if (outline.isEmpty()) { // not cut: it goes with the selection only when it lies wholly in it
+            (std::all_of(stroke.points.begin(), stroke.points.end(), in) ? out.inside : out.outside).push_back(stroke);
+            return out;
+        }
+        const QPainterPath shape = fillPath(stroke);
+        const QPainterPath inside = shape.intersected(outline), outside = shape.subtracted(outline);
+        if (!inside.isEmpty())
+            out.inside.push_back(outside.isEmpty() ? stroke : fillShaped(stroke, inside));
+        if (!outside.isEmpty())
+            out.outside.push_back(inside.isEmpty() ? stroke : fillShaped(stroke, outside));
+        return out;
+    }
     std::vector<brush::BrushInput> run;
     bool runIn = in(stroke.points.front());
     auto flush = [&] {
@@ -76,6 +93,118 @@ SplitStroke splitStrokeByMask(const doc::VectorStroke &stroke, const SelectionMa
     return out;
 }
 
+std::vector<std::vector<QPointF>> fillOutlines(const doc::VectorStroke &fill)
+{
+    std::vector<std::vector<QPointF>> out;
+    std::size_t next = 0; // index into fill.outlines
+    for (std::size_t i = 0; i < fill.points.size(); ++i) {
+        if (out.empty() || (next < fill.outlines.size() && int(i) == fill.outlines[next])) {
+            if (!out.empty())
+                ++next;
+            out.emplace_back();
+        }
+        out.back().emplace_back(fill.points[i].x, fill.points[i].y);
+    }
+    return out;
+}
+
+doc::VectorStroke makeFill(const std::vector<std::vector<QPointF>> &outlines, std::uint32_t color, double opacity)
+{
+    doc::VectorStroke fill;
+    fill.fill = true;
+    fill.size = 0;
+    fill.color = color;
+    fill.opacity = opacity;
+    for (const std::vector<QPointF> &outline : outlines) {
+        if (outline.size() < 3)
+            continue;
+        if (!fill.points.empty())
+            fill.outlines.push_back(int(fill.points.size()));
+        for (const QPointF &p : outline) {
+            brush::BrushInput in;
+            in.x = p.x();
+            in.y = p.y();
+            fill.points.push_back(in);
+        }
+    }
+    return fill;
+}
+
+QPainterPath fillPath(const doc::VectorStroke &fill)
+{
+    QPainterPath path;
+    path.setFillRule(Qt::OddEvenFill);
+    for (const std::vector<QPointF> &outline : fillOutlines(fill)) {
+        if (outline.size() < 3)
+            continue;
+        path.addPolygon(QPolygonF(QList<QPointF>(outline.begin(), outline.end())));
+        path.closeSubpath();
+    }
+    return path;
+}
+
+doc::VectorStroke fillShaped(const doc::VectorStroke &like, const QPainterPath &path)
+{
+    std::vector<std::vector<QPointF>> outlines;
+    for (const QPolygonF &polygon : path.toSubpathPolygons()) {
+        std::vector<QPointF> outline(polygon.begin(), polygon.end());
+        if (outline.size() > 1 && outline.front() == outline.back())
+            outline.pop_back(); // closed again when drawn
+        outlines.push_back(std::move(outline));
+    }
+    return makeFill(outlines, like.color, like.opacity);
+}
+
+namespace {
+
+// A fill painted over `target`, antialiased, within `clip` (empty: no limit). Returns the area painted.
+QRect drawFill(doc::TiledImage &target, const doc::VectorStroke &fill, const QRect &clip)
+{
+    const QPainterPath path = fillPath(fill);
+    QRect box = path.boundingRect().toAlignedRect().adjusted(-1, -1, 1, 1);
+    if (!clip.isEmpty())
+        box &= clip;
+    if (box.isEmpty())
+        return {};
+    QImage shape(box.size(), QImage::Format_ARGB32_Premultiplied);
+    shape.fill(Qt::transparent);
+    {
+        QPainter painter(&shape);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.translate(-box.topLeft());
+        QColor color = QColor::fromRgba(fill.color);
+        color.setAlphaF(float(color.alphaF() * std::clamp(fill.opacity, 0.0, 1.0)));
+        painter.fillPath(path, color);
+    }
+    // Over what the layer has there (source over, premultiplied), as a stroke's dabs go.
+    std::vector<doc::Pixel> pixels(std::size_t(box.width()) * std::size_t(box.height()));
+    target.read(box.x(), box.y(), box.width(), box.height(), pixels.data(), box.width());
+    bool any = false;
+    for (int y = 0; y < box.height(); ++y) {
+        const auto *src = reinterpret_cast<const doc::Pixel *>(shape.constScanLine(y));
+        doc::Pixel *dst = pixels.data() + std::size_t(y) * std::size_t(box.width());
+        for (int x = 0; x < box.width(); ++x) {
+            const doc::Pixel s = src[x];
+            const std::uint32_t a = s >> 24;
+            if (a == 0)
+                continue;
+            any = true;
+            const doc::Pixel d = dst[x];
+            const std::uint32_t keep = 255 - a;
+            auto channel = [&](int shift) {
+                return std::min<std::uint32_t>(255, ((s >> shift) & 0xFF) + (((d >> shift) & 0xFF) * keep + 127) / 255);
+            };
+            dst[x] = channel(24) << 24 | channel(16) << 16 | channel(8) << 8 | channel(0);
+        }
+    }
+    if (!any)
+        return {};
+    target.write(box.x(), box.y(), box.width(), box.height(), pixels.data(), box.width());
+    return box;
+}
+
+} // namespace
+
 QRect drawStrokes(doc::TiledImage &target, const std::vector<doc::VectorStroke> &strokes, const tools::ToolState &state,
                   const QRect &clip)
 {
@@ -84,6 +213,10 @@ QRect drawStrokes(doc::TiledImage &target, const std::vector<doc::VectorStroke> 
     for (const doc::VectorStroke &s : strokes) {
         if (s.points.empty())
             continue;
+        if (s.fill) {
+            painted |= drawFill(target, s, clip);
+            continue;
+        }
         tools::BrushDefinitionPtr &definition = brushes[s.brush];
         if (!definition)
             definition = state.findBrush(QString::fromStdString(s.brush));

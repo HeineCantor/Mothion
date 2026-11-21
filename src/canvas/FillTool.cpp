@@ -2,7 +2,10 @@
 
 #include "canvas/SelectionMask.h"
 #include "canvas/SelectionTool.h"
+#include "canvas/VectorRender.h"
+#include "core/fill/FillShape.h"
 #include "core/fill/FloodFill.h"
+#include "core/puppet/Contour.h"
 #include "document/DocumentController.h"
 #include "tools/ToolState.h"
 
@@ -43,6 +46,15 @@ doc::Pixel over(doc::Pixel pixel, doc::Pixel fill, int coverage)
         out |= doc::Pixel(std::min(255, f + (p * (255 - a) + 127) / 255)) << shift;
     }
     return out;
+}
+
+// The tiles of `image`, as one rectangle.
+QRect tileBounds(const doc::TiledImage &image)
+{
+    QRect r;
+    for (const doc::TileCoord &c : image.tileCoords())
+        r |= QRect(c.x * doc::kTileSize, c.y * doc::kTileSize, doc::kTileSize, doc::kTileSize);
+    return r;
 }
 
 // `pixel` with `amount` (0..255) of it taken away: what a fill does to a mask (it shows the layer where it fills).
@@ -127,13 +139,18 @@ void FillTool::fillLasso()
         return;
 
     QString reason;
-    const auto target = m_document->beginPaint(true, &reason);
+    const auto target = m_document->beginPaint(true, &reason, true, true);
     if (!target) {
         if (!reason.isEmpty())
             m_status(reason);
         return;
     }
     const doc::TiledImage before = *target->image;
+    if (target->vector) { // the outline is the shape
+        const QColor c = target->tint(m_state->color());
+        putFill(*target, fillShaped(makeFill({}, c.rgba(), m_state->settings(tools::ToolId::Fill).opacity), area), before);
+        return;
+    }
     const QRect box = mask.bounds;
     const doc::Pixel color = fillColor(target->tint(m_state->color()));
     fillByMask(*target->image, mask, color, target->mask);
@@ -156,7 +173,7 @@ void FillTool::fillAround(const QPointF &docPos)
         return m_status(QObject::tr("Click inside the selection to fill it"));
 
     QString reason;
-    const auto target = m_document->beginPaint(true, &reason);
+    const auto target = m_document->beginPaint(true, &reason, true, true);
     if (!target) {
         if (!reason.isEmpty())
             m_status(reason);
@@ -223,6 +240,44 @@ void FillTool::fillAround(const QPointF &docPos)
         return;
     }
 
+    if (target->vector) {
+        // A shape of colour: the area clicked, grown under the lines round it up to their middle (not by the expand
+        // setting: its edge then stays under the lines however they are moved), traced as outlines.
+        fill::Region area0;
+        area0.width = w;
+        area0.height = h;
+        area0.mask = clicked;
+        area0.left = w;
+        area0.top = h;
+        for (int y = 0; y < h; ++y)
+            for (int x = 0; x < w; ++x)
+                if (clicked[std::size_t(y) * std::size_t(w) + std::size_t(x)]) {
+                    area0.left = std::min(area0.left, x);
+                    area0.right = std::max(area0.right, x);
+                    area0.top = std::min(area0.top, y);
+                    area0.bottom = std::max(area0.bottom, y);
+                }
+        const doc::Pixel seedPixel = source[std::size_t(seedY - area.y()) * std::size_t(w) + std::size_t(seedX - area.x())];
+        constexpr int kReach = 64; // px: the widest line a fill goes under to its middle
+        const fill::Region grown = fill::grownToLineMiddle(area0, source.data(), seedPixel, settings.tolerance, kReach);
+        std::vector<std::vector<QPointF>> outlines;
+        for (const std::vector<fill::Point> &outline : fill::regionOutlines(grown)) {
+            std::vector<puppet::Vec2> points;
+            for (const fill::Point &p : outline)
+                points.push_back({p.x + area.x(), p.y + area.y()});
+            std::vector<QPointF> simple;
+            for (const puppet::Vec2 &p : puppet::simplifyContour(points, 0.7))
+                simple.emplace_back(p.x, p.y);
+            outlines.push_back(std::move(simple));
+        }
+        doc::VectorStroke shape = makeFill(outlines, target->tint(m_state->color()).rgba(),
+                                           m_state->settings(tools::ToolId::Fill).opacity);
+        if (m_document->hasSelection())
+            shape = fillShaped(shape, fillPath(shape).intersected(m_document->selection()));
+        putFill(*target, std::move(shape), before);
+        return;
+    }
+
     // Inside the area clicked (and the selection) the color over what is there, so an area filled before is filled
     // again; where the area grows under the lines round it, behind what is there, so the lines keep their edge.
     const doc::Pixel color = fillColor(target->tint(m_state->color()));
@@ -248,6 +303,29 @@ void FillTool::fillAround(const QPointF &docPos)
     }
     target->image->write(box.x(), box.y(), box.width(), box.height(), pixels.data(), box.width());
     m_document->notifyPainted(box);
+    m_document->endPaint(before, doc::CommandKind::Fill);
+}
+
+void FillTool::putFill(const document::DocumentController::PaintTarget &target, doc::VectorStroke fill,
+                       const doc::TiledImage &before)
+{
+    const doc::Layer *layer = m_document->document().layer(target.cel, target.drawing, target.layer);
+    if (!layer || fill.points.empty()) {
+        m_document->cancelPaint();
+        return;
+    }
+    // Above the fills under the first line (an area filled again takes the new colour), under the lines.
+    std::vector<doc::VectorStroke> after = layer->strokes;
+    std::size_t at = 0;
+    while (at < after.size() && after[at].fill)
+        ++at;
+    after.insert(after.begin() + std::ptrdiff_t(at), std::move(fill));
+    const QRect was = tileBounds(before);
+    m_document->attachStrokeChange(target, layer->strokes, after);
+    doc::TiledImage drawn;
+    const QRect painted = drawStrokes(drawn, after, *m_state, {});
+    *target.image = std::move(drawn);
+    m_document->notifyPainted(was | painted);
     m_document->endPaint(before, doc::CommandKind::Fill);
 }
 

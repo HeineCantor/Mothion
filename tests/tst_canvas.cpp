@@ -3,7 +3,10 @@
 #include "canvas/Resample.h"
 #include "canvas/StrokeSession.h"
 #include "canvas/Symmetry.h"
+#include "canvas/VectorErase.h"
 #include "canvas/VectorPoints.h"
+#include "canvas/VectorRender.h"
+#include "canvas/SelectionMask.h"
 #include "canvas/VectorWarp.h"
 #include "core/puppet/PuppetRig.h"
 #include "core/brush/DabGenerator.h"
@@ -706,6 +709,44 @@ private slots:
             const brush::BrushInput &far = warped[0].points.back();
             QVERIFY2(far.tipAngle > 15 && far.tipAngle < 40, qPrintable(QString::number(far.tipAngle)));
         }
+    }
+
+    // A shape of colour (a fill on a vector layer) is drawn as its outlines filled, holes by the even-odd rule; it is cut
+    // along a selection's outline when that is given (whole otherwise, inside only when all of it is); the vector eraser
+    // leaves it alone; the puppet warp keeps its outlines apart.
+    void aFillIsAShapeOfOutlines()
+    {
+        tools::ToolState state;
+        const doc::VectorStroke shape = canvas::makeFill({{{0, 0}, {100, 0}, {100, 100}, {0, 100}}, {{30, 30}, {70, 30}, {70, 70}, {30, 70}}},
+                                                         0xff2040c0u, 1.0);
+        QVERIFY(shape.fill);
+        QCOMPARE(shape.outlines, std::vector<int>({4}));
+        QCOMPARE(int(canvas::fillOutlines(shape).size()), 2);
+        doc::TiledImage image;
+        canvas::drawStrokes(image, {shape}, state, {});
+        QCOMPARE(image.pixel(10, 50), doc::Pixel(0xff2040c0u));
+        QCOMPARE(qAlpha(image.pixel(50, 50)), 0); // the hole
+        QCOMPARE(qAlpha(image.pixel(150, 50)), 0);
+
+        QPainterPath left;
+        left.addRect(-10, -10, 60, 130); // x up to 50
+        const canvas::SelectionMask mask = canvas::SelectionMask::fromPath(left);
+        const canvas::SplitStroke cut = canvas::splitStrokeByMask(shape, mask, left);
+        QCOMPARE(cut.inside.size(), std::size_t(1));
+        QCOMPARE(cut.outside.size(), std::size_t(1));
+        doc::TiledImage halves;
+        canvas::drawStrokes(halves, cut.inside, state, {});
+        QCOMPARE(halves.pixel(10, 50), doc::Pixel(0xff2040c0u));
+        QCOMPARE(qAlpha(halves.pixel(90, 50)), 0);
+        QCOMPARE(qAlpha(halves.pixel(40, 50)), 0); // the hole's half stays a hole
+        const canvas::SplitStroke whole = canvas::splitStrokeByMask(shape, mask);
+        QVERIFY(whole.inside.empty());
+        QCOMPARE(whole.outside.size(), std::size_t(1));
+
+        const canvas::VectorErasure erased = canvas::eraseFromStrokes({shape}, {QPointF(10, 50), QPointF(90, 50)}, 20,
+                                                                      canvas::VectorEraseMode::WholeLine);
+        QVERIFY(!erased.changed);
+        QCOMPARE(erased.strokes.size(), std::size_t(1));
     }
 
     // The width at an anchor, and less and less towards the anchors beside it.

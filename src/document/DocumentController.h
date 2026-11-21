@@ -525,8 +525,8 @@ public:
     // where the cel has a frame; where it has none, drawing makes the frame and selects its layer (see
     // setLayerChosen()).
     // `forDrawing` false is for the tools that move whole layers: they are not refused.
-    // A vector layer only takes the brush and the eraser, which keep what they draw as a stroke (attachStroke()):
-    // the other tools are refused there, unless `vectorOk`.
+    // A vector layer only takes the brush and the eraser, which keep what they draw as a stroke (attachStroke()), and
+    // the bucket, which keeps a shape of colour: the other tools are refused there, unless `vectorOk`.
     std::optional<PaintTarget> beginPaint(bool createIfEmpty, QString *reason = nullptr, bool forDrawing = true,
                                           bool vectorOk = false);
     // On a vector layer: the stroke that endPaint() records, in the same undo step as its pixels. `points` is

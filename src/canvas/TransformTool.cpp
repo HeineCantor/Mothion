@@ -157,7 +157,7 @@ bool TransformTool::start()
                 part.strokes = layer->strokes;
             } else { // the strokes are cut along the outline: those inside move, the rest stays
                 for (const doc::VectorStroke &stroke : layer->strokes) {
-                    SplitStroke cut = splitStrokeByMask(stroke, *mask);
+                    SplitStroke cut = splitStrokeByMask(stroke, *mask, m_document->selection());
                     part.strokes.insert(part.strokes.end(), cut.inside.begin(), cut.inside.end());
                     part.restStrokes.insert(part.restStrokes.end(), cut.outside.begin(), cut.outside.end());
                 }

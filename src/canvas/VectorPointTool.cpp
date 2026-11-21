@@ -120,8 +120,8 @@ int VectorPointTool::strokeAt(const QPointF &docPos) const
         return -1;
     for (int i = int(layer->strokes.size()) - 1; i >= 0; --i) {
         const doc::VectorStroke &stroke = layer->strokes[std::size_t(i)];
-        if (stroke.erase)
-            continue; // the eraser's strokes are not lines to correct
+        if (stroke.erase || stroke.fill)
+            continue; // the eraser's strokes and the shapes of colour are not lines to correct
         const auto place = nearestPlace(stroke, docPos);
         if (place && place->distance <= std::max(kLineGrab / m_zoom, stroke.size / 2.0))
             return i;
@@ -409,7 +409,7 @@ bool VectorPointTool::beginEdit(Edit::Kind kind, const std::set<int> &indices)
     e.lowest = *indices.begin();
     e.highest = *indices.rbegin();
     for (std::size_t i = std::size_t(e.highest) + 1; i < e.strokes.size(); ++i)
-        if (e.strokes[i].erase)
+        if (e.strokes[i].erase || e.strokes[i].fill)
             e.aboveLaidOver = false;
     m_edit = std::move(e);
     return true;

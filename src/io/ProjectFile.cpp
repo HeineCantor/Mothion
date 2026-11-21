@@ -145,7 +145,7 @@ QString strokesToJson(const std::vector<doc::VectorStroke> &strokes)
         for (const brush::BrushInput &in : st.points)
             points.append(QJsonArray{in.x, in.y, in.pressure, in.velocity, in.tilt, in.hasTilt ? 1 : 0, in.penAngle,
                                      in.inOut, in.sizeScale, in.flowScale, in.direction, in.corner ? 1 : 0, in.tipAngle});
-        all.append(QJsonObject{
+        QJsonObject object{
             {QStringLiteral("brush"), QString::fromStdString(st.brush)},
             {QStringLiteral("size"), st.size},
             {QStringLiteral("opacity"), st.opacity},
@@ -156,7 +156,15 @@ QString strokesToJson(const std::vector<doc::VectorStroke> &strokes)
             {QStringLiteral("cornerTips"), st.cornerTips},
             {QStringLiteral("startAfter"), st.startCorrectedAfter},
             {QStringLiteral("points"), points},
-        });
+        };
+        if (st.fill) { // a shape of colour: its outlines (where each after the first starts)
+            object.insert(QStringLiteral("fill"), true);
+            QJsonArray outlines;
+            for (int start : st.outlines)
+                outlines.append(start);
+            object.insert(QStringLiteral("outlines"), outlines);
+        }
+        all.append(object);
     }
     return QString::fromUtf8(QJsonDocument(all).toJson(QJsonDocument::Compact));
 }
@@ -179,6 +187,9 @@ std::vector<doc::VectorStroke> strokesFromJson(const QString &text)
         st.erase = o.value(QStringLiteral("erase")).toBool(false);
         st.cornerTips = o.value(QStringLiteral("cornerTips")).toBool(true);
         st.startCorrectedAfter = o.value(QStringLiteral("startAfter")).toBool(false);
+        st.fill = o.value(QStringLiteral("fill")).toBool(false);
+        for (const QJsonValue &start : o.value(QStringLiteral("outlines")).toArray())
+            st.outlines.push_back(start.toInt());
         for (const QJsonValue &pv : o.value(QStringLiteral("points")).toArray()) {
             const QJsonArray a = pv.toArray();
             if (a.size() < 12)
@@ -199,6 +210,12 @@ std::vector<doc::VectorStroke> strokesFromJson(const QString &text)
             in.tipAngle = a.size() > 12 ? a[12].toDouble() : 0.0;
             st.points.push_back(in);
         }
+        // Outline starts that do not fit the points left (a damaged file) are let go.
+        std::vector<int> starts;
+        for (int start : st.outlines)
+            if (start > (starts.empty() ? 0 : starts.back()) && start < int(st.points.size()))
+                starts.push_back(start);
+        st.outlines = std::move(starts);
         strokes.push_back(std::move(st));
     }
     return strokes;

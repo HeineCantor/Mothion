@@ -36,7 +36,7 @@ struct LayerProperties
 // What a layer is: pixels drawn on it, a perspective grid (a guide that
 // cannot be drawn on: its image stays empty, its look comes from
 // LayerProperties::perspective), or a vector layer: pixels too, but made from the strokes it keeps
-// (Layer::strokes), which only the brush and the eraser add to.
+// (Layer::strokes), which the brush and the eraser add to, and the bucket as shapes of colour.
 enum class LayerKind { Raster, Perspective, Vector };
 
 // One layer of a drawing, stacked with the drawing's other layers.

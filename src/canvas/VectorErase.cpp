@@ -209,7 +209,7 @@ void VectorEraseState::erase(const std::vector<QPointF> &pathPoints, double radi
         for (std::size_t e = 0; e < m_left.size(); ++e) {
             const doc::VectorStroke &stroke = m_left[e].stroke;
             const double body = (pressed ? stroke.size / 2.0 : 0.0) + kCoreTolerance;
-            if (stroke.erase || stroke.points.empty()
+            if (stroke.erase || stroke.fill || stroke.points.empty()
                 || !m_left[e].box.adjusted(-body, -body, body, body)
                         .intersects(eraser.bounds.adjusted(-1e-6, -1e-6, 1e-6, 1e-6)))
                 continue;
@@ -236,7 +236,7 @@ void VectorEraseState::erase(const std::vector<QPointF> &pathPoints, double radi
             reach = nearest[e] + kCoreTolerance;
         }
         const QRectF near = entry.box.adjusted(-reach, -reach, reach, reach);
-        if (stroke.erase || stroke.points.empty() || !near.intersects(eraser.bounds.adjusted(-1e-6, -1e-6, 1e-6, 1e-6))) {
+        if (stroke.erase || stroke.fill || stroke.points.empty() || !near.intersects(eraser.bounds.adjusted(-1e-6, -1e-6, 1e-6, 1e-6))) {
             next.push_back(std::move(entry));
             continue;
         }
@@ -292,7 +292,7 @@ void VectorEraseState::erase(const std::vector<QPointF> &pathPoints, double radi
                     const QPointF a = at(q[segment]), b = at(q[segment + 1]);
                     const QRectF segBox = QRectF(a, b).normalized().adjusted(-1e-6, -1e-6, 1e-6, 1e-6);
                     for (std::size_t o = 0; o < m_original.size(); ++o) {
-                        if (o == entry.origin || m_original[o].erase || !m_originalBoxes[o].intersects(segBox))
+                        if (o == entry.origin || m_original[o].erase || m_original[o].fill || !m_originalBoxes[o].intersects(segBox))
                             continue;
                         const Points &op = m_original[o].points;
                         for (std::size_t j = 0; j + 1 < op.size(); ++j) {

@@ -330,7 +330,7 @@ bool DocumentController::trajectoryFromMarks(QString *reason)
     };
     std::vector<Mark> all;
     for (const doc::VectorStroke &stroke : layer->strokes) {
-        if (stroke.erase || stroke.points.empty())
+        if (stroke.erase || stroke.fill || stroke.points.empty())
             continue;
         Mark mark;
         double x = 0, y = 0;
@@ -2560,7 +2560,7 @@ bool DocumentController::eraseBySelection(bool insideIt, QString *reason)
     bool strokesErased = false;
     if (vector)
         for (const doc::VectorStroke &stroke : layer->strokes) {
-            canvas::SplitStroke split = canvas::splitStrokeByMask(stroke, mask);
+            canvas::SplitStroke split = canvas::splitStrokeByMask(stroke, mask, m_selection);
             const auto &erased = insideIt ? split.inside : split.outside;
             const auto &kept = insideIt ? split.outside : split.inside;
             strokesErased |= !erased.empty();
@@ -2885,7 +2885,7 @@ bool DocumentController::flipSelection(bool horizontal, QString *reason)
             const doc::Layer *vectorLayer = m_document->layer(target.cel, target.drawing, target.layer);
             std::vector<doc::VectorStroke> kept, flipped;
             for (const doc::VectorStroke &stroke : vectorLayer->strokes) {
-                canvas::SplitStroke split = canvas::splitStrokeByMask(stroke, mask);
+                canvas::SplitStroke split = canvas::splitStrokeByMask(stroke, mask, m_selection);
                 kept.insert(kept.end(), split.outside.begin(), split.outside.end());
                 for (const doc::VectorStroke &piece : split.inside)
                     flipped.push_back(canvas::transformedStroke(piece, across));
@@ -2966,7 +2966,7 @@ bool DocumentController::selectionToLayer(bool cut, QString *reason)
     std::vector<doc::VectorStroke> strokesInside, strokesOutside;
     if (vector)
         for (const doc::VectorStroke &stroke : layer->strokes) {
-            canvas::SplitStroke split = canvas::splitStrokeByMask(stroke, mask);
+            canvas::SplitStroke split = canvas::splitStrokeByMask(stroke, mask, m_selection);
             strokesInside.insert(strokesInside.end(), split.inside.begin(), split.inside.end());
             strokesOutside.insert(strokesOutside.end(), split.outside.begin(), split.outside.end());
         }
@@ -3050,7 +3050,7 @@ QImage DocumentController::copyPixels(QPoint *origin, QString *reason)
         } else {
             const canvas::SelectionMask mask = canvas::SelectionMask::fromPath(m_selection);
             for (const doc::VectorStroke &stroke : layer->strokes) {
-                canvas::SplitStroke cut = canvas::splitStrokeByMask(stroke, mask);
+                canvas::SplitStroke cut = canvas::splitStrokeByMask(stroke, mask, m_selection);
                 m_copiedStrokes.insert(m_copiedStrokes.end(), cut.inside.begin(), cut.inside.end());
             }
         }
@@ -3398,7 +3398,7 @@ std::optional<DocumentController::PaintTarget> DocumentController::beginPaint(bo
     if (layer->kind == doc::LayerKind::Perspective)
         return fail(tr("“%1” is a perspective layer: it can't be drawn on").arg(name));
     if (layer->kind == doc::LayerKind::Vector && !vectorOk)
-        return fail(tr("“%1” is a vector layer: only the brush and the eraser work on it so far").arg(name));
+        return fail(tr("“%1” is a vector layer: only the brush, the eraser and the bucket work on it so far").arg(name));
     state.target = {m_currentCel, drawing, m_currentLayer, &layer->image};
     state.target.vector = layer->kind == doc::LayerKind::Vector;
     if (layer->mask && m_maskLayer == layer->id) { // the mask is what is drawn on
