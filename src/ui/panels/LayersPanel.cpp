@@ -1,5 +1,7 @@
 #include "ui/panels/LayersPanel.h"
 
+#include "ui/TrajectoryMenu.h"
+
 #include "canvas/FrameRenderer.h"
 #include "canvas/TileQt.h"
 #include "core/document/commands/CelCommands.h"
@@ -1569,28 +1571,9 @@ void LayersPanel::showContextMenu(const QPoint &at)
         const doc::Cel *cel = m_document->document().cel(celId);
         QAction *raster = menu.addAction(tr("Raster into new Cel"), this, [this, celId] { m_document->rasterCel(celId); });
         raster->setEnabled(cel && !cel->timing().exposures().empty());
-        // A cel that is no trajectory can follow one: what it does comes on top of the cel's own keys.
-        if (cel && !cel->properties().trajectory) {
-            QMenu *follow = menu.addMenu(tr("Follow trajectory"));
-            const doc::Document &doc = m_document->document();
-            const doc::Cel *followed = doc.followedTrajectory(*cel);
-            QAction *none = follow->addAction(tr("None"), this, [this, celId] { m_document->setTrajectoryParent(celId, doc::kNoId); });
-            none->setCheckable(true);
-            none->setChecked(!followed);
-            bool any = false;
-            for (int i = doc.celCount() - 1; i >= 0; --i) {
-                const doc::Cel &t = doc.celAt(i);
-                if (!t.properties().trajectory)
-                    continue;
-                any = true;
-                const doc::CelId id = t.id();
-                QAction *action = follow->addAction(QString::fromStdString(t.properties().name), this,
-                                                    [this, celId, id] { m_document->setTrajectoryParent(celId, id); });
-                action->setCheckable(true);
-                action->setChecked(followed && followed->id() == id);
-            }
-            follow->setEnabled(any);
-        }
+        // A cel follows a trajectory (Follow trajectory), a trajectory another (Parent to).
+        if (cel)
+            addParentTrajectoryMenu(menu, m_document, *cel, this);
         menu.addSeparator();
     }
     if (kindOf(item) == Row::Layer) {

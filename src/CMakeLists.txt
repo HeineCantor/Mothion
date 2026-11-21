@@ -183,6 +183,7 @@ qt_add_library(mothion_gui STATIC
     diagnostics/CrashHandler.h diagnostics/CrashHandler.cpp
     ui/AdvancedToolSettings.h ui/AdvancedToolSettings.cpp
     ui/IconFactory.h ui/IconFactory.cpp
+    ui/TrajectoryMenu.h ui/TrajectoryMenu.cpp
     audio/AudioAnalyzer.h audio/AudioAnalyzer.cpp
     audio/AudioPlayer.h audio/AudioPlayer.cpp
     ui/Shortcuts.h ui/Shortcuts.cpp

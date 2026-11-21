@@ -8,12 +8,14 @@
 #include "tools/ToolState.h"
 #include "ui/panels/ToolPropertiesPanel.h"
 #include "ui/AutoplayWindow.h"
+#include "ui/TrajectoryMenu.h"
 #include "ui/panels/timeline/TimelinePanel.h"
 #include "ui/panels/timeline/TimelineView.h"
 
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QMenu>
 #include <QPainter>
 #include <QPen>
 #include <QPushButton>
@@ -877,6 +879,62 @@ private slots:
         drag(screen(px, py), {});
         drag(screen(px + 400, py), {}, Qt::ShiftModifier);
         QCOMPARE(gizmo.chosenKeys(), (std::set<int>{2, 12, 22}));
+    }
+
+    // The menu of a cel's parent trajectory: a trajectory gets "Parent to" (the other trajectories, the parent checked,
+    // None to let go; one that follows it cannot be its parent), a cel that is no trajectory "Follow trajectory".
+    void aTrajectoryIsParentedToAnotherFromItsMenu()
+    {
+        document::DocumentController controller;
+        controller.addTrajectory();
+        const doc::CelId a = controller.currentCel();
+        controller.addTrajectory();
+        const doc::CelId b = controller.currentCel();
+        controller.addTrajectory();
+        const doc::CelId c = controller.currentCel();
+        QVERIFY(controller.setTrajectoryParent(b, a)); // b follows a
+        const doc::Document &d = controller.document();
+        auto name = [&](doc::CelId id) { return QString::fromStdString(d.cel(id)->properties().name); };
+        QVERIFY(name(a) != name(b) && name(b) != name(c) && name(a) != name(c));
+
+        QMenu menu;
+        ui::addParentTrajectoryMenu(menu, &controller, *d.cel(a), &menu);
+        QMenu *parents = menu.actions().value(0) ? menu.actions().value(0)->menu() : nullptr;
+        QVERIFY(parents);
+        QCOMPARE(parents->title(), QStringLiteral("Parent to"));
+        auto action = [&](const QString &text) -> QAction * {
+            for (QAction *x : parents->actions())
+                if (x->text() == text)
+                    return x;
+            return nullptr;
+        };
+        QVERIFY(action(QStringLiteral("None")) && action(QStringLiteral("None"))->isChecked());
+        QVERIFY(!action(name(a))); // not itself
+        QVERIFY(action(name(b)) && !action(name(b))->isEnabled()); // b follows a: a loop
+        QVERIFY(action(name(c)) && action(name(c))->isEnabled());
+        action(name(c))->trigger();
+        QCOMPARE(d.trajectoryParent(*d.cel(a))->id(), c);
+        controller.undo(); // one step
+        QVERIFY(!d.trajectoryParent(*d.cel(a)));
+        controller.redo();
+
+        // Back: c is the parent, checked; None lets it go.
+        QMenu again;
+        ui::addParentTrajectoryMenu(again, &controller, *d.cel(a), &again);
+        parents = again.actions().value(0)->menu();
+        QVERIFY(action(name(c))->isChecked());
+        QVERIFY(!action(QStringLiteral("None"))->isChecked());
+        action(QStringLiteral("None"))->trigger();
+        QVERIFY(!d.trajectoryParent(*d.cel(a)));
+
+        // A cel that is no trajectory: Follow trajectory, all three to choose from.
+        controller.addCel();
+        QMenu cel;
+        ui::addParentTrajectoryMenu(cel, &controller, *d.cel(controller.currentCel()), &cel);
+        parents = cel.actions().value(0)->menu();
+        QCOMPARE(parents->title(), QStringLiteral("Follow trajectory"));
+        QVERIFY(action(name(a)) && action(name(b)) && action(name(c)));
+        QVERIFY(action(name(a))->isEnabled() && action(name(b))->isEnabled());
     }
 
     // Choosing the path's keys is an undo step (each change, as the pixels' selection is; a key dragged after is one more),
