@@ -162,6 +162,36 @@ private slots:
     }
 
 
+    // A pen sends far more samples than a warp can be drawn for (a tablet's are not merged as the mouse's): a drag is
+    // drawn again only once the last drawing's time has passed, the samples between only move where it goes; the last
+    // place is drawn all the same, while the pen holds still too, and the release settles there.
+    void puppetDragDrawsLessOftenThanThePenSamples()
+    {
+        document::DocumentController controller;
+        tools::ToolState state;
+        QImage image(400, 40, QImage::Format_ARGB32);
+        image.fill(Qt::darkCyan);
+        controller.importImage(image, QStringLiteral("bar")); // x 760..1159, y 520..559
+        const doc::Cel &cel = controller.document().celAt(1);
+        const doc::TiledImage &pixels = cel.drawing(cel.timing().drawingAt(0))->layers.front().image;
+        canvas::PuppetTool tool(&controller, &state, [](const QString &) {}, [] {});
+        tool.press({780, 540}, Qt::NoModifier); // an anchor
+        tool.release({780, 540}, Qt::NoModifier);
+        tool.press({1140, 540}, Qt::NoModifier);
+        QSignalSpy drawn(&controller, &document::DocumentController::pixelsChanged);
+        const int samples = 200;
+        for (int i = 1; i <= samples; ++i) // all at once, as a tablet's queued samples come
+            tool.move({1140, 540.0 + 100.0 * i / samples}, Qt::NoModifier);
+        QVERIFY2(drawn.count() < samples / 4, qPrintable(QString::number(drawn.count())));
+        QTRY_VERIFY(qAlpha(pixels.pixel(1140, 638)) > 0); // the last place drawn, the pen held still
+        tool.release({1140, 640}, Qt::NoModifier);
+        QVERIFY(qAlpha(pixels.pixel(1140, 638)) > 0);
+        QCOMPARE(qAlpha(pixels.pixel(1140, 530)), 0);
+        tool.commit();
+        controller.undo(); // one step
+        QVERIFY(qAlpha(pixels.pixel(1140, 530)) > 0);
+    }
+
     // Shift+click selects several pins, dragging one moves them all, Delete
     // removes them; in radius mode Shift+click picks several points.
     void puppetMovesSeveralPinsOrPoints()

@@ -10,6 +10,7 @@
 
 #include <QPainter>
 #include <QPalette>
+#include <QTimer>
 #include <QApplication>
 
 #include <algorithm>
@@ -343,18 +344,50 @@ void PuppetTool::press(const QPointF &docPos, Qt::KeyboardModifiers modifiers)
 void PuppetTool::move(const QPointF &docPos, Qt::KeyboardModifiers)
 {
     m_pointer = docPos;
-    if (m_session && m_localDrag) {
-        m_session->rig->localDragTo({docPos.x(), docPos.y()}, kDragIterations);
-        m_session->stepChanged = true;
-        render();
+    if (m_session && (m_localDrag || m_draggingPins))
+        dragTo(docPos);
+}
+
+void PuppetTool::dragTo(const QPointF &pen)
+{
+    m_dragPen = pen;
+    m_dragPending = true;
+    const qint64 wait = std::max<qint64>(m_drawCost, 8); // at most about 120 drawings a second
+    const qint64 since = m_lastDraw.isValid() ? m_lastDraw.elapsed() : wait;
+    if (since >= wait) {
+        applyDrag();
         return;
     }
-    if (!m_session || !m_draggingPins)
+    if (!m_dragTimer) {
+        m_dragTimer = std::make_unique<QTimer>();
+        m_dragTimer->setSingleShot(true);
+        QObject::connect(m_dragTimer.get(), &QTimer::timeout, m_dragTimer.get(), [this] { applyDrag(); });
+    }
+    if (!m_dragTimer->isActive())
+        m_dragTimer->start(int(wait - since));
+}
+
+void PuppetTool::applyDrag()
+{
+    if (m_dragTimer)
+        m_dragTimer->stop();
+    if (!m_dragPending)
         return;
-    moveDraggedPins(docPos, kDragIterations);
-    m_dragMoved = true;
+    m_dragPending = false;
+    if (!m_session || (!m_localDrag && !m_draggingPins))
+        return;
+    QElapsedTimer cost;
+    cost.start();
+    if (m_localDrag) {
+        m_session->rig->localDragTo({m_dragPen.x(), m_dragPen.y()}, kDragIterations);
+    } else {
+        moveDraggedPins(m_dragPen, kDragIterations);
+        m_dragMoved = true;
+    }
     m_session->stepChanged = true;
     render();
+    m_drawCost = cost.elapsed();
+    m_lastDraw.start();
 }
 
 void PuppetTool::moveDraggedPins(const QPointF &pen, int iterations)
@@ -369,6 +402,15 @@ void PuppetTool::moveDraggedPins(const QPointF &pen, int iterations)
 void PuppetTool::release(const QPointF &docPos, Qt::KeyboardModifiers)
 {
     m_pointer = docPos;
+    if (m_dragPending) { // the samples not drawn yet: the release settles at its own place
+        m_dragPending = false;
+        if (m_dragTimer)
+            m_dragTimer->stop();
+        if (m_session && (m_draggingPins || m_localDrag)) {
+            m_dragMoved = m_draggingPins;
+            m_session->stepChanged = true; // a step, though not drawn before the release
+        }
+    }
     if (m_session && m_localDrag) {
         m_session->rig->localDragTo({docPos.x(), docPos.y()}, kSettleIterations);
         m_session->rig->endLocalDrag();
@@ -398,6 +440,9 @@ QRectF PuppetTool::pendingBounds() const
 
 void PuppetTool::commit()
 {
+    m_dragPending = false;
+    if (m_dragTimer)
+        m_dragTimer->stop();
     m_localDrag = false;
     if (!m_session)
         return;
@@ -425,6 +470,9 @@ void PuppetTool::commit()
 
 void PuppetTool::cancel()
 {
+    m_dragPending = false;
+    if (m_dragTimer)
+        m_dragTimer->stop();
     m_localDrag = false;
     if (!m_session)
         return;

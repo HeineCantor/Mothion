@@ -7,6 +7,7 @@
 #include "core/puppet/PuppetRig.h"
 #include "core/puppet/WarpRaster.h"
 
+#include <QElapsedTimer>
 #include <QMetaObject>
 #include <QRect>
 #include <QString>
@@ -22,6 +23,8 @@ class DocumentController;
 namespace mothion::tools {
 class ToolState;
 }
+
+class QTimer;
 
 namespace mothion::canvas {
 
@@ -96,6 +99,11 @@ private:
     // Radius mode: the radius times 1.15 per step (down for negative ones).
     void stepRadius(double steps);
     void render();
+    // The drag taken to the pen's last place and drawn. A pen sends far more samples than a warp can be drawn for (a
+    // tablet's are not merged as the mouse's are), so a drag is drawn again only once the last drawing's time has
+    // passed; the samples between only move the place, and the last one is drawn when that time is up.
+    void dragTo(const QPointF &pen);
+    void applyDrag();
     void settingsChanged();
 
     document::DocumentController *m_document;
@@ -146,6 +154,11 @@ private:
     // Radius mode: the points picked to move together, and the drag.
     std::vector<puppet::PuppetRig::VertexRef> m_localPoints;
     bool m_localDrag = false;
+    QPointF m_dragPen;          // where the drag goes, waiting to be drawn (see dragTo())
+    bool m_dragPending = false;
+    QElapsedTimer m_lastDraw;    // since the drag was last drawn
+    qint64 m_drawCost = 0;       // how long that took, ms
+    std::unique_ptr<QTimer> m_dragTimer;
     QPointF m_pointer; // last pen position, for the radius circle
     bool m_pointerKnown = false;
     bool m_previewFailed = false; // nothing to mesh, as of the last try
