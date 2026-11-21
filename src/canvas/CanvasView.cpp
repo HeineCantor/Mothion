@@ -286,6 +286,7 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
     connect(m_document, &DocumentController::motionPreviewChanged, this, [this] { update(); }); // keys dragged on the timeline
     connect(m_toolState, &ToolState::trajectoryModeChanged, this, [this](bool on) {
         m_trajectoryGizmo.setPathVisible(on);
+        updateStraightLine(); // no straight line while a path is shown
         update();
     });
     connect(m_toolState, &ToolState::activeToolChanged, this, &CanvasView::renderWholeFrame); // posed or as drawn
@@ -309,6 +310,7 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
         connect(m_document, signal, this, &CanvasView::updateCursor); // may now (not) be drawable
     connect(m_document, &DocumentController::currentFrameChanged, this, &CanvasView::updateCursor);
     connect(m_document, &DocumentController::currentCelChanged, this, &CanvasView::updateCursor);
+    connect(m_document, &DocumentController::currentCelChanged, this, &CanvasView::updateStraightLine); // a path shown or not
     // The path's keys chosen (an undo or a redo too): their dots and their box are drawn again.
     connect(m_document, &DocumentController::pathKeysChosen, this, qOverload<>(&QWidget::update));
     connect(m_toolState, &ToolState::activeToolChanged, this, [this] { updateStraightLine(); });
@@ -1563,8 +1565,9 @@ QPointF CanvasView::lineStartOf(const std::vector<brush::BrushInput> &points) co
 
 void CanvasView::updateStraightLine()
 {
+    // Not while a path is shown in trajectory mode: nothing is drawn then, and Shift chooses more of its keys.
     const bool armed = m_shiftHeld && m_lastPoint && !m_stroke && !m_gesture.isActive() && !panKeyHeld()
-                       && ToolState::isPaintTool(m_toolState->activeTool());
+                       && ToolState::isPaintTool(m_toolState->activeTool()) && !m_trajectoryGizmo.pathShown();
     if (armed != m_lineArmed) {
         m_lineArmed = armed;
         update();
@@ -1781,7 +1784,7 @@ void CanvasView::keyPressEvent(QKeyEvent *event)
     // Shift held: the straight line from the last point (see updateStraightLine()).
     if (event->key() == Qt::Key_Shift && !event->isAutoRepeat()) {
         m_shiftHeld = true;
-        if (!m_lastPoint && ToolState::isPaintTool(m_toolState->activeTool()) && !m_stroke)
+        if (!m_lastPoint && ToolState::isPaintTool(m_toolState->activeTool()) && !m_stroke && !m_trajectoryGizmo.pathShown())
             emit statusMessage(tr("Draw something first: Shift then draws a straight line from the last point"));
         updateStraightLine();
     }

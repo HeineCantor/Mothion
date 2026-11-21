@@ -804,6 +804,57 @@ private slots:
         QVERIFY(qAbs(controller.celPoseAt(id, 0).scaleX - 1.0) < 0.01);
     }
 
+    // In trajectory mode, with a path shown, Shift is for the path's keys: with a paint tool it does not ready the straight
+    // line from the last point (nothing is drawn then); out of trajectory mode it does again.
+    void shiftChoosesPathKeysNotAStraightLineInTrajectoryMode()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        controller.setSceneLength(30);
+        controller.addTrajectory();
+        const doc::CelId trajectory = controller.currentCel();
+        QVERIFY(controller.setCelKey(trajectory, 2, at(0, 0)));
+        QVERIFY(controller.setCelKey(trajectory, 12, at(200, 100)));
+        QImage image(60, 40, QImage::Format_ARGB32);
+        image.fill(Qt::red);
+        controller.importImage(image, QStringLiteral("piece"));
+        const doc::CelId follower = controller.currentCel();
+        QVERIFY(controller.setTrajectoryParent(follower, trajectory));
+
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(900, 520);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        state.setActiveTool(tools::ToolId::Brush);
+        const QTransform toView = canvas.view().documentToView();
+        auto screen = [&](double x, double y) { return toView.map(QPointF(x, y)).toPoint(); };
+        const double px = controller.document().cel(trajectory)->motion().pivotX;
+        const double py = controller.document().cel(trajectory)->motion().pivotY;
+        controller.setLayerChosen(true); // its layer, to draw on
+        { // a short stroke, away from the path: there is a last point
+            QTest::mousePress(&canvas, Qt::LeftButton, {}, screen(px - 300, py + 250));
+            QTest::mouseMove(&canvas, screen(px - 290, py + 250));
+            QTest::mouseRelease(&canvas, Qt::LeftButton, {}, screen(px - 280, py + 250));
+        }
+
+        state.setTrajectoryMode(true);
+        QVERIFY(canvas.trajectoryGizmo().pathShown());
+        QTest::keyPress(&canvas, Qt::Key_Shift);
+        QVERIFY(!canvas.straightLineArmed());
+        QTest::mouseClick(&canvas, Qt::LeftButton, {}, screen(px, py));
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::ShiftModifier, screen(px + 200, py + 100));
+        QCOMPARE(canvas.trajectoryGizmo().chosenKeys(), (std::set<int>{2, 12}));
+        QVERIFY(!canvas.straightLineArmed());
+        QTest::keyRelease(&canvas, Qt::Key_Shift);
+
+        state.setTrajectoryMode(false);
+        QTest::keyPress(&canvas, Qt::Key_Shift);
+        QVERIFY(canvas.straightLineArmed());
+        state.setTrajectoryMode(true); // turned on while held: the line goes
+        QVERIFY(!canvas.straightLineArmed());
+        QTest::keyRelease(&canvas, Qt::Key_Shift);
+    }
+
     // While the path is shown the selection tools choose its keys (a box, a lasso; Shift adds, Alt takes away), and a
     // chosen key dragged takes the others with it, as far on the page, in one undo step.
     void pathKeysAreChosenAndMovedTogether()

@@ -78,6 +78,8 @@ public:
     // The frame of the camera and its handles (the camera selected in the Layers panel).
     const CameraGizmo &cameraGizmo() const { return m_cameraGizmo; }
     const TrajectoryGizmo &trajectoryGizmo() const { return m_trajectoryGizmo; }
+    // Shift held with a paint tool: the straight line from the last point waits for the pen (see updateStraightLine()).
+    bool straightLineArmed() const { return m_lineArmed; }
     const SymmetryGizmo &symmetryGizmo() const { return m_symmetryGizmo; }
     // Where the open transform's box is now (document coordinates, the box
     // after the transform); a null rect when no transform is open.
