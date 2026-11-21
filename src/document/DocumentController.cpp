@@ -7,6 +7,7 @@
 #include "canvas/SelectionGrow.h"
 #include "canvas/VectorRender.h"
 #include "canvas/TileQt.h"
+#include "core/deform/BoneField.h"
 #include "core/document/LipSync.h"
 #include "core/document/commands/DrawingCommands.h"
 #include "core/Parallel.h"
@@ -30,6 +31,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 #include <set>
 #include <functional>
 #include <vector>
@@ -473,6 +475,168 @@ bool DocumentController::setTrajectoryParent(doc::CelId childId, doc::CelId pare
     doc::CelProperties properties = child->properties();
     properties.parent = parentId;
     execute(doc::makeSetCelProperties(*m_document, childId, std::move(properties)));
+    return true;
+}
+
+void DocumentController::addDeformer(doc::DeformerKind kind)
+{
+    doc::Document &d = *m_document;
+    const QString base = kind == doc::DeformerKind::Bones ? tr("Bones %1")
+                         : kind == doc::DeformerKind::Curve ? tr("Curve %1")
+                                                              : tr("Envelope %1");
+    QString name; // the first free number
+    for (int n = 1;; ++n) {
+        name = base.arg(n);
+        bool used = false;
+        for (int i = 0; i < d.celCount() && !used; ++i)
+            used = d.celAt(i).properties().name == name.toStdString();
+        if (!used)
+            break;
+    }
+    const doc::Cel *current = d.cel(m_currentCel);
+    const bool bend = current && !current->properties().drawsNothing();
+    doc::CelProperties properties{name.toStdString()};
+    properties.deformer = kind;
+    if (bend) // it follows what the cel followed: what it bends still goes along that way
+        if (const doc::Cel *trajectory = d.followedTrajectory(*current))
+            properties.parent = trajectory->id();
+    auto add = std::make_unique<doc::AddCelCommand>(d, d.indexOf(m_currentCel) + 1, std::move(properties));
+    const doc::CelId id = add->celId();
+    std::vector<std::unique_ptr<doc::Command>> steps;
+    steps.push_back(std::move(add));
+    if (bend) {
+        doc::CelProperties child = current->properties();
+        child.parent = id;
+        steps.push_back(doc::makeSetCelProperties(d, current->id(), std::move(child)));
+    }
+    execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::AddCel, std::move(steps)));
+    chooseCel(id);
+}
+
+namespace {
+// A deformation cel's motion with the numbers of every Deform key changed by `change`.
+doc::CelMotion withDeformKeys(const doc::CelMotion &motion, const std::function<void(std::vector<double> &)> &change)
+{
+    doc::CelMotion out = motion;
+    for (const doc::CelKey &key : motion.keys(doc::Channel::Deform)) {
+        doc::CelPose pose = key.pose;
+        change(pose.deform);
+        out.setKey(doc::Channel::Deform, key.frame, pose, key.easing);
+    }
+    return out;
+}
+} // namespace
+
+int DocumentController::addBone(doc::CelId celId, int parent, QPointF from, QPointF to)
+{
+    const doc::Cel *cel = m_document->cel(celId);
+    if (!cel || cel->properties().deformer != doc::DeformerKind::Bones)
+        return -1;
+    const double length = std::hypot(to.x() - from.x(), to.y() - from.y());
+    if (length < 1e-6)
+        return -1;
+    doc::Deformer deformer = cel->deformer();
+    if (parent >= int(deformer.bones.size()))
+        parent = -1;
+    double angle = std::atan2(to.y() - from.y(), to.x() - from.x());
+    std::array<double, doc::kBoneParams> numbers{from.x(), from.y(), 0, length};
+    if (parent >= 0) {
+        // From the parent's end, along and across it; the angle from the parent's.
+        const deform::BoneFrame p = deform::boneFrames(deformer, deformer.rest)[std::size_t(parent)];
+        const deform::Vec2 along = p.direction(), across{-along.y, along.x}, offset = deform::Vec2{from.x(), from.y()} - p.end();
+        numbers[doc::BoneX] = puppet::dot(offset, along);
+        numbers[doc::BoneY] = puppet::dot(offset, across);
+        angle -= p.angle;
+    }
+    numbers[doc::BoneAngle] = std::remainder(angle * 180.0 / std::numbers::pi, 360.0);
+    doc::Bone bone;
+    bone.parent = parent;
+    bone.radius = std::clamp(length * 0.35, 8.0, 200.0);
+    bone.fade = bone.radius;
+    deformer.bones.push_back(bone);
+    deformer.rest.resize((deformer.bones.size() - 1) * doc::kBoneParams, 0.0);
+    deformer.rest.insert(deformer.rest.end(), numbers.begin(), numbers.end());
+    const std::size_t count = deformer.rest.size();
+    const std::vector<double> rest = deformer.rest;
+    std::vector<std::unique_ptr<doc::Command>> steps;
+    steps.push_back(std::make_unique<doc::SetDeformerCommand>(celId, std::move(deformer)));
+    if (cel->motion().hasKeys(doc::Channel::Deform))
+        steps.push_back(std::make_unique<doc::SetCelMotionCommand>(
+            celId, withDeformKeys(cel->motion(), [&](std::vector<double> &pose) {
+                // The numbers it lacks are the rest's (the new bone's among them).
+                for (std::size_t i = pose.size(); i < count; ++i)
+                    pose.push_back(rest[i]);
+            })));
+    const int index = int(cel->deformer().bones.size());
+    execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::EditDeformer, std::move(steps)));
+    return index;
+}
+
+bool DocumentController::removeBone(doc::CelId celId, int bone)
+{
+    const doc::Cel *cel = m_document->cel(celId);
+    if (!cel || bone < 0 || bone >= int(cel->deformer().bones.size()))
+        return false;
+    const doc::Deformer &old = cel->deformer();
+    // The bone and all under it (a parent comes before its children).
+    std::vector<char> gone(old.bones.size(), 0);
+    gone[std::size_t(bone)] = 1;
+    for (std::size_t i = std::size_t(bone) + 1; i < old.bones.size(); ++i)
+        if (old.bones[i].parent >= 0 && gone[std::size_t(old.bones[i].parent)])
+            gone[i] = 1;
+    std::vector<int> newIndex(old.bones.size(), -1);
+    doc::Deformer deformer;
+    for (std::size_t i = 0; i < old.bones.size(); ++i) {
+        if (gone[i])
+            continue;
+        newIndex[i] = int(deformer.bones.size());
+        doc::Bone b = old.bones[i];
+        b.parent = b.parent >= 0 ? newIndex[std::size_t(b.parent)] : -1;
+        deformer.bones.push_back(b);
+    }
+    auto keep = [&](std::vector<double> &numbers) {
+        std::vector<double> kept;
+        for (std::size_t i = 0; i < old.bones.size(); ++i)
+            if (!gone[i])
+                for (int k = 0; k < doc::kBoneParams; ++k) {
+                    const std::size_t at = i * doc::kBoneParams + std::size_t(k);
+                    kept.push_back(at < numbers.size() ? numbers[at] : at < old.rest.size() ? old.rest[at] : 0.0);
+                }
+        numbers = std::move(kept);
+    };
+    deformer.rest = old.rest;
+    keep(deformer.rest);
+    std::vector<std::unique_ptr<doc::Command>> steps;
+    steps.push_back(std::make_unique<doc::SetDeformerCommand>(celId, std::move(deformer)));
+    if (cel->motion().hasKeys(doc::Channel::Deform))
+        steps.push_back(std::make_unique<doc::SetCelMotionCommand>(celId, withDeformKeys(cel->motion(), keep)));
+    execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::EditDeformer, std::move(steps)));
+    return true;
+}
+
+bool DocumentController::setDeformerRest(doc::CelId celId, doc::Deformer deformer)
+{
+    const doc::Cel *cel = m_document->cel(celId);
+    if (!cel || cel->properties().deformer == doc::DeformerKind::None || deformer == cel->deformer()
+        || deformer.bones.size() != cel->deformer().bones.size())
+        return false;
+    deformer.rest.resize(deformer.bones.size() * doc::kBoneParams, 0.0);
+    execute(std::make_unique<doc::SetDeformerCommand>(celId, std::move(deformer)));
+    return true;
+}
+
+bool DocumentController::setDeformKey(doc::CelId celId, int frame, std::vector<double> pose)
+{
+    const doc::Cel *cel = m_document->cel(celId);
+    if (!cel || cel->properties().deformer == doc::DeformerKind::None)
+        return false;
+    doc::CelMotion motion = cel->motion();
+    doc::CelPose p;
+    p.deform = std::move(pose);
+    motion.setKey(doc::Channel::Deform, frame, p);
+    if (motion == cel->motion())
+        return false;
+    execute(std::make_unique<doc::SetCelMotionCommand>(celId, std::move(motion)));
     return true;
 }
 
@@ -1232,15 +1396,22 @@ doc::CelPose DocumentController::celPoseAt(doc::CelId id, int frame) const
     return cel ? cel->motion().poseAt(frame) : doc::CelPose{};
 }
 
-bool DocumentController::celKeyMotion(const doc::Cel &cel, int frame, const doc::CelPose &pose, doc::CelMotion &out) const
+bool DocumentController::celKeyMotion(const doc::Cel &cel, int frame, const doc::CelPose &given, doc::CelMotion &out) const
 {
     doc::CelMotion motion = cel.motion();
     const bool first = motion.isEmpty();
     if (first)
         startMotion(motion, cel, frame);
-    const doc::CelPose now = motion.interpolatedAt(frame);
+    doc::CelPose pose = given;
+    if (pose.deform.empty() && cel.properties().deformer != doc::DeformerKind::None)
+        pose.deform = m_document->deformPoseAt(cel, frame); // a deformer with no keys yet: its rest
+    doc::CelPose now = motion.interpolatedAt(frame);
+    if (now.deform.empty())
+        now.deform = cel.deformer().rest;
     bool changed = false;
     for (doc::Channel c : doc::kChannels) {
+        if (!doc::hasChannel(cel.properties(), c))
+            continue;
         const bool wanted = motion.hasKeys(c) || doc::channelsDiffer(c, pose, now) || (first && c != doc::Channel::Opacity);
         if (!wanted)
             continue;
@@ -1267,15 +1438,18 @@ bool DocumentController::setCelKey(doc::CelId id, int frame, const doc::CelPose 
     return true;
 }
 
-bool DocumentController::setCelChannelKey(doc::CelId id, doc::Channel channel, int frame, const doc::CelPose &pose)
+bool DocumentController::setCelChannelKey(doc::CelId id, doc::Channel channel, int frame, const doc::CelPose &given)
 {
     const doc::Cel *cel = m_document->cel(id);
-    if (!cel || frame < 0)
+    if (!cel || frame < 0 || !doc::hasChannel(cel->properties(), channel))
         return false;
     clearTemporaryPose();
     doc::CelMotion motion = cel->motion();
     if (motion.isEmpty())
         startMotion(motion, *cel, frame);
+    doc::CelPose pose = given;
+    if (channel == doc::Channel::Deform && pose.deform.empty())
+        pose.deform = m_document->deformPoseAt(*cel, frame);
     if (const doc::CelKey *existing = motion.keyAt(channel, frame); existing && existing->pose == doc::channelOf(channel, pose))
         return false;
     motion.setKey(channel, frame, pose);
@@ -1450,8 +1624,14 @@ void DocumentController::beginFirstKey(doc::CelId id, int frame)
     clearTemporaryPose();
     doc::CelMotion motion = cel->motion();
     startMotion(motion, *cel, frame);
-    for (doc::Channel c : {doc::Channel::Position, doc::Channel::Rotation, doc::Channel::Scale})
-        motion.setKey(c, frame, doc::CelPose{});
+    if (cel->properties().deformer != doc::DeformerKind::None) { // a deformer: its pose, at rest
+        doc::CelPose rest;
+        rest.deform = cel->deformer().rest;
+        motion.setKey(doc::Channel::Deform, frame, rest);
+    } else {
+        for (doc::Channel c : {doc::Channel::Position, doc::Channel::Rotation, doc::Channel::Scale})
+            motion.setKey(c, frame, doc::CelPose{});
+    }
     cel->setMotion(std::move(motion));
     doc::ChangeSet changes;
     changes.motion = true;
@@ -2618,9 +2798,11 @@ bool DocumentController::renameDrawing(doc::CelId celId, doc::DrawingId drawingI
 bool DocumentController::setMouthChart(doc::CelId celId, bool on, QString *reason)
 {
     const doc::Cel *cel = m_document->cel(celId);
-    if (!cel || cel->properties().trajectory) {
+    if (!cel || cel->properties().drawsNothing()) {
         if (reason)
-            *reason = cel ? tr("A trajectory has no drawings: it cannot be a mouth chart") : tr("No such cel");
+            *reason = !cel ? tr("No such cel")
+                      : cel->properties().trajectory ? tr("A trajectory has no drawings: it cannot be a mouth chart")
+                                                     : tr("A deformer has no drawings: it cannot be a mouth chart");
         return false;
     }
     if (cel->properties().mouthChart == on)
@@ -3196,6 +3378,7 @@ QString DocumentController::commandName(doc::CommandKind kind)
     case doc::CommandKind::EditMarkers: return tr("markers");
     case doc::CommandKind::Flip: return tr("flip");
     case doc::CommandKind::EditMotion: return tr("keyframes");
+    case doc::CommandKind::EditDeformer: return tr("bones");
     case doc::CommandKind::EditBlenderLink: return tr("Blender link");
     case doc::CommandKind::AdjustColor: return tr("hue/saturation/value");
     case doc::CommandKind::RenameDrawing: return tr("rename frame");
@@ -3361,6 +3544,9 @@ std::optional<DocumentController::PaintTarget> DocumentController::beginPaint(bo
         return fail(tr("No cel selected"));
     if (cel->properties().trajectory)
         return fail(tr("“%1” is a trajectory: nothing is drawn on it").arg(QString::fromStdString(cel->properties().name)));
+    if (cel->properties().deformer != doc::DeformerKind::None)
+        return fail(tr("“%1” is a deformer: nothing is drawn on it, it bends the cels that follow it")
+                        .arg(QString::fromStdString(cel->properties().name)));
     if (!cel->properties().visible)
         return fail(tr("Cel “%1” is hidden").arg(QString::fromStdString(cel->properties().name)));
     if (cel->properties().locked)

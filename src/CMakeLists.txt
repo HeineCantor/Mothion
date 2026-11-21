@@ -29,6 +29,8 @@ add_library(mothion_core STATIC
     core/puppet/ArapDeformer.h core/puppet/ArapDeformer.cpp
     core/puppet/PuppetRig.h core/puppet/PuppetRig.cpp
     core/puppet/WarpRaster.h core/puppet/WarpRaster.cpp
+    core/deform/BoneField.h core/deform/BoneField.cpp
+    core/deform/DeformRaster.h core/deform/DeformRaster.cpp
 
     core/document/Tile.h
     core/document/TiledImage.h core/document/TiledImage.cpp
@@ -56,6 +58,7 @@ add_library(mothion_core STATIC
     core/document/commands/MotionCommands.h core/document/commands/MotionCommands.cpp
     core/document/commands/BlenderLinkCommands.h core/document/commands/BlenderLinkCommands.cpp
     core/document/CelMotion.h core/document/CelMotion.cpp
+    core/document/Deformer.h
     core/document/LipSync.h core/document/LipSync.cpp
     core/document/Compositing.h
 )
@@ -119,6 +122,7 @@ qt_add_library(mothion_gui STATIC
     canvas/PerspectiveGizmo.h canvas/PerspectiveGizmo.cpp
     canvas/CameraGizmo.h canvas/CameraGizmo.cpp
     canvas/TrajectoryGizmo.h canvas/TrajectoryGizmo.cpp
+    canvas/BoneGizmo.h canvas/BoneGizmo.cpp
     canvas/ViewTransform.h canvas/ViewTransform.cpp
     canvas/NavigationGesture.h canvas/NavigationGesture.cpp
     canvas/CanvasTool.h

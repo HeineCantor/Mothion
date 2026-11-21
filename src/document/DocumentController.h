@@ -96,6 +96,23 @@ public:
     // `child` follows `parent` (a trajectory; kNoId lets it go); its own keys then come on top of the parent's way. The child
     // is a trajectory or any cel. One undo step. False if that would be a loop, or the parent is no trajectory, or nothing changes.
     bool setTrajectoryParent(doc::CelId child, doc::CelId parent);
+    // A deformation cel of `kind` above the current one (see doc::CelProperties::deformer), named after its kind, with no
+    // bones yet. The current cel, if it is a drawn one, is bent by it (it becomes its parent, and follows the trajectory the
+    // cel followed). One undo step; the new cel is chosen.
+    void addDeformer(doc::DeformerKind kind);
+    // A bone added to a Bones deformation cel, from `from` to `to` on the page as drawn: a child of `parent` (-1: a root),
+    // its start where `from` is from the parent's end. Its zone grows with its length. Every key of the cel's Deform
+    // channel gets it as it is at rest. One undo step; the new bone's index, or -1 for a cel that is no Bones deformer or a
+    // bone of no length.
+    int addBone(doc::CelId cel, int parent, QPointF from, QPointF to);
+    // Removes a bone and the bones that hang from it, from the rest and from every key. One undo step; false if there is
+    // no such bone.
+    bool removeBone(doc::CelId cel, int bone);
+    // The bones and the rest of a deformation cel (as many bones as it has: its keys keep their numbers). One undo step;
+    // false if nothing changes or the bones are not as many.
+    bool setDeformerRest(doc::CelId cel, doc::Deformer deformer);
+    // A key of a deformation cel's Deform channel on `frame`, with `pose` (see doc::Deformer). One undo step.
+    bool setDeformKey(doc::CelId cel, int frame, std::vector<double> pose);
     // Adds an empty layer of `kind` to the current drawing, above the current
     // layer (on top if `onTop`), named "Layer N" (or "Perspective N") with the
     // first free N; it becomes current. A perspective layer starts with a grid
@@ -248,7 +265,7 @@ public:
     // The same for several cels moved together: one undo step for all (each with the motion it had when the drag began).
     void finishCelPoses(const std::vector<std::pair<doc::CelId, doc::CelMotion>> &before);
     // For a cel with no key: its first one on `frame` (position, rotation and scale, as it is drawn, the pivot as the first key
-    // puts it) with no undo step, as previewCelPose() changes it; finishCelPose() from the motion it had then records both.
+    // puts it; a deformation cel's pose at rest) with no undo step, as previewCelPose() changes it; finishCelPose() from the motion it had then records both.
     void beginFirstKey(doc::CelId cel, int frame);
     void cancelCelPose(doc::CelId cel, const doc::CelMotion &before);
     // Takes all the keys of the cel away (it stands still, as drawn).

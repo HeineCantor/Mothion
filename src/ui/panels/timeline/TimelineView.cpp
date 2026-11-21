@@ -844,6 +844,7 @@ void TimelineView::paintMotionHeader(QPainter &p, int celIndex, int row) const
         const QString name = *channel == doc::Channel::Position   ? tr("Position")
                              : *channel == doc::Channel::Rotation ? tr("Rotation")
                              : *channel == doc::Channel::Scale    ? tr("Scale")
+                             : *channel == doc::Channel::Deform   ? tr("Deformation")
                                                                   : tr("Opacity");
         p.drawText(r.adjusted(40 + indent, 0, -4, 0), Qt::AlignVCenter | Qt::AlignLeft, name);
     } else {
@@ -991,13 +992,14 @@ void TimelineView::showMotionMenu(const QPoint &globalPos, int celIndex, int fra
                            [this, id, frame] { m_document->setCelKey(id, frame, m_document->celPoseAt(id, frame)); });
         QMenu *only = nullptr;
         for (doc::Channel c : doc::kChannels) {
-            if (motion.keyAt(c, frame))
+            if (motion.keyAt(c, frame) || !doc::hasChannel(cel.properties(), c))
                 continue;
             if (!only)
                 only = menu.addMenu(tr("Add a keyframe of"));
             const QString name = c == doc::Channel::Position   ? tr("Position")
                                  : c == doc::Channel::Rotation ? tr("Rotation")
                                  : c == doc::Channel::Scale    ? tr("Scale")
+                                 : c == doc::Channel::Deform   ? tr("Deformation")
                                                                : tr("Opacity");
             only->addAction(name, this, [this, id, frame, c] {
                 m_document->setCelChannelKey(id, c, frame, m_document->celPoseAt(id, frame));
@@ -1518,9 +1520,12 @@ void TimelineView::paintHeaders(QPainter &p) const
         p.setPen(palette().placeholderText().color());
         for (const QRect &slot : {eyeRect(row), lockRect(row)})
             p.drawRect(slot.adjusted(0, 0, -1, -1));
-        // A trajectory is not shown or hidden: its slot says it is active.
+        // A trajectory or a deformer is not shown or hidden: its slot says it is active.
         if (cel.properties().visible)
-            icon(cel.properties().trajectory ? IconId::Trajectory : IconId::Eye, tone)
+            icon(cel.properties().trajectory                                ? IconId::Trajectory
+                 : cel.properties().deformer != doc::DeformerKind::None ? IconId::Bones
+                                                                         : IconId::Eye,
+                 tone)
                 .paint(&p, eyeRect(row).adjusted(1, 1, -1, -1));
         if (cel.properties().locked)
             icon(IconId::Lock, tone).paint(&p, lockRect(row).adjusted(1, 1, -1, -1));
@@ -2283,7 +2288,7 @@ void TimelineView::addCelActions(QMenu &menu, const doc::Cel &cel)
     // A cel follows a trajectory (Follow trajectory), a trajectory another (Parent to): what it does comes on top of the
     // cel's own keys.
     addParentTrajectoryMenu(menu, m_document, cel, this);
-    if (!cel.properties().trajectory) {
+    if (!cel.properties().drawsNothing()) {
         // Lip sync: the cel's drawings are mouths (A to H, X), drawn in the Mouth chart panel and put by the mouth bar.
         QAction *chart = menu.addAction(tr("Mouth chart (lip sync)"), this, [this, celId](bool on) {
             QString reason;
@@ -2370,7 +2375,7 @@ void TimelineView::contextMenuEvent(QContextMenuEvent *event)
     const doc::CelId celId = cel.id();
     m_document->setCurrentCel(celId);
     m_document->setCurrentFrame(frame);
-    if (cel.properties().trajectory) { // no frames to work on: only its keys
+    if (cel.properties().drawsNothing()) { // no frames to work on: only its keys
         QMenu menu(this);
         QAction *key = menu.addAction(tr("Add keyframe here"), this, [this, celId, frame] {
             m_document->setCelKey(celId, frame, m_document->celPoseAt(celId, frame));
@@ -2378,7 +2383,7 @@ void TimelineView::contextMenuEvent(QContextMenuEvent *event)
         key->setEnabled(!m_document->celMotion(celId)->hasKeyAt(frame));
         menu.addSeparator();
         // Its keys played backwards over the same frames (the curves turned around too).
-        QAction *reverse = menu.addAction(tr("Reverse Trajectory"), this, [this, celId] { m_document->reverseCelMotion(celId); });
+        QAction *reverse = menu.addAction(cel.properties().trajectory ? tr("Reverse Trajectory") : tr("Reverse Keyframes"), this, [this, celId] { m_document->reverseCelMotion(celId); });
         reverse->setEnabled(m_document->celMotion(celId)->keyFrames().size() >= 2);
         menu.exec(event->globalPos());
         return;

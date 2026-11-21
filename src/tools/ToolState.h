@@ -249,6 +249,10 @@ public:
     // on and a path is shown. A choice of the person's, for the session.
     bool trajectoryMode() const { return m_trajectoryMode; }
     void setTrajectoryMode(bool on);
+    // Rig mode: the bones of a Bones deformation cel are shown at rest on the canvas, to be made and placed; off, they are
+    // posed on each frame and animated (see canvas::BoneGizmo). A choice of the person's, for the session.
+    bool rigMode() const { return m_rigMode; }
+    void setRigMode(bool on);
     // The tool and the mode say that the cel is the one moved (not its pixels).
     bool movesTheCel() const { return m_keyframeMode && (m_activeTool == ToolId::Transform || m_activeTool == ToolId::Move); }
 
@@ -316,6 +320,7 @@ signals:
     void useTiltChanged(bool use);
     void keyframeModeChanged(bool on);
     void trajectoryModeChanged(bool on);
+    void rigModeChanged(bool on);
     void correctStartAfterStrokeChanged(bool on);
     void sharpCornersChanged(bool on);
     void puppetSettingsChanged();
@@ -347,6 +352,7 @@ private:
     bool m_useTilt = true;
     bool m_keyframeMode = false;
     bool m_trajectoryMode = false;
+    bool m_rigMode = false;
     bool m_correctStartAfterStroke = false;
     bool m_sharpCorners = false;
     PuppetSettings m_puppet;

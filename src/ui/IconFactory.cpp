@@ -694,6 +694,26 @@ void drawGlyph(QPainter &p, IconId id)
         path.moveTo(16, 6.5);
         path.lineTo(22, 6.5);
         break;
+    case IconId::Bones: // two bones bent at a joint, a dot on each joint
+        path.moveTo(4, 20);
+        path.lineTo(10.5, 11.5);
+        path.lineTo(20, 7);
+        path.addEllipse(QPointF(4, 20), 1.8, 1.8);
+        path.addEllipse(QPointF(10.5, 11.5), 1.8, 1.8);
+        path.addEllipse(QPointF(20, 7), 1.8, 1.8);
+        break;
+    case IconId::NewBones: // the bones, with a plus
+        path.moveTo(3.5, 20.5);
+        path.lineTo(8.5, 13.5);
+        path.lineTo(15.5, 14.5);
+        path.addEllipse(QPointF(3.5, 20.5), 1.6, 1.6);
+        path.addEllipse(QPointF(8.5, 13.5), 1.6, 1.6);
+        path.addEllipse(QPointF(15.5, 14.5), 1.6, 1.6);
+        path.moveTo(19, 3.5);
+        path.lineTo(19, 9.5);
+        path.moveTo(16, 6.5);
+        path.lineTo(22, 6.5);
+        break;
     case IconId::Onion: // a bulb with its layers and a sprout
         path.moveTo(12, 6);
         path.cubicTo(18, 8, 21, 12, 21, 15);

@@ -496,6 +496,38 @@ private slots:
         QVERIFY(loaded->celAt(0).motion().hasKeyAt(3));
     }
 
+    // Format 20: the deformation cels, their bones and rest, and the keys of their pose.
+    void deformerCelsSurviveTheFile()
+    {
+        QTemporaryDir dir;
+        const QString path = dir.filePath(QStringLiteral("bones.moth"));
+        const auto original = sampleDocument();
+        doc::CelProperties properties{"Bones"};
+        properties.deformer = doc::DeformerKind::Bones;
+        doc::Cel &bones = original->insertCel(0, std::make_unique<doc::Cel>(original->allocateCelId(), properties));
+        doc::Deformer deformer;
+        deformer.bones.push_back({-1, 25, 12});
+        deformer.bones.push_back({0, 18.5, 7});
+        deformer.rest = {10, 20, 0, 100, 0, 0, 45, 60.5};
+        bones.setDeformer(deformer);
+        doc::CelMotion motion;
+        doc::CelPose pose;
+        pose.deform = {10, 20, 30, 100, 0, 0, -45, 60.5};
+        motion.setKey(doc::Channel::Deform, 4, pose, doc::Easing::hold());
+        bones.setMotion(motion);
+        original->celAt(1).setProperties([&] { auto p = original->celAt(1).properties(); p.parent = bones.id(); return p; }());
+        QString error;
+        QVERIFY2(io::saveProject(*original, path, &error), qPrintable(error));
+        const auto loaded = io::loadProject(path, &error);
+        QVERIFY2(loaded, qPrintable(error));
+        compareDocuments(*original, *loaded);
+        QCOMPARE(loaded->celAt(0).properties().deformer, doc::DeformerKind::Bones);
+        QCOMPARE(loaded->celAt(0).deformer(), deformer);
+        QCOMPARE(loaded->celAt(0).motion(), motion);
+        QCOMPARE(loaded->celAt(1).properties().deformer, doc::DeformerKind::None);
+        QCOMPARE(loaded->followedDeformer(loaded->celAt(1)), &loaded->celAt(0));
+    }
+
     // Format 19: the cels that are mouth charts (and no others), with their drawings named after the shapes, those
     // the timeline does not show too.
     void mouthChartsSurviveTheFile()

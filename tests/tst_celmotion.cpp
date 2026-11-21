@@ -1,5 +1,6 @@
 #include "canvas/CanvasView.h"
 #include "canvas/FrameRenderer.h"
+#include "core/deform/BoneField.h"
 #include "core/document/CelMotion.h"
 #include "core/document/Document.h"
 #include "core/document/commands/CelCommands.h"
@@ -150,6 +151,120 @@ private slots:
         QVERIFY(at(0, 0).movesNothing());
         QVERIFY(!at(0, 0, 1).movesNothing());
         QVERIFY(at(0, 0, 0, 1, 0.2).movesNothing()); // only the opacity: nothing to move
+    }
+
+    void aDeformerBendsTheCelThatFollowsIt()
+    {
+        doc::Document document(200, 200);
+        document.setFrameCount(30);
+        document.setPaperColor(0xffffffff);
+        // A red bar along a bone from (20, 100) to (120, 100).
+        const doc::CelId piece = addSquare(document, 20, 97, 6);
+        {
+            doc::Cel &cel = *document.cel(piece);
+            auto &image = cel.drawing(cel.drawings().begin()->first)->layers.front().image;
+            for (int x = 20; x < 120; ++x)
+                for (int y = 97; y < 103; ++y)
+                    image.setPixel(x, y, 0xffff0000u);
+        }
+        doc::CelProperties b{"Bones"};
+        b.deformer = doc::DeformerKind::Bones;
+        doc::Cel &bones = document.insertCel(1, std::make_unique<doc::Cel>(document.allocateCelId(), b));
+        doc::Deformer deformer;
+        deformer.bones.push_back({-1, 20, 10});
+        deformer.rest = {20, 100, 0, 100};
+        bones.setDeformer(deformer);
+        document.cel(piece)->setProperties([&] { auto p = document.cel(piece)->properties(); p.parent = bones.id(); return p; }());
+
+        canvas::FrameRenderer renderer;
+        renderer.renderAll(document, 0);
+        QCOMPARE(renderer.image().pixelColor(100, 100), QColor(Qt::red)); // at rest: as drawn
+        // Turned down by a key on frame 10.
+        doc::CelMotion motion;
+        doc::CelPose rest, down;
+        rest.deform = deformer.rest;
+        down.deform = {20, 100, 90, 100};
+        motion.setKey(doc::Channel::Deform, 0, rest, doc::Easing::linear());
+        motion.setKey(doc::Channel::Deform, 10, down, doc::Easing::linear());
+        bones.setMotion(motion);
+        renderer.renderAll(document, 10);
+        QCOMPARE(renderer.image().pixelColor(100, 100), QColor(Qt::white));
+        QCOMPARE(renderer.image().pixelColor(20, 180), QColor(Qt::red));
+        QCOMPARE(renderer.image().pixelColor(20, 120), QColor(Qt::red));
+        // A part of the frame agrees with the whole.
+        const QImage whole = renderer.image();
+        canvas::FrameRenderer part;
+        part.renderAll(document, 0);
+        part.render(document, 10, QRect(0, 90, 60, 100));
+        for (int y = 90; y < 190; ++y)
+            for (int x = 0; x < 60; ++x)
+                QCOMPARE(part.image().pixel(x, y), whole.pixel(x, y));
+        // Shown undeformed (to draw on it), or with its deformer inactive: as drawn.
+        renderer.setCelUndeformed(piece);
+        renderer.renderAll(document, 10);
+        QCOMPARE(renderer.image().pixelColor(100, 100), QColor(Qt::red));
+        renderer.setCelUndeformed(doc::kNoId);
+        bones.setProperties([&] { auto p = bones.properties(); p.visible = false; return p; }());
+        renderer.renderAll(document, 10);
+        QCOMPARE(renderer.image().pixelColor(100, 100), QColor(Qt::red));
+    }
+
+    void theControllerMakesBonesAsUndoableSteps()
+    {
+        document::DocumentController controller;
+        controller.setSceneLength(48);
+        const doc::CelId drawn = controller.currentCel();
+        controller.addDeformer(doc::DeformerKind::Bones);
+        const doc::CelId bones = controller.currentCel();
+        QVERIFY(bones != drawn);
+        const doc::Document &d = controller.document();
+        QCOMPARE(d.cel(bones)->properties().name, std::string("Bones 1"));
+        QCOMPARE(d.cel(drawn)->properties().parent, bones); // the cel that was current is bent by it
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo new cel"));
+
+        QCOMPARE(controller.addBone(bones, -1, {10, 10}, {110, 10}), 0);
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo bones"));
+        QCOMPARE(controller.addBone(bones, 0, {110, 10}, {110, 60}), 1);
+        QCOMPARE(controller.addBone(drawn, -1, {0, 0}, {1, 1}), -1); // not a deformer
+        QCOMPARE(controller.addBone(bones, 0, {5, 5}, {5, 5}), -1);   // no length
+        const doc::Deformer &rig = d.cel(bones)->deformer();
+        QCOMPARE(rig.bones.size(), std::size_t(2));
+        QCOMPARE(rig.bones[1].parent, 0);
+        QCOMPARE(rig.rest[4 + doc::BoneAngle], 90.0); // from its parent's
+        QCOMPARE(rig.rest[4 + doc::BoneLength], 50.0);
+        QVERIFY(std::abs(rig.rest[4 + doc::BoneX]) < 1e-9); // it starts at the parent's end
+
+        // A key, then a third bone: the key gets it at rest.
+        std::vector<double> pose = rig.rest;
+        pose[doc::BoneAngle] = 30;
+        QVERIFY(controller.setDeformKey(bones, 5, pose));
+        QVERIFY(!controller.setDeformKey(bones, 5, pose)); // nothing changes
+        QVERIFY(!controller.setDeformKey(drawn, 5, pose));
+        QCOMPARE(controller.addBone(bones, 1, {110, 60}, {150, 60}), 2);
+        QCOMPARE(d.deformPoseAt(*d.cel(bones), 5).size(), std::size_t(3 * doc::kBoneParams));
+        QCOMPARE(d.deformPoseAt(*d.cel(bones), 5)[doc::BoneAngle], 30.0);
+        // The Cel key of a deformer keys its pose, nothing else.
+        QVERIFY(controller.setCelKey(bones, 9, controller.celPoseAt(bones, 9)));
+        QVERIFY(d.cel(bones)->motion().keyAt(doc::Channel::Deform, 9));
+        QVERIFY(!d.cel(bones)->motion().hasKeys(doc::Channel::Position));
+
+        // Taking the middle bone away takes the one hanging from it too, from the keys as well.
+        QVERIFY(controller.removeBone(bones, 1));
+        QCOMPARE(d.cel(bones)->deformer().bones.size(), std::size_t(1));
+        QCOMPARE(d.deformPoseAt(*d.cel(bones), 5).size(), std::size_t(doc::kBoneParams));
+        QCOMPARE(d.deformPoseAt(*d.cel(bones), 5)[doc::BoneAngle], 30.0);
+        QVERIFY(!controller.removeBone(bones, 4));
+        controller.undo();
+        QCOMPARE(d.cel(bones)->deformer().bones.size(), std::size_t(3));
+        QCOMPARE(d.deformPoseAt(*d.cel(bones), 5).size(), std::size_t(3 * doc::kBoneParams));
+
+        // The rest moved: same bones, other numbers.
+        doc::Deformer moved = d.cel(bones)->deformer();
+        moved.rest[doc::BoneX] = 20;
+        QVERIFY(controller.setDeformerRest(bones, moved));
+        QVERIFY(!controller.setDeformerRest(bones, moved));
+        moved.bones.pop_back();
+        QVERIFY(!controller.setDeformerRest(bones, moved)); // not as many bones
     }
 
     void theControllerKeepsKeysAsUndoableSteps()
@@ -728,6 +843,76 @@ private slots:
     // A trajectory cel: made from the arrow next to the new cel button's plus (here, directly), it has no drawings and is not drawn;
     // selected, it shows a circle (its middle moves it, its arrow turns it, its edge scales it) whatever the tool, and what is
     // dragged becomes its keys, in one undo step; nothing can be drawn on it.
+    void bonesAreDrawnInRigModeAndTurnedToAnimate()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        controller.setSceneLength(30);
+        const doc::CelId drawn = controller.currentCel();
+        controller.addDeformer(doc::DeformerKind::Bones);
+        const doc::CelId bones = controller.currentCel();
+        state.setRigMode(true);
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(900, 520);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        state.setActiveTool(tools::ToolId::Brush); // whatever the tool
+        const canvas::BoneGizmo &gizmo = canvas.boneGizmo();
+        QVERIFY(gizmo.editable());
+        const QTransform toView = canvas.view().documentToView();
+        auto at = [&](const QPointF &docPoint) { return toView.map(docPoint).toPoint(); };
+        auto drag = [&](QPointF from, QPointF to) {
+            QTest::mousePress(&canvas, Qt::LeftButton, {}, at(from));
+            for (int k = 1; k <= 4; ++k)
+                QTest::mouseMove(&canvas, at(from + (to - from) * k / 4.0));
+            QTest::mouseRelease(&canvas, Qt::LeftButton, {}, at(to));
+        };
+        const doc::Deformer &rig = controller.document().cel(bones)->deformer();
+
+        // On nothing: a root; from its end: the next one, hanging from it.
+        drag({600, 500}, {900, 500});
+        QCOMPARE(rig.bones.size(), std::size_t(1));
+        QVERIFY(std::abs(rig.rest[doc::BoneLength] - 300) < 4);
+        drag({900, 500}, {1200, 500});
+        QCOMPARE(rig.bones.size(), std::size_t(2));
+        QCOMPARE(rig.bones[1].parent, 0);
+        QCOMPARE(gizmo.chosenBone(), 1);
+        // Delete takes the chosen one away; undo brings it back.
+        QTest::keyClick(&canvas, Qt::Key_Delete);
+        QCOMPARE(rig.bones.size(), std::size_t(1));
+        controller.undo();
+        QCOMPARE(controller.document().cel(bones)->deformer().bones.size(), std::size_t(2));
+        // The joint between them dragged: both bones meet where it went, their other ends stay.
+        drag({900, 500}, {900, 400});
+        const auto frames = deform::boneFrames(controller.document().cel(bones)->deformer(),
+                                               controller.document().cel(bones)->deformer().rest);
+        QVERIFY(std::abs(frames[0].end().y - 400) < 3 && std::abs(frames[1].origin.y - 400) < 3);
+        QVERIFY(std::abs(frames[1].end().x - 1200) < 3 && std::abs(frames[1].end().y - 500) < 3);
+        QVERIFY(std::abs(frames[0].origin.x - 600) < 3);
+
+        // Animated: the forearm turned on frame 5, the first key of the deformer, one undo step.
+        state.setRigMode(false);
+        controller.setCurrentFrame(5);
+        const QPointF elbow = *gizmo.partPoint(1, canvas::BoneGizmo::Part::Origin);
+        const QPointF hand = *gizmo.partPoint(1, canvas::BoneGizmo::Part::End);
+        const double reach = QLineF(elbow, hand).length();
+        const double from = std::atan2(hand.y() - elbow.y(), hand.x() - elbow.x());
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, at(hand));
+        for (int k = 1; k <= 6; ++k) {
+            const double a = from + k * (M_PI / 4) / 6;
+            QTest::mouseMove(&canvas, at(elbow + QPointF(std::cos(a), std::sin(a)) * reach));
+        }
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, at(elbow + QPointF(std::cos(from + M_PI / 4), std::sin(from + M_PI / 4)) * reach));
+        const doc::Cel *deformer = controller.document().cel(bones);
+        QVERIFY(deformer->motion().keyAt(doc::Channel::Deform, 5));
+        const std::vector<double> pose = controller.document().deformPoseAt(*deformer, 5);
+        QVERIFY(std::abs(pose[4 + doc::BoneAngle] - (deformer->deformer().rest[4 + doc::BoneAngle] + 45)) < 1.5);
+        QCOMPARE(pose[doc::BoneAngle], deformer->deformer().rest[doc::BoneAngle]); // the upper arm stays
+        controller.undo();
+        QVERIFY(!controller.document().cel(bones)->motion().hasKeys(doc::Channel::Deform));
+        QCOMPARE(controller.document().cel(drawn)->properties().parent, bones);
+    }
+
     void aTrajectoryCelIsMovedByItsCircle()
     {
         tools::ToolState state;

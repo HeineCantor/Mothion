@@ -19,7 +19,11 @@ void addParentTrajectoryMenu(QMenu &menu, document::DocumentController *document
     const doc::CelId celId = cel.id();
     const bool trajectory = cel.properties().trajectory;
     QMenu *parents = menu.addMenu(trajectory ? tr("Parent to") : tr("Follow trajectory"));
-    const doc::Cel *parent = trajectory ? d.trajectoryParent(cel) : d.followedTrajectory(cel);
+    // Its own parent, if that is a trajectory (one bent by a deformer follows the deformer's: that is the deformer's choice).
+    const doc::Cel *direct = d.cel(cel.properties().parent);
+    const doc::Cel *parent = trajectory ? d.trajectoryParent(cel)
+                             : direct && direct->properties().trajectory && direct->id() != celId ? direct
+                                                                                                    : nullptr;
     QAction *none = parents->addAction(tr("None"), context,
                                        [document, celId] { document->setTrajectoryParent(celId, doc::kNoId); });
     none->setCheckable(true);
@@ -50,6 +54,29 @@ void addParentTrajectoryMenu(QMenu &menu, document::DocumentController *document
     }
     parents->setToolTipsVisible(true);
     parents->setEnabled(any || parent);
+
+    // A drawn cel can be bent by a deformer instead (its parent then is the deformer).
+    if (cel.properties().drawsNothing())
+        return;
+    QMenu *deformers = menu.addMenu(tr("Deformed by"));
+    const doc::Cel *bentBy = direct && direct->properties().deformer != doc::DeformerKind::None ? direct : nullptr;
+    QAction *unbent = deformers->addAction(tr("None"), context,
+                                           [document, celId] { document->setTrajectoryParent(celId, doc::kNoId); });
+    unbent->setCheckable(true);
+    unbent->setChecked(!bentBy);
+    bool anyDeformer = false;
+    for (int i = d.celCount() - 1; i >= 0; --i) {
+        const doc::Cel &t = d.celAt(i);
+        if (t.properties().deformer == doc::DeformerKind::None)
+            continue;
+        const doc::CelId id = t.id();
+        QAction *action = deformers->addAction(QString::fromStdString(t.properties().name), context,
+                                               [document, celId, id] { document->setTrajectoryParent(celId, id); });
+        action->setCheckable(true);
+        action->setChecked(bentBy && bentBy->id() == id);
+        anyDeformer = true;
+    }
+    deformers->setEnabled(anyDeformer || bentBy);
 }
 
 } // namespace mothion::ui

@@ -124,7 +124,7 @@ void MouthChartPanel::sync()
     const doc::Cel *cel = m_document->document().cel(m_document->currentCel());
     if (!cel || !cel->properties().mouthChart) {
         m_pages->setCurrentIndex(0);
-        const bool can = cel && !cel->properties().trajectory;
+        const bool can = cel && !cel->properties().drawsNothing();
         m_noChart->setText(tr("The mouths of a character for the lip sync: a cel with a frame for each mouth shape "
                               "(A to H, X). The current cel is not a mouth chart."));
         m_makeChart->setText(cel ? tr("Make “%1” a mouth chart").arg(QString::fromStdString(cel->properties().name))

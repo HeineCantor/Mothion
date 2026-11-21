@@ -17,6 +17,8 @@ struct CelPose
     double scaleX = 1, scaleY = 1;      // 1 is as drawn; negative turns it over
     double rotation = 0;                // degrees, clockwise, accumulating (not wrapped: 0 to 360 is a full turn)
     double opacity = 1;                 // 0..1, on top of the cel's own opacity
+    // A deformation cel's pose (see Deformer): its numbers, empty for its rest. Nothing for any other cel.
+    std::vector<double> deform;
 
     // As drawn: nothing moved, turned or scaled (the opacity is another matter).
     bool movesNothing() const { return x == 0 && y == 0 && scaleX == 1 && scaleY == 1 && rotation == 0; }
@@ -32,10 +34,12 @@ enum class Channel
     Position, // x, y
     Rotation,
     Scale,    // scaleX, scaleY
-    Opacity
+    Opacity,
+    Deform    // deform: a deformation cel's pose, all its numbers keyed together
 };
-constexpr int kChannelCount = 4;
-constexpr Channel kChannels[kChannelCount] = {Channel::Position, Channel::Rotation, Channel::Scale, Channel::Opacity};
+constexpr int kChannelCount = 5;
+constexpr Channel kChannels[kChannelCount] = {Channel::Position, Channel::Rotation, Channel::Scale, Channel::Opacity,
+                                              Channel::Deform};
 
 // Only the part of `pose` that belongs to the channel (the rest as a pose that moves nothing has it), or the part copied
 // from `from` into `into`.
@@ -55,7 +59,8 @@ struct CelKey
 // What the animation does to a cel: where its pivot is, and, for each channel (position, rotation, scale, opacity) its
 // own keys. Before the first key of a channel and after the last it stays as that key put it; between two it goes along
 // the first one's easing. The position and the rotation go straight along the easing, the scale by ratios (a steady scale
-// looks steady), the opacity straight. A channel with no key is not changed at all; a cel with no key in any is not moved.
+// looks steady), the opacity straight, each number of a deformation's pose straight (one that only one of the two keys
+// has stays as that one has it). A channel with no key is not changed at all; a cel with no key in any is not moved.
 class CelMotion
 {
 public:

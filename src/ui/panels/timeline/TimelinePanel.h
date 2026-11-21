@@ -52,6 +52,7 @@ private:
     void lipSyncFromAudio();
 
     document::DocumentController *m_document;
+    tools::ToolState *m_toolState;
     TimelineView *m_view;
     TimelinePlayer *m_player;
     QWidget *m_mouthBar = nullptr;

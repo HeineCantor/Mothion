@@ -36,6 +36,7 @@ void copyChannel(Channel channel, const CelPose &from, CelPose &into)
     case Channel::Rotation: into.rotation = from.rotation; break;
     case Channel::Scale: into.scaleX = from.scaleX; into.scaleY = from.scaleY; break;
     case Channel::Opacity: into.opacity = from.opacity; break;
+    case Channel::Deform: into.deform = from.deform; break;
     }
 }
 
@@ -141,6 +142,11 @@ CelPose CelMotion::channelPose(Channel channel, int frame) const
         pose.scaleY = ratio(a.scaleY, b.scaleY);
         break;
     case Channel::Opacity: pose.opacity = std::clamp(straight(a.opacity, b.opacity), 0.0, 1.0); break;
+    case Channel::Deform:
+        pose.deform = a.deform.size() >= b.deform.size() ? a.deform : b.deform;
+        for (std::size_t i = 0; i < std::min(a.deform.size(), b.deform.size()); ++i)
+            pose.deform[i] = straight(a.deform[i], b.deform[i]);
+        break;
     }
     return pose;
 }

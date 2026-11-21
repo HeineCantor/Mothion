@@ -1,10 +1,15 @@
 #pragma once
 
 #include "canvas/Resample.h"
+#include "core/puppet/WarpRaster.h"
 #include "core/document/Document.h"
 
 #include <QImage>
 #include <QRect>
+
+#include <map>
+#include <optional>
+#include <vector>
 
 class QPainter;
 
@@ -54,6 +59,10 @@ public:
     // This cel is drawn as it is, without its motion: to draw on it where its pixels are (kNoId: none).
     void setCelAsDrawn(doc::CelId cel) { m_asDrawn = cel; }
     doc::CelId celAsDrawn() const { return m_asDrawn; }
+    // This cel is drawn without what the deformation cel that bends it does (its pose and trajectory still move it): to
+    // draw on it where its pixels are (kNoId: none).
+    void setCelUndeformed(doc::CelId cel) { m_undeformed = cel; }
+    doc::CelId celUndeformed() const { return m_undeformed; }
     // Only this cel is drawn (kNoId: all of them), to see what one cel makes of the frame by itself.
     void setOnlyCel(doc::CelId cel) { m_only = cel; }
     // This cel shows this drawing whatever its timing says (a mouth of a mouth chart drawn off the timeline); kNoId: as
@@ -92,6 +101,35 @@ private:
     doc::CelId m_shownCel = doc::kNoId;
     doc::DrawingId m_shownDrawing = doc::kNoId;
     const doc::Drawing *drawingOf(const doc::Cel &cel, int frame) const;
+
+    // A drawing bent by the deformation cel that bends its cel, placed where it landed.
+    struct Deformed
+    {
+        QImage image;
+        QRect rect;
+    };
+    // `drawing` of `cel` bent on `frame`; nullptr if nothing bends it there. Kept for each cel, and made again only when
+    // what it is made of changes: the drawing's layers (their tiles: the copies kept here make a tile written to be a new
+    // one), the deformer's bones or its pose.
+    const Deformed *deformed(const doc::Document &doc, const doc::Cel &cel, const doc::Drawing &drawing, int frame) const;
+    doc::CelId m_undeformed = doc::kNoId;
+    struct Bent
+    {
+        struct Source
+        {
+            doc::LayerProperties properties;
+            doc::LayerKind kind = doc::LayerKind::Raster;
+            doc::TiledImage image;
+            std::optional<doc::TiledImage> mask;
+        };
+        std::vector<Source> layers;
+        doc::Deformer deformer;
+        std::vector<double> pose;
+        bool guides = true;
+        puppet::RasterImage source; // the drawing as drawn, its layers composed
+        Deformed result;
+    };
+    mutable std::map<doc::CelId, Bent> m_deformed;
 };
 
 } // namespace mothion::canvas

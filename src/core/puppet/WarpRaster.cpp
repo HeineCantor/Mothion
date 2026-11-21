@@ -140,34 +140,53 @@ void deformedBounds(const PuppetRig &rig, int &x, int &y, int &width, int &heigh
     height = int(std::ceil(maxY)) + 2 - y;
 }
 
-void warp(const PuppetRig &rig, const RasterImage &source, RasterImage &target)
+namespace {
+// `draw(rowBegin, rowEnd)` over horizontal bands of `target`, in parallel; within a band, triangles keep their order.
+template <class Draw> void inBands(const RasterImage &target, const Draw &draw)
 {
-    if (target.isEmpty())
-        return;
-    // Horizontal bands drawn in parallel; within a band, triangles keep their order.
-    auto band = [&](int rowBegin, int rowEnd) {
-        for (const auto &mesh : rig.meshes())
-            for (const auto &t : mesh.rest.triangles)
-                drawTriangle(source, target, rowBegin, rowEnd, mesh.deformed[std::size_t(t[0])],
-                             mesh.deformed[std::size_t(t[1])], mesh.deformed[std::size_t(t[2])],
-                             mesh.rest.vertices[std::size_t(t[0])], mesh.rest.vertices[std::size_t(t[1])],
-                             mesh.rest.vertices[std::size_t(t[2])]);
-    };
     const int bands = std::clamp(int(std::thread::hardware_concurrency()), 1, 16);
     const int rows = (target.height + bands - 1) / bands;
     if (bands == 1 || target.height < 64) {
-        band(target.y, target.y + target.height);
+        draw(target.y, target.y + target.height);
         return;
     }
     std::vector<std::thread> workers;
     for (int b = 1; b < bands; ++b) {
         const int begin = target.y + b * rows, end = std::min(target.y + target.height, begin + rows);
         if (begin < end)
-            workers.emplace_back(band, begin, end);
+            workers.emplace_back(draw, begin, end);
     }
-    band(target.y, target.y + rows);
+    draw(target.y, target.y + rows);
     for (std::thread &w : workers)
         w.join();
+}
+} // namespace
+
+void warp(const PuppetRig &rig, const RasterImage &source, RasterImage &target)
+{
+    if (target.isEmpty())
+        return;
+    inBands(target, [&](int rowBegin, int rowEnd) {
+        for (const auto &mesh : rig.meshes())
+            for (const auto &t : mesh.rest.triangles)
+                drawTriangle(source, target, rowBegin, rowEnd, mesh.deformed[std::size_t(t[0])],
+                             mesh.deformed[std::size_t(t[1])], mesh.deformed[std::size_t(t[2])],
+                             mesh.rest.vertices[std::size_t(t[0])], mesh.rest.vertices[std::size_t(t[1])],
+                             mesh.rest.vertices[std::size_t(t[2])]);
+    });
+}
+
+void warpTriangles(const std::vector<Vec2> &rest, const std::vector<Vec2> &deformed,
+                   const std::vector<std::array<int, 3>> &triangles, const RasterImage &source, RasterImage &target)
+{
+    if (target.isEmpty())
+        return;
+    inBands(target, [&](int rowBegin, int rowEnd) {
+        for (const auto &t : triangles)
+            drawTriangle(source, target, rowBegin, rowEnd, deformed[std::size_t(t[0])], deformed[std::size_t(t[1])],
+                         deformed[std::size_t(t[2])], rest[std::size_t(t[0])], rest[std::size_t(t[1])],
+                         rest[std::size_t(t[2])]);
+    });
 }
 
 } // namespace mothion::puppet

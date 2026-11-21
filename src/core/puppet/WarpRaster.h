@@ -2,6 +2,7 @@
 
 #include "core/puppet/PuppetRig.h"
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -31,5 +32,9 @@ void deformedBounds(const PuppetRig &rig, int &x, int &y, int &width, int &heigh
 // itself). Each triangle maps back to the source with its own affine
 // transform; pixels are sampled bilinearly.
 void warp(const PuppetRig &rig, const RasterImage &source, RasterImage &target);
+// The same for any triangles: each one, given by indices into `rest` and `deformed`, drawn from its place in `rest` to
+// its place in `deformed`.
+void warpTriangles(const std::vector<Vec2> &rest, const std::vector<Vec2> &deformed,
+                   const std::vector<std::array<int, 3>> &triangles, const RasterImage &source, RasterImage &target);
 
 } // namespace mothion::puppet

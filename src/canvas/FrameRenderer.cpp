@@ -2,6 +2,8 @@
 
 #include "canvas/BlendDraw.h"
 #include "canvas/TileQt.h"
+#include "core/deform/BoneField.h"
+#include "core/deform/DeformRaster.h"
 #include "core/document/Blend.h"
 
 #include <QPainter>
@@ -316,6 +318,74 @@ QRect visibleBounds(const doc::Drawing &drawing, bool guides)
     return right < left ? QRect() : QRect(QPoint(left, top), QPoint(right, bottom)).translated(tiles.topLeft());
 }
 
+namespace {
+// Whether two images hold the very same tiles.
+bool sameTiles(const doc::TiledImage &a, const doc::TiledImage &b)
+{
+    if (a.tileCount() != b.tileCount())
+        return false;
+    for (const doc::TileCoord &c : a.tileCoords())
+        if (a.tile(c) != b.tile(c))
+            return false;
+    return true;
+}
+} // namespace
+
+const FrameRenderer::Deformed *FrameRenderer::deformed(const doc::Document &doc, const doc::Cel &cel,
+                                                       const doc::Drawing &drawing, int frame) const
+{
+    if (cel.id() == m_asDrawn || cel.id() == m_undeformed)
+        return nullptr;
+    const doc::Cel *deformer = doc.followedDeformer(cel);
+    if (!deformer || deformer->deformer().isEmpty())
+        return nullptr;
+    const std::vector<double> pose = doc.deformPoseAt(*deformer, frame);
+    Bent &bent = m_deformed[cel.id()];
+    // The drawing as drawn: kept while its layers are the same (only the pose changes as the bones are turned).
+    bool sameDrawing = bent.guides == m_guides && !bent.layers.empty() && bent.layers.size() == drawing.layers.size();
+    for (std::size_t i = 0; sameDrawing && i < drawing.layers.size(); ++i) {
+        const doc::Layer &l = drawing.layers[i];
+        const Bent::Source &k = bent.layers[i];
+        sameDrawing = k.properties == l.properties && k.kind == l.kind && sameTiles(k.image, l.image)
+                      && k.mask.has_value() == l.mask.has_value() && (!l.mask || sameTiles(*k.mask, *l.mask));
+    }
+    if (sameDrawing && bent.pose == pose && bent.deformer == deformer->deformer())
+        return bent.result.image.isNull() ? nullptr : &bent.result;
+    if (!sameDrawing) {
+        bent.layers.clear();
+        for (const doc::Layer &l : drawing.layers)
+            bent.layers.push_back({l.properties, l.kind, l.image, l.mask});
+        bent.guides = m_guides;
+        const QRect bounds = drawingBounds(drawing, m_guides);
+        bent.source = bounds.isEmpty() ? puppet::RasterImage()
+                                       : puppet::RasterImage(bounds.x(), bounds.y(), bounds.width(), bounds.height());
+        if (!bounds.isEmpty()) {
+            const QImage content = composeDrawing(drawing, bounds, m_guides);
+            for (int y = 0; y < bounds.height(); ++y) {
+                const auto *row = reinterpret_cast<const std::uint32_t *>(content.constScanLine(y));
+                std::copy(row, row + bounds.width(), bent.source.pixels.begin() + std::ptrdiff_t(y) * bounds.width());
+            }
+        }
+    }
+    bent.deformer = deformer->deformer();
+    bent.pose = pose;
+    Deformed &out = bent.result;
+    out = Deformed{};
+    const deform::BoneField field(deformer->deformer(), pose);
+    if (field.isIdentity() || bent.source.isEmpty())
+        return nullptr;
+    const puppet::RasterImage warped = deform::warpImage(bent.source, [&field](deform::Vec2 p) { return field.map(p); });
+    if (warped.isEmpty())
+        return nullptr;
+    out.rect = QRect(warped.x, warped.y, warped.width, warped.height);
+    out.image = QImage(warped.width, warped.height, QImage::Format_ARGB32_Premultiplied);
+    for (int y = 0; y < warped.height; ++y)
+        std::copy(warped.pixels.begin() + std::ptrdiff_t(y) * warped.width,
+                  warped.pixels.begin() + std::ptrdiff_t(y + 1) * warped.width,
+                  reinterpret_cast<std::uint32_t *>(out.image.scanLine(y)));
+    return &out;
+}
+
 void FrameRenderer::renderAll(const doc::Document &doc, int frame)
 {
     const QRect page(0, 0, doc.width(), doc.height());
@@ -422,12 +492,13 @@ QRect FrameRenderer::contentBounds(const doc::Document &doc, int frame) const
     QRect bounds;
     for (int i = 0; i < doc.celCount(); ++i) {
         const doc::Cel &cel = doc.celAt(i);
-        if ((m_only != doc::kNoId && cel.id() != m_only) || cel.properties().trajectory || !cel.properties().visible)
+        if ((m_only != doc::kNoId && cel.id() != m_only) || cel.properties().drawsNothing() || !cel.properties().visible)
             continue;
         const doc::Drawing *drawing = drawingOf(cel, frame);
         if (!drawing)
             continue;
-        const QRect own = drawingBounds(*drawing, m_guides);
+        const Deformed *bent = deformed(doc, cel, *drawing, frame);
+        const QRect own = bent ? bent->rect : drawingBounds(*drawing, m_guides);
         if (own.isEmpty())
             continue;
         const bool animated = !cel.motion().isEmpty() && cel.id() != m_asDrawn;
@@ -457,8 +528,8 @@ void FrameRenderer::compose(QImage &target, const QPoint &origin, const doc::Doc
         const doc::Cel &cel = doc.celAt(i);
         if (m_only != doc::kNoId && cel.id() != m_only)
             continue;
-        if (cel.properties().trajectory)
-            continue; // not drawn: it only moves what follows it
+        if (cel.properties().drawsNothing())
+            continue; // not drawn: it only moves or bends what follows it
         const doc::CelProperties &props = cel.properties();
         const doc::Drawing *drawing = drawingOf(cel, frame);
         // What the animation does to the cel on this frame (nothing for a cel with no keys, or one shown as drawn).
@@ -478,8 +549,10 @@ void FrameRenderer::compose(QImage &target, const QPoint &origin, const doc::Doc
             }
         if (shown == 0)
             continue;
-        if ((animated && !pose.movesNothing()) || !follow.isIdentity()) {
-            // Moved as one piece: what its layers show together, read through the pose into this area.
+        const Deformed *bent = deformed(doc, cel, *drawing, frame);
+        if (bent || (animated && !pose.movesNothing()) || !follow.isIdentity()) {
+            // Moved as one piece: what its layers show together (bent by its deformation cel), read through the pose into
+            // this area.
             const doc::Matrix2x3 m = pose.matrix(cel.motion().pivotX, cel.motion().pivotY).then(follow);
             const QTransform forward(m.a, m.b, m.c, m.d, m.e, m.f);
             bool invertible = false;
@@ -487,14 +560,15 @@ void FrameRenderer::compose(QImage &target, const QPoint &origin, const doc::Doc
             if (!invertible)
                 continue;
             const QRect source = back.mapRect(QRectF(area)).toAlignedRect().adjusted(-3, -3, 3, 3)
-                                 & drawingBounds(*drawing, m_guides);
+                                 & (bent ? bent->rect : drawingBounds(*drawing, m_guides));
             if (source.isEmpty())
                 continue;
             // Only where it lands (not all of the area: the canvas has no end, and a piece is often small on it).
             const QRect dest = forward.mapRect(QRectF(source)).toAlignedRect().adjusted(-2, -2, 2, 2) & area;
             if (dest.isEmpty())
                 continue;
-            const QImage content = composeDrawing(*drawing, source, m_guides);
+            const QImage content = bent ? bent->image.copy(source.translated(-bent->rect.topLeft()))
+                                        : composeDrawing(*drawing, source, m_guides);
             QImage moved;
             const QTransform toArea = forward * QTransform::fromTranslate(-dest.x(), -dest.y());
             if (m_filter == ResampleFilter::Bilinear || m_filter == ResampleFilter::Nearest) {

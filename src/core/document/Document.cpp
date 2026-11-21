@@ -65,7 +65,11 @@ const Cel *Document::trajectoryParent(const Cel &cel) const
 bool Document::trajectoryLoop(CelId child, CelId parent) const
 {
     const Cel *c = cel(child), *p = cel(parent);
-    if (!c || !p || !p->properties().trajectory)
+    if (!c || !p)
+        return true;
+    if (p->properties().deformer != DeformerKind::None)
+        return c->properties().drawsNothing(); // only a drawn cel is bent, and nothing follows it
+    if (!p->properties().trajectory)
         return true;
     if (!c->properties().trajectory)
         return false; // a cel that follows one: nothing follows it, so there is no way back
@@ -80,10 +84,31 @@ bool Document::trajectoryLoop(CelId child, CelId parent) const
 
 const Cel *Document::followedTrajectory(const Cel &cel) const
 {
-    if (cel.properties().trajectory || cel.properties().parent == kNoId)
+    if (cel.properties().trajectory || cel.properties().parent == kNoId || cel.properties().parent == cel.id())
         return nullptr;
     const Cel *parent = this->cel(cel.properties().parent);
-    return parent && parent->properties().trajectory ? parent : nullptr;
+    if (!parent)
+        return nullptr;
+    if (parent->properties().trajectory)
+        return parent;
+    // Bent by a deformation cel (an inactive one too): what follows it follows its trajectory.
+    if (parent->properties().deformer != DeformerKind::None && cel.properties().deformer == DeformerKind::None)
+        return followedTrajectory(*parent);
+    return nullptr;
+}
+
+const Cel *Document::followedDeformer(const Cel &cel) const
+{
+    if (cel.properties().drawsNothing() || cel.properties().parent == kNoId)
+        return nullptr;
+    const Cel *parent = this->cel(cel.properties().parent);
+    return parent && parent->properties().deformer != DeformerKind::None && parent->properties().visible ? parent : nullptr;
+}
+
+std::vector<double> Document::deformPoseAt(const Cel &deformer, int frame) const
+{
+    std::vector<double> pose = deformer.motion().poseAt(frame).deform;
+    return pose.empty() ? deformer.deformer().rest : pose;
 }
 
 int Document::trajectoryStartFrame(CelId trajectory) const

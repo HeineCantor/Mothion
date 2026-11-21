@@ -785,10 +785,11 @@ void LayersPanel::rebuildTree()
     };
 
     const QPixmap blank = thumbnail(nullptr, nullptr, docSize, nullptr);
-    // Top cel first. Trajectories are not here: they live in the timeline and have no place in the drawing order.
+    // Top cel first. Trajectories and deformers are not here: they live in the timeline and have no place in the drawing
+    // order.
     std::vector<std::pair<int, int>> order; // cel index, depth
     for (int i = d.celCount() - 1; i >= 0; --i)
-        if (!d.celAt(i).properties().trajectory)
+        if (!d.celAt(i).properties().drawsNothing())
             order.push_back({i, 0});
     for (const auto &[i, depth] : order) {
         const doc::Cel &cel = d.celAt(i);

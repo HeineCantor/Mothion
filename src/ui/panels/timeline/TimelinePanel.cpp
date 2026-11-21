@@ -150,6 +150,7 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
                              QWidget *parent)
     : QWidget(parent)
     , m_document(document)
+    , m_toolState(toolState)
     , m_view(new TimelineView(document, this))
     , m_player(new TimelinePlayer(document, audio, this))
 {
@@ -259,6 +260,17 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
     connect(pathMode, &QToolButton::toggled, toolState, &tools::ToolState::setTrajectoryMode);
     connect(toolState, &tools::ToolState::trajectoryModeChanged, pathMode, &QToolButton::setChecked);
 
+    // Rig mode: the bones of a bones deformer at rest, to be drawn and placed; off, they are turned on the frames.
+    auto *rigMode = celButton(IconId::Bones, QStringLiteral("rigMode"),
+                              tr("Rig mode: draw and place the bones of the current bones deformer at rest (drag on "
+                                 "nothing: a new bone; from the end of the last one: the next; Delete: the chosen one). "
+                                 "Off, drag the bones to bend what follows them on this frame."),
+                              this);
+    rigMode->setCheckable(true);
+    rigMode->setChecked(toolState->rigMode());
+    connect(rigMode, &QToolButton::toggled, toolState, &tools::ToolState::setRigMode);
+    connect(toolState, &tools::ToolState::rigModeChanged, rigMode, &QToolButton::setChecked);
+
     // A marker on the current frame: pressed while there is one; the button adds or takes it away (Ctrl+M).
     auto *marker = celButton(IconId::Flag, QStringLiteral("markerButton"),
                              tr("Marker on this frame: add or remove it (Ctrl+M). A marker is a name on the timeline: "
@@ -325,6 +337,7 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
     bar->addWidget(cameraKey);
     bar->addWidget(celKey);
     bar->addWidget(pathMode);
+    bar->addWidget(rigMode);
     bar->addWidget(prevMarker);
     bar->addWidget(marker);
     bar->addWidget(nextMarker);
@@ -381,6 +394,10 @@ QLayout *TimelinePanel::celBar()
     auto *add = celButton(IconId::NewCel, QStringLiteral("celAdd"), tr("New cel above the current one"), this);
     auto *addTrajectory = celButton(IconId::NewTrajectory, QStringLiteral("trajectoryAdd"),
                                     tr("New trajectory cel above the current one"), this);
+    auto *addBones = celButton(IconId::NewBones, QStringLiteral("bonesAdd"),
+                               tr("New bones deformer above the current cel: the current cel is bent by it. Draw its bones "
+                                  "in rig mode, then turn them on the frames to animate the bend"),
+                               this);
     auto *remove = celButton(IconId::Delete, QStringLiteral("celRemove"), tr("Delete the current cel"), this);
     auto *up = celButton(IconId::ArrowUp, QStringLiteral("celUp"), tr("Move the current cel up"), this);
     auto *down = celButton(IconId::ArrowDown, QStringLiteral("celDown"), tr("Move the current cel down"), this);
@@ -403,7 +420,7 @@ QLayout *TimelinePanel::celBar()
     auto *row = new QHBoxLayout;
     row->setContentsMargins(4, 0, 4, 2);
     row->setSpacing(4);
-    for (QWidget *w : std::initializer_list<QWidget *>{add, addTrajectory, remove, up, down})
+    for (QWidget *w : std::initializer_list<QWidget *>{add, addTrajectory, addBones, remove, up, down})
         row->addWidget(w);
     row->addSpacing(8);
     row->addWidget(blend);
@@ -433,6 +450,10 @@ QLayout *TimelinePanel::celBar()
     };
     connect(add, &QToolButton::clicked, m_document, &DocumentController::addCel);
     connect(addTrajectory, &QToolButton::clicked, m_document, &DocumentController::addTrajectory);
+    connect(addBones, &QToolButton::clicked, this, [this] {
+        m_document->addDeformer(doc::DeformerKind::Bones);
+        m_toolState->setRigMode(true); // its bones are to be drawn first
+    });
     connect(remove, &QToolButton::clicked, this, [this] {
         if (m_document->document().celCount() > 1) // keep at least one
             m_document->execute(std::make_unique<doc::RemoveCelCommand>(m_document->currentCel()));

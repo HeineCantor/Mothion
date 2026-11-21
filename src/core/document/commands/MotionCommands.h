@@ -2,6 +2,7 @@
 
 #include "core/document/CelMotion.h"
 #include "core/document/Command.h"
+#include "core/document/Deformer.h"
 
 namespace mothion::doc {
 
@@ -23,6 +24,23 @@ private:
     CelId m_cel;
     CelMotion m_after;
     CelMotion m_before;
+};
+
+// Puts `after` in place of a deformation cel's bones and rest (see Deformer), and undo puts the old ones back.
+class SetDeformerCommand : public Command
+{
+public:
+    SetDeformerCommand(CelId cel, Deformer after);
+
+    CommandKind kind() const override { return CommandKind::EditDeformer; }
+    ChangeSet apply(Document &doc) override;
+    ChangeSet revert(Document &doc) override;
+    std::size_t memoryBytes() const override;
+
+private:
+    CelId m_cel;
+    Deformer m_after;
+    Deformer m_before;
 };
 
 } // namespace mothion::doc

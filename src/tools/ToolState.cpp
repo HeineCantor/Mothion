@@ -197,6 +197,14 @@ void ToolState::setTrajectoryMode(bool on)
     emit trajectoryModeChanged(on);
 }
 
+void ToolState::setRigMode(bool on)
+{
+    if (on == m_rigMode)
+        return;
+    m_rigMode = on;
+    emit rigModeChanged(on);
+}
+
 void ToolState::setSharpCorners(bool on)
 {
     if (on == m_sharpCorners)

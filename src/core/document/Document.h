@@ -92,16 +92,22 @@ public:
     // Trajectories (see CelProperties::trajectory) that follow one another. `cel`'s parent if it has one that is a trajectory
     // there, other than itself; nullptr otherwise.
     const Cel *trajectoryParent(const Cel &cel) const;
-    // The trajectory a cel that is no trajectory follows (its parent, if that is one); nullptr for none.
+    // The trajectory a cel that is no trajectory follows (its parent, if that is one, or the one the deformation cel that
+    // bends it follows); nullptr for none.
     const Cel *followedTrajectory(const Cel &cel) const;
+    // The deformation cel that bends a drawn cel (its parent, if that is one); nullptr for none (an inactive one, whose
+    // `visible` is off, bends nothing).
+    const Cel *followedDeformer(const Cel &cel) const;
+    // A deformation cel's pose on `frame`: its Deform channel's there, or its rest without one.
+    std::vector<double> deformPoseAt(const Cel &deformer, int frame) const;
     // What the trajectory a cel follows does to it on `frame` (identity for a cel that follows none): on top of the cel's own
     // pose, and relative: only what the trajectory has done since its first key (see trajectoryStartFrame()), so the cel is
     // where it is drawn at that frame and before it.
     Matrix2x3 followMatrix(const Cel &cel, int frame) const;
     // The frame of the first key of a trajectory or of the ones it follows; -1 if none has a key.
     int trajectoryStartFrame(CelId trajectory) const;
-    // Whether making `parent` the parent of `child` would be a loop (or the parent is no trajectory, or a trajectory's
-    // child is not one).
+    // Whether making `parent` the parent of `child` would be a loop or cannot be: the parent is no trajectory or deformation
+    // cel; a trajectory's child is not one; a deformation cel's child is a trajectory or a deformation cel.
     bool trajectoryLoop(CelId child, CelId parent) const;
     // What a trajectory does on `frame` to what follows it: its parent's way, then its own pose (an inactive one has none)
     // on top of that (the parent's matrix after its own: a child turns round its parent as the parent turns).

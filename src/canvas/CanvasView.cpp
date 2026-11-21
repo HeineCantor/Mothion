@@ -102,6 +102,7 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
     , m_gizmo(document)
     , m_cameraGizmo(document)
     , m_trajectoryGizmo(document)
+    , m_boneGizmo(document)
     , m_symmetryGizmo(document, toolState)
     , m_overlay(new DebugOverlay(this))
 {
@@ -284,6 +285,14 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
         update();
     });
     connect(m_document, &DocumentController::motionPreviewChanged, this, [this] { update(); }); // keys dragged on the timeline
+    // Rig mode: the bones of a Bones deformer at rest, to be made and placed; off, posed and animated.
+    m_boneGizmo.setRigMode(m_toolState->rigMode());
+    m_boneGizmo.setRepaint([this] { update(); });
+    connect(m_toolState, &ToolState::rigModeChanged, this, [this](bool on) {
+        m_boneGizmo.cancel();
+        m_boneGizmo.setRigMode(on);
+        update();
+    });
     connect(m_toolState, &ToolState::trajectoryModeChanged, this, [this](bool on) {
         m_trajectoryGizmo.setPathVisible(on);
         updateStraightLine(); // no straight line while a path is shown
@@ -615,6 +624,7 @@ void CanvasView::paintEvent(QPaintEvent *)
     m_cameraGizmo.paint(p, m_view);
     m_trajectoryGizmo.paintPath(p, m_view); // the whole way of the trajectory, under its circle
     m_trajectoryGizmo.paint(p, m_view);
+    m_boneGizmo.paint(p, m_view);
     m_symmetryGizmo.paint(p, m_view);
     paintSnapGuide(p);
     paintStraightLinePreview(p);
@@ -658,6 +668,9 @@ void CanvasView::syncCelAsDrawn()
     // A cel moved by its keys is always shown moved, at rest and with a pixel tool too: the pen works on it as shown (see
     // toCel()).
     m_frame.setCelAsDrawn(doc::kNoId);
+    // A cel bent by a deformer is shown as drawn while it is the current one, so that the pen paints where its pixels are;
+    // the bend shows when its deformer (or another cel) is the current one, and while playing.
+    m_frame.setCelUndeformed(m_playing || m_scrubbing ? doc::kNoId : m_document->currentCel());
     // A mouth of a mouth chart drawn off the timeline is what the canvas shows of the cel.
     m_frame.setDrawingShown(m_document->currentCel(), m_document->mouthDrawingEdited());
     m_page.setDrawingShown(m_document->currentCel(), m_document->mouthDrawingEdited());
@@ -986,6 +999,7 @@ void CanvasView::handleSample(const PenSample &sample)
 
     const bool busy = m_gesture.isActive() || m_stroke.has_value() || m_editTool || m_gizmo.isDragging()
                       || m_cameraGizmo.isDragging() || m_trajectoryGizmo.isDragging() || m_symmetryGizmo.isDragging()
+                      || m_boneGizmo.isDragging()
                       || m_flip.has_value();
     const QPointF docPos = m_view.mapToDocument(QPointF(sample.x, sample.y));
     const QPointF celPos = toCel(docPos);
@@ -1008,6 +1022,8 @@ void CanvasView::handleSample(const PenSample &sample)
             update(); // the symmetry's center or knob, whatever the tool; Ctrl+drag with a brush brings the center
         } else if (sample.tipDown() && m_trajectoryGizmo.press(docPos, m_view, modifiers)) {
             update(); // the circle of the trajectory cel selected: its middle, its arrow or its edge, whatever the tool
+        } else if (sample.tipDown() && m_boneGizmo.press(docPos, m_view, modifiers)) {
+            update(); // the bones of a deformer: made and placed in rig mode, else turned, whatever the tool
         } else if (sample.tipDown() && m_gizmo.press(docPos, m_view)) {
             update(); // a handle of the perspective layer, whatever the tool
         } else if (sample.tipDown() && m_trajectoryGizmo.pathShown()
@@ -1073,6 +1089,9 @@ void CanvasView::handleSample(const PenSample &sample)
         } else if (m_trajectoryGizmo.isDragging()) {
             m_trajectoryGizmo.move(docPos, modifiers);
             update();
+        } else if (m_boneGizmo.isDragging()) {
+            m_boneGizmo.move(docPos, modifiers);
+            update();
         } else if (m_gizmo.isDragging()) {
             m_gizmo.move(docPos, m_view);
             update();
@@ -1113,6 +1132,10 @@ void CanvasView::handleSample(const PenSample &sample)
             update();
             updateGizmoCursor();
         }
+        if (m_boneGizmo.isDragging()) {
+            m_boneGizmo.release(docPos);
+            update();
+        }
         if (m_gizmo.isDragging()) {
             const bool menu = m_gizmo.release(docPos);
             update();
@@ -1145,6 +1168,8 @@ void CanvasView::handleSample(const PenSample &sample)
             updateGizmoCursor();
             update();
         }
+        if (!busy && m_boneGizmo.hover(docPos, m_view))
+            update();
         if (!busy && m_gizmo.hover(docPos, m_view)) {
             updateGizmoCursor();
             update();
@@ -1634,6 +1659,7 @@ void CanvasView::cancelStroke()
     m_gizmo.cancel();
     m_cameraGizmo.cancel();
     m_trajectoryGizmo.cancel();
+    m_boneGizmo.cancel();
     m_symmetryGizmo.cancel();
     if (m_editTool) {
         // A drag cut short is dropped, unless it belongs to a longer edit.
@@ -1716,6 +1742,11 @@ bool CanvasView::event(QEvent *event)
         updateCursor();
     if (event->type() == QEvent::ShortcutOverride) {
         auto *key = static_cast<QKeyEvent *>(event);
+        if ((key->key() == Qt::Key_Delete || key->key() == Qt::Key_Backspace) && m_boneGizmo.rigMode()
+            && m_boneGizmo.chosenBone() >= 0) {
+            event->accept(); // the chosen bone goes, not the frame
+            return true;
+        }
         if (const CanvasTool *tool = canvasTool(); tool && key->modifiers() == Qt::NoModifier && tool->wantsKey(key->key())) {
             event->accept(); // no shortcut: it comes as a key press
             return true;
@@ -1787,6 +1818,11 @@ void CanvasView::keyPressEvent(QKeyEvent *event)
         if (!m_lastPoint && ToolState::isPaintTool(m_toolState->activeTool()) && !m_stroke && !m_trajectoryGizmo.pathShown())
             emit statusMessage(tr("Draw something first: Shift then draws a straight line from the last point"));
         updateStraightLine();
+    }
+    if ((event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) && m_boneGizmo.removeChosenBone()) {
+        event->accept();
+        update();
+        return;
     }
     // Repeats too: a held key may keep stepping (the puppet radius).
     if (CanvasTool *tool = canvasTool(); tool && tool->keyPress(event->key())) {
