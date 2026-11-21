@@ -1927,8 +1927,11 @@ void CanvasView::updateCursor()
         setCursor(zoomCursor());
     else if (picksColor())
         setCursor(Qt::CrossCursor);
-    else if (ToolState::editsPixels(m_toolState->activeTool()) && m_document->drawingBlocked())
-        setCursor(Qt::ForbiddenCursor); // nothing to draw on: a cel, a frame or the camera is selected
+    else if (ToolState::editsPixels(m_toolState->activeTool()) && m_document->drawingBlocked()
+             && (m_document->cameraSelected() || !ToolState::worksOnChosenLayers(m_toolState->activeTool())))
+        // Nothing to draw on: a cel, a frame or the camera is selected. The tools that work on all the layers chosen (a
+        // cel's or a frame's) do work then, but not on the camera.
+        setCursor(Qt::ForbiddenCursor);
     else if (ToolState::isPaintTool(m_toolState->activeTool()) && Preferences::instance().brushOutline())
         setCursor(invisibleCursor()); // the brush's own outline, drawn in paintEvent(), is the cursor
     else if (const CanvasTool *tool = canvasTool())

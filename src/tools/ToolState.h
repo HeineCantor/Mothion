@@ -174,6 +174,12 @@ public:
         return tool != ToolId::Hand && tool != ToolId::Zoom && tool != ToolId::RectSelect &&
                tool != ToolId::LassoSelect && tool != ToolId::Eyedropper;
     }
+    // Tools that work on every layer chosen together (those of a chosen cel or frame too), not on one alone: they are not
+    // stopped by a cel or a frame being chosen instead of a layer.
+    static bool worksOnChosenLayers(ToolId tool)
+    {
+        return tool == ToolId::Move || tool == ToolId::Transform || tool == ToolId::Puppet;
+    }
     // Tools with a size of their own in the settings: the paint tools, the effect brushes and the shape tool.
     // The size controls (presets, [ ] and the slider) work on all of them.
     static bool hasSize(ToolId tool)

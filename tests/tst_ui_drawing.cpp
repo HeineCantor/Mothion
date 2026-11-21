@@ -2193,7 +2193,8 @@ private slots:
     }
 
 
-    // With a cel or a frame selected (or the camera), the pixel tools show the "not allowed" cursor, not the brush.
+    // With a cel or a frame selected (or the camera), the pixel tools that work on one layer show the "not allowed"
+    // cursor, not the brush; those that work on all the chosen layers (move, transform, puppet) do not, but on the camera.
     void cursorSaysNoWhenNothingCanBeDrawnOn()
     {
         tools::ToolState state;
@@ -2220,6 +2221,16 @@ private slots:
         QVERIFY(canvas.cursor().shape() != Qt::ForbiddenCursor);
         state.setActiveTool(tools::ToolId::RectSelect);
         QVERIFY(canvas.cursor().shape() != Qt::ForbiddenCursor);
+        // The tools that work on all the layers chosen (a cel's or a frame's) do work then.
+        for (tools::ToolId tool : {tools::ToolId::Move, tools::ToolId::Transform, tools::ToolId::Puppet}) {
+            state.setActiveTool(tool);
+            QVERIFY(canvas.cursor().shape() != Qt::ForbiddenCursor);
+        }
+        controller.addCamera();
+        controller.selectCamera(true); // not on the camera
+        QVERIFY(controller.cameraSelected());
+        QCOMPARE(canvas.cursor().shape(), Qt::ForbiddenCursor);
+        controller.selectCamera(false);
 
         state.setActiveTool(tools::ToolId::Brush);
         controller.setLayerChosen(true);
