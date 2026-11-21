@@ -1632,6 +1632,31 @@ private slots:
     }
 
 
+    // Choosing a mouth to draw chooses its layer: the cel chosen as a whole before (its name in the timeline), which
+    // stops the brushes until a layer is, does not stop them on the mouth (the Layers panel may be hidden behind the
+    // Mouth chart). Two charts, a mouth of the second drawn, back to the first by its name, one of its mouths chosen.
+    void choosingAMouthToDrawChoosesItsLayer()
+    {
+        document::DocumentController controller;
+        const doc::CelId first = controller.currentCel();
+        QVERIFY(controller.setMouthChart(first, true));
+        controller.addCel();
+        const doc::CelId second = controller.currentCel();
+        QVERIFY(second != first);
+        QVERIFY(controller.setMouthChart(second, true));
+        QVERIFY(controller.editMouthDrawing(doc::mouthDrawing(*controller.document().cel(second), 'D')));
+        QVERIFY(!controller.drawingBlocked());
+        controller.chooseCel(first);
+        QVERIFY(!controller.layerChosen()); // a cel chosen as a whole: the brushes wait for a layer, as ever
+        QSignalSpy byDrawing(&controller, &document::DocumentController::layerChosenByDrawing);
+        QVERIFY(controller.editMouthDrawing(doc::mouthDrawing(*controller.document().cel(first), 'A')));
+        QVERIFY(controller.layerChosen());
+        QVERIFY(!controller.drawingBlocked());
+        QCOMPARE(byDrawing.count(), 1); // the Layers panel shows the layer chosen
+        controller.stopEditingMouth();
+        QVERIFY(!controller.drawingBlocked()); // and stays so for the other drawings
+    }
+
     // Rhubarb Lip Sync's output read: its JSON cues, and its machine-readable status (progress, failure).
     void rhubarbsOutputIsRead()
     {

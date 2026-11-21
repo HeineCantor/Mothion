@@ -2585,6 +2585,13 @@ bool DocumentController::editMouthDrawing(doc::DrawingId drawing)
     interruptStroke();
     m_mouthEdit = drawing;
     resolveCurrentLayer();
+    // A mouth chosen to draw: its layer is the selection, not the cel chosen as a whole before (which would stop the
+    // brushes, with the Layers panel perhaps hidden behind the Mouth chart).
+    selectCamera(false);
+    if (!m_layerChosen) {
+        setLayerChosen(true);
+        emit layerChosenByDrawing();
+    }
     emit mouthEditChanged();
     emit pixelsChanged(m_currentCel, doc::kNoId, kWholeCanvas); // the canvas shows another drawing
     return true;
