@@ -243,19 +243,17 @@ std::optional<QPointF> TrajectoryGizmo::handlePoint(Handle handle, const ViewTra
 
 void TrajectoryGizmo::setChosen(doc::CelId cel, const std::set<int> &frames, int clicked)
 {
-    m_chosenCel = cel;
-    m_chosen = frames;
-    emit m_document->pathKeysChosen(cel, std::vector<int>(frames.begin(), frames.end()), clicked);
+    m_document->choosePathKeys(cel, frames, clicked); // (an undo step when they change)
 }
 
 std::set<int> TrajectoryGizmo::chosenKeys() const
 {
     const doc::Cel *trajectory = pathTrajectory();
-    if (!trajectory || trajectory->id() != m_chosenCel)
+    if (!trajectory || trajectory->id() != m_document->pathKeysCel())
         return {};
     std::set<int> keys;
     const doc::CelMotion &motion = motionOf(*trajectory);
-    for (int frame : m_chosen)
+    for (int frame : m_document->pathKeys())
         if (motion.keyAt(doc::Channel::Position, frame)) // one taken away or moved since is not chosen any more
             keys.insert(frame);
     return keys;
@@ -320,7 +318,7 @@ bool TrajectoryGizmo::press(const QPointF &docPos, const ViewTransform &view, Qt
         // The keys chosen, as on the timeline: a click chooses the key alone (one among several chosen keeps them, to drag
         // them together); Ctrl adds it or takes it away; Shift adds the keys from the one last clicked to it.
         std::set<int> chosen = chosenKeys();
-        if (m_chosenCel != trajectory->id())
+        if (m_document->pathKeysCel() != trajectory->id())
             m_anchorKey = -1;
         if (modifiers & Qt::ControlModifier) {
             if (chosen.contains(frame)) {

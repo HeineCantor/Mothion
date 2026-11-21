@@ -101,6 +101,42 @@ private:
     QPainterPath m_after;
 };
 
+// The keys of a trajectory's path chosen before and after a step (see choosePathKeys()).
+class PathKeysCommand : public doc::Command
+{
+public:
+    using Assign = std::function<void(doc::CelId, const std::set<int> &)>;
+    struct Keys
+    {
+        doc::CelId cel = doc::kNoId;
+        std::set<int> frames;
+    };
+
+    PathKeysCommand(Assign assign, Keys before, Keys after)
+        : m_assign(std::move(assign))
+        , m_before(std::move(before))
+        , m_after(std::move(after))
+    {
+    }
+
+    doc::CommandKind kind() const override { return doc::CommandKind::Select; }
+    doc::ChangeSet apply(doc::Document &) override
+    {
+        m_assign(m_after.cel, m_after.frames);
+        return {};
+    }
+    doc::ChangeSet revert(doc::Document &) override
+    {
+        m_assign(m_before.cel, m_before.frames);
+        return {};
+    }
+
+private:
+    Assign m_assign;
+    Keys m_before;
+    Keys m_after;
+};
+
 } // namespace
 
 DocumentController::DocumentController(QObject *parent)
@@ -164,6 +200,8 @@ void DocumentController::replaceDocument(std::unique_ptr<doc::Document> document
                                                   : doc::kNoId;
     m_currentFrame = 0;
     m_mouthEdit = doc::kNoId;
+    m_pathKeysCel = doc::kNoId;
+    m_pathKeys.clear();
     m_currentLayer = doc::kNoId;
     m_currentLayerName.clear();
     m_lastLayerOf.clear();
@@ -2359,6 +2397,30 @@ void DocumentController::setSelection(const QPainterPath &area)
         doc::CommandKind::Select, [this](const QPainterPath &a) { assignSelection(a); }, std::move(before),
         m_selection));
     emit historyChanged();
+}
+
+void DocumentController::choosePathKeys(doc::CelId cel, const std::set<int> &frames, int clicked)
+{
+    if (frames.empty())
+        cel = m_pathKeysCel; // none chosen: of whichever trajectory
+    if (cel == m_pathKeysCel && frames == m_pathKeys) {
+        if (clicked >= 0)
+            emit pathKeysChosen(cel, std::vector<int>(frames.begin(), frames.end()), clicked); // another one clicked
+        return;
+    }
+    PathKeysCommand::Keys before{m_pathKeysCel, m_pathKeys};
+    assignPathKeys(cel, frames, clicked);
+    m_history.pushApplied(std::make_unique<PathKeysCommand>(
+        [this](doc::CelId c, const std::set<int> &f) { assignPathKeys(c, f, -1); }, std::move(before),
+        PathKeysCommand::Keys{m_pathKeysCel, m_pathKeys}));
+    emit historyChanged();
+}
+
+void DocumentController::assignPathKeys(doc::CelId cel, const std::set<int> &frames, int clicked)
+{
+    m_pathKeysCel = cel;
+    m_pathKeys = frames;
+    emit pathKeysChosen(cel, std::vector<int>(frames.begin(), frames.end()), clicked);
 }
 
 void DocumentController::assignSelection(const QPainterPath &area)

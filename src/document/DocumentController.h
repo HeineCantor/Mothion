@@ -1,6 +1,7 @@
 #pragma once
 
 #include <limits>
+#include <set>
 #include "core/document/Document.h"
 #include "core/document/History.h"
 #include "core/document/LipSync.h"
@@ -285,6 +286,11 @@ public:
     double symmetryAngle() const { return m_document->symmetryAxes().angle; }
     void setSymmetryAxes(const QPointF &center, double angle);
     void resetSymmetryAxes();
+    // The keys of a trajectory's path chosen on the canvas (TrajectoryGizmo), by their frames: kept here, so that each
+    // change is an undo step ("selection"), as the pixels' selection is. `clicked`: the key clicked, or -1.
+    doc::CelId pathKeysCel() const { return m_pathKeysCel; }
+    const std::set<int> &pathKeys() const { return m_pathKeys; }
+    void choosePathKeys(doc::CelId cel, const std::set<int> &frames, int clicked = -1);
     int playRangeFirst() const { return m_document->sceneStart(); }
     int playRangeLast() const; // the scene's last frame, never before the first
     // The frame after the last exposure of any cel: how short the scene can be without leaving some out.
@@ -724,6 +730,9 @@ private:
     void previewMotions(std::map<doc::CelId, doc::CelMotion> motions);
     std::vector<doc::VectorStroke> m_copiedStrokes;
     bool m_layerChosen = true;
+    doc::CelId m_pathKeysCel = doc::kNoId; // see choosePathKeys()
+    std::set<int> m_pathKeys;
+    void assignPathKeys(doc::CelId cel, const std::set<int> &frames, int clicked);
     bool m_cameraSelected = false;
     doc::LayerId m_currentLayer = doc::kNoId;
     std::string m_currentLayerName; // looked for when the drawing changes

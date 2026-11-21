@@ -309,6 +309,8 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
         connect(m_document, signal, this, &CanvasView::updateCursor); // may now (not) be drawable
     connect(m_document, &DocumentController::currentFrameChanged, this, &CanvasView::updateCursor);
     connect(m_document, &DocumentController::currentCelChanged, this, &CanvasView::updateCursor);
+    // The path's keys chosen (an undo or a redo too): their dots and their box are drawn again.
+    connect(m_document, &DocumentController::pathKeysChosen, this, qOverload<>(&QWidget::update));
     connect(m_toolState, &ToolState::activeToolChanged, this, [this] { updateStraightLine(); });
     connect(m_document, &DocumentController::documentReplaced, this, [this] {
         m_lastPoint.reset();
@@ -1010,6 +1012,9 @@ void CanvasView::handleSample(const PenSample &sample)
                    && (m_toolState->activeTool() == ToolId::RectSelect || m_toolState->activeTool() == ToolId::LassoSelect)
                    && m_trajectoryGizmo.beginMarquee(docPos, m_toolState->activeTool() == ToolId::LassoSelect, modifiers)) {
             update(); // while a path is shown the selection tools choose its keys, to move them together
+        } else if (sample.tipDown() && m_trajectoryGizmo.pathShown() && !m_trajectoryGizmo.chosenKeys().empty()) {
+            m_trajectoryGizmo.clearChosenKeys(); // a click on nothing, with other tools: none of the path's keys chosen
+            update();
         } else if (sample.tipDown() && m_trajectoryGizmo.pathShown()
                    && (sample.tool == InputTool::Eraser || ToolState::hasSize(m_toolState->activeTool())
                        || m_toolState->activeTool() == ToolId::Fill)) {

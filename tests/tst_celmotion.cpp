@@ -879,6 +879,62 @@ private slots:
         QCOMPARE(gizmo.chosenKeys(), (std::set<int>{2, 12, 22}));
     }
 
+    // Choosing the path's keys is an undo step (each change, as the pixels' selection is; a key dragged after is one more),
+    // and a click on nothing chooses none with any tool, not only the selection ones.
+    void choosingPathKeysIsUndoneAndAClickOnNothingChoosesNone()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        controller.setSceneLength(30);
+        controller.addTrajectory();
+        const doc::CelId trajectory = controller.currentCel();
+        QVERIFY(controller.setCelKey(trajectory, 2, at(0, 0)));
+        QVERIFY(controller.setCelKey(trajectory, 12, at(200, 100)));
+        QVERIFY(controller.setCelKey(trajectory, 22, at(400, 0)));
+
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(900, 520);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        state.setTrajectoryMode(true);
+        const canvas::TrajectoryGizmo &gizmo = canvas.trajectoryGizmo();
+        const QTransform toView = canvas.view().documentToView();
+        auto screen = [&](double x, double y) { return toView.map(QPointF(x, y)).toPoint(); };
+        const double px = controller.document().cel(trajectory)->motion().pivotX;
+        const double py = controller.document().cel(trajectory)->motion().pivotY;
+        auto click = [&](QPoint at, Qt::KeyboardModifiers modifiers = {}) {
+            QTest::mousePress(&canvas, Qt::LeftButton, modifiers, at);
+            QTest::mouseRelease(&canvas, Qt::LeftButton, modifiers, at);
+        };
+
+        state.setActiveTool(tools::ToolId::RectSelect);
+        click(screen(px + 200, py + 100));
+        QCOMPARE(gizmo.chosenKeys(), (std::set<int>{12}));
+        click(screen(px + 400, py), Qt::ControlModifier);
+        QCOMPARE(gizmo.chosenKeys(), (std::set<int>{12, 22}));
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo selection"));
+        controller.undo();
+        QCOMPARE(gizmo.chosenKeys(), (std::set<int>{12}));
+        controller.undo();
+        QVERIFY(gizmo.chosenKeys().empty());
+        controller.redo();
+        controller.redo();
+        QCOMPARE(gizmo.chosenKeys(), (std::set<int>{12, 22}));
+        click(screen(px + 400, py)); // chosen already: no step (the others stay, to drag them together)
+        QCOMPARE(gizmo.chosenKeys(), (std::set<int>{12, 22}));
+        controller.undo(); // the Ctrl+click before it
+        QCOMPARE(gizmo.chosenKeys(), (std::set<int>{12}));
+        controller.redo();
+        QCOMPARE(gizmo.chosenKeys(), (std::set<int>{12, 22}));
+
+        // Another tool than the selection ones: a click on nothing chooses none, and that is undone too.
+        state.setActiveTool(tools::ToolId::Move);
+        click(screen(px + 100, py + 300));
+        QVERIFY(gizmo.chosenKeys().empty());
+        controller.undo();
+        QCOMPARE(gizmo.chosenKeys(), (std::set<int>{12, 22}));
+    }
+
     // The whole path of a trajectory is shown on the page, from its first key to its last: while the trajectory is the
     // current cel, and while a cel that follows it is (the path is the trajectory's). The camera selected, or an inactive
     // trajectory: none.
