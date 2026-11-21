@@ -204,6 +204,7 @@ void DocumentController::replaceDocument(std::unique_ptr<doc::Document> document
     m_pathKeys.clear();
     m_currentLayer = doc::kNoId;
     m_currentLayerName.clear();
+    m_currentLayerKind = doc::LayerKind::Raster;
     m_lastLayerOf.clear();
     const bool cameraWasSelected = m_cameraSelected;
     m_cameraSelected = false;
@@ -213,6 +214,7 @@ void DocumentController::replaceDocument(std::unique_ptr<doc::Document> document
     if (const doc::Drawing *drawing = currentDrawing(); drawing && !drawing->layers.empty()) {
         m_currentLayer = drawing->layers.back().id;
         m_currentLayerName = drawing->layers.back().properties.name;
+        m_currentLayerKind = drawing->layers.back().kind;
         m_lastLayerOf[currentDrawingId()] = m_currentLayer;
     }
 
@@ -806,12 +808,20 @@ void DocumentController::commitLayerProperties(const LayerRef &ref, const doc::L
     execute(doc::makeSetLayerProperties(*m_document, ref.cel, ref.drawing, ref.layer, after));
 }
 
+std::string DocumentController::newFrameLayerName() const
+{
+    // A vector or perspective layer's name ("Vector 1") would be wrong on a raster layer.
+    if (m_currentLayerName.empty() || m_currentLayerKind != doc::LayerKind::Raster)
+        return tr("Layer 1").toStdString();
+    return m_currentLayerName;
+}
+
 void DocumentController::insertFrame(doc::CelId cel, int frame, bool after)
 {
     if (!m_document->cel(cel))
         return;
     const int at = std::max(0, frame + (after ? 1 : 0));
-    const std::string layerName = m_currentLayerName.empty() ? tr("Layer 1").toStdString() : m_currentLayerName;
+    const std::string layerName = newFrameLayerName();
     doc::NewDrawing made = doc::makeInbetween(*m_document, cel, at, layerName,
                                               after ? doc::CommandKind::InsertInbetween : doc::CommandKind::AddDrawing);
     execute(std::move(made.command));
@@ -3286,6 +3296,7 @@ void DocumentController::resolveCurrentLayer()
                 }
         }
         m_currentLayerName = drawing->layer(layer)->properties.name; // renamed, perhaps
+        m_currentLayerKind = drawing->layer(layer)->kind;
         m_lastLayerOf[currentDrawingId()] = layer;
     }
     if (layer == m_currentLayer)
@@ -3329,6 +3340,7 @@ void DocumentController::setCurrentLayer(doc::LayerId layer)
     interruptStroke();
     m_currentLayer = layer;
     m_currentLayerName = drawing->layer(layer)->properties.name;
+    m_currentLayerKind = drawing->layer(layer)->kind;
     m_lastLayerOf[currentDrawingId()] = layer;
     emit currentLayerChanged(layer);
 }
@@ -3365,7 +3377,7 @@ std::optional<DocumentController::PaintTarget> DocumentController::beginPaint(bo
             return fail(QString());
         // Harmony-like: drawing on an empty frame creates a drawing there,
         // its layer named like the one worked on before.
-        const std::string layerName = m_currentLayerName.empty() ? tr("Layer 1").toStdString() : m_currentLayerName;
+        const std::string layerName = newFrameLayerName();
         doc::NewDrawing created = doc::makeNewDrawing(*m_document, m_currentCel, m_currentFrame, 1, layerName);
         publish(created.command->apply(*m_document)); // the new layer becomes current
         state.createdDrawing = std::move(created.command);

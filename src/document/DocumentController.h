@@ -737,6 +737,9 @@ private:
     bool m_cameraSelected = false;
     doc::LayerId m_currentLayer = doc::kNoId;
     std::string m_currentLayerName; // looked for when the drawing changes
+    doc::LayerKind m_currentLayerKind = doc::LayerKind::Raster; // its kind
+    // The name of the layer of a drawing made on an empty frame (a raster one): the one worked on before, if raster too.
+    std::string newFrameLayerName() const;
     std::map<doc::DrawingId, doc::LayerId> m_lastLayerOf; // the layer last current in each drawing (this session)
     QPainterPath m_selection;
     std::shared_ptr<const doc::Cel> m_copiedCel; // (see copyCel())

@@ -321,6 +321,25 @@ private slots:
     }
 
 
+    // A drawing made on an empty frame has a raster layer: named like the layer worked on before when that was raster too,
+    // not after a vector one ("Vector 1"), which would name a raster layer as a vector one.
+    void aNewFrameAfterAVectorLayerIsNotNamedVector()
+    {
+        document::DocumentController controller;
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 1, "Line").command);
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Vector));
+        QCOMPARE(controller.currentDrawing()->layer(controller.currentLayer())->properties.name, std::string("Vector 1"));
+        controller.setCurrentFrame(3); // an empty frame
+        const auto target = controller.beginPaint(true);
+        QVERIFY(target);
+        const doc::Drawing *made = controller.currentDrawing();
+        QCOMPARE(made->layers.size(), std::size_t(1));
+        QCOMPARE(made->layers[0].kind, doc::LayerKind::Raster);
+        QCOMPARE(made->layers[0].properties.name, std::string("Layer 1"));
+        controller.cancelPaint();
+    }
+
     void importedImageGetsItsOwnLayer()
     {
         document::DocumentController controller; // 1920×1080, one layer
