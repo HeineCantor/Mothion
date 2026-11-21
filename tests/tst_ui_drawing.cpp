@@ -1388,6 +1388,69 @@ private slots:
         }
     }
 
+    // A mark that crosses the path is the point where it crosses, not its middle: ticks hanging below a straight path put
+    // the trajectory on the path; a mark that does not reach it keeps its middle.
+    void aMarkCrossingThePathIsWhereItCrosses_data()
+    {
+        QTest::addColumn<bool>("posed");
+        QTest::newRow("in place") << false;
+        QTest::newRow("cel moved by a key") << true; // the strokes kept in the cel's place, the trajectory where they show
+    }
+
+    void aMarkCrossingThePathIsWhereItCrosses()
+    {
+        QFETCH(bool, posed);
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(500, 400);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 4, "Line").command);
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Vector));
+        const QPointF moved = posed ? QPointF(-80, 40) : QPointF();
+        if (posed) {
+            doc::CelPose pose;
+            pose.x = moved.x();
+            pose.y = moved.y();
+            QVERIFY(controller.setCelKey(controller.currentCel(), 0, pose));
+        }
+        QCoreApplication::processEvents();
+        state.setActiveTool(tools::ToolId::Brush);
+        const QTransform toView = canvas.view().documentToView();
+        auto dragTo = [&](const std::vector<QPointF> &docPoints) {
+            QTest::mousePress(&canvas, Qt::LeftButton, {}, toView.map(docPoints.front()).toPoint());
+            for (const QPointF &p : docPoints)
+                QTest::mouseMove(&canvas, toView.map(p).toPoint());
+            QTest::mouseRelease(&canvas, Qt::LeftButton, {}, toView.map(docPoints.back()).toPoint());
+        };
+        std::vector<QPointF> line; // a straight path across
+        for (int i = 0; i <= 40; ++i)
+            line.emplace_back(500 + i * 25.0, 600);
+        dragTo(line);
+        const double xs[] = {600, 800, 1000, 1200};
+        for (double x : xs) // ticks from just above the path to well below it: their middles are far under it
+            dragTo({{x, 580}, {x, 640}, {x, 700}});
+        dragTo({{1400, 680}, {1400, 700}, {1400, 720}}); // one that does not reach it
+        const doc::Layer &layer = *controller.currentDrawing()->layer(controller.currentLayer());
+        QCOMPARE(layer.strokes.size(), std::size_t(6));
+        const double pathY = layer.strokes.front().points.front().y + moved.y(); // where it shows
+        QString reason;
+        QVERIFY2(controller.trajectoryFromMarks(&reason), qPrintable(reason));
+        const doc::Cel *cel = controller.document().cel(controller.currentCel());
+        const std::vector<int> frames = cel->motion().keyFrames();
+        QCOMPARE(int(frames.size()), 5);
+        for (int k = 0; k < 4; ++k) {
+            const doc::CelPose pose = cel->motion().poseAt(frames[std::size_t(k)]);
+            const double y = cel->motion().pivotY + pose.y;
+            QVERIFY2(qAbs(y - pathY) < 12, qPrintable(QString::number(y)));
+            QVERIFY(qAbs(cel->motion().pivotX + pose.x - xs[k]) < 24); // under the pen
+        }
+        const doc::CelPose last = cel->motion().poseAt(frames.back());
+        QVERIFY(cel->motion().pivotY + last.y > pathY + 60); // its middle
+    }
+
     // On a vector layer a paste is the copied strokes, floating the same way; pixels are refused there.
     void aPasteOfStrokesFloatsOnAVectorLayer()
     {
