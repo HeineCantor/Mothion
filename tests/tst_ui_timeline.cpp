@@ -1687,7 +1687,7 @@ private slots:
         QVERIFY(progress.count() >= 2);
         QCOMPARE(progress.last().first().toDouble(), 1.0);
         QFile given(argsFile);
-        QVERIFY(given.open(QIODevice::ReadOnly));
+        QVERIFY(given.open(QIODevice::ReadOnly | QIODevice::Text)); // (lines ended as they may be)
         const QStringList args = QString::fromLocal8Bit(given.readAll()).split(QLatin1Char('\n'), Qt::SkipEmptyParts);
         QVERIFY(args.contains(QStringLiteral("--machineReadable")));
         QCOMPARE(args.at(args.indexOf(QStringLiteral("-r")) + 1), QStringLiteral("phonetic"));

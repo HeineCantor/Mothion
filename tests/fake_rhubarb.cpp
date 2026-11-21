@@ -13,7 +13,7 @@ int main(int argc, char **argv)
         if (std::string(argv[i]) == "-o")
             output = argv[i + 1];
     if (const char *argsFile = std::getenv("FAKE_RHUBARB_ARGS")) {
-        if (std::FILE *f = std::fopen(argsFile, "w")) {
+        if (std::FILE *f = std::fopen(argsFile, "wb")) { // (binary: "\n" alone, on Windows too)
             for (int i = 1; i < argc; ++i)
                 std::fprintf(f, "%s\n", argv[i]);
             std::fclose(f);
