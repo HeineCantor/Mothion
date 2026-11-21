@@ -207,6 +207,7 @@ void compareDocuments(const doc::Document &x, const doc::Document &y)
                         QCOMPARE(py.flowScale, px.flowScale);
                         QCOMPARE(py.direction, px.direction);
                         QCOMPARE(py.corner, px.corner);
+                        QCOMPARE(py.tipAngle, px.tipAngle);
                     }
                 }
                 auto cx = kx.image.tileCoords(), cy = ky.image.tileCoords();
@@ -426,6 +427,7 @@ private slots:
                 in.inOut = m == 0 ? 0.0 : 1.0;
                 in.direction = 12.0 * m;
                 in.corner = m == 3;
+                in.tipAngle = -7.5 * m; // turned by a puppet warp
                 st.points.push_back(in);
             }
             vector.strokes.push_back(std::move(st));

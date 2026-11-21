@@ -4,6 +4,8 @@
 #include "canvas/StrokeSession.h"
 #include "canvas/Symmetry.h"
 #include "canvas/VectorPoints.h"
+#include "canvas/VectorWarp.h"
+#include "core/puppet/PuppetRig.h"
 #include "core/brush/DabGenerator.h"
 #include "canvas/ViewTransform.h"
 #include "core/document/Document.h"
@@ -663,6 +665,47 @@ private slots:
         QCOMPARE(anchorWeight(0.5, false, false), 0.5);
         QCOMPARE(anchorWeight(0.25, true, true), 0.25);
         QCOMPARE(movedAnchors(line, anchors, {{}, {}, {}}), line); // nothing moved: the same stroke
+    }
+
+    // A line carried by the puppet warp is as wide as the mesh was stretched across it, not along it: squeezed along the
+    // line it keeps its width; and a tip held at an angle (a flat brush) turns as far as the mesh turned there.
+    void aWarpedLineFollowsTheMeshAcrossIt()
+    {
+        puppet::Bitmask m(0, 0, 220, 60);
+        for (int y = 20; y < 40; ++y)
+            for (int x = 10; x < 210; ++x)
+                m.set(x, y, true); // a long bar
+        doc::VectorStroke line;
+        line.size = 10;
+        for (int x = 20; x <= 200; x += 5) {
+            brush::BrushInput in;
+            in.x = x;
+            in.y = 30;
+            line.points.push_back(in);
+        }
+        {
+            puppet::PuppetRig rig(m, {2, 3});
+            QVERIFY(rig.addPin({20, 30}));
+            const auto handle = rig.addPin({200, 30});
+            QVERIFY(handle);
+            rig.movePin(*handle, {120, 30}, 30); // squeezed along the line, towards the anchor
+            const std::vector<doc::VectorStroke> warped = canvas::warpedStrokes({line}, rig);
+            QCOMPARE(warped.size(), std::size_t(1));
+            QVERIFY(warped[0].points.back().x < 150); // carried along
+            for (const brush::BrushInput &in : warped[0].points)
+                QVERIFY2(in.sizeScale > 0.6 && in.sizeScale < 1.6, qPrintable(QString::number(in.sizeScale))); // not as the area went (0.2)
+            QCOMPARE(warped[0].size, 10.0);
+        }
+        {
+            puppet::PuppetRig rig(m, {2, 3});
+            QVERIFY(rig.addPin({20, 30}));
+            const auto handle = rig.addPin({200, 30});
+            QVERIFY(handle);
+            rig.movePin(*handle, {20 + 180 * std::cos(0.5), 30 + 180 * std::sin(0.5)}, 60); // turned about 29° down
+            const std::vector<doc::VectorStroke> warped = canvas::warpedStrokes({line}, rig);
+            const brush::BrushInput &far = warped[0].points.back();
+            QVERIFY2(far.tipAngle > 15 && far.tipAngle < 40, qPrintable(QString::number(far.tipAngle)));
+        }
     }
 
     // The width at an anchor, and less and less towards the anchors beside it.

@@ -56,10 +56,18 @@ public:
         }
     }
 
-    // Where the rest point `p` is now, and how much the brush grows there.
-    Vec2 map(Vec2 p, double &scale) const
+    // The linear part of the affine map of a triangle: a vector (x, y) at rest becomes (a x + b y, c x + d y).
+    struct Linear
     {
-        scale = 1.0;
+        double a = 1, b = 0, c = 0, d = 1;
+        Vec2 apply(Vec2 v) const { return {a * v.x + b * v.y, c * v.x + d * v.y}; }
+        double det() const { return a * d - b * c; }
+    };
+
+    // Where the rest point `p` is now, and the linear part of the map there (the identity outside the meshes).
+    Vec2 map(Vec2 p, Linear &linear) const
+    {
+        linear = {};
         if (!m_cells.empty()) {
             const int cx = column(p.x - m_x0, m_columns), cy = column(p.y - m_y0, m_rows);
             for (const auto &id : m_cells[std::size_t(cy) * std::size_t(m_columns) + std::size_t(cx)]) {
@@ -72,10 +80,14 @@ public:
                     continue;
                 const Vec2 da = mesh.deformed[std::size_t(tri[0])], db = mesh.deformed[std::size_t(tri[1])],
                            dc = mesh.deformed[std::size_t(tri[2])];
-                const double restArea = std::abs(puppet::orient(a, b, c));
-                const double nowArea = std::abs(puppet::orient(da, db, dc));
-                if (restArea > 1e-12)
-                    scale = std::clamp(std::sqrt(nowArea / restArea), 0.2, 5.0);
+                // Rest edges e1 = b − a, e2 = c − a go to f1 = db − da, f2 = dc − da: L = F·E⁻¹.
+                const Vec2 e1 = b - a, e2 = c - a, f1 = db - da, f2 = dc - da;
+                const double det = e1.x * e2.y - e2.x * e1.y;
+                if (std::abs(det) > 1e-12) {
+                    const double i11 = e2.y / det, i12 = -e2.x / det, i21 = -e1.y / det, i22 = e1.x / det;
+                    linear = {f1.x * i11 + f2.x * i21, f1.x * i12 + f2.x * i22, f1.y * i11 + f2.y * i21,
+                              f1.y * i12 + f2.y * i22};
+                }
                 return da * (*w)[0] + db * (*w)[1] + dc * (*w)[2];
             }
         }
@@ -126,12 +138,51 @@ std::vector<doc::VectorStroke> warpedStrokes(const std::vector<doc::VectorStroke
             }
             moved.points.push_back(stroke.points[i]);
         }
-        for (brush::BrushInput &in : moved.points) {
-            double scale = 1.0;
-            const Vec2 to = index.map({in.x, in.y}, scale);
-            in.x = to.x;
-            in.y = to.y;
-            in.sizeScale *= scale;
+        // The width goes as far as the mesh stretched across the line, not along it: a band of width w becomes
+        // w·det(L)/|L·t| wide (t the line's direction at rest), so the edge of a colour under the line moves as the line's
+        // edge does and stays covered. Smoothed along the line, so that it does not step from one triangle to the next.
+        const std::size_t n = moved.points.size();
+        std::vector<double> across(n, 1.0);
+        std::vector<double> turn(n, 0.0); // degrees the mesh turned there (the rotation of its polar decomposition)
+        std::vector<Vec2> to(n);
+        for (std::size_t i = 0; i < n; ++i) {
+            const brush::BrushInput &before = moved.points[i > 0 ? i - 1 : i];
+            const brush::BrushInput &after = moved.points[i + 1 < n ? i + 1 : i];
+            MeshIndex::Linear linear;
+            to[i] = index.map({moved.points[i].x, moved.points[i].y}, linear);
+            // Where the line has no direction, the turn of the mesh there (its polar decomposition's rotation).
+            turn[i] = std::atan2(linear.c - linear.b, linear.a + linear.d) * 180.0 / std::numbers::pi;
+            Vec2 t{after.x - before.x, after.y - before.y};
+            const double length = std::hypot(t.x, t.y);
+            if (length > 1e-9) {
+                t = {t.x / length, t.y / length};
+                const Vec2 along = linear.apply(t);
+                const double stretch = std::hypot(along.x, along.y);
+                if (stretch > 1e-9) {
+                    across[i] = std::clamp(std::abs(linear.det()) / stretch, 0.25, 4.0);
+                    // The tip turns as the line did there, so it meets the line at the angle it met it before: the
+                    // width across is then the old one times `across`, as in the preview, however unevenly the mesh
+                    // was stretched.
+                    turn[i] = (std::atan2(along.y, along.x) - std::atan2(t.y, t.x)) * 180.0 / std::numbers::pi;
+                }
+            }
+        }
+        constexpr int kSmooth = 4; // points each side (about 12 px)
+        for (std::size_t i = 0; i < n; ++i) {
+            double sum = 0, turned = 0;
+            int count = 0;
+            for (std::ptrdiff_t k = std::ptrdiff_t(i) - kSmooth; k <= std::ptrdiff_t(i) + kSmooth; ++k)
+                if (k >= 0 && k < std::ptrdiff_t(n)) {
+                    sum += across[std::size_t(k)];
+                    turned += std::remainder(turn[std::size_t(k)] - turn[i], 360.0); // as near to this one as can be
+                    ++count;
+                }
+            brush::BrushInput &in = moved.points[i];
+            in.x = to[i].x;
+            in.y = to[i].y;
+            in.sizeScale *= sum / count;
+            // A tip held at an angle (a flat brush) turns with the line, as the pixels of the warp's preview do.
+            in.tipAngle = std::remainder(in.tipAngle + turn[i] + turned / count, 360.0);
         }
         for (std::size_t i = 0; i < moved.points.size(); ++i) {
             const brush::BrushInput &before = moved.points[i > 0 ? i - 1 : i];

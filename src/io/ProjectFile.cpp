@@ -136,7 +136,7 @@ doc::BlendMode blendFromName(const QString &text)
 
 // A vector layer's strokes as JSON: one object per stroke, its points as arrays of the numbers of a
 // brush::BrushInput (x, y, pressure, velocity, tilt, hasTilt, penAngle, inOut, sizeScale, flowScale,
-// direction, corner).
+// direction, corner, tipAngle; an older file's points have no tipAngle: 0).
 QString strokesToJson(const std::vector<doc::VectorStroke> &strokes)
 {
     QJsonArray all;
@@ -144,7 +144,7 @@ QString strokesToJson(const std::vector<doc::VectorStroke> &strokes)
         QJsonArray points;
         for (const brush::BrushInput &in : st.points)
             points.append(QJsonArray{in.x, in.y, in.pressure, in.velocity, in.tilt, in.hasTilt ? 1 : 0, in.penAngle,
-                                     in.inOut, in.sizeScale, in.flowScale, in.direction, in.corner ? 1 : 0});
+                                     in.inOut, in.sizeScale, in.flowScale, in.direction, in.corner ? 1 : 0, in.tipAngle});
         all.append(QJsonObject{
             {QStringLiteral("brush"), QString::fromStdString(st.brush)},
             {QStringLiteral("size"), st.size},
@@ -196,6 +196,7 @@ std::vector<doc::VectorStroke> strokesFromJson(const QString &text)
             in.flowScale = a[9].toDouble(1.0);
             in.direction = a[10].toDouble();
             in.corner = a[11].toInt() != 0;
+            in.tipAngle = a.size() > 12 ? a[12].toDouble() : 0.0;
             st.points.push_back(in);
         }
         strokes.push_back(std::move(st));

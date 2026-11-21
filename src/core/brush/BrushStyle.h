@@ -22,6 +22,8 @@ struct BrushInput
     double sizeScale = 1.0;   // multiplies the size
     double flowScale = 1.0;   // multiplies the flow
     double direction = 0.0;   // degrees, direction of travel (document, y down)
+    double tipAngle = 0.0;    // degrees the tip is turned further (a puppet warp turned the line there); not added
+                              // when the tip follows the direction of travel, which turns with the line already
     bool corner = false;      // a sharp corner of the stroke (see isCorner): kept by the corrections
 
     bool operator==(const BrushInput &) const = default;

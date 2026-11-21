@@ -1,6 +1,10 @@
 // Tests for the UI layer: puppet warp.
 
 #include "test_common.h"
+#include "canvas/VectorRender.h"
+#include "canvas/VectorWarp.h"
+#include "core/puppet/PuppetRig.h"
+#include "core/puppet/WarpRaster.h"
 
 class TestUiPuppet : public QObject
 {
@@ -21,6 +25,100 @@ private slots:
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, m_settingsDir.path());
     }
 
+
+    // A vector line drawn round a colour with a flat brush (its tip held at an angle), warped: drawn again from its
+    // strokes when the pen rests, it is as the warp's preview (its pixels bent) showed it, and no white opens between it
+    // and the colour, wherever the mesh turned or stretched.
+    void aWarpedFlatLineIsAsThePreviewShowedIt_data()
+    {
+        QTest::addColumn<QPointF>("pull");
+        QTest::newRow("stretched") << QPointF(160, 60);
+        QTest::newRow("squeezed") << QPointF(-150, 0);
+        QTest::newRow("turned up") << QPointF(30, -160);
+        QTest::newRow("pulled far") << QPointF(380, -140);
+        QTest::newRow("pulled far down") << QPointF(300, 220);
+    }
+
+    void aWarpedFlatLineIsAsThePreviewShowedIt()
+    {
+        QFETCH(QPointF, pull);
+        tools::ToolState state;
+        tools::BrushLibrary library;
+        tools::BrushDefinitionPtr flat;
+        for (const tools::BrushPreset &preset : library.presets(tools::ToolId::Brush))
+            if (preset.brush && preset.brush->name == QStringLiteral("Flat brush"))
+                flat = preset.brush;
+        QVERIFY(flat);
+        state.setBrushResolver([flat](const QString &name) { return name == flat->name ? flat : nullptr; });
+
+        // A ring of the flat brush round a disc of colour.
+        const QPointF centre(600, 400);
+        const double r = 200;
+        doc::VectorStroke ring;
+        ring.brush = flat->name.toStdString();
+        ring.size = 30;
+        for (int i = 0; i <= 400; ++i) {
+            const double a = i * 2 * std::numbers::pi / 400;
+            brush::BrushInput in;
+            in.x = centre.x() + r * std::cos(a);
+            in.y = centre.y() + r * std::sin(a);
+            in.pressure = 0.8;
+            ring.points.push_back(in);
+        }
+        doc::TiledImage linePixels;
+        canvas::drawStrokes(linePixels, {ring}, state, {});
+        const QRect area(int(centre.x() - r - 40), int(centre.y() - r - 40), int(2 * r + 80), int(2 * r + 80));
+        puppet::RasterImage lineSource(area.x(), area.y(), area.width(), area.height());
+        linePixels.read(area.x(), area.y(), area.width(), area.height(), lineSource.pixels.data(), area.width());
+        puppet::RasterImage colorSource(area.x(), area.y(), area.width(), area.height());
+        puppet::Bitmask shape(area.x(), area.y(), area.width(), area.height());
+        for (int y = 0; y < area.height(); ++y)
+            for (int x = 0; x < area.width(); ++x) {
+                const std::size_t i = std::size_t(y) * std::size_t(area.width()) + std::size_t(x);
+                if (std::hypot(area.x() + x + 0.5 - centre.x(), area.y() + y + 0.5 - centre.y()) < r)
+                    colorSource.pixels[i] = 0xff7070d0u; // up to the middle of the line
+                shape.bits[i] = (colorSource.pixels[i] | lineSource.pixels[i]) >> 24 ? 1 : 0;
+            }
+
+        puppet::PuppetRig rig(shape, {1, 3});
+        QVERIFY(rig.addPin({centre.x() - 0.6 * r, centre.y()}));
+        QVERIFY(rig.addPin({centre.x(), centre.y() - 0.6 * r}));
+        QVERIFY(rig.addPin({centre.x(), centre.y() + 0.6 * r}));
+        const auto handle = rig.addPin({centre.x() + 0.7 * r, centre.y()});
+        QVERIFY(handle);
+        rig.movePin(*handle, {centre.x() + 0.7 * r + pull.x(), centre.y() + pull.y()}, 60);
+
+        int x, y, w, h;
+        puppet::deformedBounds(rig, x, y, w, h);
+        puppet::RasterImage preview(x, y, w, h), color(x, y, w, h);
+        puppet::warp(rig, lineSource, preview);
+        puppet::warp(rig, colorSource, color);
+        doc::TiledImage again;
+        canvas::drawStrokes(again, canvas::warpedStrokes({ring}, rig), state, {});
+        std::vector<std::uint32_t> drawn(std::size_t(w) * std::size_t(h));
+        again.read(x, y, w, h, drawn.data(), w);
+
+        int line = 0, differ = 0;
+        for (std::size_t i = 0; i < drawn.size(); ++i) {
+            const bool a = (preview.pixels[i] >> 24) > 127, b = (drawn[i] >> 24) > 127;
+            line += a;
+            differ += a != b;
+        }
+        QVERIFY2(differ < line / 25, qPrintable(QStringLiteral("%1 of %2").arg(differ).arg(line))); // within 4%
+        // White between the line and the colour: a pixel with neither, closed in by them on all four sides.
+        auto inked = [&](int px, int py) {
+            if (px < 0 || py < 0 || px >= w || py >= h)
+                return false;
+            const std::size_t i = std::size_t(py) * std::size_t(w) + std::size_t(px);
+            return (drawn[i] >> 24) > 60 || (color.pixels[i] >> 24) > 60;
+        };
+        int gaps = 0;
+        for (int py = 0; py < h; ++py)
+            for (int px = 0; px < w; ++px)
+                if (!inked(px, py) && inked(px - 6, py) && inked(px + 6, py) && inked(px, py - 6) && inked(px, py + 6))
+                    ++gaps;
+        QCOMPARE(gaps, 0);
+    }
 
     // Radius mode: no pins, a drag bends only what lies around the pen; the
     // wheel over the canvas sizes the radius instead of zooming.

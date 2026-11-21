@@ -56,6 +56,7 @@ BrushInput DabGenerator::interpolate(const BrushInput &a, const BrushInput &b, d
     r.sizeScale = lerp(a.sizeScale, b.sizeScale, t);
     r.flowScale = lerp(a.flowScale, b.flowScale, t);
     r.direction = b.direction;
+    r.tipAngle = lerpAngle(a.tipAngle, b.tipAngle, t);
     return r;
 }
 
@@ -224,9 +225,11 @@ DabGenerator::Single DabGenerator::computeDab(const BrushInput &in, bool applyRa
     if (s.rotationMode & RotationOn) {
         angle = s.rotation;
         if (s.rotationMode & RotationPenAngle)
-            angle += in.penAngle;
+            angle += in.penAngle + in.tipAngle;
         else if (s.rotationMode & RotationDirection)
             angle += in.direction;
+        else
+            angle += in.tipAngle;
         if ((s.rotationMode & RotationRandom) && rng)
             angle += (rng->next01() - 0.5) * s.rotationRandom * 360.0;
     }
