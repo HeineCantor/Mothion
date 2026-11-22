@@ -49,8 +49,9 @@ puppet::RasterImage warpImage(const puppet::RasterImage &source, const std::func
             minX = std::min(minX, moved[v].x), maxX = std::max(maxX, moved[v].x);
             minY = std::min(minY, moved[v].y), maxY = std::max(maxY, moved[v].y);
         }
-    const int x0 = int(std::floor(minX)) - 1, y0 = int(std::floor(minY)) - 1;
-    puppet::RasterImage target(x0, y0, int(std::ceil(maxX)) + 2 - x0, int(std::ceil(maxY)) + 2 - y0);
+    constexpr double kNoise = 1e-6;
+    const int x0 = int(std::floor(minX + kNoise)) - 1, y0 = int(std::floor(minY + kNoise)) - 1;
+    puppet::RasterImage target(x0, y0, int(std::ceil(maxX - kNoise)) + 2 - x0, int(std::ceil(maxY - kNoise)) + 2 - y0);
     puppet::warpTriangles(rest, moved, triangles, source, target);
     return target;
 }
