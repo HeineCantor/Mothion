@@ -2306,6 +2306,12 @@ bool TimelineView::event(QEvent *event)
             event->accept();
             return true;
         }
+        // Delete with blocks selected (and no keys chosen) takes them out: the timeline's.
+        if ((key->key() == Qt::Key_Delete || key->key() == Qt::Key_Backspace) && !m_selected.empty()
+            && m_chosenKeys.empty()) {
+            event->accept();
+            return true;
+        }
         // S with keys chosen is the timeline's (elsewhere it is a tool's); while scaling, every key is.
         if (m_keyScale || (key->key() == Qt::Key_S && key->modifiers() == Qt::NoModifier && !m_chosenKeys.empty())) {
             event->accept();
@@ -2464,9 +2470,15 @@ void TimelineView::contextMenuEvent(QContextMenuEvent *event)
     menu.addAction(tr("Insert empty frame"), this, [this, celId, frame] {
         m_document->execute(doc::makeInsertEmptyFrames(m_document->document(), celId, frame, 1));
     });
-    menu.addAction(tr("Delete frame"), this, [this, celId, frame] {
-        m_document->execute(doc::makeRemoveFrames(m_document->document(), celId, frame, 1));
-    });
+    // On a block of a selection of several: all the blocks selected taken out, as one step.
+    const doc::Exposure *here = cel.timing().exposureAt(frame);
+    if (here && m_selected.size() > 1 && isSelected(celId, here->start)) {
+        menu.addAction(tr("Delete frames"), this, [this] { deleteSelectedFrames(); });
+    } else {
+        menu.addAction(tr("Delete frame"), this, [this, celId, frame] {
+            m_document->execute(doc::makeRemoveFrames(m_document->document(), celId, frame, 1));
+        });
+    }
     if (drawing) {
         menu.addSeparator();
         const doc::DrawingId id = drawing->id;
@@ -2508,6 +2520,15 @@ void TimelineView::contextMenuEvent(QContextMenuEvent *event)
     }
     menu.setToolTipsVisible(true);
     menu.exec(event->globalPos());
+}
+
+void TimelineView::deleteSelectedFrames()
+{
+    auto command = doc::makeRemoveExposures(m_document->document(), m_selected);
+    m_selected.clear();
+    viewport()->update();
+    if (command)
+        m_document->execute(std::move(command));
 }
 
 void TimelineView::wheelEvent(QWheelEvent *event)
@@ -2578,6 +2599,11 @@ void TimelineView::keyPressEvent(QKeyEvent *event)
         viewport()->update();
         if (m_document->removeCelKeys(keys))
             return;
+    }
+    // Blocks selected: Delete takes their frames out (the ones after move back), one undo step.
+    if ((event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) && !m_selected.empty()) {
+        deleteSelectedFrames();
+        return;
     }
     const int celIndex = d.indexOf(m_document->currentCel());
     switch (event->key()) {

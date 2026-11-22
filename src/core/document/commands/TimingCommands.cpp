@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <map>
+#include <set>
 
 namespace mothion::doc {
 
@@ -131,6 +132,30 @@ std::unique_ptr<Command> makeMoveExposures(const Document &doc, const std::vecto
     if (steps.empty())
         return nullptr;
     return std::make_unique<GroupCommand>(CommandKind::MoveFrames, std::move(steps));
+}
+
+std::unique_ptr<Command> makeRemoveExposures(const Document &doc, const std::vector<ExposureRef> &exposures)
+{
+    std::map<CelId, std::set<int>> byCel;
+    for (const ExposureRef &e : exposures)
+        byCel[e.cel].insert(e.start);
+    std::vector<std::unique_ptr<Command>> steps;
+    for (const auto &[celId, starts] : byCel) {
+        const Cel *cel = doc.cel(celId);
+        if (!cel)
+            continue;
+        Timing after = cel->timing();
+        for (auto it = starts.rbegin(); it != starts.rend(); ++it) // the last first: those before stay where they are
+            if (const Exposure *e = cel->timing().exposureAt(*it); e && e->start == *it)
+                after.removeFrames(e->start, e->length);
+        if (after != cel->timing())
+            steps.push_back(std::make_unique<SetTimingCommand>(celId, cel->timing(), std::move(after)));
+    }
+    if (steps.empty())
+        return nullptr;
+    if (steps.size() == 1)
+        return std::move(steps.front());
+    return std::make_unique<GroupCommand>(CommandKind::ChangeTiming, std::move(steps));
 }
 
 ChangeSet SetFrameCountCommand::apply(Document &doc)

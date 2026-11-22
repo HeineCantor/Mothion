@@ -869,6 +869,56 @@ private slots:
         QCOMPARE(controller.camera()->keys().size(), size_t(3));
     }
 
+    // Delete with several blocks selected, on two cels: their frames taken out (the ones after move back), one step.
+    void timelineDeletesTheSelectedFrames()
+    {
+        document::DocumentController controller;
+        doc::Document &d = controller.documentForCommands();
+        const doc::CelId bottom = controller.currentCel();
+        controller.addCel();
+        const doc::CelId top = controller.currentCel();
+        doc::NewDrawing a = doc::makeNewDrawing(d, bottom, 0, 2, "Line");
+        controller.execute(std::move(a.command));
+        doc::NewDrawing b = doc::makeNewDrawing(d, bottom, 2, 1, "Line");
+        controller.execute(std::move(b.command));
+        doc::NewDrawing c = doc::makeNewDrawing(d, bottom, 6, 1, "Line");
+        controller.execute(std::move(c.command));
+        doc::NewDrawing t = doc::makeNewDrawing(d, top, 1, 1, "Line");
+        controller.execute(std::move(t.command));
+        doc::NewDrawing u = doc::makeNewDrawing(d, top, 2, 1, "Line");
+        controller.execute(std::move(u.command));
+
+        ui::TimelineView view(&controller);
+        view.resize(800, 200);
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        ui::TimelineMetrics m;
+        auto cell = [&](int row, int frame) {
+            return QPoint(m.frameX(frame) + m.frameWidth / 2, m.rowY(row) + m.rowHeight / 2);
+        };
+        auto *vp = view.viewport();
+        QTest::mouseClick(vp, Qt::LeftButton, {}, cell(1, 0));
+        QTest::mouseClick(vp, Qt::LeftButton, Qt::ControlModifier, cell(1, 6));
+        QTest::mouseClick(vp, Qt::LeftButton, Qt::ControlModifier, cell(0, 1));
+        QCOMPARE(view.selectedFrames().size(), std::size_t(3));
+        view.setFocus();
+        QTest::keyClick(&view, Qt::Key_Delete);
+        const doc::Timing &low = d.cel(bottom)->timing(), &high = d.cel(top)->timing();
+        QCOMPARE(low.drawingAt(0), b.id);
+        QCOMPARE(low.exposureAt(0)->length, 1);
+        QCOMPARE(low.drawingAt(4), doc::kNoId); // c gone
+        QCOMPARE(int(low.exposures().size()), 1);
+        QCOMPARE(high.drawingAt(1), u.id);
+        QCOMPARE(int(high.exposures().size()), 1);
+        QVERIFY(view.selectedFrames().empty());
+        controller.undo(); // all at once
+        QCOMPARE(low.drawingAt(0), a.id);
+        QCOMPARE(low.drawingAt(2), b.id);
+        QCOMPARE(low.drawingAt(6), c.id);
+        QCOMPARE(high.drawingAt(1), t.id);
+        QCOMPARE(high.drawingAt(2), u.id);
+    }
+
     void timelineDragsTheSelectedFrames()
     {
         document::DocumentController controller;

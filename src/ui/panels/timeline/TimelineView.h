@@ -99,6 +99,8 @@ public:
     // Copies the selected blocks; pastes them at the current frame (see
     // above). Paste returns false when there is no room or nothing copied.
     void copyFrames();
+    // The frames of the blocks selected taken out (the ones after them move back), one undo step.
+    void deleteSelectedFrames();
     bool pasteFrames(bool asCopies);
     bool canPasteFrames() const;
 

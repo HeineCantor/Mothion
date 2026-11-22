@@ -84,5 +84,8 @@ struct ExposureRef
 // nullptr when nothing moves or some exposure would not fit (exposuresFit()).
 std::unique_ptr<Command> makeMoveExposures(const Document &doc, const std::vector<ExposureRef> &exposures,
                                            int offset);
+// The frames of those exposures taken out of each cel (the ones after them move back), as one step; nullptr when there
+// is nothing to take out.
+std::unique_ptr<Command> makeRemoveExposures(const Document &doc, const std::vector<ExposureRef> &exposures);
 
 } // namespace mothion::doc
