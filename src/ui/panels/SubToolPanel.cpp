@@ -16,6 +16,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QPolygonF>
+#include <QRegion>
 #include <QStyledItemDelegate>
 #include <QVBoxLayout>
 
@@ -184,6 +185,61 @@ QImage renderShapePreview(tools::ShapeSettings::Kind kind, const QColor &ink)
     return image;
 }
 
+// A Correct line sub tool: a line with its control points, and what the sub tool does to them.
+QImage renderVectorPointPreview(tools::VectorPointSettings::Mode mode, const QColor &ink)
+{
+    using Mode = tools::VectorPointSettings::Mode;
+    QImage image(kPreviewSize, QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+    QPainter p(&image);
+    p.setRenderHint(QPainter::Antialiasing);
+    const QRectF r(QPointF(10, 6), QPointF(kPreviewSize.width() - 10, kPreviewSize.height() - 6));
+    const double y = r.center().y();
+    const QPointF points[] = {{r.left() + 4, y + 6}, {r.left() + 34, y - 6}, {r.right() - 34, y + 6}, {r.right() - 4, y - 6}};
+    QPainterPath line;
+    line.moveTo(points[0]);
+    for (int i = 1; i < 4; ++i) {
+        const QPointF a = points[i - 1], b = points[i];
+        line.cubicTo(QPointF((a.x() + b.x()) / 2, a.y()), QPointF((a.x() + b.x()) / 2, b.y()), b);
+    }
+    if (mode == Mode::Width) { // wider in the middle
+        for (int i = 0; i < 3; ++i) {
+            p.setPen(QPen(ink, 1.5 + i * 2.0, Qt::SolidLine, Qt::RoundCap));
+            const double from = r.left() + 4 + i * 20, to = r.right() - 4 - i * 20;
+            p.save();
+            p.setClipRect(QRectF(from, r.top() - 6, to - from, r.height() + 12));
+            p.drawPath(line);
+            p.restore();
+        }
+    } else if (mode == Mode::Cut) { // a gap
+        p.setPen(QPen(ink, 1.5));
+        p.save();
+        p.setClipRegion(QRegion(image.rect()).subtracted(QRect(int(r.center().x()) - 4, 0, 8, image.height())));
+        p.drawPath(line);
+        p.restore();
+    } else {
+        p.setPen(QPen(ink, 1.5));
+        p.drawPath(line);
+    }
+    if (mode == Mode::Lasso) { // a dashed loop round two of the points, those filled
+        QPen dashes(ink, 1.2, Qt::DashLine);
+        p.setPen(dashes);
+        p.setBrush(Qt::NoBrush);
+        p.drawEllipse(QRectF(points[1].x() - 8, r.top() - 3, points[2].x() - points[1].x() + 16, r.height() + 6));
+    }
+    for (int i = 0; i < 4; ++i) {
+        const bool chosen = (mode == Mode::Lasso && (i == 1 || i == 2)) || (mode == Mode::Move && i == 2);
+        p.setPen(QPen(ink, 1.2));
+        p.setBrush(chosen ? ink : QColor(Qt::transparent));
+        const QRectF box(points[i].x() - 3, points[i].y() - 3, 6, 6);
+        if (mode == Mode::Corner && i == 1)
+            p.drawRect(box);
+        else
+            p.drawEllipse(box);
+    }
+    return image;
+}
+
 // A selection sub tool: its marching-ants outline, a rectangle or a lasso loop.
 QImage renderSelectionPreview(tools::ToolId tool, const QColor &ink)
 {
@@ -272,6 +328,14 @@ SubToolPanel::SubToolPanel(tools::ToolState *state, tools::BrushLibrary *library
         m_memory->select(m_presets[row]); // a paint sub tool comes back as it was left
     });
     connect(m_state, &tools::ToolState::activeToolChanged, this, &SubToolPanel::showPresetsFor);
+    // The Correct line's process chosen in its properties too: the sub tool in use follows.
+    connect(m_state, &tools::ToolState::vectorPointsChanged, this, [this] {
+        if (m_shownTool != tools::ToolId::VectorPoint)
+            return;
+        for (int i = 0; i < m_presets.size(); ++i)
+            if (m_presets[i].vectorPointMode == m_state->vectorPoints().mode && m_list->currentRow() != i)
+                m_list->setCurrentRow(i);
+    });
     connect(m_library, &tools::BrushLibrary::presetsChanged, this, [this] {
         m_shownTool.reset(); // rebuilt whatever is shown
         showPresetsFor(m_state->activeTool());
@@ -331,6 +395,7 @@ void SubToolPanel::showPresetsFor(tools::ToolId tool)
         item->setData(kPreviewRole, preset.selectsTool ? renderSelectionPreview(*preset.selectsTool, ink)
                                     : preset.fillMode  ? renderFillPreview(*preset.fillMode, ink, preset.fillAllLayers.value_or(false))
                                     : preset.shapeKind ? renderShapePreview(*preset.shapeKind, ink)
+                                    : preset.vectorPointMode ? renderVectorPointPreview(*preset.vectorPointMode, ink)
                                     : (preset.blendMode || preset.liquifyMode) ? renderEffectPreview(preset, ink)
                                                        : renderPreview(preset, ink));
     }
@@ -343,6 +408,7 @@ void SubToolPanel::showPresetsFor(tools::ToolId tool)
     for (int i = 0; i < m_presets.size(); ++i) { // what is in use, whoever set it
         const tools::BrushPreset &p = m_presets[i];
         if ((p.shapeKind && *p.shapeKind == m_state->shapeSettings().kind)
+            || (p.vectorPointMode && *p.vectorPointMode == m_state->vectorPoints().mode)
             || (p.blendMode && *p.blendMode == m_state->blendSettings().mode)
             || (p.liquifyMode && *p.liquifyMode == m_state->liquifySettings().mode)
             || (p.fillMode && *p.fillMode == m_state->fillSettings().mode

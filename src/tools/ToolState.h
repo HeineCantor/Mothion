@@ -40,10 +40,11 @@ struct PuppetSettings
 
 // What the Correct line tool (ToolId::VectorPoint, as Clip Studio's Correct line > Control point) does to the control
 // points of a vector layer's strokes (see canvas::VectorPointTool): moves them (a click on the line adds one, Alt+click
-// takes one away), changes the line's width at them, makes them corners or smooth, or cuts the line.
+// takes one away), changes the line's width at them, makes them corners or smooth, cuts the line, or chooses many of
+// them at once with a lasso.
 struct VectorPointSettings
 {
-    enum class Mode { Move, Width, Corner, Cut };
+    enum class Mode { Move, Width, Corner, Cut, Lasso };
     Mode mode = Mode::Move;
 
     bool operator==(const VectorPointSettings &) const = default;

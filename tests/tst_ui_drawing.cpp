@@ -627,6 +627,86 @@ private slots:
         controller.undo();
         QCOMPARE(strokes(), drawn);
 
+        // Lasso: a loop round anchors of the strokes chosen chooses them (Shift more, Alt fewer); the others move them.
+        state.setVectorPoints({tools::VectorPointSettings::Mode::Lasso});
+        auto lasso = [&](const QRectF &box, Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+            const QPointF corners[] = {box.topLeft(), box.topRight(), box.bottomRight(), box.bottomLeft(), box.topLeft()};
+            tool.press(corners[0], modifiers);
+            QVERIFY(tool.isActive());
+            for (int c = 1; c < 5; ++c)
+                for (int i = 1; i <= 10; ++i)
+                    tool.move(corners[c - 1] + (corners[c] - corners[c - 1]) * i / 10, modifiers);
+            QVERIFY(tool.lassoPoints().size() > 4);
+            tool.release(corners[4], modifiers);
+            QVERIFY(!tool.isActive());
+        };
+        auto inside = [&](const QRectF &box) {
+            std::set<canvas::VectorPointTool::AnchorRef> out;
+            for (int s : {0, 1})
+                for (int k = 0; k < int(tool.anchorsOf(s).size()); ++k)
+                    if (box.contains(*tool.anchorPoint(s, k)))
+                        out.insert({s, k});
+            return out;
+        };
+        const QRectF leftHalf(790, 500, 70, 80), rightLine(990, 500, 120, 80);
+        QVERIFY(!inside(leftHalf).empty() && !inside(rightLine).empty());
+        lasso(leftHalf);
+        QCOMPARE(tool.chosenAnchorRefs(), inside(leftHalf));
+        QVERIFY(int(tool.chosenAnchorRefs().size()) < int(tool.anchorsOf(0).size())); // not the whole line
+        lasso(rightLine, Qt::ShiftModifier);
+        std::set<canvas::VectorPointTool::AnchorRef> both = inside(leftHalf);
+        both.merge(inside(rightLine));
+        QCOMPARE(tool.chosenAnchorRefs(), both);
+        lasso(rightLine, Qt::AltModifier);
+        QCOMPARE(tool.chosenAnchorRefs(), inside(leftHalf));
+        // Each choice is an undo step: back to the points chosen before, and on again.
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo selection"));
+        controller.undo();
+        QCOMPARE(tool.chosenAnchorRefs(), both);
+        controller.undo();
+        QCOMPARE(tool.chosenAnchorRefs(), inside(leftHalf));
+        controller.redo();
+        controller.redo();
+        QCOMPARE(tool.chosenAnchorRefs(), inside(leftHalf));
+        QCOMPARE(tool.chosenStrokes(), std::vector<int>({0, 1}));
+        QCOMPARE(strokes(), drawn); // choosing changes nothing
+        click(QPointF(850, drawn[2].points.front().y), Qt::ShiftModifier); // a click still chooses a stroke
+        QCOMPARE(tool.chosenStrokes(), std::vector<int>({0, 1, 2}));
+        click(QPointF(850, drawn[2].points.front().y), Qt::ShiftModifier);
+        QCOMPARE(tool.chosenStrokes(), std::vector<int>({0, 1}));
+        state.setVectorPoints({tools::VectorPointSettings::Mode::Move});
+        const QPointF held = *tool.anchorPoint(0, 0);
+        tool.press(held, Qt::NoModifier);
+        tool.move(held + QPointF(0, -20), Qt::NoModifier);
+        tool.release(held + QPointF(0, -20), Qt::NoModifier);
+        QCOMPARE(strokes()[0].points.front().y, drawn[0].points.front().y - 20);
+        QCOMPARE(strokes()[0].points.back().y, drawn[0].points.back().y); // outside the loop: stays
+        QCOMPARE(strokes()[1], drawn[1]);
+        controller.undo();
+        QCOMPARE(strokes(), drawn);
+        // A stroke not chosen that the loop touches, even in part: chosen with all its anchors.
+        state.setVectorPoints({tools::VectorPointSettings::Mode::Lasso});
+        lasso(QRectF(780, 680, 70, 40)); // half of the third (not chosen)
+        QCOMPARE(tool.chosenStrokes(), std::vector<int>({0, 1, 2}));
+        controller.undo(); // the stroke taken by the loop is no longer chosen
+        QCOMPARE(tool.chosenStrokes(), std::vector<int>({0, 1}));
+        controller.redo();
+        QCOMPARE(tool.chosenStrokes(), std::vector<int>({0, 1, 2}));
+        std::set<canvas::VectorPointTool::AnchorRef> all;
+        for (int k = 0; k < int(tool.anchorsOf(2).size()); ++k)
+            all.insert({2, k});
+        QCOMPARE(tool.chosenAnchorRefs(), all);
+        click(QPointF(850, drawn[2].points.front().y), Qt::ShiftModifier);
+        lasso(QRectF(840, 690, 20, 20)); // only crossing it, no point inside... or a few: chosen all the same
+        QCOMPARE(tool.chosenStrokes(), std::vector<int>({0, 1, 2}));
+        QCOMPARE(tool.chosenAnchorRefs(), all);
+        click(QPointF(850, drawn[2].points.front().y), Qt::ShiftModifier);
+        lasso(QRectF(780, 720, 140, 40)); // near it, not on it: not chosen
+        QCOMPARE(tool.chosenStrokes(), std::vector<int>({0, 1}));
+        QVERIFY(tool.chosenAnchorRefs().empty());
+        QCOMPARE(strokes(), drawn);
+        state.setVectorPoints({tools::VectorPointSettings::Mode::Move});
+
         // An end dropped away from any end: only moved.
         const int last = int(tool.anchorsOf(0).size()) - 1;
         QCOMPARE(*tool.anchorPoint(0, last), firstEnd);
@@ -857,6 +937,8 @@ private slots:
 
         // The same through the canvas, with the tool chosen: a click chooses the stroke, a drag on its line bends it.
         state.setVectorPoints({tools::VectorPointSettings::Mode::Move});
+        while (controller.undoText() == QStringLiteral("Undo selection")) // the points chosen meanwhile
+            controller.undo();
         controller.undo(); // the line straight again
         QCOMPARE(layer().strokes[0], drawn);
         const QTransform toView = canvas.view().documentToView();

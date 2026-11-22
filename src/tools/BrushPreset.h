@@ -58,6 +58,8 @@ struct BrushPreset
     std::optional<LiquifySettings::Mode> liquifyMode;
     // A shape sub tool: sets only the kind of shape (the style stays as it is).
     std::optional<ShapeSettings::Kind> shapeKind;
+    // A Correct line sub tool: sets only what it does to the control points.
+    std::optional<VectorPointSettings::Mode> vectorPointMode;
     // A sub tool that is a tool of its own (the selection shapes): picking it
     // makes that tool active, nothing else.
     std::optional<ToolId> selectsTool;

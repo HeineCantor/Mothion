@@ -90,8 +90,22 @@ QList<BrushPreset> builtInPresets(ToolId tool)
     case ToolId::Puppet:
     case ToolId::Eyedropper:
     case ToolId::Transform:
-    case ToolId::VectorPoint:
         return {}; // no sub tools
+    case ToolId::VectorPoint: { // what the Correct line does to the control points
+        using Mode = VectorPointSettings::Mode;
+        const std::pair<QString, Mode> modes[] = {
+            {QObject::tr("Move control points"), Mode::Move}, {QObject::tr("Lasso control points"), Mode::Lasso},
+            {QObject::tr("Line width"), Mode::Width},         {QObject::tr("Corner"), Mode::Corner},
+            {QObject::tr("Cut line"), Mode::Cut},
+        };
+        QList<BrushPreset> list;
+        for (const auto &[name, mode] : modes) {
+            BrushPreset preset{name, tool};
+            preset.vectorPointMode = mode;
+            list << preset;
+        }
+        return list;
+    }
     }
     return {};
 }
@@ -120,6 +134,12 @@ void applyPreset(ToolState &state, const BrushPreset &preset)
         LiquifySettings liquify = state.liquifySettings();
         liquify.mode = *preset.liquifyMode;
         state.setLiquifySettings(liquify);
+        return;
+    }
+    if (preset.vectorPointMode) {
+        VectorPointSettings points = state.vectorPoints();
+        points.mode = *preset.vectorPointMode;
+        state.setVectorPoints(points);
         return;
     }
     if (preset.shapeKind) {

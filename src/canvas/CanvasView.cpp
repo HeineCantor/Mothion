@@ -328,6 +328,7 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
     connect(m_document, &DocumentController::currentCelChanged, this, &CanvasView::updateStraightLine); // a path shown or not
     // The path's keys chosen (an undo or a redo too): their dots and their box are drawn again.
     connect(m_document, &DocumentController::pathKeysChosen, this, qOverload<>(&QWidget::update));
+    connect(m_document, &DocumentController::toolChoiceRestored, this, qOverload<>(&QWidget::update));
     connect(m_toolState, &ToolState::activeToolChanged, this, [this] { updateStraightLine(); });
     connect(m_document, &DocumentController::documentReplaced, this, [this] {
         m_lastPoint.reset();

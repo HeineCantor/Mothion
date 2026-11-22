@@ -7,7 +7,9 @@
 
 #include <QObject>
 #include <QPainter>
+#include <QLineF>
 #include <QPainterPath>
+#include <QPolygonF>
 
 #include <algorithm>
 #include <cmath>
@@ -88,7 +90,10 @@ void VectorPointTool::refresh() const
         if (now == p.stroke)
             continue;
         p.stroke = now;
+        const std::size_t before = p.anchors.size();
         p.anchors = controlPoints(now, kTolerance / m_zoom);
+        if (p.anchors.size() == before) // the same anchors moved (a move undone): those chosen stay
+            continue;
         std::erase_if(m_chosen->anchors, [&](const AnchorRef &a) { return a.stroke == p.index; });
         if (m_chosen->pivot && m_chosen->pivot->stroke == p.index)
             m_chosen->pivot.reset();
@@ -201,11 +206,75 @@ bool VectorPointTool::chooseAllAnchors()
     refresh();
     if (!m_chosen)
         return false;
+    const Choice before = choice();
     m_chosen->anchors.clear();
     for (const Picked &p : m_chosen->strokes)
         for (int k = 0; k < int(p.anchors.size()); ++k)
             m_chosen->anchors.insert({p.index, k});
+    m_strokesChanged = false;
+    recordChoice(before);
     return true;
+}
+
+VectorPointTool::Choice VectorPointTool::choice() const
+{
+    refresh();
+    Choice c;
+    if (!m_chosen)
+        return c;
+    c.cel = m_chosen->cel;
+    c.drawing = m_chosen->drawing;
+    c.layer = m_chosen->layer;
+    for (const Picked &p : m_chosen->strokes)
+        c.strokes.push_back(p.index);
+    c.anchors = m_chosen->anchors;
+    c.pivot = m_chosen->pivot;
+    c.current = m_chosen->current;
+    return c;
+}
+
+void VectorPointTool::restore(const Choice &choice)
+{
+    m_lasso.reset();
+    const doc::Layer *layer = currentLayer();
+    if (m_edit || choice.strokes.empty() || !layer || choice.cel != m_document->currentCel()
+        || choice.drawing != m_document->currentDrawingId() || choice.layer != layer->id) {
+        if (!m_edit)
+            m_chosen.reset(); // none chosen, or on a layer no longer the current one
+        return;
+    }
+    Chosen c;
+    c.cel = choice.cel;
+    c.drawing = choice.drawing;
+    c.layer = choice.layer;
+    for (int index : choice.strokes)
+        if (index >= 0 && index < int(layer->strokes.size()))
+            c.strokes.push_back(makePicked(index));
+    if (c.strokes.empty()) {
+        m_chosen.reset();
+        return;
+    }
+    auto valid = [&](const AnchorRef &a) {
+        const Picked *p = c.find(a.stroke);
+        return p && a.k >= 0 && a.k < int(p->anchors.size());
+    };
+    for (const AnchorRef &a : choice.anchors)
+        if (valid(a))
+            c.anchors.insert(a);
+    if (choice.pivot && valid(*choice.pivot))
+        c.pivot = choice.pivot;
+    c.current = c.find(choice.current) ? choice.current : c.strokes.back().index;
+    m_chosen = std::move(c);
+}
+
+void VectorPointTool::recordChoice(const Choice &before)
+{
+    if (m_strokesChanged)
+        return;
+    Choice after = choice();
+    if (after == before)
+        return;
+    m_document->recordToolChoice([this, before] { restore(before); }, [this, after] { restore(after); }, m_alive);
 }
 
 std::vector<int> VectorPointTool::chosenStrokes() const
@@ -269,8 +338,15 @@ void VectorPointTool::press(const QPointF &docPos, Qt::KeyboardModifiers modifie
         m_status(QObject::tr("Correct line works on the strokes of a vector layer"));
         return;
     }
-    refresh();
+    const Choice before = choice();
+    m_strokesChanged = false;
+    const std::shared_ptr<void> record(nullptr, [&](void *) { recordChoice(before); });
     const Mode mode = m_toolState->vectorPoints().mode;
+
+    if (mode == Mode::Lasso) {
+        m_lasso = Lasso{{docPos}, modifiers};
+        return;
+    }
 
     if (const std::optional<AnchorRef> anchor = anchorAt(docPos)) {
         Chosen &c = *m_chosen;
@@ -346,6 +422,7 @@ void VectorPointTool::press(const QPointF &docPos, Qt::KeyboardModifiers modifie
                 return;
             }
             const PathPlace at = *place;
+            m_strokesChanged = true; // the anchor added is part of the edit's step
             if (!beginEdit(Edit::Kind::Move, {index}))
                 return;
             Edit::Stroke &es = m_edit->edited.front();
@@ -363,7 +440,12 @@ void VectorPointTool::press(const QPointF &docPos, Qt::KeyboardModifiers modifie
         }
     }
 
-    // Elsewhere: the stroke there chosen (Shift: one more, or taken away), or none.
+    chooseStrokeAt(docPos, modifiers);
+}
+
+void VectorPointTool::chooseStrokeAt(const QPointF &docPos, Qt::KeyboardModifiers modifiers)
+{
+    // The stroke there chosen (Shift: one more, or taken away), or none.
     const int index = strokeAt(docPos);
     if (modifiers & Qt::ShiftModifier) {
         if (index >= 0)
@@ -426,6 +508,11 @@ void VectorPointTool::syncPicked()
 
 void VectorPointTool::move(const QPointF &docPos, Qt::KeyboardModifiers)
 {
+    if (m_lasso) {
+        if (QLineF(m_lasso->points.back(), docPos).length() * m_zoom >= 2.0) // a point each 2 px on screen
+            m_lasso->points.push_back(docPos);
+        return;
+    }
     if (!m_edit || !m_chosen)
         return;
     Edit &e = *m_edit;
@@ -575,8 +662,94 @@ void VectorPointTool::redraw(const std::vector<doc::VectorStroke> &strokes, cons
     m_document->notifyPainted(region);
 }
 
+void VectorPointTool::finishLasso()
+{
+    const Lasso lasso = std::move(*m_lasso);
+    m_lasso.reset();
+    refresh();
+    const bool add = lasso.modifiers & Qt::ShiftModifier;
+    const bool remove = !add && (lasso.modifiers & Qt::AltModifier);
+    auto take = [&](const std::set<AnchorRef> &found) {
+        Chosen &c = *m_chosen;
+        if (remove) {
+            for (const AnchorRef &a : found)
+                c.anchors.erase(a);
+        } else {
+            if (!add)
+                c.anchors.clear();
+            c.anchors.insert(found.begin(), found.end());
+        }
+        if (!found.empty()) {
+            c.pivot = *found.rbegin();
+            c.current = found.rbegin()->stroke;
+        }
+    };
+
+    // A click: the anchor there, or the stroke.
+    QPolygonF loop(QList<QPointF>(lasso.points.begin(), lasso.points.end()));
+    const QRectF bounds = loop.boundingRect();
+    if (std::max(bounds.width(), bounds.height()) * m_zoom < 3.0) {
+        if (const std::optional<AnchorRef> anchor = anchorAt(lasso.points.front()))
+            take({*anchor});
+        else
+            chooseStrokeAt(lasso.points.front(), lasso.modifiers & Qt::ShiftModifier);
+        return;
+    }
+    // A stroke not chosen yet that the loop takes in or crosses, even in part: chosen, with all its anchors.
+    std::vector<int> taken;
+    if (const doc::Layer *layer = currentLayer(); layer && !remove) {
+        std::vector<QLineF> edges;
+        for (qsizetype i = 0; i < loop.size(); ++i)
+            edges.emplace_back(loop[i], loop[(i + 1) % loop.size()]);
+        auto touched = [&](const doc::VectorStroke &stroke) {
+            QPointF last;
+            for (std::size_t i = 0; i < stroke.points.size(); ++i) {
+                const QPointF at(stroke.points[i].x, stroke.points[i].y);
+                if (loop.containsPoint(at, Qt::OddEvenFill))
+                    return true;
+                if (i > 0 && bounds.intersects(QRectF(last, at).normalized().adjusted(-0.5, -0.5, 0.5, 0.5))) {
+                    const QLineF piece(last, at);
+                    for (const QLineF &edge : edges)
+                        if (piece.intersects(edge) == QLineF::BoundedIntersection)
+                            return true;
+                }
+                last = at;
+            }
+            return false;
+        };
+        for (int i = 0; i < int(layer->strokes.size()); ++i) {
+            const doc::VectorStroke &stroke = layer->strokes[std::size_t(i)];
+            if ((m_chosen && m_chosen->find(i)) || stroke.points.empty()
+                || !bounds.intersects(strokeReach(stroke)) || !touched(stroke))
+                continue;
+            choose(i, true);
+            taken.push_back(i);
+        }
+    }
+    if (!m_chosen) {
+        m_status(QObject::tr("Draw the loop across strokes, or choose them first (click one, Shift+click one more)"));
+        return;
+    }
+    std::set<AnchorRef> found;
+    for (const Picked &p : m_chosen->strokes) {
+        const bool whole = std::find(taken.begin(), taken.end(), p.index) != taken.end();
+        for (int k = 0; k < int(p.anchors.size()); ++k)
+            if (whole || loop.containsPoint(pointOf(p.stroke, p.anchors[std::size_t(k)]), Qt::OddEvenFill))
+                found.insert({p.index, k});
+    }
+    take(found);
+}
+
 void VectorPointTool::release(const QPointF &docPos, Qt::KeyboardModifiers modifiers)
 {
+    if (m_lasso) {
+        move(docPos, modifiers);
+        const Choice before = choice();
+        m_strokesChanged = false;
+        finishLasso();
+        recordChoice(before);
+        return;
+    }
     if (!m_edit)
         return;
     move(docPos, modifiers);
@@ -619,6 +792,7 @@ void VectorPointTool::changeAtOnce(int index, const std::function<bool(std::vect
     Picked *picked = m_chosen ? m_chosen->find(index) : nullptr;
     if (!picked)
         return;
+    m_strokesChanged = true;
     const std::vector<int> anchorsBefore = picked->anchors;
     if (!beginEdit(Edit::Kind::Move, {index}))
         return;
@@ -652,6 +826,7 @@ void VectorPointTool::merge(const End &from, const End &to)
 {
     if (!m_chosen || !beginEdit(Edit::Kind::Move, {from.stroke}))
         return;
+    m_strokesChanged = true;
     std::vector<doc::VectorStroke> strokes = m_edit->strokes;
     const int a = from.stroke, b = to.stroke;
     if (a == b || b < 0 || b >= int(strokes.size())) {
@@ -689,6 +864,7 @@ void VectorPointTool::merge(const End &from, const End &to)
 void VectorPointTool::cancel()
 {
     m_flushTimer.stop();
+    m_lasso.reset();
     if (!m_edit)
         return;
     Edit e = std::move(*m_edit);
@@ -726,6 +902,7 @@ QCursor VectorPointTool::cursor() const
         case Mode::Width: return Qt::SizeVerCursor;
         case Mode::Corner: return Qt::PointingHandCursor;
         case Mode::Cut: break;
+        case Mode::Lasso: return Qt::PointingHandCursor;
         }
     }
     return Qt::CrossCursor;
@@ -758,7 +935,24 @@ void VectorPointTool::paintOverlay(QPainter &painter, const ViewTransform &view)
         painter.setPen(QPen(QColor(accent.red(), accent.green(), accent.blue(), 120), 1.5));
         painter.drawPath(pathOf(layer->strokes[std::size_t(m_hoverStroke)]));
     }
+    // The lasso being drawn: a loop, black and white dashes so that it shows on any colour.
+    auto drawLasso = [&] {
+        if (!m_lasso || m_lasso->points.size() < 2)
+            return;
+        QPolygonF loop;
+        for (const QPointF &q : m_lasso->points)
+            loop << toView.map(q);
+        painter.setBrush(QColor(accent.red(), accent.green(), accent.blue(), 30));
+        painter.setPen(QPen(Qt::white, 1.0));
+        painter.drawPolygon(loop);
+        QPen dash(Qt::black, 1.0);
+        dash.setDashPattern({4, 4});
+        painter.setBrush(Qt::NoBrush);
+        painter.setPen(dash);
+        painter.drawPolygon(loop);
+    };
     if (!m_chosen) {
+        drawLasso();
         painter.restore();
         return;
     }
@@ -794,6 +988,7 @@ void VectorPointTool::paintOverlay(QPainter &painter, const ViewTransform &view)
     }
 
     constexpr double r = 4.0;
+    drawLasso();
     for (const Picked &p : m_chosen->strokes)
         for (std::size_t k = 0; k < p.anchors.size(); ++k) {
             const AnchorRef ref{p.index, int(k)};

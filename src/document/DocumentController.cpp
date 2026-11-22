@@ -140,6 +140,45 @@ private:
     Keys m_after;
 };
 
+// A tool's choice before and after a step (see recordToolChoice()).
+class ToolChoiceCommand : public doc::Command
+{
+public:
+    ToolChoiceCommand(std::function<void()> undo, std::function<void()> redo, std::weak_ptr<void> alive,
+                      std::function<void()> restored)
+        : m_undo(std::move(undo))
+        , m_redo(std::move(redo))
+        , m_alive(std::move(alive))
+        , m_restored(std::move(restored))
+    {
+    }
+
+    doc::CommandKind kind() const override { return doc::CommandKind::Select; }
+    doc::ChangeSet apply(doc::Document &) override
+    {
+        run(m_redo);
+        return {};
+    }
+    doc::ChangeSet revert(doc::Document &) override
+    {
+        run(m_undo);
+        return {};
+    }
+
+private:
+    void run(const std::function<void()> &f)
+    {
+        if (m_alive.expired())
+            return;
+        f();
+        m_restored();
+    }
+
+    std::function<void()> m_undo, m_redo;
+    std::weak_ptr<void> m_alive;
+    std::function<void()> m_restored;
+};
+
 } // namespace
 
 DocumentController::DocumentController(QObject *parent)
@@ -2806,6 +2845,14 @@ void DocumentController::choosePathKeys(doc::CelId cel, const std::set<int> &fra
     m_history.pushApplied(std::make_unique<PathKeysCommand>(
         [this](doc::CelId c, const std::set<int> &f) { assignPathKeys(c, f, -1); }, std::move(before),
         PathKeysCommand::Keys{m_pathKeysCel, m_pathKeys}));
+    emit historyChanged();
+}
+
+void DocumentController::recordToolChoice(std::function<void()> undo, std::function<void()> redo,
+                                          std::weak_ptr<void> alive)
+{
+    m_history.pushApplied(std::make_unique<ToolChoiceCommand>(std::move(undo), std::move(redo), std::move(alive),
+                                                              [this] { emit toolChoiceRestored(); }));
     emit historyChanged();
 }
 

@@ -14,6 +14,7 @@
 
 #include <compare>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <set>
 #include <vector>
@@ -36,9 +37,14 @@ namespace mothion::canvas {
 //    an end of another stroke chosen makes the two one (see mergedStrokes());
 //  - Width: an anchor dragged up makes the line wider round it, down thinner (the anchors chosen together);
 //  - Corner: a click on an anchor makes it a corner, or smooth again;
-//  - Cut: a click on the line of a stroke chosen cuts it in two there.
+//  - Cut: a click on the line of a stroke chosen cuts it in two there;
+//  - Lasso: a drag draws a loop round anchors of the strokes chosen, which become the anchors chosen (Shift: they are
+//    chosen too, Alt: they are no longer chosen), to be moved or widened together in the other modes. A click without a
+//    drag chooses the anchor there (Shift, Alt alike), or, on no anchor, chooses a stroke as in the other modes. A stroke
+//    not chosen yet that the loop takes in or crosses, even in part, is chosen too, with all its anchors (not with Alt).
 //
-// Each change is one undo step, the strokes and the layer's pixels together (drawn again from the strokes).
+// Each change is one undo step, the strokes and the layer's pixels together (drawn again from the strokes). So is each
+// change of what is chosen, strokes and anchors (a "selection" step, see DocumentController::recordToolChoice()).
 class VectorPointTool : public CanvasTool
 {
 public:
@@ -49,7 +55,7 @@ public:
     void move(const QPointF &docPos, Qt::KeyboardModifiers modifiers) override;
     void release(const QPointF &docPos, Qt::KeyboardModifiers modifiers) override;
     void cancel() override;
-    bool isActive() const override { return m_edit.has_value(); }
+    bool isActive() const override { return m_edit.has_value() || m_lasso.has_value(); }
     bool hover(const QPointF &docPos) override;
     void setViewZoom(double zoom) override { m_zoom = zoom > 0 ? zoom : 1.0; }
     void paintOverlay(QPainter &painter, const ViewTransform &view) const override;
@@ -75,6 +81,8 @@ public:
     std::vector<int> anchorsOf(int stroke) const;
     std::optional<QPointF> anchorPoint(int stroke, int k) const;
     std::set<AnchorRef> chosenAnchorRefs() const;
+    // The lasso being drawn (document coordinates), empty when none; for tests.
+    std::vector<QPointF> lassoPoints() const { return m_lasso ? m_lasso->points : std::vector<QPointF>(); }
     // Ctrl+A: every anchor of the strokes chosen; false if no stroke is chosen.
     bool chooseAllAnchors();
 
@@ -145,6 +153,35 @@ private:
         std::optional<End> mergeFrom, mergeTo;
     };
 
+    // What is chosen, as an undo step keeps it.
+    struct Choice
+    {
+        doc::CelId cel = doc::kNoId;
+        doc::DrawingId drawing = doc::kNoId;
+        doc::LayerId layer = doc::kNoId;
+        std::vector<int> strokes;
+        std::set<AnchorRef> anchors;
+        std::optional<AnchorRef> pivot;
+        int current = -1;
+        bool operator==(const Choice &) const = default;
+    };
+    Choice choice() const;
+    void restore(const Choice &choice);
+    // Records the change from `before` to what is chosen now as an undo step, unless nothing changed or a change of
+    // the strokes made it (m_strokesChanged: undoing that puts the choice right).
+    void recordChoice(const Choice &before);
+
+    // Lasso mode: the loop as it is drawn, and the keys held at the press.
+    struct Lasso
+    {
+        std::vector<QPointF> points;
+        Qt::KeyboardModifiers modifiers;
+    };
+    // The loop closed: the anchors inside it chosen (or, a click, the anchor or stroke there).
+    void finishLasso();
+    // Where the strokes are chosen by a click on them (no anchor, no line of a stroke chosen there).
+    void chooseStrokeAt(const QPointF &docPos, Qt::KeyboardModifiers modifiers);
+
     const doc::Layer *currentLayer() const;
     // The strokes chosen, put right with the layer: dropped when the layer is another, taken again (with new anchors)
     // when a stroke changed (an undo).
@@ -180,6 +217,9 @@ private:
     double m_zoom = 1.0;
     mutable std::optional<Chosen> m_chosen;
     std::optional<Edit> m_edit;
+    std::optional<Lasso> m_lasso;
+    bool m_strokesChanged = false;
+    std::shared_ptr<int> m_alive = std::make_shared<int>(0); // see DocumentController::recordToolChoice()
     QTimer m_flushTimer;
     std::optional<AnchorRef> m_hoverAnchor;
     int m_hoverStroke = -1;

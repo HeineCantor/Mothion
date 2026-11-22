@@ -320,6 +320,10 @@ public:
     doc::CelId pathKeysCel() const { return m_pathKeysCel; }
     const std::set<int> &pathKeys() const { return m_pathKeys; }
     void choosePathKeys(doc::CelId cel, const std::set<int> &frames, int clicked = -1);
+    // What a tool has chosen (not part of the document, as the control points of the Correct line) changed: recorded as
+    // an undo step ("selection") that calls `undo` and `redo` to put it back, each followed by toolChoiceRestored().
+    // The tool gives `alive`, false once it is gone (the step then does nothing).
+    void recordToolChoice(std::function<void()> undo, std::function<void()> redo, std::weak_ptr<void> alive);
     int playRangeFirst() const { return m_document->sceneStart(); }
     int playRangeLast() const; // the scene's last frame, never before the first
     // The frame after the last exposure of any cel: how short the scene can be without leaving some out.
@@ -704,6 +708,8 @@ signals:
     // Undo/redo availability or labels changed.
     void historyChanged();
     void selectionChanged();
+    // A tool's choice was put back by an undo or a redo (see recordToolChoice()).
+    void toolChoiceRestored();
     // Emitted before anything that must not happen mid-stroke (undo, frame
     // change...): whoever is painting should cancel its stroke now.
     void strokeInterrupted();
