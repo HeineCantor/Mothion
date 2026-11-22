@@ -485,12 +485,18 @@ void VectorPointTool::press(const QPointF &docPos, Qt::KeyboardModifiers modifie
         Chosen &c = *m_chosen;
         Picked &picked = *c.find(anchor->stroke);
         c.current = anchor->stroke;
-        if (modifiers & Qt::ShiftModifier) { // the anchors from the one clicked last to this one (on its stroke)
-            const int from = c.pivot && c.pivot->stroke == anchor->stroke ? c.pivot->k : anchor->k;
-            c.anchors.clear();
-            for (int k = std::min(from, anchor->k); k <= std::max(from, anchor->k); ++k)
-                c.anchors.insert({anchor->stroke, k});
-            c.pivot = AnchorRef{anchor->stroke, from};
+        if (modifiers & Qt::ShiftModifier) {
+            // The anchors from the one clicked last to this one, on its stroke (those chosen on the other strokes stay);
+            // the one clicked last on another stroke: this one more, and the range starts from it.
+            if (c.pivot && c.pivot->stroke == anchor->stroke) {
+                const int from = c.pivot->k;
+                std::erase_if(c.anchors, [&](const AnchorRef &a) { return a.stroke == anchor->stroke; });
+                for (int k = std::min(from, anchor->k); k <= std::max(from, anchor->k); ++k)
+                    c.anchors.insert({anchor->stroke, k});
+            } else {
+                c.anchors.insert(*anchor);
+                c.pivot = anchor;
+            }
             return;
         }
         if (modifiers & Qt::ControlModifier) { // one more anchor chosen, or one taken away

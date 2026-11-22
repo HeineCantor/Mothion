@@ -741,6 +741,33 @@ private slots:
         QCOMPARE(strokes()[2], drawn[2]);
         controller.undo();
         QCOMPARE(strokes(), drawn);
+        // Shift+click on a point of the other stroke: one more, those chosen on the first stay; a range on it from there.
+        {
+            using Ref = canvas::VectorPointTool::AnchorRef;
+            click(QPointF(500, 300)); // nothing there: nothing chosen
+            click(onFirst, Qt::ShiftModifier);
+            click(onSecond, Qt::ShiftModifier);
+            QCOMPARE(tool.chosenStrokes(), std::vector<int>({0, 1}));
+            click(*tool.anchorPoint(0, 1));
+            QCOMPARE(tool.chosenAnchorRefs(), std::set<Ref>({{0, 1}}));
+            click(*tool.anchorPoint(1, 0), Qt::ShiftModifier);
+            QCOMPARE(tool.chosenAnchorRefs(), std::set<Ref>({{0, 1}, {1, 0}}));
+            const int lastOfSecond = int(tool.anchorsOf(1).size()) - 1;
+            QVERIFY(lastOfSecond >= 1);
+            click(*tool.anchorPoint(1, lastOfSecond), Qt::ShiftModifier);
+            std::set<Ref> range{{0, 1}};
+            for (int k = 0; k <= lastOfSecond; ++k)
+                range.insert({1, k});
+            QCOMPARE(tool.chosenAnchorRefs(), range);
+            const QPointF grip = *tool.anchorPoint(0, 1);
+            tool.press(grip, Qt::NoModifier);
+            tool.move(grip + QPointF(0, -30), Qt::NoModifier);
+            tool.release(grip + QPointF(0, -30), Qt::NoModifier);
+            QVERIFY(strokes()[0] != drawn[0]);
+            QVERIFY(strokes()[1] != drawn[1]);
+            controller.undo();
+            QCOMPARE(strokes(), drawn);
+        }
 
         // Lasso: a loop round anchors of the strokes chosen chooses them (Shift more, Alt fewer); the others move them.
         state.setVectorPoints({tools::VectorPointSettings::Mode::Lasso});

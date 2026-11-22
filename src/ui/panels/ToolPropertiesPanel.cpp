@@ -352,7 +352,7 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
     auto updateVectorPointHelp = [this, vectorPointHelp] {
         const QString help[] = {
             tr("Click a stroke of a vector layer to show its control points (Shift+click a stroke: one more). Drag a "
-               "point to bend the line; Shift+click chooses the points from the one clicked last, Ctrl+click one more, "
+               "point to bend the line; Shift+click chooses the points from the one clicked last (on another stroke: one more), Ctrl+click one more, "
                "Ctrl+A all of them, to move together. Click the line to add a point, Alt+click a point to take it "
                "away. Drop an end on an end of another chosen stroke to join the two. The chosen points show Bezier "
                "handles: drag one to bend the line on its side (Alt: the other side stays); drop it on its point to "
