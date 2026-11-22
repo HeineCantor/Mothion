@@ -142,15 +142,22 @@ doc::BlendMode blendFromName(const QString &text)
 
 // A vector layer's strokes as JSON: one object per stroke, its points as arrays of the numbers of a
 // brush::BrushInput (x, y, pressure, velocity, tilt, hasTilt, penAngle, inOut, sizeScale, flowScale,
-// direction, corner, tipAngle; an older file's points have no tipAngle: 0).
+// direction, corner, tipAngle; an older file's points have no tipAngle: 0). `corner` is 0, or 1 plus twice the corner's
+// handles held in it (BrushInput::heldHandles): an older reader sees a corner. A 14th number, 1, marks an anchor put by
+// hand (BrushInput::keptAnchor); it is left out when 0.
 QString strokesToJson(const std::vector<doc::VectorStroke> &strokes)
 {
     QJsonArray all;
     for (const doc::VectorStroke &st : strokes) {
         QJsonArray points;
-        for (const brush::BrushInput &in : st.points)
-            points.append(QJsonArray{in.x, in.y, in.pressure, in.velocity, in.tilt, in.hasTilt ? 1 : 0, in.penAngle,
-                                     in.inOut, in.sizeScale, in.flowScale, in.direction, in.corner ? 1 : 0, in.tipAngle});
+        for (const brush::BrushInput &in : st.points) {
+            QJsonArray point{in.x, in.y, in.pressure, in.velocity, in.tilt, in.hasTilt ? 1 : 0, in.penAngle,
+                             in.inOut, in.sizeScale, in.flowScale, in.direction, in.corner ? 1 + 2 * (in.heldHandles & 3) : 0,
+                             in.tipAngle};
+            if (in.keptAnchor)
+                point.append(1);
+            points.append(point);
+        }
         QJsonObject object{
             {QStringLiteral("brush"), QString::fromStdString(st.brush)},
             {QStringLiteral("size"), st.size},
@@ -213,7 +220,9 @@ std::vector<doc::VectorStroke> strokesFromJson(const QString &text)
             in.flowScale = a[9].toDouble(1.0);
             in.direction = a[10].toDouble();
             in.corner = a[11].toInt() != 0;
+            in.heldHandles = in.corner ? std::uint8_t((a[11].toInt() >> 1) & 3) : 0;
             in.tipAngle = a.size() > 12 ? a[12].toDouble() : 0.0;
+            in.keptAnchor = a.size() > 13 && a[13].toInt() != 0;
             st.points.push_back(in);
         }
         // Outline starts that do not fit the points left (a damaged file) are let go.

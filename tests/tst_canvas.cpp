@@ -5,6 +5,8 @@
 #include "canvas/Symmetry.h"
 #include "canvas/VectorErase.h"
 #include "canvas/VectorPoints.h"
+
+#include <map>
 #include "canvas/VectorRender.h"
 #include "canvas/SelectionMask.h"
 #include "canvas/VectorWarp.h"
@@ -642,32 +644,173 @@ private slots:
         }
         QCOMPARE(controlPoints(bent, 1.0), (std::vector<int>{0, 25, 50}));
         QCOMPARE(controlPoints(doc::VectorStroke{}, 1.0), std::vector<int>());
+        // A smooth curve is one Bezier curve, not a polyline: no anchors along an arc (a polyline would need several).
+        doc::VectorStroke arc;
+        for (int i = 0; i <= 90; ++i) {
+            brush::BrushInput in;
+            in.x = 100 * std::cos(i * std::numbers::pi / 180);
+            in.y = 100 * std::sin(i * std::numbers::pi / 180);
+            arc.points.push_back(in);
+        }
+        QCOMPARE(controlPoints(arc, 1.0), (std::vector<int>{0, 90}));
+        // An anchor put by hand stays one.
+        arc.points[30].keptAnchor = true;
+        QCOMPARE(controlPoints(arc, 1.0), (std::vector<int>{0, 30, 90}));
     }
 
-    // An anchor moved takes the points round it along, less and less towards the anchors beside it, which stay; round
-    // a smooth anchor what is near goes along as a whole, round a corner the line bends at once. Pressure stays.
+    // An anchor moved takes its handles along: the runs beside it bend to the curves their ends make now, the anchors beside
+    // it stay; what is near it goes along with it as a whole, halfway about half as far. Pressure stays; points are put in
+    // where a run grew longer.
     void movingAnAnchorBendsTheLineRoundIt()
     {
-        const doc::VectorStroke line = straightStroke(51);
+        const doc::VectorStroke line = straightStroke(51); // x from 0 to 100
         const std::vector<int> anchors{0, 25, 50};
         const std::vector<QPointF> offsets{{}, {0, 20}, {}};
-        const doc::VectorStroke smooth = movedAnchors(line, anchors, offsets);
-        QCOMPARE(smooth.points[25].y, 20.0);
-        QCOMPARE(smooth.points[0].y, 0.0);
-        QCOMPARE(smooth.points[50].y, 0.0);
-        QVERIFY(smooth.points[24].y > 19.8);                                   // along with it as a whole
-        QVERIFY(std::abs(smooth.points[13].y - 10.0) < 1.5);                   // halfway, half as far
-        QCOMPARE(smooth.points[24].x, line.points[24].x);                      // only up
+        std::vector<int> after;
+        const doc::VectorStroke smooth = movedAnchors(line, anchors, offsets, &after);
+        QCOMPARE(after.size(), anchors.size());
+        QCOMPARE(int(smooth.points.size()), after.back() + 1);
+        QCOMPARE(smooth.points[std::size_t(after[1])].y, 20.0);
+        QCOMPARE(smooth.points[std::size_t(after[1])].x, 50.0);
+        QCOMPARE(smooth.points.front().y, 0.0);
+        QCOMPARE(smooth.points.back().y, 0.0);
+        QCOMPARE(smooth.points.back().x, 100.0);
+        auto yAt = [&](double x) { // the line's height where it passes x
+            for (std::size_t i = 1; i < smooth.points.size(); ++i)
+                if (smooth.points[i - 1].x <= x && smooth.points[i].x >= x) {
+                    const double w = (x - smooth.points[i - 1].x) / std::max(1e-9, smooth.points[i].x - smooth.points[i - 1].x);
+                    return smooth.points[i - 1].y + w * (smooth.points[i].y - smooth.points[i - 1].y);
+                }
+            return 0.0;
+        };
+        QVERIFY(yAt(48) > 19.0);                     // along with it as a whole
+        QVERIFY(std::abs(yAt(25) - 10.0) < 2.5);     // halfway, about half as far
+        QVERIFY(yAt(2) < 2.0);                       // the anchor beside it stays
         QCOMPARE(smooth.points[30].pressure, 0.5);
-        doc::VectorStroke corner = line;
-        corner.points[25].corner = true;
-        const doc::VectorStroke bent = movedAnchors(corner, anchors, offsets);
-        // Towards the corner the line lets go at once: less of it goes along than round a smooth anchor.
-        QVERIFY(std::abs(bent.points[24].y - 20.0 * anchorWeight(0.96, false, true)) < 1e-9);
-        QVERIFY(bent.points[24].y < smooth.points[24].y - 0.5);
         QCOMPARE(anchorWeight(0.5, false, false), 0.5);
         QCOMPARE(anchorWeight(0.25, true, true), 0.25);
         QCOMPARE(movedAnchors(line, anchors, {{}, {}, {}}), line); // nothing moved: the same stroke
+    }
+
+    // Pulled hard many times, a point moved far first and its handles thrown about (each drag from where the last left them,
+    // as the tool does): the line bends, it never breaks into spikes or jumps (no point far from the one before it, no turn
+    // back on itself from one point to the next).
+    void handlesPulledHardNeverBreakTheLine()
+    {
+        doc::VectorStroke st; // a wave drawn fast: its points far apart
+        for (int i = 0; i <= 120; ++i) {
+            brush::BrushInput in;
+            in.x = 200 + 12.0 * i;
+            in.y = 600 + 200 * std::sin(i / 18.0) + 3 * std::sin(i * 1.3);
+            st.points.push_back(in);
+        }
+        auto worst = [](const doc::VectorStroke &x, double *sharpest) {
+            double gap = 0, turn = 0;
+            for (std::size_t i = 1; i < x.points.size(); ++i) {
+                const QPointF a(x.points[i].x - x.points[i - 1].x, x.points[i].y - x.points[i - 1].y);
+                gap = std::max(gap, std::hypot(a.x(), a.y()));
+                if (i + 1 < x.points.size()) {
+                    const QPointF b(x.points[i + 1].x - x.points[i].x, x.points[i + 1].y - x.points[i].y);
+                    turn = std::max(turn, std::abs(std::atan2(a.x() * b.y() - a.y() * b.x(), a.x() * b.x() + a.y() * b.y())));
+                }
+            }
+            *sharpest = turn;
+            return gap;
+        };
+        double turn = 0;
+        const double gap = worst(st, &turn);
+        std::vector<int> anchors = controlPoints(st, 6.0);
+        QVERIFY2(anchors.size() >= 4 && anchors.size() <= 8, qPrintable(QString::number(anchors.size()))); // the bends, not each wobble
+        std::vector<QPointF> offsets(anchors.size());
+        offsets[1] = QPointF(350, 250);
+        st = movedAnchors(st, anchors, offsets, &anchors);
+        double moveTurn = 0;
+        QVERIFY2(worst(st, &moveTurn) <= gap * 1.2, qPrintable(QString::number(worst(st, &moveTurn))));
+        QVERIFY2(moveTurn < 2.0, qPrintable(QString::number(moveTurn)));
+        std::map<std::pair<int, bool>, QPointF> memory;
+        const KnownHandle known = [&](int k, bool out) -> std::optional<QPointF> {
+            const auto it = memory.find({k, out});
+            return it == memory.end() ? std::nullopt : std::optional<QPointF>(it->second);
+        };
+        const QPointF a(st.points[std::size_t(anchors[1])].x, st.points[std::size_t(anchors[1])].y);
+        const std::pair<int, QPointF> pulls[] = {{1, a + QPointF(400, -300)}, {1, a + QPointF(-500, -100)},
+                                                 {1, a + QPointF(50, 600)}, {2, QPointF(1500, 100)}};
+        for (const auto &[k, to] : pulls) {
+            HandleChange change;
+            st = movedHandle(st, anchors, k, k == 1, to, true, known, &change);
+            anchors = change.anchors;
+            for (const auto &h : change.handles)
+                memory[{h.k, h.out}] = h.at;
+            double sharpest = 0;
+            QVERIFY2(worst(st, &sharpest) <= gap * 1.2, qPrintable(QString::number(worst(st, &sharpest))));
+            QVERIFY2(sharpest < 2.0, qPrintable(QString::number(sharpest))); // under 115 degrees from one point to the next
+        }
+    }
+
+    // An anchor's Bezier handles: on a straight run a third of the way to the anchors beside it; one dragged bends the run on
+    // its side (its ends stay, pressure too), and on a smooth anchor the run on the other side turns with it, unless not
+    // mirrored, or at a corner.
+    void aHandleDraggedBendsTheRunOnItsSide()
+    {
+        const doc::VectorStroke line = straightStroke(61); // x from 0 to 120, y 0; the middle anchor at 60
+        const std::vector<int> anchors{0, 30, 60};
+        const QPointF out = *anchorHandle(line, anchors, 1, true), in = *anchorHandle(line, anchors, 1, false);
+        QVERIFY(std::hypot(out.x() - 80, out.y()) < 0.5);
+        QVERIFY(std::hypot(in.x() - 40, in.y()) < 0.5);
+        QVERIFY(!anchorHandle(line, anchors, 0, false)); // no run before the first anchor
+        QVERIFY(!anchorHandle(line, anchors, 2, true));
+        // The out handle pulled down: the run after the anchor bulges down, the anchors stay.
+        canvas::HandleChange change; // (the run grew longer: points were put in, and the last anchor moved along)
+        const doc::VectorStroke alone = movedHandle(line, anchors, 1, true, out + QPointF(0, 30), false, {}, &change);
+        const std::vector<int> &moved = change.anchors;
+        QCOMPARE(moved[0], 0);
+        QCOMPARE(moved[1], 30);
+        QVERIFY(moved[2] > 60);
+        QCOMPARE(int(alone.points.size()), moved[2] + 1);
+        QCOMPARE(alone.points[30].y, 0.0);
+        QCOMPARE(alone.points[std::size_t(moved[2])].y, 0.0);
+        QCOMPARE(alone.points[std::size_t(moved[2])].x, 120.0);
+        double deepest = 0;
+        for (int i = 30; i <= moved[2]; ++i)
+            deepest = std::max(deepest, alone.points[std::size_t(i)].y);
+        QVERIFY(deepest > 5.0);
+        QCOMPARE(alone.points[15].y, 0.0); // the other side, not mirrored: as it was
+        QCOMPARE(alone.points[40].pressure, line.points[40].pressure);
+        // Mirrored on a smooth anchor: the run before turns the other way (up), so the line stays smooth through it.
+        canvas::HandleChange smoothChange;
+        const doc::VectorStroke smooth = movedHandle(line, anchors, 1, true, out + QPointF(0, 30), true, {}, &smoothChange);
+        // The handle found again the way it was let go (a fit: its length only about; the tool shows it where it was put).
+        const QPointF found = *anchorHandle(smooth, smoothChange.anchors, 1, true) - QPointF(60, 0);
+        const QPointF put = out + QPointF(0, 30) - QPointF(60, 0);
+        const double angle = std::abs(std::atan2(found.x() * put.y() - found.y() * put.x(), found.x() * put.x() + found.y() * put.y()));
+        QVERIFY2(angle < 15.0 * std::numbers::pi / 180.0, qPrintable(QStringLiteral("%1 %2").arg(found.x()).arg(found.y())));
+        double highest = 0; // (y down: the most negative)
+        for (int i = 0; i <= 30; ++i)
+            highest = std::min(highest, smooth.points[std::size_t(i)].y);
+        QVERIFY(highest < -5.0);
+        QCOMPARE(smooth.points[0].y, 0.0);
+        // At a corner the other side stays.
+        doc::VectorStroke corner = line;
+        corner.points[30].corner = true;
+        QCOMPARE(movedHandle(corner, anchors, 1, true, out + QPointF(0, 30), true).points[22].y, 0.0);
+        // A handle pulled far out: the run's points stay evenly along the curve (no long straight pieces between a few
+        // points, which would draw the curve with corners).
+        canvas::HandleChange farChange;
+        const doc::VectorStroke far = movedHandle(line, anchors, 1, true, QPointF(100, 160), false, {}, &farChange);
+        const std::vector<int> &farAnchors = farChange.anchors;
+        double length = 0, widest = 0;
+        for (int i = 31; i <= farAnchors[2]; ++i) {
+            const double step = std::hypot(far.points[std::size_t(i)].x - far.points[std::size_t(i - 1)].x,
+                                           far.points[std::size_t(i)].y - far.points[std::size_t(i - 1)].y);
+            length += step;
+            widest = std::max(widest, step);
+        }
+        QVERIFY2(widest < 1.5 * length / (farAnchors[2] - 30), qPrintable(QStringLiteral("%1 of %2").arg(widest).arg(length / 30)));
+        QVERIFY(widest < 2.0 * 2.0); // and as dense as the line was (a point every 2 px), or about
+        // Not moved: the same line.
+        const doc::VectorStroke same = movedHandle(line, anchors, 1, true, out, true);
+        for (std::size_t i = 0; i < line.points.size(); ++i)
+            QVERIFY(std::abs(same.points[i].y - line.points[i].y) < 1e-9);
     }
 
     // A line carried by the puppet warp is as wide as the mesh was stretched across it, not along it: squeezed along the
@@ -788,12 +931,13 @@ private slots:
     void anAnchorIsTakenAway()
     {
         std::vector<int> anchors{0, 25, 50};
-        doc::VectorStroke bent = movedAnchors(straightStroke(51), anchors, {{}, {0, 20}, {}});
+        doc::VectorStroke bent = movedAnchors(straightStroke(51), anchors, {{}, {0, 20}, {}}, &anchors);
+        const std::size_t count = bent.points.size();
         QVERIFY(removeAnchor(bent, anchors, 1));
-        QCOMPARE(anchors, (std::vector<int>{0, 50}));
+        QCOMPARE(anchors, (std::vector<int>{0, int(count) - 1}));
         for (const brush::BrushInput &in : bent.points)
             QVERIFY(std::abs(in.y) < 1e-9); // straight between the two ends left
-        QCOMPARE(bent.points.size(), std::size_t(51));
+        QCOMPARE(bent.points.size(), count);
         QVERIFY(!removeAnchor(bent, anchors, 0));
 
         doc::VectorStroke line = straightStroke(51);

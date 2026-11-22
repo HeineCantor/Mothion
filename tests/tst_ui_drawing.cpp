@@ -4,6 +4,7 @@
 #include "canvas/VectorErase.h"
 #include "canvas/VectorEraseTool.h"
 #include "canvas/VectorPointTool.h"
+#include "canvas/VectorPoints.h"
 #include "canvas/VectorRender.h"
 
 class TestUiDrawing : public QObject
@@ -546,6 +547,120 @@ private slots:
         QCOMPARE(layer().strokes.size(), std::size_t(1));
     }
 
+    // The anchors chosen show their Bezier handles, and each run of them the handle of the anchor next to each end, towards
+    // it; a handle dragged bends the line on its side, one undo step; dropped on its anchor it goes into it (a corner, the
+    // handle not shown), and Alt+drag from the anchor pulls the handles out again (smooth); Alt+click still takes it away.
+    void correctLineShowsBezierHandles()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 4, "Line").command);
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Vector));
+        doc::VectorStroke wave; // a wave of several turns: a curve to each (a cubic follows about half a turn of it)
+        for (int i = 0; i <= 400; ++i) {
+            brush::BrushInput in;
+            in.x = 100 + 2.0 * i;
+            in.y = 300 + 40 * std::sin(i / 12.0);
+            in.pressure = 1;
+            wave.points.push_back(in);
+        }
+        d.layer(controller.currentCel(), controller.currentDrawingId(), controller.currentLayer())->strokes.push_back(wave);
+        auto strokes = [&]() -> const std::vector<doc::VectorStroke> & {
+            return controller.currentDrawing()->layer(controller.currentLayer())->strokes;
+        };
+        state.setActiveTool(tools::ToolId::VectorPoint);
+        state.setVectorPoints({tools::VectorPointSettings::Mode::Move});
+        canvas::VectorPointTool tool(&controller, &state, [](const QString &) {});
+        auto click = [&](const QPointF &at, Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+            tool.press(at, modifiers);
+            if (tool.isActive())
+                tool.release(at, modifiers);
+        };
+        click(QPointF(wave.points[10].x, wave.points[10].y));
+        QCOMPARE(tool.chosenStrokes(), std::vector<int>({0}));
+        const int n = int(tool.anchorsOf(0).size());
+        QVERIFY2(n >= 5, qPrintable(QString::number(n)));
+        using H = canvas::VectorPointTool::HandleRef;
+        QVERIFY(tool.shownHandles().empty()); // no anchor chosen: none
+
+        // A lone anchor: its two handles, and one on each anchor beside it, towards it.
+        click(*tool.anchorPoint(0, 2));
+        QCOMPARE(tool.shownHandles(), (std::vector<H>{{0, 1, true}, {0, 2, false}, {0, 2, true}, {0, 3, false}}));
+        // A run (2 to 3): the handles of both, and of 1 and 4 towards it.
+        click(*tool.anchorPoint(0, 3), Qt::ShiftModifier);
+        QCOMPARE(tool.chosenAnchors(), (std::set<int>{2, 3}));
+        QCOMPARE(tool.shownHandles(),
+                 (std::vector<H>{{0, 1, true}, {0, 2, false}, {0, 2, true}, {0, 3, false}, {0, 3, true}, {0, 4, false}}));
+        // At the end of the line: only the ones that have a run.
+        click(*tool.anchorPoint(0, 0));
+        QCOMPARE(tool.shownHandles(), (std::vector<H>{{0, 0, true}, {0, 1, false}}));
+        // Other modes show none.
+        state.setVectorPoints({tools::VectorPointSettings::Mode::Width});
+        QVERIFY(tool.shownHandles().empty());
+        state.setVectorPoints({tools::VectorPointSettings::Mode::Move});
+
+        // A handle dragged: the line bends on its side, the anchors stay; one undo step.
+        click(*tool.anchorPoint(0, 2));
+        const std::vector<doc::VectorStroke> before = strokes();
+        const std::vector<int> anchors = tool.anchorsOf(0);
+        const QPointF grip = *tool.handlePoint({0, 2, true});
+        tool.press(grip, Qt::NoModifier);
+        QVERIFY(tool.isActive());
+        tool.move(grip + QPointF(0, 40), Qt::NoModifier);
+        QCOMPARE(*tool.handlePoint({0, 2, true}), grip + QPointF(0, 40)); // under the pen while dragged
+        tool.release(grip + QPointF(0, 40), Qt::NoModifier);
+        QCOMPARE(*tool.handlePoint({0, 2, true}), grip + QPointF(0, 40)); // where it was let go, not where a fit finds it
+        const doc::VectorStroke &bent = strokes()[0];
+        const std::vector<int> now = tool.anchorsOf(0); // (the run grew: points put in, the anchors after it moved along)
+        QCOMPARE(now.size(), anchors.size());
+        for (int k : {0, 1, 2, 3, n - 1}) // the anchors stay where they were
+            QCOMPARE(*tool.anchorPoint(0, k), QPointF(before[0].points[std::size_t(anchors[std::size_t(k)])].x,
+                                                      before[0].points[std::size_t(anchors[std::size_t(k)])].y));
+        double furthest = 0;
+        for (int i = now[2]; i <= now[3]; ++i)
+            furthest = std::max(furthest, bent.points[std::size_t(i)].y - before[0].points[std::size_t(anchors[2])].y);
+        QVERIFY(furthest > 3.0);
+        controller.undo();
+        QCOMPARE(strokes(), before);
+
+        // Dropped on its anchor: into it, the anchor a corner, the handle no longer shown (the other side stays).
+        const QPointF anchor2 = *tool.anchorPoint(0, 2);
+        const QPointF inHandle = *tool.handlePoint({0, 2, false});
+        tool.press(grip, Qt::NoModifier);
+        tool.move(anchor2 + QPointF(2, 1), Qt::NoModifier); // near enough: it snaps in
+        QCOMPARE(*tool.handlePoint({0, 2, true}), anchor2);
+        tool.release(anchor2 + QPointF(2, 1), Qt::NoModifier);
+        QVERIFY(strokes()[0].points[std::size_t(anchors[2])].corner);
+        const std::vector<H> shown = tool.shownHandles();
+        QVERIFY(std::find(shown.begin(), shown.end(), H{0, 2, true}) == shown.end());
+        QVERIFY(std::find(shown.begin(), shown.end(), H{0, 2, false}) != shown.end());
+        QVERIFY(QLineF(*tool.handlePoint({0, 2, false}), inHandle).length() < 2.0); // the other side as it was
+        const std::vector<doc::VectorStroke> cornered = strokes();
+
+        // Alt+drag from the anchor: the handles out of it, opposite each other, the anchor smooth again.
+        tool.press(anchor2, Qt::AltModifier);
+        QVERIFY(tool.isActive());
+        tool.move(anchor2 + QPointF(8, 0), Qt::AltModifier); // (the anchors beside it are 20 px away)
+        tool.release(anchor2 + QPointF(8, 0), Qt::AltModifier);
+        QVERIFY(!strokes()[0].points[std::size_t(anchors[2])].corner);
+        QCOMPARE(int(tool.anchorsOf(0).size()), n); // not taken away
+        const QPointF out = *tool.handlePoint({0, 2, true}), in = *tool.handlePoint({0, 2, false});
+        QVERIFY2(QLineF(out, anchor2 + QPointF(8, 0)).length() < 2.0, qPrintable(QStringLiteral("%1,%2").arg(out.x()).arg(out.y())));
+        QVERIFY2(QLineF(in, anchor2 - QPointF(8, 0)).length() < 2.0, qPrintable(QStringLiteral("%1,%2").arg(in.x()).arg(in.y())));
+        controller.undo();
+        QCOMPARE(strokes(), cornered);
+        controller.undo();
+        QCOMPARE(strokes(), before);
+
+        // Alt+click, no drag: the anchor goes.
+        click(*tool.anchorPoint(0, 2));
+        click(*tool.anchorPoint(0, 2), Qt::AltModifier);
+        QCOMPARE(int(tool.anchorsOf(0).size()), n - 1);
+        controller.undo();
+        QCOMPARE(strokes(), before);
+    }
+
     // Correct line with several strokes chosen (Shift+click on a stroke: one more, or taken away): their anchors all
     // show and move together; an end dragged onto an end of another stroke chosen makes the two one, as one undo step,
     // without thinning where they meet; dropped elsewhere, the end is only moved.
@@ -776,9 +891,9 @@ private slots:
         state.setActiveTool(tools::ToolId::Brush); // a zigzag: an anchor at each turn
         const QPoint start = canvas.view().documentToView().map(QPointF(800, 540)).toPoint();
         QTest::mousePress(&canvas, Qt::LeftButton, {}, start);
-        for (int i = 1; i <= 120; ++i)
+        for (int i = 1; i <= 240; ++i) // (each turn sharp: a curve cannot go round it, an anchor is there)
             QTest::mouseMove(&canvas, start + QPoint(i, (i / 20) % 2 ? 20 - i % 20 : i % 20));
-        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, start + QPoint(120, 0));
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, start + QPoint(240, 0));
         QCOMPARE(controller.currentDrawing()->layer(controller.currentLayer())->strokes.size(), std::size_t(1));
 
         state.setActiveTool(tools::ToolId::VectorPoint);
@@ -927,7 +1042,11 @@ private slots:
         // A corner, and smooth again.
         state.setVectorPoints({tools::VectorPointSettings::Mode::Corner});
         click(raised);
-        const int topIndex = tool.anchors()[std::size_t(top)];
+        int topIndex = -1; // (the anchors are found again after an undo: the one at the top, wherever it is in the list)
+        for (int k = 0; k < int(tool.anchors().size()); ++k)
+            if (QLineF(*tool.anchorPoint(k), raised).length() < 1.0)
+                topIndex = tool.anchors()[std::size_t(k)];
+        QVERIFY(topIndex >= 0);
         QVERIFY(layer().strokes[0].points[std::size_t(topIndex)].corner);
         controller.undo();
         QVERIFY(!layer().strokes[0].points[std::size_t(topIndex)].corner);

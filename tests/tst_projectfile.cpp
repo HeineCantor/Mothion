@@ -429,6 +429,8 @@ private slots:
                 in.inOut = m == 0 ? 0.0 : 1.0;
                 in.direction = 12.0 * m;
                 in.corner = m == 3;
+                in.heldHandles = m == 3 ? 2 : 0; // a corner with a handle in it (the Correct line)
+                in.keptAnchor = m == 1;          // an anchor put by hand
                 in.tipAngle = -7.5 * m; // turned by a puppet warp
                 st.points.push_back(in);
             }

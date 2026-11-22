@@ -5,6 +5,7 @@
 #include <QPointF>
 #include <QRectF>
 
+#include <functional>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -16,8 +17,10 @@ namespace mothion::canvas {
 // line, the anchors, and what is done to an anchor is done to the points round it.
 //
 // The anchors are indices into the stroke's points, in order: the first and the last point, every corner
-// (brush::BrushInput::corner), and between them the fewest points that keep the line within `tolerance` of the path
-// (Douglas-Peucker). They are not kept with the stroke: they are found when the stroke is chosen, and kept by the tool
+// (brush::BrushInput::corner), every anchor put by hand (keptAnchor), where the line bends most (the top of each bulge, as
+// a drawing's control points are put), and between those as few points as cut the line in pieces each a cubic Bezier
+// curve follows within `tolerance` (Schneider's fitting). A smooth line has few of them: a curve between two, not a
+// polyline's many corners. They are not kept with the stroke: they are found when the stroke is chosen, and kept by the tool
 // as it is edited (the functions below put them right as points come and go).
 std::vector<int> controlPoints(const doc::VectorStroke &stroke, double tolerance);
 
@@ -27,17 +30,58 @@ std::vector<int> controlPoints(const doc::VectorStroke &stroke, double tolerance
 // go at once (slope 1: the line bends at it).
 double anchorWeight(double t, bool startCorner, bool endCorner);
 
-// `original` with each anchor moved by its offset (`offsets[k]` for `anchors[k]`, zero for those that stay): each point
-// between two anchors moves by a mix of their offsets (anchorWeight(), the way along the run measured on the path), so
-// the line keeps what the pen did, its wobbles and its pressure, and only bends. The direction of travel is found again.
+// `original` with each anchor moved by its offset (`offsets[k]` for `anchors[k]`, zero for those that stay), its handles
+// along with it: each run beside an anchor moved bent to the curve its ends make now (see movedHandle()), so the line keeps
+// what the pen did, its wobbles and its pressure, and only bends; where a run grows longer, points are put in (as dense as
+// it was). `anchorsAfter`, if given, gets the anchors' indices in the result. The direction of travel is found again.
 doc::VectorStroke movedAnchors(const doc::VectorStroke &original, const std::vector<int> &anchors,
-                               const std::vector<QPointF> &offsets);
+                               const std::vector<QPointF> &offsets, std::vector<int> *anchorsAfter = nullptr);
 
 // `original` with the width at each anchor multiplied by its factor (`factors[k]`, 1 for those that stay), and the
 // points between two anchors by a mix of theirs: brush::BrushInput::sizeScale, which multiplies the size whatever the
 // brush does with the pressure.
 doc::VectorStroke scaledWidths(const doc::VectorStroke &original, const std::vector<int> &anchors,
                                const std::vector<double> &factors);
+
+// The Bezier handles of the anchors: the run of points between two anchors read as a cubic curve from one to the other
+// (fitted to the points, its ends on the anchors; each handle along the way the line goes at its anchor, the same both
+// sides of a smooth one, only its length fitted; a handle that is in its corner, see brush::BrushInput::heldHandles, held
+// there), whose inner control points are the handles: the "out" handle of the anchor that starts the run and the "in"
+// handle of the one that ends it.
+//
+// Anchor `k`'s handle, `out` (towards the next anchor) or in (towards the one before); nothing at an end that has no run
+// that way.
+std::optional<QPointF> anchorHandle(const doc::VectorStroke &stroke, const std::vector<int> &anchors, int k, bool out);
+
+// Handles known already (set by a drag before: the curve fitted to the points finds them only about where they were put):
+// anchor `k`'s, towards the next (`out`) or the one before; nothing for one not known, which is fitted.
+using KnownHandle = std::function<std::optional<QPointF>(int k, bool out)>;
+// What a change of the handles did: the anchors' indices in the stroke made (a run laid again may have more points), and
+// the handles of the runs laid again, where they are now.
+struct HandleChange
+{
+    struct Handle
+    {
+        int k = -1;
+        bool out = false;
+        QPointF at;
+    };
+    std::vector<int> anchors;
+    std::vector<Handle> handles;
+};
+
+// `original` with anchor `k`'s handle (`out` or in) at `to`: the run on that side laid again along the curve it makes now,
+// each point as far along it (by length) and as far off it as it was (so the line keeps what the pen did, and only bends;
+// its ends stay); where the curve grew longer, points are put in, so the line is as dense as it was.
+// `mirrored` (a smooth anchor): the handle on the other side turns with it, as long as it was, so the line stays smooth
+// through the anchor (a corner's does not, nor an end's).
+doc::VectorStroke movedHandle(const doc::VectorStroke &original, const std::vector<int> &anchors, int k, bool out,
+                              const QPointF &to, bool mirrored, const KnownHandle &known = {},
+                              HandleChange *change = nullptr);
+// `original` with anchor `k`'s handles pulled out of it: the out handle at `outTo`, the in handle opposite, as long (at an
+// end, the one there is); the anchor smooth again (not a corner). What makes a corner (its handles in it) smooth.
+doc::VectorStroke pulledHandles(const doc::VectorStroke &original, const std::vector<int> &anchors, int k,
+                                const QPointF &outTo, const KnownHandle &known = {}, HandleChange *change = nullptr);
 
 // The place on the stroke's path nearest `pos`: between points `segment` and `segment + 1`, at `t` (0..1) of the way.
 struct PathPlace

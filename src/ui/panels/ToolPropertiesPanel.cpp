@@ -353,7 +353,9 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
             tr("Click a stroke of a vector layer to show its control points (Shift+click a stroke: one more). Drag a "
                "point to bend the line; Shift+click chooses the points from the one clicked last, Ctrl+click one more, "
                "Ctrl+A all of them, to move together. Click the line to add a point, Alt+click a point to take it "
-               "away. Drop an end on an end of another chosen stroke to join the two."),
+               "away. Drop an end on an end of another chosen stroke to join the two. The chosen points show Bezier "
+               "handles: drag one to bend the line on its side (Alt: the other side stays); drop it on its point to "
+               "make a corner, Alt+drag from a point to pull its handles out again."),
             tr("Drag a control point up to make the line wider round it, down to make it thinner (Shift+click, Ctrl+click "
                "and Ctrl+A choose more points)."),
             tr("Click a control point to make it a corner (square), or smooth again (round)."),

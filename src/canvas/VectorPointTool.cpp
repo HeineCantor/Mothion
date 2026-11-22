@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace mothion::canvas {
 
@@ -91,8 +92,8 @@ void VectorPointTool::refresh() const
             continue;
         p.stroke = now;
         const std::size_t before = p.anchors.size();
-        p.anchors = controlPoints(now, kTolerance / m_zoom);
-        if (p.anchors.size() == before) // the same anchors moved (a move undone): those chosen stay
+        p.anchors = controlPoints(now, kTolerance / m_zoom); // found again (an undo, a redo)
+        if (p.anchors.size() == before) // as many (a move undone): those chosen stay
             continue;
         std::erase_if(m_chosen->anchors, [&](const AnchorRef &a) { return a.stroke == p.index; });
         if (m_chosen->pivot && m_chosen->pivot->stroke == p.index)
@@ -277,6 +278,112 @@ void VectorPointTool::recordChoice(const Choice &before)
     m_document->recordToolChoice([this, before] { restore(before); }, [this, after] { restore(after); }, m_alive);
 }
 
+std::vector<VectorPointTool::HandleRef> VectorPointTool::shownHandles() const
+{
+    refresh();
+    std::vector<HandleRef> out;
+    if (!m_chosen || m_toolState->vectorPoints().mode != Mode::Move)
+        return out;
+    for (const Picked &p : m_chosen->strokes) {
+        const int n = int(p.anchors.size());
+        if (n < 2)
+            continue;
+        // The anchors chosen, in runs: a lone one shows its two handles, a run the handle of the anchor next to each of
+        // its ends, towards it.
+        std::vector<int> ks;
+        for (const AnchorRef &a : m_chosen->anchors)
+            if (a.stroke == p.index)
+                ks.push_back(a.k);
+        auto add = [&](int k, bool towardsNext) {
+            const HandleRef h{p.index, k, towardsNext};
+            const bool dragged = m_edit && m_edit->kind == Edit::Kind::Handle && m_edit->handle == h;
+            if (dragged || !handleInAnchor(h))
+                out.push_back(h);
+        };
+        for (std::size_t i = 0; i < ks.size();) {
+            std::size_t j = i;
+            while (j + 1 < ks.size() && ks[j + 1] == ks[j] + 1)
+                ++j;
+            const int first = ks[i], last = ks[j];
+            if (first > 0) // the anchor before the run, towards it
+                add(first - 1, true);
+            for (int k = first; k <= last; ++k) { // each anchor of the run, both of its handles
+                if (k > 0)
+                    add(k, false);
+                if (k + 1 < n)
+                    add(k, true);
+            }
+            if (last + 1 < n) // the anchor after the run, towards it
+                add(last + 1, false);
+            i = j + 1;
+        }
+    }
+    return out;
+}
+
+bool VectorPointTool::handleInAnchor(const HandleRef &handle) const
+{
+    const Picked *p = m_chosen ? m_chosen->find(handle.stroke) : nullptr;
+    if (!p || handle.k < 0 || handle.k >= int(p->anchors.size()))
+        return false;
+    const brush::BrushInput &point = p->stroke.points[std::size_t(p->anchors[std::size_t(handle.k)])];
+    return point.corner && (point.heldHandles & (handle.out ? 2 : 1));
+}
+
+std::map<std::pair<int, bool>, QPointF> VectorPointTool::rememberedOf(const Picked &picked) const
+{
+    const auto it = m_remembered.find(picked.index);
+    if (it == m_remembered.end())
+        return {};
+    if (it->second.anchors != picked.anchors || it->second.stroke != picked.stroke) {
+        m_remembered.erase(it); // changed since (another edit, an undo): fitted again
+        return {};
+    }
+    return it->second.handles;
+}
+
+std::optional<QPointF> VectorPointTool::handlePoint(const HandleRef &handle) const
+{
+    refresh();
+    if (m_edit && m_edit->kind == Edit::Kind::Handle) {
+        if (m_edit->handle == handle)
+            return m_edit->handleNow; // under the pen while it is dragged
+        for (const HandleChange::Handle &h : m_edit->change.handles) // the others the drag moves
+            if (h.k == handle.k && h.out == handle.out && handle.stroke == m_edit->handle.stroke)
+                return h.at;
+    }
+    const Picked *p = m_chosen ? m_chosen->find(handle.stroke) : nullptr;
+    if (!p)
+        return std::nullopt;
+    const auto known = rememberedOf(*p);
+    if (const auto it = known.find({handle.k, handle.out}); it != known.end())
+        return it->second;
+    return anchorHandle(p->stroke, p->anchors, handle.k, handle.out);
+}
+
+std::optional<VectorPointTool::HandleRef> VectorPointTool::handleAt(const QPointF &docPos) const
+{
+    // Within reach, and nearer than an anchor within reach (a short handle lies close to its anchor).
+    double reach = kGrab / m_zoom;
+    bool anchorNear = false;
+    if (const std::optional<AnchorRef> anchor = anchorAt(docPos))
+        if (const std::optional<QPointF> at = anchorPoint(anchor->stroke, anchor->k)) {
+            reach = std::min(reach, QLineF(*at, docPos).length());
+            anchorNear = true;
+        }
+    std::optional<HandleRef> best;
+    for (const HandleRef &h : shownHandles())
+        if (const std::optional<QPointF> at = handlePoint(h)) {
+            const double d = QLineF(*at, docPos).length();
+            if (d < reach || (!anchorNear && d == reach)) {
+                reach = d;
+                best = h;
+                anchorNear = true; // (from now on only a nearer one)
+            }
+        }
+    return best;
+}
+
 std::vector<int> VectorPointTool::chosenStrokes() const
 {
     refresh();
@@ -348,6 +455,32 @@ void VectorPointTool::press(const QPointF &docPos, Qt::KeyboardModifiers modifie
         return;
     }
 
+    // A Bezier handle: dragged, it bends the line on its side.
+    if (const std::optional<HandleRef> handle = mode == Mode::Move ? handleAt(docPos) : std::nullopt) {
+        const std::optional<QPointF> at = handlePoint(*handle);
+        if (at && beginEdit(Edit::Kind::Handle, {handle->stroke})) {
+            Edit &e = *m_edit;
+            e.press = docPos;
+            e.handle = *handle;
+            e.handleGrab = *at - docPos;
+            e.handleNow = *at;
+            if (const Picked *picked = m_chosen->find(handle->stroke))
+                e.known = rememberedOf(*picked);
+            // The anchor's other handle stays where it is shown (fitted again from the points it might shift a little).
+            if (const auto other = handlePoint({handle->stroke, handle->k, !handle->out}))
+                e.known.try_emplace({handle->k, !handle->out}, *other);
+            // What a drag changes: the runs on both sides of the anchor (the other side turns with a smooth one).
+            Edit::Stroke &es = e.edited.front();
+            const int n = int(es.anchors.size());
+            Q_UNUSED(n);
+            es.from = 0; // all of it: the runs laid again may take more points, and move the rest along
+            es.to = std::numeric_limits<int>::max();
+            es.changedShown = pointsReach(es.start, es.from, es.to);
+            e.rangesKnown = true;
+        }
+        return;
+    }
+
     if (const std::optional<AnchorRef> anchor = anchorAt(docPos)) {
         Chosen &c = *m_chosen;
         Picked &picked = *c.find(anchor->stroke);
@@ -367,10 +500,7 @@ void VectorPointTool::press(const QPointF &docPos, Qt::KeyboardModifiers modifie
             return;
         }
         if (mode == Mode::Move && (modifiers & Qt::AltModifier)) {
-            const int k = anchor->k;
-            changeAtOnce(anchor->stroke, [&](std::vector<doc::VectorStroke> &strokes) {
-                return removeAnchor(strokes[std::size_t(picked.index)], picked.anchors, k);
-            });
+            m_pendingPull = PendingPull{*anchor, docPos}; // a drag pulls its handles out, a click takes it away
             return;
         }
         if (mode == Mode::Corner) {
@@ -506,8 +636,31 @@ void VectorPointTool::syncPicked()
             p.stroke = m_edit->strokes[std::size_t(p.index)];
 }
 
-void VectorPointTool::move(const QPointF &docPos, Qt::KeyboardModifiers)
+void VectorPointTool::move(const QPointF &docPos, Qt::KeyboardModifiers modifiers)
 {
+    if (m_pendingPull) {
+        // Far enough from the press: the handles come out of the anchor, following the pen.
+        if (QLineF(m_pendingPull->press, docPos).length() * m_zoom < 3.0)
+            return;
+        const PendingPull pull = *m_pendingPull;
+        m_pendingPull.reset();
+        const Picked *p = m_chosen ? m_chosen->find(pull.anchor.stroke) : nullptr;
+        if (!p || p->anchors.size() < 2 || !beginEdit(Edit::Kind::Handle, {pull.anchor.stroke}))
+            return;
+        Edit &e = *m_edit;
+        Edit::Stroke &es = e.edited.front();
+        const int n = int(es.anchors.size()), k = pull.anchor.k;
+        e.known = rememberedOf(*p);
+        e.pull = true;
+        e.press = pull.press;
+        e.handle = {pull.anchor.stroke, k, k + 1 < n}; // the out handle follows the pen (at the last anchor, the in one)
+        e.handleGrab = pointOf(es.start, es.anchors[std::size_t(k)]) - pull.press;
+        e.handleNow = docPos + e.handleGrab;
+        es.from = 0; // (as for a handle dragged)
+        es.to = std::numeric_limits<int>::max();
+        es.changedShown = pointsReach(es.start, es.from, es.to);
+        e.rangesKnown = true;
+    }
     if (m_lasso) {
         if (QLineF(m_lasso->points.back(), docPos).length() * m_zoom >= 2.0) // a point each 2 px on screen
             m_lasso->points.push_back(docPos);
@@ -530,6 +683,10 @@ void VectorPointTool::move(const QPointF &docPos, Qt::KeyboardModifiers)
             const int first = ks.front(), last = ks.back();
             es.from = es.anchors[std::size_t(std::max(first - 1, 0))] - 1;
             es.to = es.anchors[std::size_t(std::min(last + 1, int(es.anchors.size()) - 1))] + 1;
+            if (e.kind == Edit::Kind::Move) { // points may be put in (and the rest move along): all of it
+                es.from = 0;
+                es.to = std::numeric_limits<int>::max();
+            }
             es.changedShown = pointsReach(es.start, es.from, es.to);
             if (e.changed) // a point was put in at the press: the whole stroke is drawn again once
                 e.pending = united(e.pending, strokeReach(es.start));
@@ -543,12 +700,41 @@ void VectorPointTool::move(const QPointF &docPos, Qt::KeyboardModifiers)
         doc::VectorStroke stroke;
         if (e.mergeTo) {
             stroke = es.start;
+        } else if (e.kind == Edit::Kind::Handle) {
+            // The runs laid again may have more points (as dense as they were): the anchors move along.
+            const KnownHandle known = [&e](int k, bool out) -> std::optional<QPointF> {
+                const auto it = e.known.find({k, out});
+                return it == e.known.end() ? std::nullopt : std::optional<QPointF>(it->second);
+            };
+            if (e.pull) {
+                e.handleNow = docPos + e.handleGrab;
+                stroke = pulledHandles(es.start, es.anchors, e.handle.k, e.handleNow, known, &e.change);
+            } else {
+                // Dropped on its anchor (within reach): into it, and the anchor a corner; the other side stays.
+                const QPointF anchor = pointOf(es.start, es.anchors[std::size_t(e.handle.k)]);
+                e.handleNow = docPos + e.handleGrab;
+                const bool into = QLineF(e.handleNow, anchor).length() * m_zoom <= kGrab;
+                if (into)
+                    e.handleNow = anchor;
+                stroke = movedHandle(es.start, es.anchors, e.handle.k, e.handle.out, e.handleNow,
+                                     !into && !(modifiers & Qt::AltModifier), known, &e.change);
+                if (into) { // a corner, with this handle in it (the curve fitted from now on keeps it there)
+                    brush::BrushInput &point = stroke.points[std::size_t(e.change.anchors[std::size_t(e.handle.k)])];
+                    point.corner = true;
+                    point.heldHandles |= e.handle.out ? 2 : 1;
+                }
+            }
+            if (Picked *picked = m_chosen->find(es.index))
+                picked->anchors = e.change.anchors;
         } else if (e.kind == Edit::Kind::Move) {
             std::vector<QPointF> offsets(es.anchors.size());
             for (const AnchorRef &a : m_chosen->anchors)
                 if (a.stroke == es.index)
                     offsets[std::size_t(a.k)] = docPos - e.press;
-            stroke = movedAnchors(es.start, es.anchors, offsets);
+            std::vector<int> anchors;
+            stroke = movedAnchors(es.start, es.anchors, offsets, &anchors);
+            if (Picked *picked = m_chosen->find(es.index)) // (points put in where a run grew: the anchors after it move along)
+                picked->anchors = anchors;
         } else {
             std::vector<double> factors(es.anchors.size(), 1.0);
             for (const AnchorRef &a : m_chosen->anchors)
@@ -750,6 +936,17 @@ void VectorPointTool::release(const QPointF &docPos, Qt::KeyboardModifiers modif
         recordChoice(before);
         return;
     }
+    if (m_pendingPull) { // Alt+click on an anchor, no drag: it goes
+        const AnchorRef anchor = m_pendingPull->anchor;
+        m_pendingPull.reset();
+        if (Picked *picked = m_chosen ? m_chosen->find(anchor.stroke) : nullptr) {
+            const int index = picked->index;
+            changeAtOnce(anchor.stroke, [&](std::vector<doc::VectorStroke> &strokes) {
+                return removeAnchor(strokes[std::size_t(index)], picked->anchors, anchor.k);
+            });
+        }
+        return;
+    }
     if (!m_edit)
         return;
     move(docPos, modifiers);
@@ -776,13 +973,26 @@ void VectorPointTool::finishEdit()
                     p->stroke = e.original[std::size_t(es.index)];
                     if (p->stroke.points.size() != es.start.points.size()) // an anchor was put in, for nothing
                         p->anchors = controlPoints(p->stroke, kTolerance / m_zoom);
+                    else if (e.kind != Edit::Kind::Width)
+                        p->anchors = es.anchors; // (a drag moves the anchors along points put in)
                 }
         return;
     }
     if (m_chosen)
         for (const Edit::Stroke &es : e.edited)
-            if (Picked *p = m_chosen->find(es.index))
-                p->anchors = es.anchors; // the points moved, but they are the same points
+            if (Picked *p = m_chosen->find(es.index); p && e.kind == Edit::Kind::Width)
+                p->anchors = es.anchors; // the same points, wider (a move or a handle: set as it went, points put in)
+    // The handles set: remembered where they were put, for as long as the stroke stays so.
+    if (e.kind == Edit::Kind::Handle && !e.edited.empty() && m_chosen) {
+        const int index = e.edited.front().index;
+        Remembered memory{e.strokes[std::size_t(index)], e.change.anchors, e.known};
+        for (const HandleChange::Handle &h : e.change.handles)
+            memory.handles[{h.k, h.out}] = h.at;
+        if (m_chosen->find(index)) // a handle in its corner is the corner's (BrushInput::heldHandles)
+            for (auto it = memory.handles.begin(); it != memory.handles.end();)
+                it = handleInAnchor({index, it->first.first, it->first.second}) ? memory.handles.erase(it) : std::next(it);
+        m_remembered[index] = std::move(memory);
+    }
     m_document->attachStrokeChange(e.target, std::move(e.original), e.strokes);
     m_document->endPaint(e.before, doc::CommandKind::Paint);
 }
@@ -865,6 +1075,7 @@ void VectorPointTool::cancel()
 {
     m_flushTimer.stop();
     m_lasso.reset();
+    m_pendingPull.reset();
     if (!m_edit)
         return;
     Edit e = std::move(*m_edit);
@@ -885,17 +1096,21 @@ void VectorPointTool::cancel()
 bool VectorPointTool::hover(const QPointF &docPos)
 {
     refresh();
-    const std::optional<AnchorRef> anchor = anchorAt(docPos);
-    const int stroke = anchor ? -1 : strokeAt(docPos);
-    if (anchor == m_hoverAnchor && stroke == m_hoverStroke)
+    const std::optional<HandleRef> handle = handleAt(docPos);
+    const std::optional<AnchorRef> anchor = handle ? std::nullopt : anchorAt(docPos);
+    const int stroke = anchor || handle ? -1 : strokeAt(docPos);
+    if (anchor == m_hoverAnchor && stroke == m_hoverStroke && handle == m_hoverHandle)
         return false;
     m_hoverAnchor = anchor;
+    m_hoverHandle = handle;
     m_hoverStroke = stroke;
     return true;
 }
 
 QCursor VectorPointTool::cursor() const
 {
+    if (m_hoverHandle)
+        return Qt::SizeAllCursor;
     if (m_hoverAnchor) {
         switch (m_toolState->vectorPoints().mode) {
         case Mode::Move: return Qt::SizeAllCursor;
@@ -989,6 +1204,24 @@ void VectorPointTool::paintOverlay(QPainter &painter, const ViewTransform &view)
 
     constexpr double r = 4.0;
     drawLasso();
+    // The Bezier handles of the anchors chosen: a line from the anchor, a small diamond at its end.
+    for (const HandleRef &h : shownHandles()) {
+        const Picked *p = m_chosen->find(h.stroke);
+        const std::optional<QPointF> at = handlePoint(h);
+        if (!p || !at)
+            continue;
+        const QPointF from = toView.map(pointOf(p->stroke, p->anchors[std::size_t(h.k)]));
+        const QPointF to = toView.map(*at);
+        painter.setPen(QPen(QColor(255, 255, 255, 200), 2.5));
+        painter.drawLine(from, to);
+        painter.setPen(QPen(accent, 1.0));
+        painter.drawLine(from, to);
+        const bool hovered = m_hoverHandle == h || (m_edit && m_edit->kind == Edit::Kind::Handle && m_edit->handle == h);
+        painter.setBrush(hovered ? accent : QColor(Qt::white));
+        painter.setPen(QPen(accent, 1.2));
+        constexpr double d = 3.5;
+        painter.drawPolygon(QPolygonF{to + QPointF(0, -d), to + QPointF(d, 0), to + QPointF(0, d), to + QPointF(-d, 0)});
+    }
     for (const Picked &p : m_chosen->strokes)
         for (std::size_t k = 0; k < p.anchors.size(); ++k) {
             const AnchorRef ref{p.index, int(k)};

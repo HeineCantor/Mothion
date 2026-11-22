@@ -1,6 +1,7 @@
 #pragma once
 
 #include "canvas/CanvasTool.h"
+#include "canvas/VectorPoints.h"
 #include "core/document/Ids.h"
 #include "core/document/TiledImage.h"
 #include "core/document/VectorStroke.h"
@@ -14,6 +15,7 @@
 
 #include <compare>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -34,7 +36,12 @@ namespace mothion::canvas {
 //    Shift+click chooses those from the anchor clicked last to this one, Ctrl+click one more or takes it away, Ctrl+A
 //    them all); a press on the line of a stroke chosen adds an anchor there, which the drag moves; Alt+click on an
 //    anchor takes it away (the line is laid smooth again there, or cut short at an end). An end of a stroke dropped on
-//    an end of another stroke chosen makes the two one (see mergedStrokes());
+//    an end of another stroke chosen makes the two one (see mergedStrokes()). The anchors chosen show their Bezier
+//    handles (see anchorHandle()), and each run of them the handle of the anchor next to each of its ends, towards it.
+//    A handle dragged bends the line on its side (the handle on the other side of a smooth anchor turns with it, unless
+//    Alt is held); dropped on its anchor it goes into it, and the anchor is a corner (a handle in its anchor is not
+//    shown). Alt+drag from an anchor pulls its handles out of it, opposite each other: smooth again (Alt+click without a
+//    drag still takes it away);
 //  - Width: an anchor dragged up makes the line wider round it, down thinner (the anchors chosen together);
 //  - Corner: a click on an anchor makes it a corner, or smooth again;
 //  - Cut: a click on the line of a stroke chosen cuts it in two there;
@@ -55,7 +62,7 @@ public:
     void move(const QPointF &docPos, Qt::KeyboardModifiers modifiers) override;
     void release(const QPointF &docPos, Qt::KeyboardModifiers modifiers) override;
     void cancel() override;
-    bool isActive() const override { return m_edit.has_value() || m_lasso.has_value(); }
+    bool isActive() const override { return m_edit.has_value() || m_lasso.has_value() || m_pendingPull.has_value(); }
     bool hover(const QPointF &docPos) override;
     void setViewZoom(double zoom) override { m_zoom = zoom > 0 ? zoom : 1.0; }
     void paintOverlay(QPainter &painter, const ViewTransform &view) const override;
@@ -83,6 +90,17 @@ public:
     std::set<AnchorRef> chosenAnchorRefs() const;
     // The lasso being drawn (document coordinates), empty when none; for tests.
     std::vector<QPointF> lassoPoints() const { return m_lasso ? m_lasso->points : std::vector<QPointF>(); }
+    // A Bezier handle shown (Move mode): anchor `k` of stroke `stroke`, towards the next anchor (`out`) or the one before.
+    struct HandleRef
+    {
+        int stroke = -1;
+        int k = -1;
+        bool out = false;
+        bool operator==(const HandleRef &) const = default;
+    };
+    std::vector<HandleRef> shownHandles() const;
+    // Where a handle shown is (document coordinates); for tests.
+    std::optional<QPointF> handlePoint(const HandleRef &handle) const;
     // Ctrl+A: every anchor of the strokes chosen; false if no stroke is chosen.
     bool chooseAllAnchors();
 
@@ -120,7 +138,7 @@ private:
     };
     struct Edit
     {
-        enum class Kind { Move, Width };
+        enum class Kind { Move, Width, Handle };
         // A stroke whose anchors the edit moves: as it was at the press (with the anchor added, if one was), and the
         // points a drag changes (from the anchor before the first chosen to the one after the last, and one more each
         // side), with what they covered as drawn last.
@@ -151,6 +169,13 @@ private:
         bool aboveLaidOver = true;
         // A lone end dragged: the end of another stroke chosen it is on now (dropped there, the two are merged).
         std::optional<End> mergeFrom, mergeTo;
+        // A handle dragged: which, and how far from the press it was.
+        HandleRef handle;
+        QPointF handleGrab;
+        QPointF handleNow; // where it is dragged to (shown there: the curve fitted again finds it only about there)
+        bool pull = false; // the handles pulled out of the anchor (Alt+drag from it), not one handle moved
+        std::map<std::pair<int, bool>, QPointF> known; // the stroke's handles set before (see m_remembered)
+        HandleChange change;                           // what the drag did to them, as it is now
     };
 
     // What is chosen, as an undo step keeps it.
@@ -187,6 +212,7 @@ private:
     // when a stroke changed (an undo).
     void refresh() const;
     std::optional<AnchorRef> anchorAt(const QPointF &docPos) const;
+    std::optional<HandleRef> handleAt(const QPointF &docPos) const;
     // The topmost stroke of the current layer that `docPos` is on, or -1.
     int strokeAt(const QPointF &docPos) const;
     // An end of a stroke chosen (not `except`) within reach of `docPos`.
@@ -218,10 +244,31 @@ private:
     mutable std::optional<Chosen> m_chosen;
     std::optional<Edit> m_edit;
     std::optional<Lasso> m_lasso;
+    // Alt pressed on an anchor in Move mode: a drag pulls its handles out, a release where it was takes it away.
+    struct PendingPull
+    {
+        AnchorRef anchor;
+        QPointF press;
+    };
+    std::optional<PendingPull> m_pendingPull;
+    // The handles set by dragging them, for each stroke while it stays as that left it (a fit of the points finds them only
+    // about where they were put): shown there, and what the next drag starts from. Keyed by anchor and side.
+    struct Remembered
+    {
+        doc::VectorStroke stroke;
+        std::vector<int> anchors;
+        std::map<std::pair<int, bool>, QPointF> handles;
+    };
+    mutable std::map<int, Remembered> m_remembered;
+    // Those of `picked`, if they are still its (empty if it changed since).
+    std::map<std::pair<int, bool>, QPointF> rememberedOf(const Picked &picked) const;
+    // Whether a handle shown is in its anchor (a corner made by dropping it there): then it is not shown.
+    bool handleInAnchor(const HandleRef &handle) const;
     bool m_strokesChanged = false;
     std::shared_ptr<int> m_alive = std::make_shared<int>(0); // see DocumentController::recordToolChoice()
     QTimer m_flushTimer;
     std::optional<AnchorRef> m_hoverAnchor;
+    std::optional<HandleRef> m_hoverHandle;
     int m_hoverStroke = -1;
 };
 

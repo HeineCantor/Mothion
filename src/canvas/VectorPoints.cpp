@@ -14,33 +14,62 @@ using brush::BrushInput;
 
 QPointF at(const BrushInput &in) { return {in.x, in.y}; }
 
-double segmentDistance(const QPointF &p, const QPointF &a, const QPointF &b)
-{
-    const QPointF ab = b - a;
-    const double len2 = QPointF::dotProduct(ab, ab);
-    const double t = len2 > 0 ? std::clamp(QPointF::dotProduct(p - a, ab) / len2, 0.0, 1.0) : 0.0;
-    const QPointF d = p - (a + t * ab);
-    return std::hypot(d.x(), d.y());
-}
+// The anchors between `first` and `last` (neither included) that cut the run in pieces each a cubic curve can follow within
+// `tolerance` (see fitRun()); defined below, with the curves.
+void splitByCurves(const std::vector<BrushInput> &points, int first, int last, double tolerance, std::vector<int> &out);
+// How far the points from `first` to `last` lie from the cubic curve fitted to them, at most; and where.
+double fitError(const std::vector<BrushInput> &points, int first, int last, int *where = nullptr);
 
-void simplify(const std::vector<BrushInput> &points, int first, int last, double tolerance, std::vector<int> &out)
+// Where the line bends most: the points where it turns most over a stretch of it as long as the line's size asks (at least
+// a few screen pixels' worth, `tolerance` being px of the document), as far as that is a real bend, each the sharpest of
+// those round it. As a
+// drawing's control points are put: on the top of each bulge, not where one bend goes into the next.
+std::vector<int> bendPoints(const std::vector<BrushInput> &points, double tolerance)
 {
-    if (last - first < 2)
-        return;
-    double farthest = -1;
-    int index = first;
-    for (int i = first + 1; i < last; ++i) {
-        const double d = segmentDistance(at(points[i]), at(points[first]), at(points[last]));
-        if (d > farthest) {
-            farthest = d;
-            index = i;
-        }
+    const int n = int(points.size());
+    std::vector<double> length(std::size_t(std::max(n, 1)), 0.0);
+    for (int i = 1; i < n; ++i)
+        length[std::size_t(i)] = length[std::size_t(i - 1)]
+                                 + std::hypot(points[std::size_t(i)].x - points[std::size_t(i - 1)].x,
+                                              points[std::size_t(i)].y - points[std::size_t(i - 1)].y);
+    // How much of the line each way the turn is measured over: a part of the line as long as its size asks (the wobbles of
+    // the pen turn little over it, a bend much), never less than a few screen pixels' worth.
+    const double reach = std::max(6.0 * tolerance, length.back() / 20.0);
+    const double enough = 30.0 * std::numbers::pi / 180.0; // turning this much over the reach is a bend
+    std::vector<double> turn(std::size_t(std::max(n, 1)), 0.0);
+    int back = 0, on = 0;
+    for (int i = 0; i < n; ++i) {
+        if (length[std::size_t(i)] < reach || length.back() - length[std::size_t(i)] < reach)
+            continue; // too near an end to tell
+        while (back + 1 < i && length[std::size_t(i)] - length[std::size_t(back + 1)] >= reach)
+            ++back;
+        on = std::max(on, i);
+        while (on < n - 1 && length[std::size_t(on)] - length[std::size_t(i)] < reach)
+            ++on;
+        const double ax = points[std::size_t(i)].x - points[std::size_t(back)].x, ay = points[std::size_t(i)].y - points[std::size_t(back)].y;
+        const double bx = points[std::size_t(on)].x - points[std::size_t(i)].x, by = points[std::size_t(on)].y - points[std::size_t(i)].y;
+        turn[std::size_t(i)] = std::abs(std::atan2(ax * by - ay * bx, ax * bx + ay * by));
     }
-    if (farthest <= tolerance)
-        return;
-    simplify(points, first, index, tolerance, out);
-    out.push_back(index);
-    simplify(points, index, last, tolerance, out);
+    // The sharpest of each stretch of the line where it turns enough, and none nearer each other than the reach.
+    std::vector<int> out;
+    for (int i = 0; i < n;) {
+        if (turn[std::size_t(i)] < enough) {
+            ++i;
+            continue;
+        }
+        int best = i, j = i;
+        while (j < n && turn[std::size_t(j)] >= enough) {
+            if (turn[std::size_t(j)] > turn[std::size_t(best)])
+                best = j;
+            ++j;
+        }
+        if (out.empty() || length[std::size_t(best)] - length[std::size_t(out.back())] >= reach)
+            out.push_back(best);
+        else if (turn[std::size_t(best)] > turn[std::size_t(out.back())])
+            out.back() = best;
+        i = j;
+    }
+    return out;
 }
 
 // The way along the path from point `from` to each point up to `to`, 0..1 (by the points' order where the run has no
@@ -103,6 +132,8 @@ int pointAt(std::vector<BrushInput> &points, const PathPlace &place, double snap
         return da <= db ? a : b;
     BrushInput in = brush::DabGenerator::interpolate(points[a], points[b], place.t);
     in.corner = false;
+    in.heldHandles = 0;
+    in.keptAnchor = false;
     points.insert(points.begin() + b, in);
     return b;
 }
@@ -116,16 +147,27 @@ std::vector<int> controlPoints(const doc::VectorStroke &stroke, double tolerance
         return {};
     if (n == 1)
         return {0};
-    // The ends and the corners stay; between them, the fewest points that keep the line.
+    // The ends, the corners, the anchors put by hand and where the line bends most stay; between them, as few points as
+    // keep the line within the tolerance of a curve.
     std::vector<int> fixed{0};
+    const std::vector<int> bends = bendPoints(stroke.points, tolerance);
     for (int i = 1; i + 1 < n; ++i)
-        if (stroke.points[i].corner)
+        if (stroke.points[i].corner || stroke.points[i].keptAnchor || std::binary_search(bends.begin(), bends.end(), i))
             fixed.push_back(i);
     fixed.push_back(n - 1);
     std::vector<int> out{0};
     for (std::size_t k = 0; k + 1 < fixed.size(); ++k) {
-        simplify(stroke.points, fixed[k], fixed[k + 1], tolerance, out);
+        const std::size_t start = out.size() - 1;
+        splitByCurves(stroke.points, fixed[k], fixed[k + 1], tolerance, out);
         out.push_back(fixed[k + 1]);
+        // A cut where the points lay farthest is not always the one a curve needs: an anchor cut in whose runs one curve
+        // can follow together goes.
+        for (std::size_t i = start + 1; i + 1 < out.size();) {
+            if (fitError(stroke.points, out[i - 1], out[i + 1]) <= tolerance)
+                out.erase(out.begin() + std::ptrdiff_t(i));
+            else
+                ++i;
+        }
     }
     return out;
 }
@@ -139,10 +181,414 @@ double anchorWeight(double t, bool startCorner, bool endCorner)
     return m0 * (t3 - 2.0 * t2 + t) + (-2.0 * t3 + 3.0 * t2) + m1 * (t3 - t2);
 }
 
+namespace {
+
+// The cubic curve fitted to the run of points from `from` to `to` (its ends on them; the inner control points by least
+// squares, the points taken at their fraction of the way), and those fractions.
+struct RunCurve
+{
+    QPointF p0, p1, p2, p3;
+    std::vector<double> t;
+
+    QPointF at(double u) const
+    {
+        const double v = 1.0 - u;
+        return v * v * v * p0 + 3 * v * v * u * p1 + 3 * v * u * u * p2 + u * u * u * p3;
+    }
+};
+
+// Which inner control points a fit leaves in their anchor (a handle dropped into a corner).
+enum class Held { None, Start, End, Both };
+
+// The way the line goes at point `i`, into the run on side `side` (+1: towards the points after it, -1: before): through the
+// point at a smooth anchor (from a little before it to a little after it, so the two runs that meet there share it and the
+// line stays smooth through it), out of it into the run at an end of the stroke or a corner.
+QPointF tangentAt(const std::vector<BrushInput> &points, int i, int side)
+{
+    constexpr double kReach = 8.0; // px of the line looked at, each way
+    const int n = int(points.size());
+    auto reach = [&](int from, int step) {
+        double gone = 0;
+        int j = from;
+        while (j + step >= 0 && j + step < n && gone < kReach) {
+            gone += std::hypot(points[std::size_t(j + step)].x - points[std::size_t(j)].x,
+                               points[std::size_t(j + step)].y - points[std::size_t(j)].y);
+            j += step;
+        }
+        return j;
+    };
+    bool smooth = i > 0 && i + 1 < n && !points[std::size_t(i)].corner;
+    if (smooth) { // a sharp turn there (not marked a corner) is one all the same: each side its own way
+        const QPointF in = at(points[std::size_t(i)]) - at(points[std::size_t(reach(i, -1))]);
+        const QPointF out = at(points[std::size_t(reach(i, +1))]) - at(points[std::size_t(i)]);
+        const double turn = std::abs(std::atan2(in.x() * out.y() - in.y() * out.x(), in.x() * out.x() + in.y() * out.y()));
+        smooth = turn < 50.0 * std::numbers::pi / 180.0;
+    }
+    const int back = smooth ? reach(i, -1) : i, on = smooth ? reach(i, +1) : reach(i, side);
+    QPointF d = smooth ? at(points[std::size_t(on)]) - at(points[std::size_t(back)])
+                       : at(points[std::size_t(on)]) - at(points[std::size_t(i)]);
+    if (smooth && side < 0)
+        d = -d;
+    const double length = std::hypot(d.x(), d.y());
+    return length < 1e-9 ? QPointF() : d / length;
+}
+
+// The handles that fit the run best for the fractions `c.t`: each along the way the line goes at its anchor (tangentAt()),
+// as long as the least squares say (Schneider); those `held` in their anchor. A length that makes no sense (none, against
+// the line, or longer than the run) gives both a third of the way from end to end, as a plain curve has.
+void fitControls(const std::vector<BrushInput> &points, int from, int to, RunCurve &c, Held held)
+{
+    const QPointF t1 = tangentAt(points, from, +1), t2 = tangentAt(points, to, -1);
+    const double chord = std::hypot(c.p3.x() - c.p0.x(), c.p3.y() - c.p0.y());
+    double c00 = 0, c01 = 0, c11 = 0, x0 = 0, x1 = 0;
+    const double dot = t1.x() * t2.x() + t1.y() * t2.y();
+    for (int i = from + 1; i < to; ++i) {
+        const double u = c.t[std::size_t(i - from)], v = 1.0 - u;
+        const double b0 = v * v * v, b1 = 3 * v * v * u, b2 = 3 * v * u * u, b3 = u * u * u;
+        const QPointF rest = at(points[std::size_t(i)]) - ((b0 + b1) * c.p0 + (b2 + b3) * c.p3);
+        c00 += b1 * b1, c01 += b1 * b2 * dot, c11 += b2 * b2;
+        x0 += b1 * (rest.x() * t1.x() + rest.y() * t1.y());
+        x1 += b2 * (rest.x() * t2.x() + rest.y() * t2.y());
+    }
+    double a1 = chord / 3, a2 = chord / 3;
+    if (held == Held::Both) {
+        a1 = a2 = 0;
+    } else if (held == Held::Start) {
+        a1 = 0;
+        a2 = c11 > 1e-12 ? x1 / c11 : chord / 3;
+        if (!(a2 > 1e-6 * chord && a2 < chord))
+            a2 = chord / 3;
+    } else if (held == Held::End) {
+        a2 = 0;
+        a1 = c00 > 1e-12 ? x0 / c00 : chord / 3;
+        if (!(a1 > 1e-6 * chord && a1 < chord))
+            a1 = chord / 3;
+    } else if (const double det = c00 * c11 - c01 * c01; std::abs(det) > 1e-12) {
+        const double f1 = (c11 * x0 - c01 * x1) / det, f2 = (c00 * x1 - c01 * x0) / det;
+        if (f1 > 1e-6 * chord && f2 > 1e-6 * chord && f1 < chord && f2 < chord)
+            a1 = f1, a2 = f2;
+    }
+    if (t1.isNull())
+        a1 = 0;
+    if (t2.isNull())
+        a2 = 0;
+    c.p1 = c.p0 + a1 * t1;
+    c.p2 = c.p3 + a2 * t2;
+}
+
+// Each point's fraction put where the curve passes nearest it: a Newton step on the distance.
+void project(const std::vector<BrushInput> &points, int from, int to, RunCurve &c)
+{
+    for (int i = from + 1; i < to; ++i) {
+        double &u = c.t[std::size_t(i - from)];
+        const double v = 1.0 - u;
+        const QPointF d = c.at(u) - at(points[std::size_t(i)]);
+        const QPointF d1 = 3 * v * v * (c.p1 - c.p0) + 6 * v * u * (c.p2 - c.p1) + 3 * u * u * (c.p3 - c.p2);
+        const QPointF d2 = 6 * v * (c.p2 - 2 * c.p1 + c.p0) + 6 * u * (c.p3 - 2 * c.p2 + c.p1);
+        const double num = d.x() * d1.x() + d.y() * d1.y();
+        const double den = d1.x() * d1.x() + d1.y() * d1.y() + d.x() * d2.x() + d.y() * d2.y();
+        if (std::abs(den) > 1e-12)
+            u = std::clamp(u - num / den, 0.0, 1.0);
+    }
+}
+
+// The fit, with the inner control points `held` in their anchors.
+RunCurve fitRunHeld(const std::vector<BrushInput> &points, int from, int to, Held held)
+{
+    RunCurve c;
+    c.p0 = at(points[std::size_t(from)]);
+    c.p3 = at(points[std::size_t(to)]);
+    c.t = runFractions(points, from, to);
+    c.p1 = c.p0 + (c.p3 - c.p0) / 3.0; // a straight line, to begin with
+    c.p2 = c.p3 - (c.p3 - c.p0) / 3.0;
+    if (held == Held::Start || held == Held::Both)
+        c.p1 = c.p0;
+    if (held == Held::End || held == Held::Both)
+        c.p2 = c.p3;
+    if (to - from < 3)
+        return c;
+    fitControls(points, from, to, c, held);
+    // Each point's fraction put where the curve passes nearest it (a Newton step on the distance), and the fit made again:
+    // a run that is a cubic is found about as that cubic (so a handle dragged stays about where it was let go).
+    for (int round = 0; round < 20; ++round) {
+        project(points, from, to, c);
+        fitControls(points, from, to, c, held);
+    }
+    return c;
+}
+
+// The run's curve: with the handles that are in their anchors (BrushInput::heldHandles) held there.
+RunCurve fitRun(const std::vector<BrushInput> &points, int from, int to)
+{
+    const BrushInput &first = points[std::size_t(from)], &last = points[std::size_t(to)];
+    const bool start = first.corner && (first.heldHandles & 2), end = last.corner && (last.heldHandles & 1);
+    return fitRunHeld(points, from, to, start && end ? Held::Both : start ? Held::Start : end ? Held::End : Held::None);
+}
+
+double fitError(const std::vector<BrushInput> &points, int first, int last, int *where)
+{
+    if (where)
+        *where = first;
+    if (last - first < 2)
+        return 0;
+    const RunCurve c = fitRun(points, first, last);
+    double farthest = 0;
+    for (int i = first + 1; i < last; ++i) {
+        const QPointF d = c.at(c.t[std::size_t(i - first)]) - at(points[std::size_t(i)]);
+        const double distance = std::hypot(d.x(), d.y());
+        if (distance > farthest) {
+            farthest = distance;
+            if (where)
+                *where = i;
+        }
+    }
+    return farthest;
+}
+
+void splitByCurves(const std::vector<BrushInput> &points, int first, int last, double tolerance, std::vector<int> &out)
+{
+    if (last - first < 3)
+        return;
+    // Where the points lie farthest from the curve fitted to them: cut there when it is past the tolerance (Schneider).
+    int index = first;
+    const double farthest = fitError(points, first, last, &index);
+    if (farthest <= tolerance)
+        return;
+    // Not hard by an end (an anchor a few points from another makes a run too short to bend): in its middle half at most.
+    const int margin = std::max(1, (last - first) / 4);
+    index = std::clamp(index, first + margin, last - margin);
+    splitByCurves(points, first, index, tolerance, out);
+    out.push_back(index);
+    splitByCurves(points, index, last, tolerance, out);
+}
+
+// The curve's parameter at each of `fractions` of its length (0..1, rising), from a table of its length.
+std::vector<double> parametersAt(const RunCurve &c, const std::vector<double> &fractions)
+{
+    constexpr int kSteps = 256;
+    std::vector<double> length(kSteps + 1, 0.0);
+    QPointF last = c.p0;
+    for (int i = 1; i <= kSteps; ++i) {
+        const QPointF p = c.at(double(i) / kSteps);
+        length[std::size_t(i)] = length[std::size_t(i - 1)] + std::hypot(p.x() - last.x(), p.y() - last.y());
+        last = p;
+    }
+    std::vector<double> out;
+    out.reserve(fractions.size());
+    const double total = length.back();
+    std::size_t i = 0;
+    for (const double f : fractions) {
+        if (total < 1e-9) {
+            out.push_back(std::clamp(f, 0.0, 1.0));
+            continue;
+        }
+        const double want = std::clamp(f, 0.0, 1.0) * total;
+        while (i + 1 < std::size_t(kSteps) && length[i + 1] < want)
+            ++i;
+        const double span = length[i + 1] - length[i];
+        const double w = span > 1e-12 ? (want - length[i]) / span : 0.0;
+        out.push_back((double(i) + std::clamp(w, 0.0, 1.0)) / kSteps);
+    }
+    return out;
+}
+
+// The run from anchor `run` to the next laid on the curve `after` (same ends), as Harmony draws a run: its points put
+// again along the curve at even steps, as dense as they were (and never sparser than kMaxStep, so the line draws as a curve,
+// not in straight pieces), each with the pressure and the rest the pen had as far along the run. What the pen wobbled off
+// the curve goes, so no wobble, stretched by the bend, comes out as a zigzag. The anchors after the run move along by the
+// points put in or taken out.
+void reshapeRun(std::vector<BrushInput> &points, std::vector<int> &anchors, std::size_t run, const RunCurve &after)
+{
+    constexpr double kMaxStep = 2.0;
+    const int from = anchors[run], to = anchors[run + 1];
+    const int count = to - from;
+    if (count < 1)
+        return;
+    const std::vector<BrushInput> original(points.begin() + from, points.begin() + to + 1);
+    const std::vector<double> along = runFractions(points, from, to);
+    double was = 0;
+    for (int i = 1; i <= count; ++i)
+        was += std::hypot(original[std::size_t(i)].x - original[std::size_t(i - 1)].x,
+                          original[std::size_t(i)].y - original[std::size_t(i - 1)].y);
+    const double spacing = std::min(was > 1e-9 ? was / count : kMaxStep, kMaxStep);
+    // How long the curve is now.
+    double length = 0;
+    QPointF last = after.p0;
+    for (int i = 1; i <= 256; ++i) {
+        const QPointF p = after.at(double(i) / 256);
+        length += std::hypot(p.x() - last.x(), p.y() - last.y());
+        last = p;
+    }
+    const int steps = std::clamp(int(std::ceil(length / spacing - 1e-6)), 1, 20000);
+    std::vector<double> fractions(std::size_t(steps) + 1);
+    for (int j = 0; j <= steps; ++j)
+        fractions[std::size_t(j)] = double(j) / steps;
+    const std::vector<double> at = parametersAt(after, fractions);
+    std::vector<BrushInput> laid;
+    laid.reserve(std::size_t(steps) + 1);
+    laid.push_back(original.front()); // the anchor itself
+    std::size_t i = 0;
+    for (int j = 1; j < steps; ++j) {
+        const double f = fractions[std::size_t(j)];
+        while (i + 1 < std::size_t(count) && along[i + 1] < f)
+            ++i;
+        const double span = along[i + 1] - along[i];
+        const double w = span > 1e-12 ? std::clamp((f - along[i]) / span, 0.0, 1.0) : 0.0;
+        BrushInput in = brush::DabGenerator::interpolate(original[i], original[i + 1], w);
+        in.corner = false;
+        in.heldHandles = 0;
+        in.keptAnchor = false;
+        const QPointF q = after.at(at[std::size_t(j)]);
+        in.x = q.x();
+        in.y = q.y();
+        laid.push_back(in);
+    }
+    laid.push_back(original.back()); // the next anchor
+    // In place of the run (its ends included), and the anchors after it along.
+    points.erase(points.begin() + from, points.begin() + to + 1);
+    points.insert(points.begin() + from, laid.begin(), laid.end());
+    const int added = int(laid.size()) - (count + 1);
+    for (std::size_t k = run + 1; k < anchors.size(); ++k)
+        anchors[k] += added;
+}
+
+// The curve of the run from anchor `run` to the next: fitted to its points, with the handles `known` (set before) in place
+// of the fitted ones, and the points' fractions found again on it.
+RunCurve curveOf(const std::vector<BrushInput> &points, const std::vector<int> &anchors, std::size_t run,
+                 const KnownHandle &known)
+{
+    const int from = anchors[run], to = anchors[run + 1];
+    RunCurve c = fitRun(points, from, to);
+    const std::optional<QPointF> first = known ? known(int(run), true) : std::nullopt;
+    const std::optional<QPointF> last = known ? known(int(run + 1), false) : std::nullopt;
+    if (!first && !last)
+        return c;
+    if (first)
+        c.p1 = *first;
+    if (last)
+        c.p2 = *last;
+    for (int round = 0; round < 20; ++round)
+        project(points, from, to, c);
+    return c;
+}
+
+} // namespace
+
+std::optional<QPointF> anchorHandle(const doc::VectorStroke &stroke, const std::vector<int> &anchors, int k, bool out)
+{
+    const int n = int(anchors.size());
+    if (k < 0 || k >= n || (out ? k + 1 >= n : k == 0))
+        return std::nullopt;
+    const RunCurve c = out ? fitRun(stroke.points, anchors[std::size_t(k)], anchors[std::size_t(k + 1)])
+                           : fitRun(stroke.points, anchors[std::size_t(k - 1)], anchors[std::size_t(k)]);
+    return out ? c.p1 : c.p2;
+}
+
+doc::VectorStroke movedHandle(const doc::VectorStroke &original, const std::vector<int> &anchors, int k, bool out,
+                              const QPointF &to, bool mirrored, const KnownHandle &known, HandleChange *change)
+{
+    doc::VectorStroke result = original;
+    std::vector<int> moved = anchors;
+    const int n = int(anchors.size());
+    if (change)
+        *change = {anchors, {}};
+    if (k < 0 || k >= n || (out ? k + 1 >= n : k == 0))
+        return result;
+    std::vector<BrushInput> &points = result.points;
+    auto lay = [&](std::size_t run, const RunCurve &, const RunCurve &after) {
+        reshapeRun(points, moved, run, after);
+        if (change) {
+            change->handles.push_back({int(run), true, after.p1});
+            change->handles.push_back({int(run + 1), false, after.p2});
+        }
+    };
+    const std::size_t run = std::size_t(out ? k : k - 1);
+    const RunCurve before = curveOf(original.points, anchors, run, known);
+    const QPointF anchor = at(original.points[std::size_t(anchors[std::size_t(k)])]);
+    const QPointF was = (out ? before.p1 : before.p2) - anchor, now = to - anchor;
+    const bool other = out ? k > 0 : k + 1 < n;
+    const bool turns = mirrored && other && !original.points[std::size_t(anchors[std::size_t(k)])].corner
+                       && std::hypot(was.x(), was.y()) > 1e-9 && std::hypot(now.x(), now.y()) > 1e-9;
+    // The other side of a smooth anchor: its handle turned as far as this one turned, as long as it was (turned, not set
+    // opposite: the fitted handles are seldom quite opposite, and the line would jump at the first move). The run after the
+    // anchor is laid again first, then the one before (laying one again moves the anchors after it).
+    auto turnOther = [&] {
+        const double turn = std::atan2(now.y(), now.x()) - std::atan2(was.y(), was.x());
+        const double c = std::cos(turn), s = std::sin(turn);
+        const std::size_t otherRun = std::size_t(out ? k - 1 : k);
+        const RunCurve then = curveOf(points, moved, otherRun, known);
+        RunCurve turned = then;
+        QPointF &handle = out ? turned.p2 : turned.p1; // the anchor's handle on that run
+        const QPointF h = handle - anchor;
+        handle = anchor + QPointF(c * h.x() - s * h.y(), s * h.x() + c * h.y());
+        lay(otherRun, then, turned);
+    };
+    if (turns && !out)
+        turnOther(); // (the run after the anchor)
+    {
+        RunCurve after = before;
+        (out ? after.p1 : after.p2) = to;
+        lay(run, before, after); // (its points and indices as they were: the run turned is after it)
+    }
+    if (turns && out)
+        turnOther(); // (the run before the anchor)
+    refreshDirections(points);
+    if (change)
+        change->anchors = moved;
+    return result;
+}
+
+doc::VectorStroke pulledHandles(const doc::VectorStroke &original, const std::vector<int> &anchors, int k,
+                                const QPointF &outTo, const KnownHandle &known, HandleChange *change)
+{
+    doc::VectorStroke result = original;
+    std::vector<int> moved = anchors;
+    const int n = int(anchors.size());
+    if (change)
+        *change = {anchors, {}};
+    if (k < 0 || k >= n || n < 2)
+        return result;
+    std::vector<BrushInput> &points = result.points;
+    // Its handles are in it now: the curves round it start from there (whatever was known of them before).
+    const KnownHandle inIt = [&](int j, bool towardsNext) -> std::optional<QPointF> {
+        if (j == k)
+            return std::nullopt;
+        return known ? known(j, towardsNext) : std::nullopt;
+    };
+    auto lay = [&](std::size_t run, const RunCurve &, const RunCurve &after) {
+        reshapeRun(points, moved, run, after);
+        if (change) {
+            change->handles.push_back({int(run), true, after.p1});
+            change->handles.push_back({int(run + 1), false, after.p2});
+        }
+    };
+    const QPointF anchor = at(original.points[std::size_t(anchors[std::size_t(k)])]);
+    if (k + 1 < n) { // the run after: its first handle at `outTo`
+        const RunCurve was = curveOf(points, moved, std::size_t(k), inIt);
+        RunCurve now = was;
+        now.p1 = outTo;
+        lay(std::size_t(k), was, now);
+    }
+    if (k > 0) { // the run before: its last handle opposite (at an end with no run after, the in handle is `outTo` itself)
+        const RunCurve was = curveOf(points, moved, std::size_t(k - 1), inIt);
+        RunCurve now = was;
+        now.p2 = k + 1 < n ? 2 * anchor - outTo : outTo;
+        lay(std::size_t(k - 1), was, now);
+    }
+    points[std::size_t(moved[std::size_t(k)])].corner = false;
+    points[std::size_t(moved[std::size_t(k)])].heldHandles = 0;
+    refreshDirections(points);
+    if (change)
+        change->anchors = moved;
+    return result;
+}
+
 doc::VectorStroke movedAnchors(const doc::VectorStroke &original, const std::vector<int> &anchors,
-                               const std::vector<QPointF> &offsets)
+                               const std::vector<QPointF> &offsets, std::vector<int> *anchorsAfter)
 {
     doc::VectorStroke out = original;
+    if (anchorsAfter)
+        *anchorsAfter = anchors;
     if (anchors.empty() || offsets.size() != anchors.size()
         || std::all_of(offsets.begin(), offsets.end(), [](const QPointF &d) { return d.isNull(); }))
         return out;
@@ -154,23 +600,26 @@ doc::VectorStroke movedAnchors(const doc::VectorStroke &original, const std::vec
         }
         return out;
     }
-    for (std::size_t k = 0; k + 1 < anchors.size(); ++k) {
-        const int from = anchors[k], to = anchors[k + 1];
+    // Each run beside an anchor moved bent to the curve whose ends (and their handles, along with them) moved as far: the
+    // points between go as smoothly, and more are put in where it grew longer. The last run first (laying one again moves
+    // the anchors after it); the anchors themselves at the end.
+    std::vector<int> moved = anchors;
+    for (std::size_t k = anchors.size() - 1; k-- > 0;) {
         if (offsets[k].isNull() && offsets[k + 1].isNull())
             continue;
-        const std::vector<double> s = runFractions(original.points, from, to);
-        const bool startCorner = original.points[from].corner, endCorner = original.points[to].corner;
-        // The last point of a run is the first of the next: it is moved there.
-        for (int i = from; i < to; ++i) {
-            const double w = anchorWeight(s[std::size_t(i - from)], startCorner, endCorner);
-            const QPointF d = (1.0 - w) * offsets[k] + w * offsets[k + 1];
-            points[i].x += d.x();
-            points[i].y += d.y();
-        }
+        const RunCurve before = fitRun(points, moved[k], moved[k + 1]);
+        RunCurve after = before;
+        after.p0 += offsets[k], after.p1 += offsets[k];
+        after.p2 += offsets[k + 1], after.p3 += offsets[k + 1];
+        reshapeRun(points, moved, k, after);
     }
-    points[anchors.back()].x += offsets.back().x();
-    points[anchors.back()].y += offsets.back().y();
+    for (std::size_t k = 0; k < moved.size(); ++k) {
+        points[std::size_t(moved[k])].x += offsets[k].x();
+        points[std::size_t(moved[k])].y += offsets[k].y();
+    }
     refreshDirections(points);
+    if (anchorsAfter)
+        *anchorsAfter = moved;
     return out;
 }
 
@@ -225,6 +674,7 @@ int addAnchor(doc::VectorStroke &stroke, std::vector<int> &anchors, const PathPl
 {
     const std::size_t before = stroke.points.size();
     const int index = pointAt(stroke.points, place, snap);
+    stroke.points[std::size_t(index)].keptAnchor = true; // put by hand: an anchor from now on
     if (stroke.points.size() != before)
         for (int &a : anchors)
             if (a >= index)
@@ -252,6 +702,8 @@ bool removeAnchor(doc::VectorStroke &stroke, std::vector<int> &anchors, int k)
         anchors.pop_back();
     } else {
         points[anchors[std::size_t(k)]].corner = false;
+        points[anchors[std::size_t(k)]].keptAnchor = false;
+        points[anchors[std::size_t(k)]].heldHandles = 0;
         anchors.erase(anchors.begin() + k);
         relayRun(points, anchors, std::size_t(k - 1));
     }
@@ -265,6 +717,7 @@ void toggleCorner(doc::VectorStroke &stroke, const std::vector<int> &anchors, in
         return;
     BrushInput &in = stroke.points[anchors[std::size_t(k)]];
     in.corner = !in.corner;
+    in.heldHandles = 0; // smooth, or a corner with its handles out
     if (in.corner || k == 0 || k == int(anchors.size()) - 1)
         return;
     relayRun(stroke.points, anchors, std::size_t(k - 1));

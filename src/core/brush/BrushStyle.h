@@ -25,6 +25,10 @@ struct BrushInput
     double tipAngle = 0.0;    // degrees the tip is turned further (a puppet warp turned the line there); not added
                               // when the tip follows the direction of travel, which turns with the line already
     bool corner = false;      // a sharp corner of the stroke (see isCorner): kept by the corrections
+    // On a corner, its Bezier handles that are in it (dropped there with the Correct line, see canvas::movedHandle()):
+    // 1 the one towards the anchor before, 2 the one towards the next.
+    std::uint8_t heldHandles = 0;
+    bool keptAnchor = false;  // an anchor put there by hand (the Correct line): one whatever the curves fitted find
 
     bool operator==(const BrushInput &) const = default;
 };
