@@ -5,6 +5,7 @@
 class QLayout;
 
 class QSpinBox;
+class QToolButton;
 
 namespace mothion::audio {
 class AudioPlayer;
@@ -43,6 +44,7 @@ protected:
 
 private:
     QLayout *celBar();
+    QToolButton *rowFilter();
     // Lip sync by hand: a button for each mouth shape (doc::LipSync.h), shown while the current cel is a mouth chart.
     QWidget *mouthBar();
     // The shape put at the current frame (see DocumentController::setMouthShape()), then on by the frames chosen.

@@ -15,7 +15,7 @@ enum class IconId {
     // What a layer is, in its row (raster, vector, perspective), and the rasterize button.
     KindRaster, KindVector, KindPerspective, Rasterize,
     // The timeline bar: a new frame (a frame with a plus) and the onion skin (an onion).
-    NewFrame, Onion, NewCel, NewTrajectory, Bones, NewBones, DeformCurve, DeformEnvelope,
+    NewFrame, Onion, NewCel, NewTrajectory, Bones, NewBones, DeformCurve, DeformEnvelope, Filter,
     // Correct line (the control points of vector strokes), and the brushes' symmetry.
     CorrectLine, Symmetry,
 };

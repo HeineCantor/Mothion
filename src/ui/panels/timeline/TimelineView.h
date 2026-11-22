@@ -72,6 +72,24 @@ public:
     // cells, and the lines that mark the seconds count from the first of them.
     void setPlayRange(int first, int last);
 
+    // Which kinds of rows the timeline shows (the filter of its bar): any of these together. A cel of a kind not shown is
+    // not there, nor are the rows of it inside the cels that follow it (a trajectory's, a deformer's); a trajectory inside
+    // another goes with its kind. Only the view: what is hidden is as it was, and still works (the canvas draws it). Kept
+    // for the next time (in the settings).
+    enum Shown : int
+    {
+        ShowDrawings = 1,     // cels with drawings
+        ShowTrajectories = 2, // trajectory cels
+        ShowDeformers = 4,    // deformation cels
+        ShowCamera = 8,       // the camera's row
+        ShowAudio = 16,       // the sound's row
+        ShowAll = 31
+    };
+    int shownKinds() const { return m_shown; }
+    void setShownKinds(int kinds);
+    // Whether the timeline shows `cel` (its kind is shown).
+    bool showsCel(const doc::Cel &cel) const;
+
     // Frames shown: the scene length, extended past the last exposure.
     int displayedFrames() const;
 
@@ -99,6 +117,7 @@ public:
     bool isLinkRow(int row) const;
 
 signals:
+    void shownKindsChanged(int kinds);
     void frameWidthChanged(int width);
     // "Import audio…" was chosen in a menu of the timeline (the window asks for the file).
     void audioImportRequested();
@@ -264,6 +283,7 @@ private:
     void syncAudio();
     void showAudioMenu(const QPoint &globalPos);
     document::DocumentController *m_document;
+    int m_shown = ShowAll;
     TimelineMetrics m_metrics;
     bool m_scrubbing = false;
     audio::AudioAnalyzer m_analyzer;

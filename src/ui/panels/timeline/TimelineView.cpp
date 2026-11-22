@@ -10,6 +10,7 @@
 #include "ui/Shortcuts.h"
 #include "ui/Theme.h"
 
+#include <QSettings>
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QActionGroup>
@@ -158,6 +159,7 @@ std::optional<doc::Easing> sameCurve(std::optional<doc::Channel> only, Of of)
 TimelineView::TimelineView(DocumentController *document, QWidget *parent)
     : QAbstractScrollArea(parent)
     , m_document(document)
+    , m_shown(QSettings().value(QStringLiteral("timeline/shown"), int(ShowAll)).toInt() & ShowAll)
 {
     setFocusPolicy(Qt::StrongFocus);
     connect(horizontalScrollBar(), &QScrollBar::sliderReleased, this, &TimelineView::updateScrollBars);
@@ -306,7 +308,7 @@ std::vector<TimelineView::Placed> TimelineView::celOrder() const
         }
     };
     for (int i = d.celCount() - 1; i >= 0; --i)
-        if (!seen[i] && !d.trajectoryParent(d.celAt(i)))
+        if (!seen[i] && !d.trajectoryParent(d.celAt(i)) && showsCel(d.celAt(i)))
             visit(visit, i, 0);
     return order;
 }
@@ -758,7 +760,26 @@ void TimelineView::paintExposure(QPainter &p, const doc::Exposure &e, const QStr
 
 bool TimelineView::hasCamera() const
 {
-    return m_document->camera().has_value();
+    return (m_shown & ShowCamera) && m_document->camera().has_value();
+}
+
+void TimelineView::setShownKinds(int kinds)
+{
+    kinds &= ShowAll;
+    if (kinds == m_shown)
+        return;
+    m_shown = kinds;
+    QSettings().setValue(QStringLiteral("timeline/shown"), m_shown);
+    updateScrollBars();
+    viewport()->update();
+    emit shownKindsChanged(m_shown);
+}
+
+bool TimelineView::showsCel(const doc::Cel &cel) const
+{
+    const doc::CelProperties &p = cel.properties();
+    const int kind = p.trajectory ? ShowTrajectories : p.deformer != doc::DeformerKind::None ? ShowDeformers : ShowDrawings;
+    return (m_shown & kind) != 0;
 }
 
 int TimelineView::cameraHeight() const
@@ -1140,7 +1161,7 @@ void TimelineView::showCameraMenu(const QPoint &globalPos, int frame)
 
 bool TimelineView::hasAudio() const
 {
-    return m_document->audioTrack().has_value();
+    return (m_shown & ShowAudio) && m_document->audioTrack().has_value();
 }
 
 int TimelineView::audioTop() const

@@ -714,6 +714,15 @@ void drawGlyph(QPainter &p, IconId id)
         path.moveTo(16, 6.5);
         path.lineTo(22, 6.5);
         break;
+    case IconId::Filter: // a funnel
+        path.moveTo(4, 5);
+        path.lineTo(20, 5);
+        path.lineTo(14, 12.5);
+        path.lineTo(14, 19);
+        path.lineTo(10, 21);
+        path.lineTo(10, 12.5);
+        path.closeSubpath();
+        break;
     case IconId::DeformCurve: // a curve with a square on each node
         path.moveTo(4, 18);
         path.cubicTo(8, 4, 16, 20, 20, 6);

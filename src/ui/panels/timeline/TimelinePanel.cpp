@@ -32,6 +32,7 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QSlider>
+#include <QMouseEvent>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -389,6 +390,51 @@ TimelinePanel::TimelinePanel(DocumentController *document, tools::ToolState *too
     });
 }
 
+QToolButton *TimelinePanel::rowFilter()
+{
+    // Which kinds of rows the timeline shows: a funnel with a check for each, pressed while some are hidden.
+    auto *button = celButton(IconId::Filter, QStringLiteral("rowFilter"),
+                             tr("Show in the timeline: drawing cels, trajectories, deformers, the camera, the sound"), this);
+    button->setCheckable(true);
+    button->setPopupMode(QToolButton::InstantPopup);
+    auto *menu = new QMenu(button);
+    menu->setObjectName(QStringLiteral("rowFilterMenu"));
+    QAction *all = menu->addAction(tr("Show all"), this, [this] { m_view->setShownKinds(TimelineView::ShowAll); });
+    menu->addSeparator();
+    const std::pair<TimelineView::Shown, QString> kinds[] = {
+        {TimelineView::ShowDrawings, tr("Drawing cels")},
+        {TimelineView::ShowTrajectories, tr("Trajectories")},
+        {TimelineView::ShowDeformers, tr("Deformers")},
+        {TimelineView::ShowCamera, tr("Camera")},
+        {TimelineView::ShowAudio, tr("Sound")},
+    };
+    std::vector<std::pair<QAction *, int>> checks;
+    for (const auto &[kind, text] : kinds) {
+        QAction *check = menu->addAction(text);
+        check->setCheckable(true);
+        const int flag = kind;
+        connect(check, &QAction::toggled, this, [this, flag](bool on) {
+            m_view->setShownKinds(on ? m_view->shownKinds() | flag : m_view->shownKinds() & ~flag);
+        });
+        checks.push_back({check, flag});
+    }
+    // The menu stays open while the checks are clicked, to choose several at once.
+    menu->installEventFilter(this);
+    auto sync = [button, all, checks, this] {
+        const int shown = m_view->shownKinds();
+        for (const auto &[check, flag] : checks) {
+            const QSignalBlocker block(check);
+            check->setChecked(shown & flag);
+        }
+        all->setEnabled(shown != TimelineView::ShowAll);
+        button->setChecked(shown != TimelineView::ShowAll);
+    };
+    connect(m_view, &TimelineView::shownKindsChanged, button, sync);
+    sync();
+    button->setMenu(menu);
+    return button;
+}
+
 QLayout *TimelinePanel::celBar()
 {
     auto *add = celButton(IconId::NewCel, QStringLiteral("celAdd"), tr("New cel above the current one"), this);
@@ -437,6 +483,8 @@ QLayout *TimelinePanel::celBar()
     row->setSpacing(4);
     for (QWidget *w : std::initializer_list<QWidget *>{add, addTrajectory, addBones, remove, up, down})
         row->addWidget(w);
+    row->addSpacing(4);
+    row->addWidget(rowFilter());
     row->addSpacing(8);
     row->addWidget(blend);
     row->addWidget(opacity, 1);
@@ -597,6 +645,15 @@ void TimelinePanel::putMouthShape(char shape)
 
 bool TimelinePanel::eventFilter(QObject *watched, QEvent *event)
 {
+    // The filter's menu: a check clicked is toggled and the menu stays open, to choose several kinds at once.
+    if (auto *menu = qobject_cast<QMenu *>(watched); menu && menu->objectName() == QLatin1String("rowFilterMenu")
+                                                     && event->type() == QEvent::MouseButtonRelease) {
+        if (QAction *action = menu->actionAt(static_cast<QMouseEvent *>(event)->position().toPoint());
+            action && action->isCheckable() && action->isEnabled()) {
+            action->toggle();
+            return true;
+        }
+    }
     // With the mouth bar shown, a shape's letter (alone) puts it, before a tool's key would take it.
     if (watched == m_view && mouthBarShown()
         && (event->type() == QEvent::ShortcutOverride || event->type() == QEvent::KeyPress)) {

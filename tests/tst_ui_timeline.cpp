@@ -30,6 +30,62 @@ private slots:
     }
 
 
+    // The funnel of the timeline's bar shows only the kinds of rows checked: drawing cels, trajectories, deformers (their
+    // rows inside the cels too), the camera, the sound. Kept for the next time.
+    void theTimelineShowsOnlyTheKindsChosen()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        controller.setSceneLength(30);
+        const doc::CelId drawn = controller.currentCel();
+        controller.addTrajectory();
+        controller.chooseCel(drawn);
+        controller.addDeformer(doc::DeformerKind::Bones); // the drawn cel is bent by it: a row of it inside the cel
+        controller.addCamera();
+        ui::TimelinePanel panel(&controller, &state);
+        panel.resize(900, 360);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        ui::TimelineView *view = panel.view();
+        auto kinds = [&] {
+            QStringList seen;
+            for (int r = 0; r < view->rowCount(); ++r) {
+                if (view->isMotionRow(r) && !view->isLinkRow(r))
+                    continue;
+                const doc::CelProperties &p = controller.document().celAt(view->celIndexForRow(r)).properties();
+                const QString kind = p.trajectory ? QStringLiteral("T") : p.deformer != doc::DeformerKind::None ? QStringLiteral("D") : QStringLiteral("C");
+                seen << (view->isLinkRow(r) ? kind.toLower() : kind);
+            }
+            return seen.join(QString());
+        };
+        QCOMPARE(kinds(), QStringLiteral("TDCd")); // top first: the trajectory, the deformer, the cel with its deformer's row
+        auto *button = panel.findChild<QToolButton *>(QStringLiteral("rowFilter"));
+        QVERIFY(button && !button->isChecked());
+        QMenu *menu = button->menu();
+        auto check = [&](const QString &text) {
+            for (QAction *a : menu->actions())
+                if (a->text() == text)
+                    return a;
+            return static_cast<QAction *>(nullptr);
+        };
+        check(QStringLiteral("Deformers"))->setChecked(false);
+        QCOMPARE(kinds(), QStringLiteral("TCd")); // its row inside the cel stays, with its keys
+        QVERIFY(button->isChecked()); // something is hidden
+        check(QStringLiteral("Drawing cels"))->setChecked(false);
+        QCOMPARE(kinds(), QStringLiteral("T"));
+        check(QStringLiteral("Camera"))->setChecked(false);
+        QCOMPARE(view->shownKinds(), int(ui::TimelineView::ShowTrajectories | ui::TimelineView::ShowAudio));
+        // Kept: a new timeline starts as this one was left.
+        {
+            ui::TimelinePanel again(&controller, &state);
+            QCOMPARE(again.view()->shownKinds(), view->shownKinds());
+        }
+        check(QStringLiteral("Show all"))->trigger();
+        QCOMPARE(kinds(), QStringLiteral("TDCd"));
+        QVERIFY(!button->isChecked());
+        QVERIFY(check(QStringLiteral("Camera"))->isChecked());
+    }
+
     // Autoplay plays the frames in a loop, the slider following; Play stops
     // it, the slider picks a frame, the speed sets the pace.
     // A whole cel is copied, cut, pasted (a new cel above the current one, with new ids: drawings, timing and keys as they
