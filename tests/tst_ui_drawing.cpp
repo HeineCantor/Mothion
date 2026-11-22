@@ -705,6 +705,17 @@ private slots:
         QCOMPARE(tool.chosenStrokes(), std::vector<int>({0, 1}));
         QVERIFY(tool.chosenAnchorRefs().empty());
         QCOMPARE(strokes(), drawn);
+        // A stroke of the eraser (or a shape of colour) is no line to correct: the loop does not take it, as a click does not.
+        doc::VectorStroke &third = d.layer(controller.currentCel(), controller.currentDrawingId(),
+                                           controller.currentLayer())->strokes[2];
+        third.erase = true;
+        lasso(QRectF(780, 680, 70, 40));
+        QCOMPARE(tool.chosenStrokes(), std::vector<int>({0, 1}));
+        third.erase = false;
+        third.fill = true;
+        lasso(QRectF(780, 680, 70, 40));
+        QCOMPARE(tool.chosenStrokes(), std::vector<int>({0, 1}));
+        third.fill = false;
         state.setVectorPoints({tools::VectorPointSettings::Mode::Move});
 
         // An end dropped away from any end: only moved.

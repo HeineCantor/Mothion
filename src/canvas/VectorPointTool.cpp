@@ -719,9 +719,9 @@ void VectorPointTool::finishLasso()
         };
         for (int i = 0; i < int(layer->strokes.size()); ++i) {
             const doc::VectorStroke &stroke = layer->strokes[std::size_t(i)];
-            if ((m_chosen && m_chosen->find(i)) || stroke.points.empty()
+            if ((m_chosen && m_chosen->find(i)) || stroke.points.empty() || stroke.erase || stroke.fill
                 || !bounds.intersects(strokeReach(stroke)) || !touched(stroke))
-                continue;
+                continue; // (the eraser's strokes and the shapes of colour are not lines to correct, as a click has them)
             choose(i, true);
             taken.push_back(i);
         }
