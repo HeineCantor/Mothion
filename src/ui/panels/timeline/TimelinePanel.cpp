@@ -1,4 +1,7 @@
 #include "ui/panels/timeline/TimelinePanel.h"
+#include <memory>
+#include <optional>
+
 #include <QProgressDialog>
 #include <QMessageBox>
 #include "io/RhubarbLipSync.h"
@@ -526,19 +529,39 @@ QLayout *TimelinePanel::celBar()
     connect(down, &QToolButton::clicked, this, [move] { move(-1); });
     connect(blend, &QComboBox::activated, this,
             [edit](int i) { edit([i](doc::CelProperties &p) { p.blend = kBlendModes[std::size_t(i)]; }); });
-    // The slider previews in the spin box while dragged and commits on
-    // release, so a drag is one undo step.
+    // While the slider is dragged the cel shows at its opacity (a preview, nothing recorded); on release the change is
+    // made once, from what it was, so a drag is one undo step.
     auto commitOpacity = [edit, opacity] {
         const float value = float(opacity->value()) / 100.0f;
         edit([value](doc::CelProperties &p) { p.opacity = value; });
     };
-    connect(opacity, &QSlider::valueChanged, this, [opacity, opacityValue, commitOpacity](int v) {
+    auto dragStart = std::make_shared<std::optional<std::pair<doc::CelId, doc::CelProperties>>>();
+    auto previewOpacity = [this, dragStart](int v) {
+        if (!*dragStart) {
+            const doc::Cel *cel = m_document->document().cel(m_document->currentCel());
+            if (!cel)
+                return;
+            *dragStart = std::make_pair(cel->id(), cel->properties());
+        }
+        doc::CelProperties shown = (*dragStart)->second;
+        shown.opacity = float(v) / 100.0f;
+        m_document->previewCelProperties((*dragStart)->first, shown);
+    };
+    connect(opacity, &QSlider::valueChanged, this, [opacity, opacityValue, commitOpacity, previewOpacity](int v) {
         const QSignalBlocker block(opacityValue);
         opacityValue->setValue(v);
-        if (!opacity->isSliderDown())
+        if (opacity->isSliderDown())
+            previewOpacity(v);
+        else
             commitOpacity();
     });
-    connect(opacity, &QSlider::sliderReleased, this, commitOpacity);
+    connect(opacity, &QSlider::sliderReleased, this, [this, dragStart, commitOpacity] {
+        if (*dragStart) { // back to the start, so the command records the whole change
+            m_document->previewCelProperties((*dragStart)->first, (*dragStart)->second);
+            dragStart->reset();
+        }
+        commitOpacity();
+    });
     connect(opacityValue, &QSpinBox::valueChanged, this, [opacity, commitOpacity](int v) {
         const QSignalBlocker block(opacity);
         opacity->setValue(v);

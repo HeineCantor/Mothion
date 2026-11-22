@@ -1224,6 +1224,21 @@ private slots:
         opacity->setValue(40);
         QCOMPARE(d.cel(second)->properties().opacity, 0.4f);
         QCOMPARE(controller.undoText(), QStringLiteral("Undo cel properties"));
+        // The slider dragged: the cel follows it at once, and the drag is one undo step on release.
+        {
+            auto *slider = panel.findChild<QSlider *>(QStringLiteral("celOpacity"));
+            QVERIFY(slider);
+            slider->setSliderDown(true);
+            slider->setValue(70);
+            QCOMPARE(d.cel(second)->properties().opacity, 0.7f);
+            slider->setValue(20);
+            QCOMPARE(d.cel(second)->properties().opacity, 0.2f);
+            slider->setSliderDown(false); // released
+            QCOMPARE(d.cel(second)->properties().opacity, 0.2f);
+            controller.undo();
+            QCOMPARE(d.cel(second)->properties().opacity, 0.4f); // back to before the drag
+            controller.redo();
+        }
         controller.setCurrentCel(first);
         QCOMPARE(blend->currentIndex(), ui::blendModeIndex(doc::BlendMode::Normal)); // follows the current cel
         QCOMPARE(opacity->value(), 100);
