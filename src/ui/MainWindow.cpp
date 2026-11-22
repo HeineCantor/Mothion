@@ -932,18 +932,30 @@ void MainWindow::importVideo()
         this, title, QString(), tr("Videos (%1);;All files (*)").arg(io::videoPatterns().join(QLatin1Char(' '))));
     if (file.isEmpty())
         return;
+    QString error;
+    const io::VideoInfo info = io::probeVideo(file, &error);
+    if (!error.isEmpty()) {
+        QMessageBox::warning(this, title, tr("Cannot read %1: %2").arg(QFileInfo(file).fileName(), error));
+        return;
+    }
+    // The frame rate (and so how many pictures), where it starts and the frames per picture.
+    const double sceneFps = m_document->document().frameRate().fps();
+    ImportSequenceDialog dialog(io::videoFrameCount(info, sceneFps), m_document->currentFrame(),
+                                m_document->document().frameCount(), this);
+    dialog.setWindowTitle(title);
+    dialog.offerFrameRates(sceneFps, info.fps, info.duration);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
     QTemporaryDir folder; // the pictures, until they are in the document
     if (!folder.isValid()) {
         QMessageBox::warning(this, title, tr("Cannot make a temporary folder for the pictures"));
         return;
     }
-    const double fps = m_document->document().frameRate().fps();
     QProgressDialog progress(tr("Taking the frames out of the video…"), tr("Cancel"), 0, 1000, this);
     progress.setWindowTitle(title);
     progress.setWindowModality(Qt::WindowModal);
     progress.setMinimumDuration(300);
-    QString error;
-    const QStringList frames = io::extractVideoFrames(file, folder.path(), fps, [&](double done, double total) {
+    const QStringList frames = io::extractVideoFrames(file, folder.path(), dialog.frameRate(), [&](double done, double total) {
         if (total > 0)
             progress.setValue(int(1000 * done / total));
         QCoreApplication::processEvents();
@@ -955,13 +967,8 @@ void MainWindow::importVideo()
             QMessageBox::warning(this, title, tr("Cannot read %1: %2").arg(QFileInfo(file).fileName(), error));
         return;
     }
-    ImportSequenceDialog dialog(int(frames.size()), m_document->currentFrame(), m_document->document().frameCount(),
-                                this);
-    dialog.setWindowTitle(title);
-    if (dialog.exec() != QDialog::Accepted)
-        return;
-    // As big as the page (a video smaller than it made bigger too), each picture a frame of its own.
-    if (importSequenceFiles(frames, QFileInfo(file).completeBaseName(), dialog.startFrame(), dialog.hold(), true) == 0)
+    // At their own size, made smaller only if bigger than the page; each picture a frame of its own.
+    if (importSequenceFiles(frames, QFileInfo(file).completeBaseName(), dialog.startFrame(), dialog.hold()) == 0)
         QMessageBox::warning(this, title, tr("None of the video's frames could be read."));
 }
 

@@ -394,6 +394,15 @@ private slots:
         QVERIFY(make.waitForFinished(60000));
         QCOMPARE(make.exitCode(), 0);
         QString error;
+        // What it is, before reading it: 2 seconds at 30 fps; 48 frames at 24 fps, 60 as it is.
+        const io::VideoInfo info = io::probeVideo(video, &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QVERIFY(std::abs(info.duration - 2.0) < 0.05);
+        QVERIFY(std::abs(info.fps - 30.0) < 0.01);
+        QCOMPARE(io::videoFrameCount(info, 24.0), 48);
+        QCOMPARE(io::videoFrameCount(info, 0.0), 60);
+        // Every frame of the video, as it is.
+        QCOMPARE(int(io::extractVideoFrames(video, dir.filePath(QStringLiteral("every")), 0.0, {}, &error).size()), 60);
         double lastTotal = 0;
         const QStringList frames = io::extractVideoFrames(video, dir.filePath(QStringLiteral("frames")), 24.0,
                                                           [&](double, double total) {
@@ -418,6 +427,8 @@ private slots:
         f.write("hello");
         f.close();
         QVERIFY(io::extractVideoFrames(text, dir.filePath(QStringLiteral("bad")), 24.0, {}, &error).isEmpty());
+        QVERIFY(!error.isEmpty());
+        io::probeVideo(text, &error);
         QVERIFY(!error.isEmpty());
     }
 

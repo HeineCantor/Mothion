@@ -70,6 +70,8 @@
 
 #include <numbers>
 #include <set>
+#include <QDoubleSpinBox>
+#include <QRadioButton>
 #include <QCheckBox>
 #include <QClipboard>
 #include <QMimeData>

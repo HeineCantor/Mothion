@@ -961,6 +961,32 @@ private slots:
     }
 
 
+    // For a video: the frame rate chosen, each choice with how many pictures it makes, and the end following.
+    void importVideoDialogOffersFrameRates()
+    {
+        ui::ImportSequenceDialog dialog(48, 0, 24);
+        dialog.offerFrameRates(24.0, 30.0, 2.0);
+        auto *scene = dialog.findChild<QRadioButton *>(QStringLiteral("sceneRate"));
+        auto *every = dialog.findChild<QRadioButton *>(QStringLiteral("everyFrame"));
+        auto *custom = dialog.findChild<QRadioButton *>(QStringLiteral("customRate"));
+        auto *fps = dialog.findChild<QDoubleSpinBox *>(QStringLiteral("customFps"));
+        auto *end = dialog.findChild<QLabel *>(QStringLiteral("end"));
+        QVERIFY(scene && every && custom && fps && end);
+        QVERIFY(scene->isChecked()); // the scene's by default: the video keeps its timing
+        QCOMPARE(dialog.frameRate(), 24.0);
+        QVERIFY(scene->text().contains(QStringLiteral("48 frame")));
+        QVERIFY(every->text().contains(QStringLiteral("60 frame")));
+        QVERIFY(end->text().contains(QStringLiteral("grows from 24 to 48")));
+        every->setChecked(true);
+        QCOMPARE(dialog.frameRate(), 0.0); // every frame, as it is
+        QVERIFY(end->text().contains(QStringLiteral("grows from 24 to 60")));
+        fps->setValue(12.0); // typing a rate chooses it
+        QVERIFY(custom->isChecked());
+        QCOMPARE(dialog.frameRate(), 12.0);
+        QVERIFY(custom->text().contains(QStringLiteral("24 frame")));
+        QVERIFY(!end->text().contains(QStringLiteral("grows")));
+    }
+
     void largeImagesAreScaledToFit()
     {
         document::DocumentController controller;
