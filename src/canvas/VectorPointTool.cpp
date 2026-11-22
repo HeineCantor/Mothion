@@ -450,7 +450,7 @@ void VectorPointTool::press(const QPointF &docPos, Qt::KeyboardModifiers modifie
     const std::shared_ptr<void> record(nullptr, [&](void *) { recordChoice(before); });
     const Mode mode = m_toolState->vectorPoints().mode;
 
-    if (mode == Mode::Lasso) {
+    if (mode == Mode::Lasso || mode == Mode::LassoInside) {
         m_lasso = Lasso{{docPos}, modifiers};
         return;
     }
@@ -855,6 +855,7 @@ void VectorPointTool::finishLasso()
     refresh();
     const bool add = lasso.modifiers & Qt::ShiftModifier;
     const bool remove = !add && (lasso.modifiers & Qt::AltModifier);
+    const bool onlyInside = m_toolState->vectorPoints().mode == Mode::LassoInside; // the strokes it touches: only their points inside
     auto take = [&](const std::set<AnchorRef> &found) {
         Chosen &c = *m_chosen;
         if (remove) {
@@ -881,7 +882,8 @@ void VectorPointTool::finishLasso()
             chooseStrokeAt(lasso.points.front(), lasso.modifiers & Qt::ShiftModifier);
         return;
     }
-    // A stroke not chosen yet that the loop takes in or crosses, even in part: chosen, with all its anchors.
+    // A stroke not chosen yet that the loop takes in or crosses, even in part: chosen, with all its anchors (in the Lasso
+    // inside process, only those inside the loop).
     std::vector<int> taken;
     if (const doc::Layer *layer = currentLayer(); layer && !remove) {
         std::vector<QLineF> edges;
@@ -918,7 +920,7 @@ void VectorPointTool::finishLasso()
     }
     std::set<AnchorRef> found;
     for (const Picked &p : m_chosen->strokes) {
-        const bool whole = std::find(taken.begin(), taken.end(), p.index) != taken.end();
+        const bool whole = !onlyInside && std::find(taken.begin(), taken.end(), p.index) != taken.end();
         for (int k = 0; k < int(p.anchors.size()); ++k)
             if (whole || loop.containsPoint(pointOf(p.stroke, p.anchors[std::size_t(k)]), Qt::OddEvenFill))
                 found.insert({p.index, k});
@@ -1117,7 +1119,8 @@ QCursor VectorPointTool::cursor() const
         case Mode::Width: return Qt::SizeVerCursor;
         case Mode::Corner: return Qt::PointingHandCursor;
         case Mode::Cut: break;
-        case Mode::Lasso: return Qt::PointingHandCursor;
+        case Mode::Lasso:
+        case Mode::LassoInside: return Qt::PointingHandCursor;
         }
     }
     return Qt::CrossCursor;

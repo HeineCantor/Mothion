@@ -345,6 +345,7 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
     m_vectorPointMode->addItem(tr("Corner"));
     m_vectorPointMode->addItem(tr("Cut line"));
     m_vectorPointMode->addItem(tr("Lasso control points"));
+    m_vectorPointMode->addItem(tr("Lasso points inside"));
     auto *vectorPointHelp = new QLabel(m_vectorPointControls);
     vectorPointHelp->setWordWrap(true);
     vectorPointHelp->setForegroundRole(QPalette::PlaceholderText);
@@ -363,8 +364,10 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
             tr("Drag a loop round control points of the chosen strokes to choose them (Shift: choose more, Alt: take "
                "them away), then move them or change their width in the other processes. A stroke not chosen that the loop "
                "touches is chosen with all its points. Click a stroke to choose it (Shift+click: one more)."),
+            tr("As the lasso, but a stroke not chosen that the loop touches is chosen only with its control points inside "
+               "the loop (Shift: choose more, Alt: take them away). Click a stroke to choose it (Shift+click: one more)."),
         };
-        vectorPointHelp->setText(help[std::clamp(m_vectorPointMode->currentIndex(), 0, 4)]);
+        vectorPointHelp->setText(help[std::clamp(m_vectorPointMode->currentIndex(), 0, 5)]);
     };
     auto *vectorPointForm = new QFormLayout(m_vectorPointControls);
     vectorPointForm->setContentsMargins(0, 0, 0, 0);

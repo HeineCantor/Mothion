@@ -44,7 +44,7 @@ struct PuppetSettings
 // them at once with a lasso.
 struct VectorPointSettings
 {
-    enum class Mode { Move, Width, Corner, Cut, Lasso };
+    enum class Mode { Move, Width, Corner, Cut, Lasso, LassoInside }; // LassoInside: the strokes it touches only with their points inside
     Mode mode = Mode::Move;
 
     bool operator==(const VectorPointSettings &) const = default;

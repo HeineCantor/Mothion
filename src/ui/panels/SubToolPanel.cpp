@@ -221,14 +221,17 @@ QImage renderVectorPointPreview(tools::VectorPointSettings::Mode mode, const QCo
         p.setPen(QPen(ink, 1.5));
         p.drawPath(line);
     }
-    if (mode == Mode::Lasso) { // a dashed loop round two of the points, those filled
+    if (mode == Mode::Lasso || mode == Mode::LassoInside) { // a dashed loop round points, those filled
         QPen dashes(ink, 1.2, Qt::DashLine);
         p.setPen(dashes);
         p.setBrush(Qt::NoBrush);
-        p.drawEllipse(QRectF(points[1].x() - 8, r.top() - 3, points[2].x() - points[1].x() + 16, r.height() + 6));
+        if (mode == Mode::Lasso)
+            p.drawEllipse(QRectF(points[1].x() - 8, r.top() - 3, points[2].x() - points[1].x() + 16, r.height() + 6));
+        else // round one point only: only that one chosen
+            p.drawEllipse(QRectF(points[1].x() - 10, points[1].y() - 10, 20, 20));
     }
     for (int i = 0; i < 4; ++i) {
-        const bool chosen = (mode == Mode::Lasso && (i == 1 || i == 2)) || (mode == Mode::Move && i == 2);
+        const bool chosen = (mode == Mode::Lasso && (i == 1 || i == 2)) || (mode == Mode::LassoInside && i == 1) || (mode == Mode::Move && i == 2);
         p.setPen(QPen(ink, 1.2));
         p.setBrush(chosen ? ink : QColor(Qt::transparent));
         const QRectF box(points[i].x() - 3, points[i].y() - 3, 6, 6);

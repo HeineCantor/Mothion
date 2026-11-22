@@ -820,6 +820,19 @@ private slots:
         QCOMPARE(tool.chosenStrokes(), std::vector<int>({0, 1}));
         QVERIFY(tool.chosenAnchorRefs().empty());
         QCOMPARE(strokes(), drawn);
+        // Lasso points inside: a stroke the loop touches is chosen with only its anchors inside the loop.
+        state.setVectorPoints({tools::VectorPointSettings::Mode::LassoInside});
+        lasso(QRectF(780, 680, 70, 40));
+        QCOMPARE(tool.chosenStrokes(), std::vector<int>({0, 1, 2}));
+        QVERIFY(!tool.chosenAnchorRefs().empty());
+        QVERIFY(tool.chosenAnchorRefs().size() < all.size());
+        for (const canvas::VectorPointTool::AnchorRef &a : tool.chosenAnchorRefs()) {
+            QCOMPARE(a.stroke, 2);
+            QVERIFY(QRectF(780, 680, 70, 40).contains(*tool.anchorPoint(2, a.k)));
+        }
+        click(QPointF(850, drawn[2].points.front().y), Qt::ShiftModifier);
+        QCOMPARE(tool.chosenStrokes(), std::vector<int>({0, 1}));
+        state.setVectorPoints({tools::VectorPointSettings::Mode::Lasso});
         // A stroke of the eraser (or a shape of colour) is no line to correct: the loop does not take it, as a click does not.
         doc::VectorStroke &third = d.layer(controller.currentCel(), controller.currentDrawingId(),
                                            controller.currentLayer())->strokes[2];

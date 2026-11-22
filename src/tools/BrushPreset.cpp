@@ -95,6 +95,7 @@ QList<BrushPreset> builtInPresets(ToolId tool)
         using Mode = VectorPointSettings::Mode;
         const std::pair<QString, Mode> modes[] = {
             {QObject::tr("Move control points"), Mode::Move}, {QObject::tr("Lasso control points"), Mode::Lasso},
+            {QObject::tr("Lasso points inside"), Mode::LassoInside},
             {QObject::tr("Line width"), Mode::Width},         {QObject::tr("Corner"), Mode::Corner},
             {QObject::tr("Cut line"), Mode::Cut},
         };

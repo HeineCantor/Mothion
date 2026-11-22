@@ -1672,7 +1672,7 @@ private slots:
         QCOMPARE(tools::builtInPresets(ToolId::RectSelect).size(), 2);
         // The Correct line's processes are its sub tools: each sets only that.
         const auto correct = tools::builtInPresets(ToolId::VectorPoint);
-        QCOMPARE(correct.size(), 5);
+        QCOMPARE(correct.size(), 6);
         tools::ToolState state;
         for (const tools::BrushPreset &preset : correct) {
             QVERIFY(preset.vectorPointMode.has_value());
@@ -1680,6 +1680,7 @@ private slots:
             QCOMPARE(state.vectorPoints().mode, *preset.vectorPointMode);
         }
         QCOMPARE(correct[1].vectorPointMode, tools::VectorPointSettings::Mode::Lasso);
+        QCOMPARE(correct[2].vectorPointMode, tools::VectorPointSettings::Mode::LassoInside);
     }
 
 
