@@ -15,7 +15,7 @@ namespace mothion::ui {
 // no trajectory gets "Follow trajectory", a trajectory "Parent to" (it becomes the child of another, and moves along its
 // way). Both list the trajectories, the parent checked, with None to let go; a trajectory that would make a loop (the
 // cel itself, or one that follows it) is shown but cannot be chosen. A drawn cel also gets "Deformed by": the deformation
-// cels, the one that bends it checked, with None. `context` owns the actions' connections.
+// cels, each to bend it or to carry it by one of its bones (or nodes), whole, with None. `context` owns the actions' connections.
 void addParentTrajectoryMenu(QMenu &menu, document::DocumentController *document, const doc::Cel &cel, QObject *context);
 
 } // namespace mothion::ui

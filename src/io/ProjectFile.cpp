@@ -88,6 +88,8 @@ const char *const kSchema[] = {
     // Format 20: the deformation cels: their kind and their bones with their rest, as JSON (their poses are the keys of
     // their motion's Deform channel).
     "create table deformer_cels (cel integer primary key references cels(id), kind text not null, data text not null)",
+    // ... and the cels carried by one of their parts (a bone or a node), not bent.
+    "create table deformer_parts (cel integer primary key references cels(id), part integer not null)",
 };
 
 // Stored by name, so reordering the enum cannot change old files.
@@ -521,19 +523,25 @@ doc::DeformerKind deformerKindFrom(const QString &name)
     return doc::DeformerKind::None;
 }
 
-// A deformer's bones (p the parent, r the radius, f the fade) and its rest pose, as JSON text.
+// A deformer's bones (p the parent, r the radius, f the fade, s for a node that begins a curve of its own) and its rest
+// pose, as JSON text.
 QString deformerToJson(const doc::Deformer &deformer)
 {
     QJsonArray bones, rest;
-    for (const doc::Bone &b : deformer.bones)
-        bones.append(QJsonObject{{"p", b.parent}, {"r", b.radius}, {"f", b.fade}});
+    for (const doc::Bone &b : deformer.bones) {
+        QJsonObject o{{"p", b.parent}, {"r", b.radius}, {"f", b.fade}};
+        if (b.starts)
+            o["s"] = true;
+        bones.append(o);
+    }
     for (double v : deformer.rest)
         rest.append(v);
     return QString::fromUtf8(QJsonDocument(QJsonObject{{"bones", bones}, {"rest", rest}}).toJson(QJsonDocument::Compact));
 }
 
-// Read back; a parent that is not a bone before its child makes it a root, and the rest has its numbers for each bone.
-doc::Deformer deformerFromJson(const QString &text)
+// Read back; a parent that is not a bone before its child makes it a root, and the rest has its numbers for each part (as
+// many as a part of `kind` has).
+doc::Deformer deformerFromJson(const QString &text, doc::DeformerKind kind)
 {
     doc::Deformer deformer;
     const QJsonObject root = QJsonDocument::fromJson(text.toUtf8()).object();
@@ -545,11 +553,12 @@ doc::Deformer deformerFromJson(const QString &text)
             bone.parent = -1;
         bone.radius = std::max(0.0, o.value("r").toDouble(bone.radius));
         bone.fade = std::max(0.0, o.value("f").toDouble(bone.fade));
+        bone.starts = o.value("s").toBool(false);
         deformer.bones.push_back(bone);
     }
     for (const QJsonValue &v : root.value("rest").toArray())
         deformer.rest.push_back(std::isfinite(v.toDouble()) ? v.toDouble() : 0.0);
-    deformer.rest.resize(deformer.bones.size() * doc::kBoneParams, 0.0);
+    deformer.rest.resize(deformer.bones.size() * std::size_t(doc::partParams(kind)), 0.0);
     return deformer;
 }
 
@@ -711,7 +720,7 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
         return false;
     }
 
-    QSqlQuery cel(db), drawing(db), layer(db), exposure(db), tile(db), mask(db), maskTile(db), clipped(db), trajectory(db), trajectoryParent(db), vectorStrokes(db), mouthChart(db), deformer(db);
+    QSqlQuery cel(db), drawing(db), layer(db), exposure(db), tile(db), mask(db), maskTile(db), clipped(db), trajectory(db), trajectoryParent(db), vectorStrokes(db), mouthChart(db), deformer(db), deformerPart(db);
     cel.prepare(QStringLiteral("insert into cels values (?, ?, ?, ?, ?, ?, ?)"));
     drawing.prepare(QStringLiteral("insert into drawings values (?, ?, ?)"));
     layer.prepare(QStringLiteral("insert into layers values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
@@ -724,6 +733,7 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
     trajectoryParent.prepare(QStringLiteral("insert into trajectory_parents values (?, ?)"));
     mouthChart.prepare(QStringLiteral("insert into mouth_charts values (?)"));
     deformer.prepare(QStringLiteral("insert into deformer_cels values (?, ?, ?)"));
+    deformerPart.prepare(QStringLiteral("insert into deformer_parts values (?, ?)"));
     vectorStrokes.prepare(QStringLiteral("insert into vector_strokes values (?, ?)"));
     auto exec = [&](QSqlQuery &query, std::initializer_list<QVariant> values) {
         for (const QVariant &v : values)
@@ -748,6 +758,8 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
             && !exec(deformer, {idValue(l.id()), QString::fromLatin1(deformerKindName(p.deformer)), deformerToJson(l.deformer())}))
             return false;
         if (p.parent != doc::kNoId && !exec(trajectoryParent, {idValue(l.id()), idValue(p.parent)}))
+            return false;
+        if (p.parent != doc::kNoId && p.parentPart >= 0 && !exec(deformerPart, {idValue(l.id()), p.parentPart}))
             return false;
         for (const auto &[id, dr] : l.drawings()) {
             if (!exec(drawing, {idValue(id), idValue(l.id()), QString::fromStdString(dr.name)}))
@@ -1088,7 +1100,17 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
                 doc::CelProperties properties = cel->properties();
                 properties.deformer = kind;
                 cel->setProperties(std::move(properties));
-                cel->setDeformer(deformerFromJson(q.value(2).toString()));
+                cel->setDeformer(deformerFromJson(q.value(2).toString(), kind));
+            }
+    }
+
+    // (A file of format 20 made before the table was may lack it.)
+    if (version >= 20 && q.exec(QStringLiteral("select cel, part from deformer_parts"))) {
+        while (q.next())
+            if (doc::Cel *cel = d->cel(idFrom(q.value(0)))) {
+                doc::CelProperties properties = cel->properties();
+                properties.parentPart = std::max(-1, q.value(1).toInt());
+                cel->setProperties(std::move(properties));
             }
     }
 

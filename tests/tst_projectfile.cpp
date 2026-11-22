@@ -526,6 +526,29 @@ private slots:
         QCOMPARE(loaded->celAt(0).motion(), motion);
         QCOMPARE(loaded->celAt(1).properties().deformer, doc::DeformerKind::None);
         QCOMPARE(loaded->followedDeformer(loaded->celAt(1)), &loaded->celAt(0));
+
+        // A curve, and a cel carried by its second node.
+        const QString curvePath = dir.filePath(QStringLiteral("curve.moth"));
+        doc::CelProperties c{"Curve"};
+        c.deformer = doc::DeformerKind::Curve;
+        doc::Cel &curve = original->insertCel(0, std::make_unique<doc::Cel>(original->allocateCelId(), c));
+        doc::Deformer nodes;
+        nodes.bones = {{-1, 30, 20}, {-1, 15, 5}};
+        nodes.rest = {0, 0, 0, 0, 40, 0, 120, 10, 40, 0};
+        curve.setDeformer(nodes);
+        original->celAt(2).setProperties([&] {
+            auto p = original->celAt(2).properties();
+            p.parent = curve.id();
+            p.parentPart = 1;
+            return p;
+        }());
+        QVERIFY2(io::saveProject(*original, curvePath, &error), qPrintable(error));
+        const auto again = io::loadProject(curvePath, &error);
+        QVERIFY2(again, qPrintable(error));
+        compareDocuments(*original, *again);
+        QCOMPARE(again->celAt(0).properties().deformer, doc::DeformerKind::Curve);
+        QCOMPARE(again->celAt(0).deformer(), nodes);
+        QCOMPARE(again->celAt(2).properties().parentPart, 1);
     }
 
     // Format 19: the cels that are mouth charts (and no others), with their drawings named after the shapes, those

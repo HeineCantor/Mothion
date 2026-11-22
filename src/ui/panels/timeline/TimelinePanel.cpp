@@ -395,9 +395,24 @@ QLayout *TimelinePanel::celBar()
     auto *addTrajectory = celButton(IconId::NewTrajectory, QStringLiteral("trajectoryAdd"),
                                     tr("New trajectory cel above the current one"), this);
     auto *addBones = celButton(IconId::NewBones, QStringLiteral("bonesAdd"),
-                               tr("New bones deformer above the current cel: the current cel is bent by it. Draw its bones "
-                                  "in rig mode, then turn them on the frames to animate the bend"),
+                               tr("New deformer above the current cel: the current cel is bent by it. Draw its bones (or its "
+                                  "curve) in rig mode, then move them on the frames to animate the bend. The arrow: bones, a "
+                                  "curve or an envelope"),
                                this);
+    {
+        auto *kinds = new QMenu(addBones);
+        auto addKind = [this, kinds](IconId id, const QString &text, doc::DeformerKind kind) {
+            kinds->addAction(icon(id, IconTone::Plain), text, this, [this, kind] {
+                m_document->addDeformer(kind);
+                m_toolState->setRigMode(true); // its bones or curve are to be drawn first
+            });
+        };
+        addKind(IconId::Bones, tr("Bones: rigid bones bent at their joints"), doc::DeformerKind::Bones);
+        addKind(IconId::DeformCurve, tr("Curve: what lies along a curve bends with it"), doc::DeformerKind::Curve);
+        addKind(IconId::DeformEnvelope, tr("Envelope: a closed curve round the drawing shapes it"), doc::DeformerKind::Envelope);
+        addBones->setMenu(kinds);
+        addBones->setPopupMode(QToolButton::MenuButtonPopup);
+    }
     auto *remove = celButton(IconId::Delete, QStringLiteral("celRemove"), tr("Delete the current cel"), this);
     auto *up = celButton(IconId::ArrowUp, QStringLiteral("celUp"), tr("Move the current cel up"), this);
     auto *down = celButton(IconId::ArrowDown, QStringLiteral("celDown"), tr("Move the current cel down"), this);

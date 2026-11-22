@@ -6,7 +6,6 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QPainterPathStroker>
-#include <QTimer>
 
 #include <cmath>
 #include <numbers>
@@ -56,6 +55,13 @@ bool ownOrigin(const doc::Deformer &deformer, const std::vector<deform::BoneFram
     return parent < 0 || puppet::length(frames[bone].origin - frames[std::size_t(parent)].end()) > 1e-6;
 }
 
+// Where the zone's handles of a bone are: across its middle, at its radius and at its radius and fade.
+deform::Vec2 zoneHandle(const deform::BoneFrame &f, const doc::Bone &bone, bool fade)
+{
+    const deform::Vec2 middle = (f.origin + f.end()) * 0.5, dir = f.direction(), across{-dir.y, dir.x};
+    return middle + across * (bone.radius + (fade ? bone.fade : 0.0));
+}
+
 } // namespace
 
 BoneGizmo::BoneGizmo(document::DocumentController *document)
@@ -63,7 +69,7 @@ BoneGizmo::BoneGizmo(document::DocumentController *document)
 {
 }
 
-BoneGizmo::~BoneGizmo() = default;
+
 
 const doc::Cel *BoneGizmo::cel() const
 {
@@ -128,7 +134,19 @@ BoneGizmo::Hit BoneGizmo::hitAt(const QPointF &docPos, const ViewTransform &view
     const doc::Deformer &deformer = m_drag && m_rig ? m_drag->rig : c->deformer();
     Hit best;
     double nearest = kGrab;
-    // The joints first: the last bones on top.
+    // The zone's handles of the chosen bone first, in rig mode.
+    if (const int chosen = chosenBone(); m_rig && chosen >= 0 && std::size_t(chosen) < f.size())
+        for (Part part : {Part::ZoneFade, Part::ZoneRadius}) {
+            const deform::Vec2 h = zoneHandle(f[std::size_t(chosen)], deformer.bones[std::size_t(chosen)], part == Part::ZoneFade);
+            const double d = QLineF(at, toView.map(toQ(h))).length();
+            if (d <= nearest) {
+                nearest = d;
+                best = {chosen, part};
+            }
+        }
+    if (best.bone >= 0)
+        return best;
+    // The joints: the last bones on top.
     for (std::size_t i = f.size(); i-- > 0;) {
         const double end = QLineF(at, toView.map(toQ(f[i].end()))).length();
         if (end <= nearest) {
@@ -161,7 +179,12 @@ std::optional<QPointF> BoneGizmo::partPoint(int bone, Part part) const
     if (bone < 0 || bone >= int(f.size()))
         return std::nullopt;
     const deform::BoneFrame &b = f[std::size_t(bone)];
-    const deform::Vec2 p = part == Part::Origin ? b.origin : part == Part::End ? b.end() : (b.origin + b.end()) * 0.5;
+    const doc::Cel *c = cel();
+    const doc::Deformer &deformer = m_drag && m_rig ? m_drag->rig : c->deformer();
+    const deform::Vec2 p = part == Part::Origin                                 ? b.origin
+                           : part == Part::End                                  ? b.end()
+                           : part == Part::ZoneRadius || part == Part::ZoneFade ? zoneHandle(b, deformer.bones[std::size_t(bone)], part == Part::ZoneFade)
+                                                                                : (b.origin + b.end()) * 0.5;
     return toPage().map(toQ(p));
 }
 
@@ -184,6 +207,9 @@ bool BoneGizmo::press(const QPointF &docPos, const ViewTransform &view, Qt::Keyb
             drag.kind = moveIt ? Drag::Kind::MoveEnd : Drag::Kind::NewBone;
             if (!moveIt)
                 drag.start = drag.now = drag.startFrames[std::size_t(hit.bone)].end(); // from the end itself
+        } else if (hit.part == Part::ZoneRadius || hit.part == Part::ZoneFade) {
+            drag.kind = Drag::Kind::Zone;
+            drag.part = hit.part;
         } else if (hit.part == Part::Origin) {
             drag.kind = Drag::Kind::MoveOrigin;
         } else if (hit.part == Part::Body) {
@@ -248,6 +274,18 @@ void BoneGizmo::apply(Drag &drag)
             if (hangsFrom(drag.rig, int(i), int(b)))
                 f[i].origin = f[i].origin + delta;
         break;
+    case Drag::Kind::Zone: {
+        // How far from the bone the pointer is: the radius, or the fade beyond it.
+        const deform::Vec2 dir = f[b].direction();
+        const double along = std::clamp(puppet::dot(drag.now - f[b].origin, dir), 0.0, f[b].length);
+        const double away = puppet::length(drag.now - (f[b].origin + dir * along));
+        doc::Bone &bone = drag.rig.bones[b];
+        if (drag.part == Part::ZoneRadius)
+            bone.radius = std::max(1.0, away);
+        else
+            bone.fade = std::max(0.0, away - bone.radius);
+        return;
+    }
     case Drag::Kind::Turn: {
         std::vector<double> pose = drag.pose;
         const deform::Vec2 way = drag.now - f[b].origin;
@@ -287,47 +325,17 @@ void BoneGizmo::move(const QPointF &docPos, Qt::KeyboardModifiers modifiers)
         apply(*m_drag);
         return;
     }
-    m_pending = true;
-    const qint64 wait = std::max<qint64>(m_drawCost, 8); // at most about 120 drawings a second
-    const qint64 since = m_lastDraw.isValid() ? m_lastDraw.elapsed() : wait;
-    if (since >= wait) {
-        applyPending();
-        return;
-    }
-    if (!m_timer) {
-        m_timer = std::make_unique<QTimer>();
-        m_timer->setSingleShot(true);
-        QObject::connect(m_timer.get(), &QTimer::timeout, m_timer.get(), [this] {
-            applyPending();
-            if (m_repaint)
-                m_repaint();
-        });
-    }
-    if (!m_timer->isActive())
-        m_timer->start(int(wait - since));
-}
-
-void BoneGizmo::applyPending()
-{
-    if (m_timer)
-        m_timer->stop();
-    if (!m_pending || !m_drag)
-        return;
-    m_pending = false;
-    QElapsedTimer cost;
-    cost.start();
-    apply(*m_drag);
-    m_drawCost = cost.elapsed();
-    m_lastDraw.start();
+    m_throttle.request([this] {
+        if (m_drag)
+            apply(*m_drag);
+    });
 }
 
 void BoneGizmo::release(const QPointF &docPos)
 {
     if (!m_drag)
         return;
-    m_pending = false; // the release settles at its own place
-    if (m_timer)
-        m_timer->stop();
+    m_throttle.cancel(); // the release settles at its own place
     m_drag->now = inBones(docPos);
     m_drag->moved = m_drag->moved || puppet::length(m_drag->now - m_drag->start) > 1e-9;
     if (m_drag->moved)
@@ -356,9 +364,7 @@ void BoneGizmo::cancel()
 {
     if (!m_drag)
         return;
-    m_pending = false;
-    if (m_timer)
-        m_timer->stop();
+    m_throttle.cancel();
     const Drag drag = std::move(*m_drag);
     m_drag.reset();
     if (!m_rig)
@@ -381,7 +387,7 @@ bool BoneGizmo::removeChosenBone()
     if (!m_rig || bone < 0 || !editable())
         return false;
     m_chosen = -1;
-    return m_document->removeBone(cel()->id(), bone);
+    return m_document->removeDeformerPart(cel()->id(), bone);
 }
 
 void BoneGizmo::paint(QPainter &painter, const ViewTransform &view) const
@@ -418,6 +424,14 @@ void BoneGizmo::paint(QPainter &painter, const ViewTransform &view) const
         painter.setBrush(Qt::NoBrush);
         painter.setPen(QPen(QColor(accent.red(), accent.green(), accent.blue(), 160), 1.0, Qt::DashLine));
         painter.drawPath(outer.createStroke(axis));
+        // Its handles: small squares across the middle.
+        for (Part part : {Part::ZoneRadius, Part::ZoneFade}) {
+            const QPointF h = toView.map(toQ(zoneHandle(f[std::size_t(chosen)], bone, part == Part::ZoneFade)));
+            const bool hot = m_hovered.bone == chosen && m_hovered.part == part;
+            painter.setPen(QPen(ink, 1.4));
+            painter.setBrush(hot ? ink : QColor(Qt::white));
+            painter.drawRect(QRectF(h - QPointF(4, 4), QSizeF(8, 8)));
+        }
     }
 
     // A bone: a long diamond from its start to its end.

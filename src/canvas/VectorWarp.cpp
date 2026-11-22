@@ -58,12 +58,7 @@ public:
     }
 
     // The linear part of the affine map of a triangle: a vector (x, y) at rest becomes (a x + b y, c x + d y).
-    struct Linear
-    {
-        double a = 1, b = 0, c = 0, d = 1;
-        Vec2 apply(Vec2 v) const { return {a * v.x + b * v.y, c * v.x + d * v.y}; }
-        double det() const { return a * d - b * c; }
-    };
+    using Linear = deform::Field::Linear;
 
     // Where the rest point `p` is now, and the linear part of the map there (the identity outside the meshes).
     Vec2 map(Vec2 p, Linear &linear) const
@@ -125,6 +120,19 @@ std::vector<doc::VectorStroke> warpedStrokes(const std::vector<doc::VectorStroke
                                              const puppet::PuppetRig &rig)
 {
     const MeshIndex index(rig);
+    return warpedStrokes(strokes, [&index](Vec2 p, deform::Field::Linear &linear) { return index.map(p, linear); });
+}
+
+std::vector<doc::VectorStroke> warpedStrokes(const std::vector<doc::VectorStroke> &strokes, const deform::Field &field)
+{
+    return warpedStrokes(strokes, [&field](Vec2 p, deform::Field::Linear &linear) {
+        linear = field.linearAt(p);
+        return field.map(p);
+    });
+}
+
+std::vector<doc::VectorStroke> warpedStrokes(const std::vector<doc::VectorStroke> &strokes, const PointMap &map)
+{
     std::vector<doc::VectorStroke> out;
     out.reserve(strokes.size());
     for (const doc::VectorStroke &stroke : strokes) {
@@ -139,8 +147,8 @@ std::vector<doc::VectorStroke> warpedStrokes(const std::vector<doc::VectorStroke
                     const QPointF a = outline[i], b = outline[(i + 1) % outline.size()];
                     const int parts = std::max(1, int(std::ceil(std::hypot(b.x() - a.x(), b.y() - a.y()) / kMaxSegment)));
                     for (int k = 0; k < parts; ++k) {
-                        MeshIndex::Linear unused;
-                        const Vec2 to = index.map({a.x() + (b.x() - a.x()) * k / parts, a.y() + (b.y() - a.y()) * k / parts}, unused);
+                        deform::Field::Linear unused;
+                        const Vec2 to = map({a.x() + (b.x() - a.x()) * k / parts, a.y() + (b.y() - a.y()) * k / parts}, unused);
                         brush::BrushInput in;
                         in.x = to.x;
                         in.y = to.y;
@@ -172,8 +180,8 @@ std::vector<doc::VectorStroke> warpedStrokes(const std::vector<doc::VectorStroke
         for (std::size_t i = 0; i < n; ++i) {
             const brush::BrushInput &before = moved.points[i > 0 ? i - 1 : i];
             const brush::BrushInput &after = moved.points[i + 1 < n ? i + 1 : i];
-            MeshIndex::Linear linear;
-            to[i] = index.map({moved.points[i].x, moved.points[i].y}, linear);
+            deform::Field::Linear linear;
+            to[i] = map({moved.points[i].x, moved.points[i].y}, linear);
             // Where the line has no direction, the turn of the mesh there (its polar decomposition's rotation).
             turn[i] = std::atan2(linear.c - linear.b, linear.a + linear.d) * 180.0 / std::numbers::pi;
             Vec2 t{after.x - before.x, after.y - before.y};

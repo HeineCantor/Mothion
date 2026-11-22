@@ -30,6 +30,9 @@ struct CelProperties
     // that follow it (their parent is it) as its pose on the frame says (see Deformer, and its Deform keys). It can follow
     // a trajectory, which then moves what it bent. Fixed when it is made; None for any other cel.
     DeformerKind deformer = DeformerKind::None;
+    // A drawn cel whose parent is a deformation cel: -1, it is bent by it; else the bone (or node) it is carried by, whole
+    // and not bent, as that bone moves and turns from its rest (Harmony's kinematic output: a hand on an arm).
+    int parentPart = -1;
     // A mouth chart, for the lip sync (see LipSync.h): a drawing for each mouth shape, named after it, shown frame by
     // frame as the sound says. The Timeline's mouth bar and the Mouth chart panel are for these cels only.
     bool mouthChart = false;

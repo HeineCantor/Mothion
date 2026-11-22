@@ -91,6 +91,13 @@ public:
     bool channelRowsShown(int celIndex) const;
     bool keyframesRowShown(int celIndex) const; // under the cel: its "Keyframes" row, unless the cel folds it away
 
+    // The rows, top first: how many, the cel of each (for a row of a trajectory or deformer inside a cel, that one: its keys
+    // are shown there), whether it is one of keys, whether it is such a row inside a cel.
+    int rowCount() const;
+    int celIndexForRow(int row) const; // (cels are bottom-first, rows top-first)
+    bool isMotionRow(int row) const;
+    bool isLinkRow(int row) const;
+
 signals:
     void frameWidthChanged(int width);
     // "Import audio…" was chosen in a menu of the timeline (the window asks for the file).
@@ -139,8 +146,11 @@ private:
         int celIndex = 0;
         bool motion = false;
         int channel = -1; // of a row of motion: the channel it shows, or -1 for the one with the keys of all of them
-        int link = -1;    // of a row (a motion one, with no keys) that names a trajectory its cel follows: that one's index
-        int depth = 0;    // of such a row: how far down the chain of trajectories it is (0: the one followed)
+        // Of a row (a motion one) that names a trajectory or a deformer its cel follows: that one's index. `celIndex` is that
+        // one too, so the row shows that cel's keys and works on them, as its own "Keyframes" row does (the same keys).
+        int link = -1;
+        int depth = 0;  // of such a row: how far down the chain it is (0: the one followed)
+        int owner = -1; // of such a row: the cel that follows it, under which it is shown
     };
     // The row of keys of a cel folds away under it (an arrow in its header, and at the left of the keys' own header): it is
     // there for a cel that has keys unless it is folded. Only the view: the keys are as they were.
@@ -153,11 +163,13 @@ private:
     };
     std::vector<Placed> celOrder() const;
     bool hasFollowers(int celIndex) const;
-    // The trajectories a cel that is no trajectory follows, shown inside it (under its own row, unless it is folded): the
-    // one it follows, then those that one follows. Only a reference: the cel stays where it is in the stack.
+    // The deformer that bends a drawn cel (or carries it by a part) and the trajectories it follows, shown inside it (under
+    // its own row, unless it is folded): the deformer, the trajectory it follows, then those that one follows. Each row
+    // shows that cel's keys, the very ones of its own row: moved, chosen or deleted there, they are on both. The cel stays
+    // where it is in the stack.
     std::vector<int> linkChain(int celIndex) const;
+    // Whether the cel follows a trajectory or a deformer (it has rows of them inside it).
     bool followsTrajectory(int celIndex) const;
-    bool isLinkRow(int row) const;
     void paintLinkHeader(QPainter &p, int row) const;
     int depthOf(int celIndex) const;
     int indentOf(int row) const; // how far in the header of a row starts, for a trajectory inside another
@@ -168,9 +180,6 @@ private:
     int channelRowCount(int celIndex) const; // the arrow, in the header of a cel with keys or of its row of keys
     void toggleFold(doc::CelId cel, bool keyframesRow); // the arrow of the cel folds "Keyframes", the one of "Keyframes" the channels
     RowRef rowRef(int row) const;
-    bool isMotionRow(int row) const;
-    int rowCount() const;
-    int celIndexForRow(int row) const; // the cel of a row (cels are bottom-first, rows top-first)
     // A diamond of the motion row `row` under `pos`: its frame, or -1.
     int motionKeyAt(const QPoint &pos, int row) const;
     void paintMotionRow(QPainter &p, int celIndex, int row) const;

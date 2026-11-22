@@ -8,6 +8,7 @@
 #include "canvas/SymmetryGizmo.h"
 #include "canvas/TrajectoryGizmo.h"
 #include "canvas/BoneGizmo.h"
+#include "canvas/CurveGizmo.h"
 #include "canvas/PerspectiveGizmo.h"
 #include "canvas/PerspectiveSnap.h"
 #include "canvas/StrokeSession.h"
@@ -80,6 +81,7 @@ public:
     const CameraGizmo &cameraGizmo() const { return m_cameraGizmo; }
     const TrajectoryGizmo &trajectoryGizmo() const { return m_trajectoryGizmo; }
     const BoneGizmo &boneGizmo() const { return m_boneGizmo; }
+    const CurveGizmo &curveGizmo() const { return m_curveGizmo; }
     // Shift held with a paint tool: the straight line from the last point waits for the pen (see updateStraightLine()).
     bool straightLineArmed() const { return m_lineArmed; }
     const SymmetryGizmo &symmetryGizmo() const { return m_symmetryGizmo; }
@@ -283,6 +285,7 @@ private:
     CameraGizmo m_cameraGizmo;
     TrajectoryGizmo m_trajectoryGizmo;
     BoneGizmo m_boneGizmo;
+    CurveGizmo m_curveGizmo;
     SymmetryGizmo m_symmetryGizmo;
     void updateGizmoCursor(); // over a handle: the hand
     std::optional<brush::DabGenerator> m_dabs;

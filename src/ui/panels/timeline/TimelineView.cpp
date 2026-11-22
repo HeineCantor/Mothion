@@ -258,7 +258,11 @@ bool TimelineView::hasFollowers(int celIndex) const
 bool TimelineView::followsTrajectory(int celIndex) const
 {
     const doc::Document &d = m_document->document();
-    return d.followedTrajectory(d.celAt(celIndex)) != nullptr;
+    const doc::Cel &cel = d.celAt(celIndex);
+    const doc::Cel *parent = d.cel(cel.properties().parent);
+    return d.followedTrajectory(cel)
+           || (parent && parent->id() != cel.id() && parent->properties().deformer != doc::DeformerKind::None
+               && cel.properties().deformer == doc::DeformerKind::None);
 }
 
 std::vector<int> TimelineView::linkChain(int celIndex) const
@@ -268,6 +272,11 @@ std::vector<int> TimelineView::linkChain(int celIndex) const
     std::vector<int> chain;
     if (m_foldedCel.count(cel.id()))
         return chain;
+    // The deformer that bends it (or carries it by a part), then the trajectories it goes along.
+    if (const doc::Cel *parent = d.cel(cel.properties().parent);
+        parent && parent->id() != cel.id() && parent->properties().deformer != doc::DeformerKind::None
+        && cel.properties().deformer == doc::DeformerKind::None)
+        chain.push_back(d.indexOf(parent->id()));
     int guard = 0;
     for (const doc::Cel *t = d.followedTrajectory(cel); t && guard <= d.celCount(); t = d.trajectoryParent(*t), ++guard)
         chain.push_back(d.indexOf(t->id()));
@@ -367,7 +376,7 @@ TimelineView::RowRef TimelineView::rowRef(int row) const
         const std::vector<int> chain = linkChain(i);
         for (std::size_t k = 0; k < chain.size(); ++k)
             if (at++ == row)
-                return {i, true, -1, chain[k], int(k)};
+                return {chain[k], true, -1, chain[k], int(k), i};
         if (!keyframesRowShown(i))
             continue;
         if (at++ == row)
@@ -439,7 +448,8 @@ std::optional<TimelineView::Resize> TimelineView::edgeAt(const QPoint &pos) cons
 
 int TimelineView::indentOf(int row) const
 {
-    return depthOf(celIndexForRow(row)) * kIndent;
+    const RowRef ref = rowRef(row);
+    return depthOf(ref.owner >= 0 ? ref.owner : ref.celIndex) * kIndent;
 }
 
 QRect TimelineView::eyeRect(int row) const
@@ -691,9 +701,7 @@ void TimelineView::paintCells(QPainter &p) const
     // Exposures.
     for (int row = 0; row < rowCount(); ++row) {
         const int celIndex = celIndexForRow(row);
-        if (isLinkRow(row))
-            continue; // a reference only: nothing in the cells
-        if (isMotionRow(row)) {
+        if (isMotionRow(row)) { // (a trajectory's or deformer's row inside a cel: its keys)
             paintMotionRow(p, celIndex, row);
             continue;
         }
@@ -781,7 +789,7 @@ QColor motionColor() { return QColor(240, 178, 61); }
 
 int TimelineView::motionKeyAt(const QPoint &pos, int row) const
 {
-    if (!isMotionRow(row) || isLinkRow(row) || pos.x() < m_metrics.headerWidth)
+    if (!isMotionRow(row) || pos.x() < m_metrics.headerWidth)
         return -1;
     const doc::CelMotion &motion = m_document->document().celAt(celIndexForRow(row)).motion();
     std::vector<int> frames;
@@ -811,7 +819,12 @@ void TimelineView::paintLinkHeader(QPainter &p, int row) const
     p.fillRect(r, palette().window());
     const int indent = (ref.depth + 1) * kIndent;
     p.fillRect(QRect(r.left() + 4 + indent, r.top() + 6, 4, r.height() - 12), colorForCel(colorSlot(trajectory.id())));
-    icon(IconId::Trajectory, IconTone::Plain)
+    const doc::DeformerKind kind = trajectory.properties().deformer;
+    icon(kind == doc::DeformerKind::Bones      ? IconId::Bones
+         : kind == doc::DeformerKind::Curve    ? IconId::DeformCurve
+         : kind == doc::DeformerKind::Envelope ? IconId::DeformEnvelope
+                                               : IconId::Trajectory,
+         IconTone::Plain)
         .paint(&p, QRect(r.left() + 12 + indent, r.top() + (r.height() - 14) / 2, 14, 14));
     QFont small = font();
     small.setPointSizeF(std::max(6.0, small.pointSizeF() - 1.0));
@@ -1522,9 +1535,11 @@ void TimelineView::paintHeaders(QPainter &p) const
             p.drawRect(slot.adjusted(0, 0, -1, -1));
         // A trajectory or a deformer is not shown or hidden: its slot says it is active.
         if (cel.properties().visible)
-            icon(cel.properties().trajectory                                ? IconId::Trajectory
-                 : cel.properties().deformer != doc::DeformerKind::None ? IconId::Bones
-                                                                         : IconId::Eye,
+            icon(cel.properties().trajectory                                    ? IconId::Trajectory
+                 : cel.properties().deformer == doc::DeformerKind::Bones    ? IconId::Bones
+                 : cel.properties().deformer == doc::DeformerKind::Curve    ? IconId::DeformCurve
+                 : cel.properties().deformer == doc::DeformerKind::Envelope ? IconId::DeformEnvelope
+                                                                             : IconId::Eye,
                  tone)
                 .paint(&p, eyeRect(row).adjusted(1, 1, -1, -1));
         if (cel.properties().locked)
@@ -2356,9 +2371,7 @@ void TimelineView::contextMenuEvent(QContextMenuEvent *event)
         return;
     }
     const int frame = frameAt(event->pos().x());
-    if (isLinkRow(row))
-        return; // a reference only
-    if (isMotionRow(row)) {
+    if (isMotionRow(row)) { // (a trajectory's or deformer's row inside a cel: its keys' menu)
         const doc::CelId cel = m_document->document().celAt(celIndexForRow(row)).id();
         m_document->setCurrentCel(cel);
         if (const int keyFrame = motionKeyAt(event->pos(), row); keyFrame >= 0 && !keyChosen(cel, keyFrame, channelOfRow(row))) {

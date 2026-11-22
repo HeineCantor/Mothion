@@ -29,7 +29,9 @@ add_library(mothion_core STATIC
     core/puppet/ArapDeformer.h core/puppet/ArapDeformer.cpp
     core/puppet/PuppetRig.h core/puppet/PuppetRig.cpp
     core/puppet/WarpRaster.h core/puppet/WarpRaster.cpp
+    core/deform/Field.h core/deform/Field.cpp
     core/deform/BoneField.h core/deform/BoneField.cpp
+    core/deform/CurveField.h core/deform/CurveField.cpp
     core/deform/DeformRaster.h core/deform/DeformRaster.cpp
 
     core/document/Tile.h
@@ -123,6 +125,8 @@ qt_add_library(mothion_gui STATIC
     canvas/CameraGizmo.h canvas/CameraGizmo.cpp
     canvas/TrajectoryGizmo.h canvas/TrajectoryGizmo.cpp
     canvas/BoneGizmo.h canvas/BoneGizmo.cpp
+    canvas/DragThrottle.h canvas/DragThrottle.cpp
+    canvas/CurveGizmo.h canvas/CurveGizmo.cpp
     canvas/ViewTransform.h canvas/ViewTransform.cpp
     canvas/NavigationGesture.h canvas/NavigationGesture.cpp
     canvas/CanvasTool.h

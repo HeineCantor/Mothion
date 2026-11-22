@@ -96,18 +96,29 @@ public:
     // `child` follows `parent` (a trajectory; kNoId lets it go); its own keys then come on top of the parent's way. The child
     // is a trajectory or any cel. One undo step. False if that would be a loop, or the parent is no trajectory, or nothing changes.
     bool setTrajectoryParent(doc::CelId child, doc::CelId parent);
+    // `child` (a drawn cel) is carried by a part of the deformation cel `deformer` (a bone, or a node): moved and turned as
+    // that part is, not bent (see doc::CelProperties::parentPart); `part` -1: bent by it. One undo step; false if it cannot
+    // be (no such part, the child is not a drawn cel) or nothing changes.
+    bool setDeformerParent(doc::CelId child, doc::CelId deformer, int part);
     // A deformation cel of `kind` above the current one (see doc::CelProperties::deformer), named after its kind, with no
-    // bones yet. The current cel, if it is a drawn one, is bent by it (it becomes its parent, and follows the trajectory the
-    // cel followed). One undo step; the new cel is chosen.
+    // bones or nodes yet (an Envelope: four round what the current cel shows there, if it shows anything). The current cel,
+    // if it is a drawn one, is bent by it (it becomes its parent, and follows the trajectory the cel followed). One undo
+    // step; the new cel is chosen.
     void addDeformer(doc::DeformerKind kind);
     // A bone added to a Bones deformation cel, from `from` to `to` on the page as drawn: a child of `parent` (-1: a root),
     // its start where `from` is from the parent's end. Its zone grows with its length. Every key of the cel's Deform
     // channel gets it as it is at rest. One undo step; the new bone's index, or -1 for a cel that is no Bones deformer or a
     // bone of no length.
     int addBone(doc::CelId cel, int parent, QPointF from, QPointF to);
-    // Removes a bone and the bones that hang from it, from the rest and from every key. One undo step; false if there is
-    // no such bone.
-    bool removeBone(doc::CelId cel, int bone);
+    // A node added to a Curve or Envelope deformation cel, at `at` on the page as drawn: on a Curve, on from `after` (the
+    // last node of its curve), or, `after` -1, beginning a curve of its own; on an Envelope, on from its last node. Its
+    // tangent runs from the node before to it, its handles a third of the way to that node. Every key of the cel's Deform
+    // channel gets it as it is at rest (from the node before as the key has it). One undo step; the new node's index, or -1
+    // for a cel that is no Curve or Envelope, an `after` that is not the last node of its curve, or a piece of no length.
+    int addNode(doc::CelId cel, QPointF at, int after = -1);
+    // Removes a part of a deformation cel, from the rest and from every key: a bone and the bones that hang from it, or a
+    // node (the others stay where they are). One undo step; false if there is no such part.
+    bool removeDeformerPart(doc::CelId cel, int part);
     // The bones and the rest of a deformation cel (as many bones as it has: its keys keep their numbers). One undo step;
     // false if nothing changes or the bones are not as many.
     bool setDeformerRest(doc::CelId cel, doc::Deformer deformer);
@@ -719,6 +730,10 @@ private:
     bool eraseBySelection(bool inside, QString *reason);
     // The first key of a cel: where it turns around (the middle of what it shows).
     void clearTemporaryPose();
+    // The cels carried by a part of `deformer` (see doc::CelProperties::parentPart) given its new number, as `renumbered`
+    // has it for each old one (-1: gone): the steps that do it, added to `steps`.
+    void carriedRenumbered(doc::CelId deformer, const std::vector<int> &renumbered,
+                           std::vector<std::unique_ptr<doc::Command>> &steps) const;
     doc::CelId m_tempPoseCel = doc::kNoId; // the cel that has a pose that is not a key (one at a time)
     void startMotion(doc::CelMotion &motion, const doc::Cel &cel, int frame) const;
     // The motion the cel would have with a key on `frame` from `pose` (set in `out`); false if that changes nothing.

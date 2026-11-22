@@ -1,13 +1,10 @@
 #pragma once
 
-#include "core/document/Deformer.h"
-#include "core/puppet/Geometry.h"
+#include "core/deform/Field.h"
 
 #include <vector>
 
 namespace mothion::deform {
-
-using puppet::Vec2;
 
 // Where a bone is in a pose: its start, its direction (radians, clockwise from the x axis on a page whose y goes down)
 // and its length.
@@ -40,14 +37,13 @@ std::vector<double> poseFromFrames(const doc::Deformer &deformer, const std::vec
 // whose zones reach it, the nearer ones count more, so that a joint bends smoothly between its two bones. What no zone
 // holds all of stays partly where it was drawn. The bones' moves are blended as rotations and translations (2D dual
 // numbers), not as points: a bent joint does not shrink.
-class BoneField
+class BoneField : public Field
 {
 public:
     BoneField(const doc::Deformer &deformer, const std::vector<double> &pose);
 
-    // Whether the pose is the rest (nothing moves).
-    bool isIdentity() const { return m_identity; }
-    Vec2 map(Vec2 p) const;
+    bool isIdentity() const override { return m_identity; }
+    Vec2 map(Vec2 p) const override;
 
 private:
     struct Part

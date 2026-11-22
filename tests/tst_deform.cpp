@@ -1,6 +1,7 @@
 // Tests for the deformation cels' core: the bones' field and the bending of pixels.
 
 #include "core/deform/BoneField.h"
+#include "core/deform/CurveField.h"
 #include "core/deform/DeformRaster.h"
 #include "core/document/CelMotion.h"
 #include "core/document/Document.h"
@@ -144,6 +145,135 @@ private slots:
         QVERIFY(bent.x + bent.width <= 50);
     }
 
+    void curveNodesAreChainedFromTheNodeBefore()
+    {
+        doc::Deformer d;
+        d.bones.resize(3);
+        // From (0, 0) along x; the next 100 on; the last 100 on turned down from there.
+        d.rest = {0, 0, 0, 30, 30, 0, 100, 0, 30, 30, 90, 100, 0, 30, 30};
+        const auto nodes = deform::curveNodes(d, d.rest);
+        QVERIFY(near(nodes[1].at, {100, 0}));
+        QVERIFY(near(nodes[2].at, {100, 100}, 1e-9));
+        // Back to numbers, and to the same nodes.
+        const std::vector<double> again = deform::poseFromNodes(nodes, d.rest);
+        for (std::size_t i = 0; i < again.size(); ++i)
+            QVERIFY2(std::abs(again[i] - d.rest[i]) < 1e-9, qPrintable(QString::number(i)));
+        // The curve runs through the nodes.
+        const auto line = deform::sampleCurve(nodes, false, 8);
+        QCOMPARE(line.size(), std::size_t(17));
+        QVERIFY(near(line.front(), {0, 0}) && near(line[8], {100, 0}) && near(line.back(), {100, 100}, 1e-9));
+        QCOMPARE(deform::sampleCurve(nodes, true, 8).size(), std::size_t(24)); // closed: back to the first
+    }
+
+    void aCurveCarriesWhatLiesAlongIt()
+    {
+        // A straight curve from (0, 0) to (200, 0) through a node at its middle.
+        doc::Deformer d;
+        d.bones = {{-1, 20, 10}, {-1, 20, 10}, {-1, 20, 10}};
+        d.rest = {0, 0, 0, 0, 30, 0, 100, 0, 30, 30, 0, 100, 0, 30, 0};
+        QVERIFY(deform::CurveField(d, d.rest).isIdentity());
+        // Its second half bent down by a quarter turn at the middle node.
+        std::vector<double> pose = d.rest;
+        pose[5 + doc::NodeAngle] = 90; // the last node, along its tangent, goes down with it
+        const deform::CurveField field(d, pose);
+        QVERIFY(!field.isIdentity());
+        QVERIFY(near(field.map({0, 0}), {0, 0}, 1e-6));     // the first node stays
+        QVERIFY(near(field.map({200, 0}), {100, 100}, 1e-6)); // the end went down with the bend
+        // Across the curve: as far across, turned with it (y down, so the right of the way is +y: now -x).
+        QVERIFY(near(field.map({200, 10}), {90, 100}, 0.5));
+        // Past the end: on straight with it.
+        QVERIFY(near(field.map({210, 0}), {100, 110}, 0.5));
+        // Out of its zone: as drawn; in the fade: part of the way.
+        QVERIFY(near(field.map({150, 200}), {150, 200}));
+        const deform::Vec2 faded = field.map({200, 25});
+        QVERIFY(faded.x > 75 && faded.x < 200);
+        // Smooth along: no step from one point to the next, round the bend too.
+        deform::Vec2 last = field.map({0, 5});
+        for (int x = 1; x <= 200; ++x) {
+            const deform::Vec2 q = field.map({double(x), 5});
+            QVERIFY2(std::hypot(q.x - last.x, q.y - last.y) < 2.5, qPrintable(QString::number(x)));
+            last = q;
+        }
+    }
+
+    void aCurveDeformerHoldsSeveralCurvesApart()
+    {
+        // Two straight curves, one along y = 0 and one along y = 300, each of two nodes.
+        doc::Deformer d;
+        d.bones = {{-1, 20, 10}, {-1, 20, 10}, {-1, 20, 10, true}, {-1, 20, 10}};
+        d.rest = {0, 0, 0, 0, 30, 0, 100, 0, 30, 0, 0, 300, 0, 0, 30, 0, 100, 0, 30, 0};
+        const auto nodes = deform::curveNodes(d, d.rest);
+        QVERIFY(nodes[2].starts && !nodes[3].starts);
+        QVERIFY(near(nodes[2].at, {0, 300}) && near(nodes[3].at, {100, 300}));
+        QCOMPARE(deform::curveRuns(nodes).size(), std::size_t(2));
+        // Back to the same numbers.
+        const auto again = deform::poseFromNodes(nodes, d.rest);
+        for (std::size_t i = 0; i < again.size(); ++i)
+            QVERIFY(std::abs(again[i] - d.rest[i]) < 1e-9);
+        // Only the second curve moved down: what lies along the first stays.
+        std::vector<double> pose = d.rest;
+        pose[10 + doc::NodeB] += 40;
+        const deform::CurveField field(d, pose);
+        QVERIFY(near(field.map({50, 0}), {50, 0}));
+        QVERIFY(near(field.map({50, 300}), {50, 340}, 1e-6));
+        // Turning the first node of the second curve does not touch the first curve's nodes.
+        pose = d.rest;
+        pose[10 + doc::NodeAngle] = 90;
+        const auto turned = deform::curveNodes(d, pose);
+        QVERIFY(near(turned[1].at, {100, 0}) && near(turned[3].at, {0, 400}, 1e-9));
+    }
+
+    void anEnvelopeBendsAllInsideIt()
+    {
+        // A square round (0, 0)-(100, 100), with straight sides (handles a third along them).
+        doc::Deformer d;
+        d.bones.resize(4);
+        auto at = [](double x, double y) { return deform::Vec2{x, y}; };
+        std::vector<deform::CurveNode> nodes(4);
+        const deform::Vec2 corners[4] = {at(0, 0), at(100, 0), at(100, 100), at(0, 100)};
+        for (int i = 0; i < 4; ++i)
+            nodes[std::size_t(i)] = {corners[i], (i * 90) * M_PI / 180, 0, 0};
+        d.rest = deform::poseFromNodes(nodes);
+        QVERIFY(deform::EnvelopeField(d, d.rest).isIdentity());
+        QVERIFY(near(deform::EnvelopeField(d, d.rest).map({37, 61}), {37, 61}));
+        // All of it moved: everything inside moves as much.
+        std::vector<deform::CurveNode> moved = nodes;
+        for (auto &n : moved)
+            n.at = n.at + deform::Vec2{30, -10};
+        const deform::EnvelopeField shifted(d, deform::poseFromNodes(moved, d.rest));
+        QVERIFY(near(shifted.map({37, 61}), {67, 51}, 1e-6));
+        QVERIFY(near(shifted.map({-50, 20}), {-20, 10}, 1e-6)); // outside too
+        // Its right side pulled out: the inside stretches towards it, the left side stays.
+        moved = nodes;
+        moved[1].at = at(200, 0);
+        moved[2].at = at(200, 100);
+        const deform::EnvelopeField stretched(d, deform::poseFromNodes(moved, d.rest));
+        QVERIFY(near(stretched.map({0, 50}), {0, 50}, 1e-6));    // on the left side
+        QVERIFY(near(stretched.map({100, 50}), {200, 50}, 1e-6)); // on the right side
+        const deform::Vec2 middle = stretched.map({50, 50});
+        QVERIFY(middle.x > 70 && middle.x < 130 && std::abs(middle.y - 50) < 1e-6);
+        // Smooth inside: no step from one point to the next.
+        deform::Vec2 last = stretched.map({1, 30});
+        for (int x = 2; x < 100; ++x) {
+            const deform::Vec2 q = stretched.map({double(x), 30});
+            QVERIFY(q.x > last.x && q.x - last.x < 4);
+            last = q;
+        }
+    }
+
+    void aFieldIsMadeForEachKind()
+    {
+        doc::Deformer d = oneBone(0, 0, 0, 100);
+        QVERIFY(deform::makeField(doc::DeformerKind::Bones, d, d.rest)->isIdentity());
+        QVERIFY(!deform::makeField(doc::DeformerKind::None, d, d.rest));
+        std::vector<double> pose = d.rest;
+        pose[doc::BoneAngle] = 90;
+        const auto field = deform::makeField(doc::DeformerKind::Bones, d, pose);
+        // Round the bone it turns a quarter: a step along x goes along y.
+        const deform::Field::Linear l = field->linearAt({50, 0});
+        QVERIFY(std::abs(l.a) < 1e-6 && std::abs(l.c - 1) < 1e-6 && std::abs(l.b + 1) < 1e-6 && std::abs(l.d) < 1e-6);
+    }
+
     void aDeformKeyInterpolatesItsNumbers()
     {
         doc::CelMotion motion;
@@ -195,6 +325,38 @@ private slots:
         bones.setProperties(off);
         QCOMPARE(d.followedDeformer(drawn), nullptr);
         QCOMPARE(d.followedTrajectory(drawn), &trajectory); // it still goes along the way
+    }
+
+    void aCelCarriedByABoneMovesWithItWhole()
+    {
+        doc::Document d(400, 400);
+        doc::CelProperties b{"Bones"};
+        b.deformer = doc::DeformerKind::Bones;
+        auto &bones = d.insertCel(0, std::make_unique<doc::Cel>(d.allocateCelId(), b));
+        doc::Deformer rig;
+        rig.bones = {{-1, 20, 10}, {0, 20, 10}};
+        rig.rest = {0, 0, 0, 100, 0, 0, 0, 100}; // (0, 0) to (100, 0) to (200, 0)
+        bones.setDeformer(rig);
+        doc::CelProperties h{"Hand"};
+        h.parent = bones.id();
+        h.parentPart = 1;
+        auto &hand = d.insertCel(1, std::make_unique<doc::Cel>(d.allocateCelId(), h));
+        QCOMPARE(d.followedDeformer(hand), nullptr); // carried, not bent
+        QVERIFY(d.followMatrix(hand, 0).isIdentity()); // at rest
+        // The upper arm turned down a quarter: the forearm's start goes to (0, 100), the hand turns with it.
+        doc::CelMotion motion;
+        doc::CelPose pose;
+        pose.deform = {0, 0, 90, 100, 0, 0, 0, 100};
+        motion.setKey(doc::Channel::Deform, 0, pose);
+        bones.setMotion(motion);
+        double x = 0, y = 0;
+        d.followMatrix(hand, 0).map(150, 0, x, y); // a point half way along the forearm
+        QVERIFY(near({x, y}, {0, 150}, 1e-9));
+        d.followMatrix(hand, 0).map(150, 10, x, y); // and one beside it: turned, not bent or stretched
+        QVERIFY(near({x, y}, {-10, 150}, 1e-9));
+        // A node of a curve carries too; an inactive deformer carries nothing.
+        bones.setProperties([&] { auto p = bones.properties(); p.visible = false; return p; }());
+        QVERIFY(d.followMatrix(hand, 0).isIdentity());
     }
 
     void theDeformersPoseIsItsKeysOrItsRest()

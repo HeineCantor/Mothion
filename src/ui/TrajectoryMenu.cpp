@@ -70,10 +70,25 @@ void addParentTrajectoryMenu(QMenu &menu, document::DocumentController *document
         if (t.properties().deformer == doc::DeformerKind::None)
             continue;
         const doc::CelId id = t.id();
-        QAction *action = deformers->addAction(QString::fromStdString(t.properties().name), context,
-                                               [document, celId, id] { document->setTrajectoryParent(celId, id); });
-        action->setCheckable(true);
-        action->setChecked(bentBy && bentBy->id() == id);
+        // Bent by it, or carried by one of its parts, whole.
+        QMenu *ways = deformers->addMenu(QString::fromStdString(t.properties().name));
+        const bool ours = bentBy && bentBy->id() == id;
+        const int carriedBy = ours ? cel.properties().parentPart : -2;
+        QAction *bend = ways->addAction(tr("Bent by it"), context,
+                                        [document, celId, id] { document->setDeformerParent(celId, id, -1); });
+        bend->setCheckable(true);
+        bend->setChecked(ours && carriedBy < 0);
+        const bool bones = t.properties().deformer == doc::DeformerKind::Bones;
+        if (!t.deformer().bones.empty())
+            ways->addSeparator();
+        for (int part = 0; part < int(t.deformer().bones.size()); ++part) {
+            QAction *carry = ways->addAction(bones ? tr("Carried by bone %1").arg(part + 1) : tr("Carried by node %1").arg(part + 1),
+                                             context, [document, celId, id, part] { document->setDeformerParent(celId, id, part); });
+            carry->setCheckable(true);
+            carry->setChecked(carriedBy == part);
+            carry->setToolTip(tr("Moved and turned as that part is, whole: not bent"));
+        }
+        ways->setToolTipsVisible(true);
         anyDeformer = true;
     }
     deformers->setEnabled(anyDeformer || bentBy);

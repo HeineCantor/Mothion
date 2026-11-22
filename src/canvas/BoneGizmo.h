@@ -4,16 +4,14 @@
 #include "core/document/CelMotion.h"
 #include "document/DocumentController.h"
 
-#include <QElapsedTimer>
+#include "canvas/DragThrottle.h"
+
 #include <QPointF>
 #include <QTransform>
 
 #include <functional>
-#include <memory>
 #include <optional>
 #include <vector>
-
-class QTimer;
 
 class QPainter;
 
@@ -30,7 +28,9 @@ class ViewTransform;
 //    one, hanging from it (Ctrl+drag from any bone's end: another one hanging from the same end);
 //  - a joint dragged moves (the bones that meet there keep their other ends; Alt+drag on the end of the last bone moves it
 //    instead of drawing the next one); a bone's middle dragged moves it with all that hangs from it;
-//  - a click chooses a bone (on nothing: none), Delete takes the chosen one away with what hangs from it.
+//  - a click chooses a bone (on nothing: none), Delete takes the chosen one away with what hangs from it;
+//  - the chosen bone shows its zone, with two handles across its middle: the inner one sets how far it holds all of the
+//    drawing, the outer one how far beyond that it holds less and less of it.
 // Each of these is one undo step.
 //
 // Out of rig mode the bones are as the frame poses them, and are animated: a bone dragged turns round its start (what
@@ -41,7 +41,7 @@ class ViewTransform;
 class BoneGizmo
 {
 public:
-    enum class Part { None, Body, Origin, End };
+    enum class Part { None, Body, Origin, End, ZoneRadius, ZoneFade };
     struct Hit
     {
         int bone = -1;
@@ -49,9 +49,8 @@ public:
     };
 
     explicit BoneGizmo(document::DocumentController *document);
-    ~BoneGizmo();
     // Called when a drag drawn later (see move()) changed what is shown.
-    void setRepaint(std::function<void()> repaint) { m_repaint = std::move(repaint); }
+    void setRepaint(std::function<void()> repaint) { m_throttle.setDrawnLater(std::move(repaint)); }
 
     void setRigMode(bool on) { m_rig = on; }
     bool rigMode() const { return m_rig; }
@@ -80,7 +79,8 @@ public:
     bool removeChosenBone();
 
     void paint(QPainter &painter, const ViewTransform &view) const;
-    // Where a part of a bone is on the page as shown (its middle for Body); for tests.
+    // Where a part of a bone is on the page as shown (its middle for Body; the zone's handles of the chosen bone in rig
+    // mode); for tests.
     std::optional<QPointF> partPoint(int bone, Part part) const;
 
     static constexpr double kGrab = 8.0; // how close on screen grabs a joint or a bone
@@ -95,7 +95,8 @@ private:
 
     struct Drag
     {
-        enum class Kind { NewBone, MoveEnd, MoveOrigin, MoveBody, Turn, Translate } kind = Kind::Turn;
+        enum class Kind { NewBone, MoveEnd, MoveOrigin, MoveBody, Zone, Turn, Translate } kind = Kind::Turn;
+        Part part = Part::None;   // for Zone: which handle
         int bone = -1;            // the bone dragged (for NewBone: the parent, -1 for a root)
         deform::Vec2 start, now;  // in the bones' place
         bool moved = false;
@@ -106,7 +107,6 @@ private:
         std::vector<deform::BoneFrame> startFrames;
     };
     void apply(Drag &drag);
-    void applyPending(); // the drag at the last place the pen was, if not drawn yet
 
     document::DocumentController *m_document;
     bool m_rig = false;
@@ -114,11 +114,7 @@ private:
     doc::CelId m_chosenCel = doc::kNoId; // the cel the chosen bone is of
     Hit m_hovered;
     std::optional<Drag> m_drag;
-    std::function<void()> m_repaint;
-    bool m_pending = false;      // a place of the pen not drawn yet
-    QElapsedTimer m_lastDraw;    // since the last drawing of a drag
-    qint64 m_drawCost = 0;       // ms it took
-    std::unique_ptr<QTimer> m_timer;
+    DragThrottle m_throttle;
 };
 
 } // namespace mothion::canvas

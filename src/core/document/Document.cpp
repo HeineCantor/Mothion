@@ -1,5 +1,8 @@
 #include "core/document/Document.h"
 
+#include "core/deform/BoneField.h"
+#include "core/deform/CurveField.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -99,10 +102,39 @@ const Cel *Document::followedTrajectory(const Cel &cel) const
 
 const Cel *Document::followedDeformer(const Cel &cel) const
 {
-    if (cel.properties().drawsNothing() || cel.properties().parent == kNoId)
-        return nullptr;
+    if (cel.properties().drawsNothing() || cel.properties().parent == kNoId || cel.properties().parentPart >= 0)
+        return nullptr; // carried by one of its parts, it is not bent
     const Cel *parent = this->cel(cel.properties().parent);
     return parent && parent->properties().deformer != DeformerKind::None && parent->properties().visible ? parent : nullptr;
+}
+
+Matrix2x3 Document::partMatrix(const Cel &cel, int frame) const
+{
+    const int part = cel.properties().parentPart;
+    const Cel *deformer = part >= 0 && !cel.properties().drawsNothing() ? this->cel(cel.properties().parent) : nullptr;
+    if (!deformer || deformer->properties().deformer == DeformerKind::None || !deformer->properties().visible
+        || part >= int(deformer->deformer().bones.size()))
+        return {};
+    // The part's place and angle at rest and in the pose.
+    double restX = 0, restY = 0, restAngle = 0, nowX = 0, nowY = 0, nowAngle = 0;
+    const std::vector<double> pose = deformPoseAt(*deformer, frame);
+    if (deformer->properties().deformer == DeformerKind::Bones) {
+        const deform::BoneFrame rest = deform::boneFrames(deformer->deformer(), deformer->deformer().rest)[std::size_t(part)];
+        const deform::BoneFrame now = deform::boneFrames(deformer->deformer(), pose)[std::size_t(part)];
+        restX = rest.origin.x, restY = rest.origin.y, restAngle = rest.angle;
+        nowX = now.origin.x, nowY = now.origin.y, nowAngle = now.angle;
+    } else {
+        const deform::CurveNode rest = deform::curveNodes(deformer->deformer(), deformer->deformer().rest)[std::size_t(part)];
+        const deform::CurveNode now = deform::curveNodes(deformer->deformer(), pose)[std::size_t(part)];
+        restX = rest.at.x, restY = rest.at.y, restAngle = rest.angle;
+        nowX = now.at.x, nowY = now.at.y, nowAngle = now.angle;
+    }
+    // Turned round its place at rest as far as it turned, then moved to where it is.
+    const double turn = nowAngle - restAngle, c = std::cos(turn), s = std::sin(turn);
+    Matrix2x3 m{c, s, -s, c, 0, 0};
+    m.e = nowX - (m.a * restX + m.c * restY);
+    m.f = nowY - (m.b * restX + m.d * restY);
+    return m;
 }
 
 std::vector<double> Document::deformPoseAt(const Cel &deformer, int frame) const
@@ -127,12 +159,13 @@ int Document::trajectoryStartFrame(CelId trajectory) const
 
 Matrix2x3 Document::followMatrix(const Cel &cel, int frame) const
 {
+    const Matrix2x3 part = partMatrix(cel, frame);
     const Cel *trajectory = followedTrajectory(cel);
     const int start = trajectory ? trajectoryStartFrame(trajectory->id()) : -1;
     if (start < 0)
-        return {};
+        return part;
     // Relative: what the trajectory has done since its first key, so the cel is where it is drawn until then.
-    return trajectoryMatrix(trajectory->id(), start).inverted().then(trajectoryMatrix(trajectory->id(), frame));
+    return part.then(trajectoryMatrix(trajectory->id(), start).inverted().then(trajectoryMatrix(trajectory->id(), frame)));
 }
 
 Matrix2x3 Document::trajectoryParentMatrix(CelId trajectory, int frame) const

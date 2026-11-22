@@ -8,6 +8,7 @@
 #include "canvas/VectorRender.h"
 #include "canvas/TileQt.h"
 #include "core/deform/BoneField.h"
+#include "core/deform/CurveField.h"
 #include "core/document/LipSync.h"
 #include "core/document/commands/DrawingCommands.h"
 #include "core/Parallel.h"
@@ -474,6 +475,24 @@ bool DocumentController::setTrajectoryParent(doc::CelId childId, doc::CelId pare
         return false;
     doc::CelProperties properties = child->properties();
     properties.parent = parentId;
+    properties.parentPart = -1;
+    execute(doc::makeSetCelProperties(*m_document, childId, std::move(properties)));
+    return true;
+}
+
+bool DocumentController::setDeformerParent(doc::CelId childId, doc::CelId deformerId, int part)
+{
+    const doc::Cel *child = m_document->cel(childId);
+    const doc::Cel *deformer = m_document->cel(deformerId);
+    if (!child || !deformer || deformer->properties().deformer == doc::DeformerKind::None
+        || m_document->trajectoryLoop(childId, deformerId) || part >= int(deformer->deformer().bones.size()))
+        return false;
+    part = std::max(-1, part);
+    if (child->properties().parent == deformerId && child->properties().parentPart == part)
+        return false;
+    doc::CelProperties properties = child->properties();
+    properties.parent = deformerId;
+    properties.parentPart = part;
     execute(doc::makeSetCelProperties(*m_document, childId, std::move(properties)));
     return true;
 }
@@ -509,6 +528,27 @@ void DocumentController::addDeformer(doc::DeformerKind kind)
         child.parent = id;
         steps.push_back(doc::makeSetCelProperties(d, current->id(), std::move(child)));
     }
+    // An Envelope starts round what the cel shows (a rounded box: four nodes at the middles of its sides).
+    if (kind == doc::DeformerKind::Envelope && bend)
+        if (const doc::Drawing *drawing = current->drawingAt(m_currentFrame)) {
+            const QRect shown = canvas::visibleBounds(*drawing);
+            if (!shown.isEmpty()) {
+                const QRectF box = QRectF(shown).adjusted(-16, -16, 16, 16);
+                const QPointF c = box.center();
+                const double rx = box.width() / 2, ry = box.height() / 2;
+                constexpr double kRound = 0.5523; // handles that make a quarter of an ellipse
+                std::vector<deform::CurveNode> nodes = {
+                    {{c.x(), c.y() - ry}, 0, rx * kRound, rx * kRound},
+                    {{c.x() + rx, c.y()}, std::numbers::pi / 2, ry * kRound, ry * kRound},
+                    {{c.x(), c.y() + ry}, std::numbers::pi, rx * kRound, rx * kRound},
+                    {{c.x() - rx, c.y()}, -std::numbers::pi / 2, ry * kRound, ry * kRound},
+                };
+                doc::Deformer envelope;
+                envelope.bones.resize(nodes.size());
+                envelope.rest = deform::poseFromNodes(nodes);
+                steps.push_back(std::make_unique<doc::SetDeformerCommand>(id, std::move(envelope)));
+            }
+        }
     execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::AddCel, std::move(steps)));
     chooseCel(id);
 }
@@ -572,11 +612,136 @@ int DocumentController::addBone(doc::CelId celId, int parent, QPointF from, QPoi
     return index;
 }
 
-bool DocumentController::removeBone(doc::CelId celId, int bone)
+int DocumentController::addNode(doc::CelId celId, QPointF at, int after)
+{
+    const doc::Cel *cel = m_document->cel(celId);
+    if (!cel || (cel->properties().deformer != doc::DeformerKind::Curve
+                 && cel->properties().deformer != doc::DeformerKind::Envelope))
+        return -1;
+    const bool envelope = cel->properties().deformer == doc::DeformerKind::Envelope;
+    doc::Deformer deformer = cel->deformer();
+    std::vector<deform::CurveNode> nodes = deform::curveNodes(deformer, deformer.rest);
+    if (envelope)
+        after = int(nodes.size()) - 1; // an envelope is one closed curve: on from its last node
+    if (after >= int(nodes.size()))
+        return -1;
+    // Only on from the last node of its curve.
+    if (after >= 0 && std::size_t(after) + 1 < nodes.size() && !nodes[std::size_t(after) + 1].starts)
+        return -1;
+    deform::CurveNode node;
+    node.at = {at.x(), at.y()};
+    node.starts = after < 0;
+    if (after >= 0) {
+        deform::CurveNode &before = nodes[std::size_t(after)];
+        const deform::Vec2 way = node.at - before.at;
+        const double length = puppet::length(way);
+        if (length < 1e-6)
+            return -1;
+        node.angle = std::atan2(way.y, way.x);
+        node.in = length / 3;
+        const bool lone = before.starts && (envelope ? nodes.size() == 1 : true);
+        if (lone && (envelope || before.out <= 0)) { // the first piece: the first node's tangent and handle go its way
+            before.angle = node.angle;
+            before.out = length / 3;
+        } else if (before.out <= 0) {
+            before.out = length / 3;
+        }
+        node.out = length / 3;
+    }
+    const std::size_t index = after >= 0 ? std::size_t(after) + 1 : nodes.size();
+    nodes.insert(nodes.begin() + std::ptrdiff_t(index), node);
+    doc::Bone part;
+    if (after >= 0)
+        part = deformer.bones[std::size_t(after)]; // the zone as the node before has it
+    else if (!deformer.bones.empty())
+        part = deformer.bones.back();
+    part.starts = node.starts && index > 0;
+    deformer.bones.insert(deformer.bones.begin() + std::ptrdiff_t(index), part);
+    const std::vector<double> before = deformer.rest;
+    deformer.rest = deform::poseFromNodes(nodes, {});
+    // The numbers it had keep their turns (an angle is the same however many turns it shows).
+    for (std::size_t k = 0; k < deformer.rest.size(); ++k) {
+        const std::size_t old = k < index * doc::kNodeParams ? k : k >= (index + 1) * doc::kNodeParams ? k - doc::kNodeParams : before.size();
+        if (old < before.size() && std::abs(std::remainder(deformer.rest[k] - before[old], 360.0)) < 1e-9)
+            deformer.rest[k] = before[old];
+    }
+    const std::vector<double> rest = deformer.rest;
+    std::vector<std::unique_ptr<doc::Command>> steps;
+    steps.push_back(std::make_unique<doc::SetDeformerCommand>(celId, std::move(deformer)));
+    if (cel->motion().hasKeys(doc::Channel::Deform))
+        steps.push_back(std::make_unique<doc::SetCelMotionCommand>(
+            celId, withDeformKeys(cel->motion(), [&](std::vector<double> &pose) {
+                // The new node as it is at rest (from the node before as the key has it); the numbers of the node before
+                // that the rest changed (its tangent and handle, for the first piece of a curve) as the rest has them
+                // where the key had them as at rest.
+                pose.resize(before.size(), 0.0);
+                for (std::size_t k = 0; k < before.size(); ++k) {
+                    const std::size_t now = k < index * doc::kNodeParams ? k : k + doc::kNodeParams;
+                    if (rest[now] != before[k] && std::abs(pose[k] - before[k]) < 1e-9)
+                        pose[k] = rest[now];
+                }
+                pose.insert(pose.begin() + std::ptrdiff_t(index * doc::kNodeParams),
+                            rest.begin() + std::ptrdiff_t(index * doc::kNodeParams),
+                            rest.begin() + std::ptrdiff_t((index + 1) * doc::kNodeParams));
+            })));
+    std::vector<int> renumbered(nodes.size() - 1);
+    for (std::size_t k = 0; k < renumbered.size(); ++k)
+        renumbered[k] = int(k < index ? k : k + 1);
+    carriedRenumbered(celId, renumbered, steps);
+    execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::EditDeformer, std::move(steps)));
+    return int(index);
+}
+
+void DocumentController::carriedRenumbered(doc::CelId deformer, const std::vector<int> &renumbered,
+                                           std::vector<std::unique_ptr<doc::Command>> &steps) const
+{
+    for (int i = 0; i < m_document->celCount(); ++i) {
+        const doc::Cel &c = m_document->celAt(i);
+        const int part = c.properties().parentPart;
+        if (c.properties().parent != deformer || part < 0 || part >= int(renumbered.size()) || renumbered[std::size_t(part)] == part)
+            continue;
+        doc::CelProperties p = c.properties();
+        p.parentPart = renumbered[std::size_t(part)]; // -1: its part is gone, it is bent instead
+        steps.push_back(doc::makeSetCelProperties(*m_document, c.id(), std::move(p)));
+    }
+}
+
+bool DocumentController::removeDeformerPart(doc::CelId celId, int bone)
 {
     const doc::Cel *cel = m_document->cel(celId);
     if (!cel || bone < 0 || bone >= int(cel->deformer().bones.size()))
         return false;
+    if (cel->properties().deformer != doc::DeformerKind::Bones) {
+        // A node: the others stay where they are, at rest and in every key.
+        const doc::Deformer &old = cel->deformer();
+        auto without = [&](std::vector<double> &numbers) {
+            std::vector<deform::CurveNode> nodes = deform::curveNodes(old, numbers);
+            const bool began = nodes[std::size_t(bone)].starts;
+            if (began && std::size_t(bone) + 1 < nodes.size())
+                nodes[std::size_t(bone) + 1].starts = true;
+            nodes.erase(nodes.begin() + bone);
+            numbers = deform::poseFromNodes(nodes, {});
+        };
+        doc::Deformer deformer = old;
+        // The node after it begins the curve if it did.
+        const bool began = bone == 0 || old.bones[std::size_t(bone)].starts;
+        if (began && std::size_t(bone) + 1 < old.bones.size())
+            deformer.bones[std::size_t(bone) + 1].starts = true;
+        deformer.bones.erase(deformer.bones.begin() + bone);
+        if (!deformer.bones.empty())
+            deformer.bones.front().starts = false; // the first always begins one
+        without(deformer.rest);
+        std::vector<std::unique_ptr<doc::Command>> steps;
+        steps.push_back(std::make_unique<doc::SetDeformerCommand>(celId, std::move(deformer)));
+        if (cel->motion().hasKeys(doc::Channel::Deform))
+            steps.push_back(std::make_unique<doc::SetCelMotionCommand>(celId, withDeformKeys(cel->motion(), without)));
+        std::vector<int> renumbered(old.bones.size());
+        for (std::size_t i = 0; i < renumbered.size(); ++i)
+            renumbered[i] = int(i) == bone ? -1 : int(i) > bone ? int(i) - 1 : int(i);
+        carriedRenumbered(celId, renumbered, steps);
+        execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::EditDeformer, std::move(steps)));
+        return true;
+    }
     const doc::Deformer &old = cel->deformer();
     // The bone and all under it (a parent comes before its children).
     std::vector<char> gone(old.bones.size(), 0);
@@ -610,6 +775,7 @@ bool DocumentController::removeBone(doc::CelId celId, int bone)
     steps.push_back(std::make_unique<doc::SetDeformerCommand>(celId, std::move(deformer)));
     if (cel->motion().hasKeys(doc::Channel::Deform))
         steps.push_back(std::make_unique<doc::SetCelMotionCommand>(celId, withDeformKeys(cel->motion(), keep)));
+    carriedRenumbered(celId, newIndex, steps);
     execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::EditDeformer, std::move(steps)));
     return true;
 }
@@ -620,7 +786,7 @@ bool DocumentController::setDeformerRest(doc::CelId celId, doc::Deformer deforme
     if (!cel || cel->properties().deformer == doc::DeformerKind::None || deformer == cel->deformer()
         || deformer.bones.size() != cel->deformer().bones.size())
         return false;
-    deformer.rest.resize(deformer.bones.size() * doc::kBoneParams, 0.0);
+    deformer.rest.resize(deformer.bones.size() * std::size_t(doc::partParams(cel->properties().deformer)), 0.0);
     execute(std::make_unique<doc::SetDeformerCommand>(celId, std::move(deformer)));
     return true;
 }

@@ -714,6 +714,21 @@ void drawGlyph(QPainter &p, IconId id)
         path.moveTo(16, 6.5);
         path.lineTo(22, 6.5);
         break;
+    case IconId::DeformCurve: // a curve with a square on each node
+        path.moveTo(4, 18);
+        path.cubicTo(8, 4, 16, 20, 20, 6);
+        path.addRect(QRectF(2.5, 16.5, 3, 3));
+        path.addRect(QRectF(18.5, 4.5, 3, 3));
+        break;
+    case IconId::DeformEnvelope: // a closed, bent outline with squares on it
+        path.moveTo(12, 3.5);
+        path.cubicTo(18, 3.5, 21, 8, 20, 12);
+        path.cubicTo(19, 17, 16, 20.5, 12, 20.5);
+        path.cubicTo(7, 20.5, 3.5, 17, 4, 12);
+        path.cubicTo(4.5, 7, 7, 3.5, 12, 3.5);
+        path.addRect(QRectF(10.5, 2, 3, 3));
+        path.addRect(QRectF(10.5, 19, 3, 3));
+        break;
     case IconId::Onion: // a bulb with its layers and a sprout
         path.moveTo(12, 6);
         path.cubicTo(18, 8, 21, 12, 21, 15);

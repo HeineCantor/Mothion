@@ -21,6 +21,9 @@ struct Bone
     int parent = -1; // a bone before this one (-1: a root)
     double radius = 30;
     double fade = 30;
+    // A node of a Curve that begins a curve of its own, not joined to the node before (the first node always does): one
+    // Curve deformer can hold several curves apart, as a Bones one several skeletons.
+    bool starts = false;
 
     bool operator==(const Bone &) const = default;
 };
@@ -37,9 +40,36 @@ enum BoneParam
     BoneLength
 };
 
+// The numbers each node of a Curve or Envelope deformer has in a pose, in this order. The first node (and one that begins a
+// curve of its own, see Bone::starts): where it is on the page and its tangent's angle (degrees, clockwise from the x
+// axis); any other: where it is from the node before, as an angle from that node's tangent and a distance, and its
+// tangent's angle from that node's tangent (so a curve turned or
+// bent at a node takes the rest of it along, as bones do). Then how long its handles are, back and on, along its tangent:
+// the curve between two nodes is a cubic Bézier from one node, through their handles, to the other. An Envelope closes:
+// its last node runs back to its first.
+constexpr int kNodeParams = 5;
+enum NodeParam
+{
+    NodeA,     // the first node: x; any other: the angle from the node before's tangent
+    NodeB,     // the first node: y; any other: the distance from the node before
+    NodeAngle, // its tangent's angle
+    NodeIn,    // the handle back
+    NodeOut    // the handle on
+};
+
+// How many numbers each part of a deformer of `kind` has in a pose.
+constexpr int partParams(DeformerKind kind)
+{
+    return kind == DeformerKind::Bones ? kBoneParams : kNodeParams;
+}
+
 // A deformation cel's own: its bones and the pose they have at rest (the drawing as drawn). A pose is a list of numbers,
 // kBoneParams for each bone in order; the keys of the cel's Deform channel are poses, and the drawings that follow the
 // cel are bent by how far the pose on the frame is from the rest.
+//
+// A Curve or an Envelope has nodes in `bones` instead (`parent` unused): a Curve bends what lies along it, each node's
+// radius and fade saying how far from the curve it reaches there; an Envelope bends all that lies inside it, and out round
+// it, as its outline is bent.
 struct Deformer
 {
     std::vector<Bone> bones;

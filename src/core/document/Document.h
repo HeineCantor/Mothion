@@ -98,10 +98,13 @@ public:
     // The deformation cel that bends a drawn cel (its parent, if that is one); nullptr for none (an inactive one, whose
     // `visible` is off, bends nothing).
     const Cel *followedDeformer(const Cel &cel) const;
+    // What the bone (or node) a cel is carried by (see CelProperties::parentPart) does to it on `frame`: it moves and turns
+    // as that part did from its rest (identity for a cel carried by none, or by an inactive deformer).
+    Matrix2x3 partMatrix(const Cel &cel, int frame) const;
     // A deformation cel's pose on `frame`: its Deform channel's there, or its rest without one.
     std::vector<double> deformPoseAt(const Cel &deformer, int frame) const;
-    // What the trajectory a cel follows does to it on `frame` (identity for a cel that follows none): on top of the cel's own
-    // pose, and relative: only what the trajectory has done since its first key (see trajectoryStartFrame()), so the cel is
+    // What the trajectory a cel follows does to it on `frame` (identity for a cel that follows none), after what the bone
+    // it is carried by does (see partMatrix()): on top of the cel's own pose, and relative: only what the trajectory has done since its first key (see trajectoryStartFrame()), so the cel is
     // where it is drawn at that frame and before it.
     Matrix2x3 followMatrix(const Cel &cel, int frame) const;
     // The frame of the first key of a trajectory or of the ones it follows; -1 if none has a key.

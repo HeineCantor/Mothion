@@ -2,8 +2,10 @@
 
 #include "canvas/BlendDraw.h"
 #include "canvas/TileQt.h"
-#include "core/deform/BoneField.h"
+#include "core/deform/Field.h"
 #include "core/deform/DeformRaster.h"
+#include "canvas/VectorRender.h"
+#include "canvas/VectorWarp.h"
 #include "core/document/Blend.h"
 
 #include <QPainter>
@@ -319,6 +321,27 @@ QRect visibleBounds(const doc::Drawing &drawing, bool guides)
 }
 
 namespace {
+// `image` bent by `field`: its pixels through a grid that the field moves.
+doc::TiledImage bentImage(const doc::TiledImage &image, const deform::Field &field)
+{
+    const std::vector<doc::TileCoord> coords = image.tileCoords();
+    if (coords.empty())
+        return {};
+    int x0 = coords.front().x, y0 = coords.front().y, x1 = x0, y1 = y0;
+    for (const doc::TileCoord &c : coords) {
+        x0 = std::min(x0, c.x), y0 = std::min(y0, c.y);
+        x1 = std::max(x1, c.x), y1 = std::max(y1, c.y);
+    }
+    const int x = x0 * doc::kTileSize, y = y0 * doc::kTileSize;
+    puppet::RasterImage source(x, y, (x1 - x0 + 1) * doc::kTileSize, (y1 - y0 + 1) * doc::kTileSize);
+    image.read(x, y, source.width, source.height, source.pixels.data(), source.width);
+    const puppet::RasterImage warped = deform::warpImage(source, [&field](deform::Vec2 p) { return field.map(p); });
+    doc::TiledImage out;
+    if (!warped.isEmpty())
+        out.write(warped.x, warped.y, warped.width, warped.height, warped.pixels.data(), warped.width);
+    return out;
+}
+
 // Whether two images hold the very same tiles.
 bool sameTiles(const doc::TiledImage &a, const doc::TiledImage &b)
 {
@@ -371,10 +394,35 @@ const FrameRenderer::Deformed *FrameRenderer::deformed(const doc::Document &doc,
     bent.pose = pose;
     Deformed &out = bent.result;
     out = Deformed{};
-    const deform::BoneField field(deformer->deformer(), pose);
-    if (field.isIdentity() || bent.source.isEmpty())
+    const std::unique_ptr<deform::Field> field = deform::makeField(deformer->properties().deformer, deformer->deformer(), pose);
+    if (!field || field->isIdentity() || bent.source.isEmpty())
         return nullptr;
-    const puppet::RasterImage warped = deform::warpImage(bent.source, [&field](deform::Vec2 p) { return field.map(p); });
+    const bool strokes = m_brushes && std::any_of(drawing.layers.begin(), drawing.layers.end(), [this](const doc::Layer &l) {
+                             return l.kind == doc::LayerKind::Vector && !l.strokes.empty() && shows(l, m_guides);
+                         });
+    if (strokes) {
+        // Layer by layer: the strokes drawn again bent, the pixels of the others bent; then composed as they are.
+        doc::Drawing shaped = drawing;
+        for (doc::Layer &l : shaped.layers) {
+            if (!shows(l, m_guides) || l.kind == doc::LayerKind::Perspective)
+                continue;
+            if (l.kind == doc::LayerKind::Vector) {
+                l.image = doc::TiledImage();
+                drawStrokes(l.image, warpedStrokes(l.strokes, *field), *m_brushes, {});
+            } else {
+                l.image = bentImage(l.image, *field);
+            }
+            if (l.mask)
+                l.mask = bentImage(*l.mask, *field);
+        }
+        const QRect rect = drawingBounds(shaped, m_guides);
+        if (rect.isEmpty())
+            return nullptr;
+        out.rect = rect;
+        out.image = composeDrawing(shaped, rect, m_guides);
+        return &out;
+    }
+    const puppet::RasterImage warped = deform::warpImage(bent.source, [&field](deform::Vec2 p) { return field->map(p); });
     if (warped.isEmpty())
         return nullptr;
     out.rect = QRect(warped.x, warped.y, warped.width, warped.height);

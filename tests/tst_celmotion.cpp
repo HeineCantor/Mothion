@@ -1,6 +1,8 @@
 #include "canvas/CanvasView.h"
 #include "canvas/FrameRenderer.h"
+#include "canvas/VectorRender.h"
 #include "core/deform/BoneField.h"
+#include "core/deform/CurveField.h"
 #include "core/document/CelMotion.h"
 #include "core/document/Document.h"
 #include "core/document/commands/CelCommands.h"
@@ -209,6 +211,68 @@ private slots:
         QCOMPARE(renderer.image().pixelColor(100, 100), QColor(Qt::red));
     }
 
+    void aVectorLayerIsBentStrokeByStroke()
+    {
+        tools::ToolState state;
+        doc::Document document(200, 200);
+        document.setFrameCount(30);
+        document.setPaperColor(0xffffffff);
+        const doc::CelId piece = addSquare(document, 0, 0, 0);
+        doc::Cel &cel = *document.cel(piece);
+        doc::Layer &layer = cel.drawing(cel.drawings().begin()->first)->layers.front();
+        layer.kind = doc::LayerKind::Vector;
+        doc::VectorStroke line;
+        line.size = 6;
+        line.color = 0xff000000u;
+        for (int x = 20; x <= 120; x += 4) {
+            brush::BrushInput in;
+            in.x = x;
+            in.y = 100;
+            line.points.push_back(in);
+        }
+        layer.strokes = {line};
+        canvas::drawStrokes(layer.image, layer.strokes, state, {});
+        doc::CelProperties b{"Bones"};
+        b.deformer = doc::DeformerKind::Bones;
+        doc::Cel &bones = document.insertCel(1, std::make_unique<doc::Cel>(document.allocateCelId(), b));
+        doc::Deformer deformer;
+        deformer.bones.push_back({-1, 20, 10});
+        deformer.rest = {20, 100, 0, 100};
+        bones.setDeformer(deformer);
+        cel.setProperties([&] { auto p = cel.properties(); p.parent = bones.id(); return p; }());
+        doc::CelMotion motion;
+        doc::CelPose down;
+        down.deform = {20, 100, 90, 100};
+        motion.setKey(doc::Channel::Deform, 0, down);
+        bones.setMotion(motion);
+
+        // How wide the line is across y = 160, and how dark its middle.
+        auto across = [](const QImage &image, int y, int *darkest) {
+            int wide = 0;
+            *darkest = 255;
+            for (int x = 0; x < 60; ++x) {
+                const int v = qGray(image.pixel(x, y));
+                *darkest = std::min(*darkest, v);
+                wide += v < 128 ? 1 : 0;
+            }
+            return wide;
+        };
+        canvas::FrameRenderer renderer;
+        renderer.setBrushes(&state);
+        renderer.renderAll(document, 0);
+        int darkest = 0;
+        const int wide = across(renderer.image(), 160, &darkest);
+        QVERIFY2(wide >= 4 && wide <= 8, qPrintable(QString::number(wide))); // as wide as drawn, down the bent bone
+        QVERIFY(darkest < 40);
+        QCOMPARE(renderer.image().pixelColor(100, 100), QColor(Qt::white)); // not where it was
+        // The strokes themselves are not touched.
+        QCOMPARE(layer.strokes.front().points.back().x, 120.0);
+        // Without the brushes: its pixels bent, at the same place.
+        canvas::FrameRenderer pixels;
+        pixels.renderAll(document, 0);
+        QVERIFY(across(pixels.image(), 160, &darkest) >= 3);
+    }
+
     void theControllerMakesBonesAsUndoableSteps()
     {
         document::DocumentController controller;
@@ -249,11 +313,11 @@ private slots:
         QVERIFY(!d.cel(bones)->motion().hasKeys(doc::Channel::Position));
 
         // Taking the middle bone away takes the one hanging from it too, from the keys as well.
-        QVERIFY(controller.removeBone(bones, 1));
+        QVERIFY(controller.removeDeformerPart(bones, 1));
         QCOMPARE(d.cel(bones)->deformer().bones.size(), std::size_t(1));
         QCOMPARE(d.deformPoseAt(*d.cel(bones), 5).size(), std::size_t(doc::kBoneParams));
         QCOMPARE(d.deformPoseAt(*d.cel(bones), 5)[doc::BoneAngle], 30.0);
-        QVERIFY(!controller.removeBone(bones, 4));
+        QVERIFY(!controller.removeDeformerPart(bones, 4));
         controller.undo();
         QCOMPARE(d.cel(bones)->deformer().bones.size(), std::size_t(3));
         QCOMPARE(d.deformPoseAt(*d.cel(bones), 5).size(), std::size_t(3 * doc::kBoneParams));
@@ -265,6 +329,166 @@ private slots:
         QVERIFY(!controller.setDeformerRest(bones, moved));
         moved.bones.pop_back();
         QVERIFY(!controller.setDeformerRest(bones, moved)); // not as many bones
+    }
+
+    void curvesAndEnvelopesAreMadeOfNodes()
+    {
+        document::DocumentController controller;
+        controller.setSceneLength(48);
+        const doc::Document &d = controller.document();
+        controller.addDeformer(doc::DeformerKind::Curve);
+        const doc::CelId curve = controller.currentCel();
+        QCOMPARE(d.cel(curve)->properties().name, std::string("Curve 1"));
+        QVERIFY(d.cel(curve)->deformer().isEmpty());
+        QCOMPARE(controller.addNode(curve, {100, 100}), 0);
+        QCOMPARE(controller.addNode(curve, {200, 100}, 0), 1);
+        QCOMPARE(controller.addNode(curve, {200, 200}, 1), 2);
+        QCOMPARE(controller.addNode(curve, {300, 300}, 0), -1); // not the last node of its curve
+        auto nodes = [&] { return deform::curveNodes(d.cel(curve)->deformer(), d.cel(curve)->deformer().rest); };
+        QVERIFY(std::hypot(nodes()[2].at.x - 200, nodes()[2].at.y - 200) < 1e-9);
+        QVERIFY(std::abs(nodes()[0].angle) < 1e-9 && nodes()[0].out > 30); // the first piece gave the first node its way
+        // A key, then the middle node taken away: the last node stays where it was, in the key too.
+        std::vector<double> pose = d.cel(curve)->deformer().rest;
+        pose[doc::NodeA] += 50; // all of it moved right in the key
+        QVERIFY(controller.setDeformKey(curve, 3, pose));
+        QVERIFY(controller.removeDeformerPart(curve, 1));
+        QCOMPARE(nodes().size(), std::size_t(2));
+        QVERIFY(std::hypot(nodes()[1].at.x - 200, nodes()[1].at.y - 200) < 1e-9);
+        const auto keyed = deform::curveNodes(d.cel(curve)->deformer(), d.deformPoseAt(*d.cel(curve), 3));
+        QVERIFY(std::hypot(keyed[1].at.x - 250, keyed[1].at.y - 200) < 1e-9);
+        controller.undo();
+        QCOMPARE(nodes().size(), std::size_t(3));
+        QCOMPARE(controller.addNode(curve, {200, 200}, 2), -1); // where the last node is: no piece
+
+        // A curve of its own, then one more node on the first curve: it goes in after that curve's last node.
+        QCOMPARE(controller.addNode(curve, {500, 500}), 3);
+        QCOMPARE(controller.addNode(curve, {600, 500}, 3), 4);
+        QCOMPARE(controller.addNode(curve, {300, 200}, 2), 3);
+        QCOMPARE(nodes().size(), std::size_t(6));
+        QVERIFY(nodes()[4].starts && !nodes()[3].starts && !nodes()[5].starts);
+        QVERIFY(std::hypot(nodes()[4].at.x - 500, nodes()[4].at.y - 500) < 1e-9); // the second curve did not move
+        QVERIFY(std::hypot(nodes()[5].at.x - 600, nodes()[5].at.y - 500) < 1e-9);
+        QCOMPARE(deform::curveRuns(nodes()).size(), std::size_t(2));
+        // Its first node taken away: the next one begins it, where it was.
+        QVERIFY(controller.removeDeformerPart(curve, 4));
+        QVERIFY(nodes()[4].starts);
+        QVERIFY(std::hypot(nodes()[4].at.x - 600, nodes()[4].at.y - 500) < 1e-9);
+
+        // An envelope starts round what the cel shows.
+        controller.chooseCel(controller.document().celAt(0).id());
+        const doc::CelId drawn = controller.currentCel();
+        QString why;
+        const auto target = controller.beginPaint(true, &why);
+        QVERIFY2(target, qPrintable(why));
+        const doc::TiledImage before = *target->image;
+        for (int y = 300; y < 400; ++y)
+            for (int x = 500; x < 700; ++x)
+                target->image->setPixel(x, y, 0xff000000u);
+        controller.endPaint(before);
+        controller.addDeformer(doc::DeformerKind::Envelope);
+        const doc::CelId envelope = controller.currentCel();
+        const auto round = deform::curveNodes(d.cel(envelope)->deformer(), d.cel(envelope)->deformer().rest);
+        QCOMPARE(round.size(), std::size_t(4));
+        for (const auto &n : round) // each node out of the drawing, round it
+            QVERIFY(n.at.x < 500 || n.at.x > 699 || n.at.y < 300 || n.at.y > 399);
+        QCOMPARE(d.cel(drawn)->properties().parent, envelope);
+    }
+
+    void aCelIsCarriedByABoneFromTheMenusChoice()
+    {
+        document::DocumentController controller;
+        controller.setSceneLength(48);
+        const doc::CelId hand = controller.currentCel();
+        controller.addDeformer(doc::DeformerKind::Bones);
+        const doc::CelId bones = controller.currentCel();
+        controller.addBone(bones, -1, {0, 0}, {100, 0});
+        controller.addBone(bones, 0, {100, 0}, {200, 0});
+        controller.addBone(bones, 1, {200, 0}, {300, 0});
+        const doc::Document &d = controller.document();
+        QVERIFY(controller.setDeformerParent(hand, bones, 2));
+        QVERIFY(!controller.setDeformerParent(hand, bones, 2)); // nothing changes
+        QVERIFY(!controller.setDeformerParent(hand, bones, 7)); // no such bone
+        QCOMPARE(d.cel(hand)->properties().parentPart, 2);
+        QCOMPARE(d.followedDeformer(*d.cel(hand)), nullptr);
+        // The first bone taken away: the bones after it go too (they hung from it), and the hand is bent again.
+        QVERIFY(controller.removeDeformerPart(bones, 1));
+        QCOMPARE(d.cel(hand)->properties().parentPart, -1);
+        QCOMPARE(d.followedDeformer(*d.cel(hand)), d.cel(bones));
+        controller.undo();
+        QCOMPARE(d.cel(hand)->properties().parentPart, 2);
+        // Following a trajectory instead lets the bone go.
+        controller.addTrajectory();
+        const doc::CelId path = controller.currentCel();
+        QVERIFY(controller.setTrajectoryParent(hand, path));
+        QCOMPARE(d.cel(hand)->properties().parentPart, -1);
+    }
+
+    void theZoneOfABoneAndTheNodesOfACurveAreDragged()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        controller.setSceneLength(30);
+        controller.addDeformer(doc::DeformerKind::Bones);
+        const doc::CelId bones = controller.currentCel();
+        controller.addBone(bones, -1, {600, 500}, {1000, 500});
+        state.setRigMode(true);
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(900, 520);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        const QTransform toView = canvas.view().documentToView();
+        auto at = [&](const QPointF &docPoint) { return toView.map(docPoint).toPoint(); };
+        auto drag = [&](QPointF from, QPointF to) {
+            QTest::mousePress(&canvas, Qt::LeftButton, {}, at(from));
+            for (int k = 1; k <= 4; ++k)
+                QTest::mouseMove(&canvas, at(from + (to - from) * k / 4.0));
+            QTest::mouseRelease(&canvas, Qt::LeftButton, {}, at(to));
+        };
+        // The bone chosen: its zone's handles show; the inner one dragged out sets the radius.
+        QTest::mouseClick(&canvas, Qt::LeftButton, {}, at({800, 500}));
+        const auto radius = canvas.boneGizmo().partPoint(0, canvas::BoneGizmo::Part::ZoneRadius);
+        QVERIFY(radius);
+        drag(*radius, QPointF(800, 500 + 90));
+        QVERIFY(std::abs(controller.document().cel(bones)->deformer().bones[0].radius - 90) < 3);
+        const auto fade = canvas.boneGizmo().partPoint(0, canvas::BoneGizmo::Part::ZoneFade);
+        drag(*fade, QPointF(800, 500 + 150));
+        QVERIFY(std::abs(controller.document().cel(bones)->deformer().bones[0].fade - 60) < 3);
+
+        // A curve: clicks put its nodes, a handle turns its node and what comes after.
+        controller.addDeformer(doc::DeformerKind::Curve);
+        const doc::CelId curve = controller.currentCel();
+        for (QPointF p : {QPointF(500, 400), QPointF(800, 400), QPointF(1100, 400)})
+            QTest::mouseClick(&canvas, Qt::LeftButton, {}, at(p));
+        QCOMPARE(controller.document().cel(curve)->deformer().bones.size(), std::size_t(3));
+        // Ctrl+click: a curve of its own, and the next click goes on along it.
+        QTest::mouseClick(&canvas, Qt::LeftButton, Qt::ControlModifier, at({500, 800}));
+        QTest::mouseClick(&canvas, Qt::LeftButton, {}, at({800, 800}));
+        {
+            const auto all = deform::curveNodes(controller.document().cel(curve)->deformer(),
+                                                controller.document().cel(curve)->deformer().rest);
+            QCOMPARE(all.size(), std::size_t(5));
+            QCOMPARE(deform::curveRuns(all).size(), std::size_t(2));
+            QVERIFY(all[3].starts && !all[4].starts);
+        }
+        const canvas::CurveGizmo &gizmo = canvas.curveGizmo();
+        const QPointF out = *gizmo.partPoint(1, canvas::CurveGizmo::Part::Out);
+        const double reach = QLineF(QPointF(800, 400), out).length();
+        drag(out, QPointF(800, 400 + reach)); // the tangent turned down a quarter
+        const auto nodes = deform::curveNodes(controller.document().cel(curve)->deformer(),
+                                              controller.document().cel(curve)->deformer().rest);
+        QVERIFY(std::abs(nodes[1].angle - M_PI / 2) < 0.05);
+        QVERIFY(std::abs(nodes[2].at.x - 800) < 5 && std::abs(nodes[2].at.y - 700) < 5); // the last node went round
+        QVERIFY(nodes[2].in > 50); // its handles kept
+
+        // Animated: the last node dragged on frame 4, a key of the curve.
+        state.setRigMode(false);
+        controller.setCurrentFrame(4);
+        const QPointF last = *gizmo.partPoint(2, canvas::CurveGizmo::Part::Node);
+        drag(last, last + QPointF(-60, 0));
+        QVERIFY(controller.document().cel(curve)->motion().keyAt(doc::Channel::Deform, 4));
+        const auto posed = deform::curveNodes(controller.document().cel(curve)->deformer(),
+                                              controller.document().deformPoseAt(*controller.document().cel(curve), 4));
+        QVERIFY(std::abs(posed[2].at.x - (nodes[2].at.x - 60)) < 3);
     }
 
     void theControllerKeepsKeysAsUndoableSteps()
@@ -672,6 +896,58 @@ private slots:
 
     // Under the "Keyframes" row, a row for each channel that has keys: a drag on a diamond there moves that channel's key
     // alone, a double click on an empty cell makes a key of that channel alone.
+    void aCelShowsTheKeysOfItsDeformerAndTrajectoryInside()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        controller.setSceneLength(40);
+        const doc::CelId cel = controller.currentCel();
+        controller.addTrajectory();
+        const doc::CelId path = controller.currentCel();
+        controller.setCelKey(path, 2, controller.celPoseAt(path, 2));
+        controller.chooseCel(cel);
+        controller.addDeformer(doc::DeformerKind::Bones); // the cel is bent by it; it follows the trajectory the cel did
+        const doc::CelId bones = controller.currentCel();
+        controller.setTrajectoryParent(bones, path);
+        controller.addBone(bones, -1, {100, 100}, {200, 100});
+        controller.setDeformKey(bones, 4, controller.document().cel(bones)->deformer().rest);
+        controller.chooseCel(cel);
+        ui::TimelinePanel panel(&controller, &state);
+        panel.resize(900, 360);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        ui::TimelineView *view = panel.view();
+        // Rows of the cel: itself, then its deformer, then the trajectory the deformer follows.
+        int row = -1;
+        for (int r = 0; r < view->rowCount(); ++r)
+            if (!view->isMotionRow(r) && controller.document().celAt(view->celIndexForRow(r)).id() == cel)
+                row = r;
+        QVERIFY(row >= 0);
+        QVERIFY(view->isLinkRow(row + 1) && view->isLinkRow(row + 2));
+        QCOMPARE(controller.document().celAt(view->celIndexForRow(row + 1)).id(), bones);
+        QCOMPARE(controller.document().celAt(view->celIndexForRow(row + 2)).id(), path);
+        // A key dragged on the deformer's row inside the cel: the deformer's own key moves.
+        ui::TimelineMetrics m;
+        auto center = [&](int r, int frame) { return QPoint(m.frameX(frame) + m.frameWidth / 2, m.rowY(r) + m.rowHeight / 2); };
+        auto *vp = view->viewport();
+        QTest::mousePress(vp, Qt::LeftButton, {}, center(row + 1, 4));
+        QTest::mouseMove(vp, center(row + 1, 6));
+        QTest::mouseMove(vp, center(row + 1, 8));
+        QTest::mouseRelease(vp, Qt::LeftButton, {}, center(row + 1, 8));
+        const doc::CelMotion &motion = controller.document().cel(bones)->motion();
+        QVERIFY(motion.keyAt(doc::Channel::Deform, 8) && !motion.keyAt(doc::Channel::Deform, 4));
+        // And the trajectory's, on its row.
+        QTest::mousePress(vp, Qt::LeftButton, {}, center(row + 2, 2));
+        QTest::mouseMove(vp, center(row + 2, 4));
+        QTest::mouseMove(vp, center(row + 2, 5));
+        QTest::mouseRelease(vp, Qt::LeftButton, {}, center(row + 2, 5));
+        QVERIFY(controller.celMotion(path)->hasKeyAt(5) && !controller.celMotion(path)->hasKeyAt(2));
+        // A cel carried by a bone shows its deformer too.
+        QVERIFY(controller.setDeformerParent(cel, bones, 0));
+        QVERIFY(view->isLinkRow(row + 1));
+        QCOMPARE(controller.document().celAt(view->celIndexForRow(row + 1)).id(), bones);
+    }
+
     void theTimelineHasARowForEachChannel()
     {
         tools::ToolState state;

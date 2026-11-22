@@ -13,6 +13,10 @@
 
 class QPainter;
 
+namespace mothion::tools {
+class ToolState;
+}
+
 namespace mothion::canvas {
 
 // The part of the document the drawing's visible layers cover (tile bounds;
@@ -62,6 +66,14 @@ public:
     // This cel is drawn without what the deformation cel that bends it does (its pose and trajectory still move it): to
     // draw on it where its pixels are (kNoId: none).
     void setCelUndeformed(doc::CelId cel) { m_undeformed = cel; }
+    // The brushes (looked up by name), to draw the strokes of a vector layer again as a deformer bends them: then a vector
+    // layer bends stroke by stroke (lines as wide as the bend makes them, nothing blurred), each raster layer by itself.
+    // Without them (nullptr) a bent drawing bends as the pixels its layers show together.
+    void setBrushes(const tools::ToolState *brushes)
+    {
+        m_brushes = brushes;
+        m_deformed.clear();
+    }
     doc::CelId celUndeformed() const { return m_undeformed; }
     // Only this cel is drawn (kNoId: all of them), to see what one cel makes of the frame by itself.
     void setOnlyCel(doc::CelId cel) { m_only = cel; }
@@ -113,6 +125,7 @@ private:
     // one), the deformer's bones or its pose.
     const Deformed *deformed(const doc::Document &doc, const doc::Cel &cel, const doc::Drawing &drawing, int frame) const;
     doc::CelId m_undeformed = doc::kNoId;
+    const tools::ToolState *m_brushes = nullptr;
     struct Bent
     {
         struct Source
