@@ -9,6 +9,11 @@ function(mothion_add_test name)
     # folder next to the executables (no offscreen platform) that would win otherwise.
     set_tests_properties(${name} PROPERTIES ENVIRONMENT
         "QT_QPA_PLATFORM=offscreen;QT_PLUGIN_PATH=${QT6_INSTALL_PREFIX}/${QT6_INSTALL_PLUGINS}")
+    # Windows: Qt's DLLs, from the Qt installation (the tests run from Visual Studio find them without windeployqt).
+    if(WIN32 AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.22)
+        set_tests_properties(${name} PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${QT6_INSTALL_PREFIX}/${QT6_INSTALL_BINS}")
+    endif()
 endfunction()
 
 mothion_add_test(tst_core mothion_core)

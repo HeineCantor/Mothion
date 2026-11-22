@@ -154,14 +154,23 @@ run.bat
 
 It rebuilds the project if the sources have changed and accepts the same options as `build.bat`.
 
+#### Visual Studio (open the folder)
+
+Visual Studio 2022 or 2026, with the *Desktop development with C++* workload, opens the folder with the presets of
+`CMakePresets.json` (*Windows x64 (RelWithDebInfo)* or *(Debug)*): Ninja with that Visual Studio's compiler. Qt is
+looked for in `QTDIR`, or else in `C:\Qt\6.10.2\msvc2022_64`, where `build.bat` installs it (the Qt for MSVC 2022 works
+with the compiler of Visual Studio 2026 too). The tests find Qt's DLLs by themselves; to start `mothion.exe`, add
+`C:\Qt\6.10.2\msvc2022_64\bin` to the `PATH` or run `windeployqt` on it.
+
 #### Manual build
 
-1. Install Visual Studio 2022 with the *Desktop development with C++* workload.
+1. Install Visual Studio 2022 or 2026 with the *Desktop development with C++* workload.
 2. Install Qt 6.x for **MSVC 2022 64-bit** using the Qt Online Installer, with the **Qt Multimedia** module selected under *Additional Libraries*.
 3. Open an *x64 Native Tools Command Prompt for VS 2022* and run:
 
 ```bat
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH=C:\Qt\6.10.2\msvc2022_64
+rem (Visual Studio 2026: -G "Visual Studio 18 2026", with a CMake recent enough to know it)
 
 cmake --build build --config RelWithDebInfo
 ctest --test-dir build -C RelWithDebInfo

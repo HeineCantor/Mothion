@@ -30,6 +30,20 @@ option(MOTHION_BUILD_DEVTOOLS "Build developer tools (brush test sheet)" OFF)
 # It is isolated in src/input/TabletBackend_wintab.cpp: turn this off if a Qt update breaks it.
 option(MOTHION_ENABLE_WINTAB "Allow switching the Windows tablet backend to Wintab (--wintab)" ON)
 
+# Windows, when nothing says where Qt is (Visual Studio opening the folder, see CMakePresets.json): the QTDIR environment
+# variable, or where scripts/build-windows.ps1 installs it.
+if(WIN32 AND NOT Qt6_DIR AND NOT CMAKE_PREFIX_PATH AND NOT DEFINED ENV{CMAKE_PREFIX_PATH})
+    if(DEFINED ENV{QTDIR})
+        set(_mothion_qt "$ENV{QTDIR}")
+    else()
+        set(_mothion_qt "C:/Qt/6.10.2/msvc2022_64")
+    endif()
+    file(TO_CMAKE_PATH "${_mothion_qt}" _mothion_qt)
+    if(EXISTS "${_mothion_qt}/lib/cmake/Qt6/Qt6Config.cmake")
+        list(APPEND CMAKE_PREFIX_PATH "${_mothion_qt}")
+    endif()
+endif()
+
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets Multimedia) # Multimedia: decoding and playing the audio track
 qt_standard_project_setup()
 

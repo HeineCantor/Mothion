@@ -5,8 +5,9 @@
 .DESCRIPTION
     Checks for, and installs when missing:
       - CMake (winget)
-      - Visual Studio 2022 with the C++ tools, or the Build Tools with the
-        C++ workload (winget; the installer asks for administrator rights)
+      - Visual Studio 2022 or 2026 with the C++ tools, or the Build Tools with
+        the C++ workload (the 2022 ones are installed with winget when none is
+        found; the installer asks for administrator rights)
       - Qt for MSVC 2022 64-bit with its Multimedia module (the audio track),
         downloaded with aqtinstall (which needs Python, also installed with
         winget if missing)
@@ -74,15 +75,28 @@ function Find-Python {
     return $null
 }
 
+# Visual Studio 2022 (17) or later with the C++ tools, the newest first: its path and its major version.
 function Find-VisualStudio {
     $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
     if (-not (Test-Path $vswhere)) { return $null }
-    $query = @('-products', '*', '-version', '[17.0,18.0)',
-               '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-property', 'installationPath')
+    $query = @('-products', '*', '-version', '[17.0,)', '-latest',
+               '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-format', 'json')
     # Prefer a release installation; fall back to a preview one.
-    $path = & $vswhere @query | Select-Object -First 1
-    if (-not $path) { $path = & $vswhere @query -prerelease | Select-Object -First 1 }
-    return $path
+    $found = & $vswhere @query | ConvertFrom-Json | Select-Object -First 1
+    if (-not $found) { $found = & $vswhere @query -prerelease | ConvertFrom-Json | Select-Object -First 1 }
+    if (-not $found) { return $null }
+    return [pscustomobject]@{ Path = $found.installationPath; Major = [int]($found.installationVersion.Split('.')[0]) }
+}
+
+# CMake's generator for a Visual Studio major version (17: 2022, 18: 2026).
+function Get-VisualStudioGenerator([int]$major) {
+    $year = @{ 17 = '2022'; 18 = '2026' }[$major]
+    if (-not $year) { throw "Visual Studio $major is not known to this script: add its year to Get-VisualStudioGenerator." }
+    $generator = "Visual Studio $major $year"
+    if (-not ((& cmake --help) -match [regex]::Escape($generator))) {
+        throw "This CMake has no '$generator' generator: update CMake (winget upgrade Kitware.CMake) and run this script again."
+    }
+    return $generator
 }
 
 Update-Path
@@ -117,7 +131,7 @@ if (-not $vs) {
     $vs = Find-VisualStudio
     if (-not $vs) { throw 'The Visual Studio C++ tools are still missing; check the Visual Studio Installer.' }
 }
-Step "C++ tools: $vs"
+Step "C++ tools: Visual Studio $($vs.Major), $($vs.Path)"
 
 # --- Qt ---
 # The base and each module: a Qt installed before the audio track lacks its Multimedia, and gets it now.
@@ -144,7 +158,7 @@ $cmakeArgs = @('-S', $repo, '-B', $buildDir, "-DCMAKE_PREFIX_PATH=$qtDir",
                "-DMOTHION_BUILD_DEVTOOLS=$(if ($DevTools) { 'ON' } else { 'OFF' })")
 if (-not (Test-Path (Join-Path $buildDir 'CMakeCache.txt'))) {
     # First configure: pick the generator and the Visual Studio installation found above.
-    $cmakeArgs += @('-G', 'Visual Studio 17 2022', '-A', 'x64', "-DCMAKE_GENERATOR_INSTANCE=$vs")
+    $cmakeArgs += @('-G', (Get-VisualStudioGenerator $vs.Major), '-A', 'x64', "-DCMAKE_GENERATOR_INSTANCE=$($vs.Path)")
 }
 Step 'Configuring'
 Invoke-Checked 'Configuring' { & cmake @cmakeArgs }
@@ -159,7 +173,7 @@ if (-not $SkipTests) {
 # --- Qt's DLLs next to the executable ---
 $exe = Join-Path $buildDir "$Config\mothion.exe"
 Step 'Copying the Qt DLLs next to mothion.exe'
-$env:VCINSTALLDIR = Join-Path $vs 'VC\' # lets windeployqt add the C++ runtime installer
+$env:VCINSTALLDIR = Join-Path $vs.Path 'VC\' # lets windeployqt add the C++ runtime installer
 Invoke-Checked 'windeployqt' {
     & (Join-Path $qtDir 'bin\windeployqt.exe') --no-translations --no-system-dxc-compiler --no-system-d3d-compiler `
         --verbose 0 $exe

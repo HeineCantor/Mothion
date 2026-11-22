@@ -1,0 +1,56 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "windows-base",
+      "hidden": true,
+      "description": "Visual Studio (2022 or 2026) opening the folder: Ninja with the MSVC of the Visual Studio that opens it. Qt is found by CMakeLists.txt (QTDIR, or C:/Qt/6.10.2/msvc2022_64).",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "architecture": { "value": "x64", "strategy": "external" },
+      "toolset": { "value": "host=x64", "strategy": "external" },
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "cl.exe",
+        "CMAKE_CXX_COMPILER": "cl.exe"
+      },
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+      "vendor": {
+        "microsoft.com/VisualStudioSettings/CMake/1.0": {
+          "hostOS": [ "Windows" ],
+          "intelliSenseMode": "windows-msvc-x64"
+        }
+      }
+    },
+    {
+      "name": "windows-relwithdebinfo",
+      "displayName": "Windows x64 (RelWithDebInfo)",
+      "inherits": "windows-base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" }
+    },
+    {
+      "name": "windows-debug",
+      "displayName": "Windows x64 (Debug)",
+      "inherits": "windows-base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "windows-relwithdebinfo", "displayName": "Windows x64 (RelWithDebInfo)", "configurePreset": "windows-relwithdebinfo" },
+    { "name": "windows-debug", "displayName": "Windows x64 (Debug)", "configurePreset": "windows-debug" }
+  ],
+  "testPresets": [
+    {
+      "name": "windows-relwithdebinfo",
+      "displayName": "Windows x64 (RelWithDebInfo)",
+      "configurePreset": "windows-relwithdebinfo",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "windows-debug",
+      "displayName": "Windows x64 (Debug)",
+      "configurePreset": "windows-debug",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}
