@@ -192,6 +192,7 @@ TimelineView::TimelineView(DocumentController *document, QWidget *parent)
         viewport()->update();
     });
     connect(m_document, &DocumentController::currentCelChanged, viewport(), qOverload<>(&QWidget::update));
+    connect(m_document, &DocumentController::currentLayerChanged, viewport(), qOverload<>(&QWidget::update)); // a time layer's row
     connect(m_document, &DocumentController::audioChanged, viewport(), qOverload<>(&QWidget::update));
     connect(m_document, &DocumentController::cameraChanged, this, [this] {
         updateScrollBars(); // the row appears with the camera
@@ -290,6 +291,40 @@ bool TimelineView::isLinkRow(int row) const
     return rowRef(row).link >= 0;
 }
 
+std::vector<doc::LayerId> TimelineView::timeRows(int celIndex) const
+{
+    const doc::Cel &cel = m_document->document().celAt(celIndex);
+    std::vector<doc::LayerId> rows;
+    if (m_foldedCel.count(cel.id()) || cel.properties().drawsNothing())
+        return rows;
+    for (const doc::TimeLayer &t : cel.timeLayers())
+        rows.push_back(t.id);
+    return rows;
+}
+
+std::vector<int> TimelineView::timeLinkChain(int celIndex, doc::LayerId layer) const
+{
+    const doc::Document &d = m_document->document();
+    const doc::Cel &cel = d.celAt(celIndex);
+    const doc::TimeLayer *time = cel.timeLayer(layer);
+    std::vector<int> chain;
+    if (!time || time->parent == doc::kNoId)
+        return chain;
+    const doc::Cel own = doc::Document::timeLayerAsCel(cel, *time);
+    if (const doc::Cel *parent = d.cel(time->parent); parent && parent->properties().deformer != doc::DeformerKind::None)
+        chain.push_back(d.indexOf(parent->id()));
+    int guard = 0;
+    for (const doc::Cel *t = d.followedTrajectory(own); t && guard <= d.celCount(); t = d.trajectoryParent(*t), ++guard)
+        chain.push_back(d.indexOf(t->id()));
+    return chain;
+}
+
+bool TimelineView::isTimeRow(int row) const
+{
+    const RowRef ref = rowRef(row);
+    return ref.time != doc::kNoId && ref.link < 0;
+}
+
 std::vector<TimelineView::Placed> TimelineView::celOrder() const
 {
     // Top first; a trajectory that follows another is shown inside it (under its own rows, indented) unless that one is folded.
@@ -338,7 +373,7 @@ QRect TimelineView::foldRect(int row) const
     const RowRef ref = rowRef(row);
     if (ref.motion && ref.channel >= 0)
         return {};
-    if (ref.link >= 0)
+    if (ref.link >= 0 || ref.time != doc::kNoId)
         return {};
     if (!ref.motion && !hasKeys(ref.celIndex) && !hasFollowers(ref.celIndex) && !followsTrajectory(ref.celIndex))
         return {};
@@ -361,6 +396,8 @@ int TimelineView::rowCount() const
     for (const Placed &p : celOrder()) {
         ++rows;
         rows += int(linkChain(p.celIndex).size());
+        for (const doc::LayerId time : timeRows(p.celIndex))
+            rows += 1 + int(timeLinkChain(p.celIndex, time).size());
         if (keyframesRowShown(p.celIndex))
             rows += 1 + (channelRowsShown(p.celIndex) ? channelRowCount(p.celIndex) : 0); // the row of its keys, and one for each channel
     }
@@ -379,6 +416,14 @@ TimelineView::RowRef TimelineView::rowRef(int row) const
         for (std::size_t k = 0; k < chain.size(); ++k)
             if (at++ == row)
                 return {chain[k], true, -1, chain[k], int(k), i};
+        for (const doc::LayerId time : timeRows(i)) {
+            if (at++ == row)
+                return {i, true, -1, -1, 0, i, time};
+            const std::vector<int> own = timeLinkChain(i, time);
+            for (std::size_t k = 0; k < own.size(); ++k)
+                if (at++ == row)
+                    return {own[k], true, -1, own[k], int(k) + 1, i, time};
+        }
         if (!keyframesRowShown(i))
             continue;
         if (at++ == row)
@@ -642,10 +687,19 @@ void TimelineView::paintSelection(QPainter &p) const
         p.drawRect(bar.adjusted(1, 1, -1, -1));
     };
     const std::vector<doc::CelId> chosen = m_document->celSelection(); // the cels chosen together
-    for (int row = 0; row < rowCount(); ++row)
-        if (!isMotionRow(row) && !m_document->cameraSelected()
-            && std::find(chosen.begin(), chosen.end(), d.celAt(celIndexForRow(row)).id()) != chosen.end())
+    const bool timeChosen = m_document->timeLayerChosen(); // a time layer by itself: its row, not its cel's
+    for (int row = 0; row < rowCount(); ++row) {
+        if (m_document->cameraSelected())
+            break;
+        if (timeChosen) {
+            if (isTimeRow(row) && d.celAt(celIndexForRow(row)).id() == m_document->currentCel()
+                && rowRef(row).time == m_document->currentLayer())
+                outline(m.rowY(row));
+            continue;
+        }
+        if (!isMotionRow(row) && std::find(chosen.begin(), chosen.end(), d.celAt(celIndexForRow(row)).id()) != chosen.end())
             outline(m.rowY(row));
+    }
     if (m_celDrag && m_celDrag->moving && m_celDrag->parentTarget != doc::kNoId) { // a trajectory to follow
         for (int row = 0; row < rowCount(); ++row)
             if (!isMotionRow(row) && d.celAt(celIndexForRow(row)).id() == m_celDrag->parentTarget) {
@@ -703,6 +757,10 @@ void TimelineView::paintCells(QPainter &p) const
     // Exposures.
     for (int row = 0; row < rowCount(); ++row) {
         const int celIndex = celIndexForRow(row);
+        if (isTimeRow(row)) {
+            paintTimeRow(p, row);
+            continue;
+        }
         if (isMotionRow(row)) { // (a trajectory's or deformer's row inside a cel: its keys)
             paintMotionRow(p, celIndex, row);
             continue;
@@ -810,7 +868,7 @@ QColor motionColor() { return QColor(240, 178, 61); }
 
 int TimelineView::motionKeyAt(const QPoint &pos, int row) const
 {
-    if (!isMotionRow(row) || pos.x() < m_metrics.headerWidth)
+    if (!isMotionRow(row) || isTimeRow(row) || pos.x() < m_metrics.headerWidth)
         return -1;
     const doc::CelMotion &motion = m_document->document().celAt(celIndexForRow(row)).motion();
     std::vector<int> frames;
@@ -858,6 +916,78 @@ void TimelineView::paintLinkHeader(QPainter &p, int row) const
     p.setFont(font());
     p.setPen(palette().mid().color());
     p.drawLine(r.bottomLeft(), r.bottomRight());
+}
+
+namespace {
+
+// A time layer as it is in the drawing the cel shows on `frame` (or in any of them).
+const doc::Layer *timeLayerOf(const doc::Cel &cel, doc::LayerId layer, int frame)
+{
+    if (const doc::Drawing *shown = cel.drawingAt(frame); shown && shown->layer(layer))
+        return shown->layer(layer);
+    for (const auto &[id, drawing] : cel.drawings())
+        if (const doc::Layer *l = drawing.layer(layer))
+            return l;
+    return nullptr;
+}
+
+} // namespace
+
+void TimelineView::paintTimeHeader(QPainter &p, int row) const
+{
+    const TimelineMetrics &m = m_metrics;
+    const RowRef ref = rowRef(row);
+    const doc::Cel &cel = m_document->document().celAt(ref.celIndex);
+    const doc::Layer *layer = timeLayerOf(cel, ref.time, m_document->currentFrame());
+    const QRect r(0, m.rowY(row), m.headerWidth - 1, m.rowHeight);
+    const bool current = cel.id() == m_document->currentCel() && ref.time == m_document->currentLayer();
+    p.fillRect(r, current ? palette().alternateBase() : palette().window());
+    const int indent = indentOf(row) + kIndent;
+    p.fillRect(QRect(r.left() + 4 + indent, r.top() + 6, 4, r.height() - 12), colorForCel(colorSlot(cel.id())));
+    icon(IconId::TimeLayer, IconTone::Plain).paint(&p, QRect(r.left() + 12 + indent, r.top() + (r.height() - 14) / 2, 14, 14));
+    QFont small = font();
+    small.setPointSizeF(std::max(6.0, small.pointSizeF() - 1.0));
+    small.setBold(current);
+    p.setFont(small);
+    p.setPen(layer && layer->properties.visible ? palette().text().color()
+                                                : palette().color(QPalette::Disabled, QPalette::Text));
+    p.drawText(r.adjusted(30 + indent, 0, -4, 0), Qt::AlignVCenter | Qt::AlignLeft,
+               layer ? QString::fromStdString(layer->properties.name) : QString());
+    p.setFont(font());
+    p.setPen(palette().mid().color());
+    p.drawLine(r.bottomLeft(), r.bottomRight());
+}
+
+void TimelineView::paintTimeRow(QPainter &p, int row) const
+{
+    // A thin bar where the cel shows: the time layer is in every frame of it.
+    const TimelineMetrics &m = m_metrics;
+    const RowRef ref = rowRef(row);
+    const doc::Cel &cel = m_document->document().celAt(ref.celIndex);
+    QColor colour = colorForCel(colorSlot(cel.id()));
+    colour.setAlphaF(0.55f);
+    const int y = m.rowY(row) + m.rowHeight / 2 - 3;
+    for (const doc::Exposure &e : timingForPainting(ref.celIndex).exposures()) {
+        const int x0 = std::max(m.frameX(e.start), m.headerWidth), x1 = m.frameX(e.end() + 1);
+        if (x1 > x0)
+            p.fillRect(QRect(x0 + 1, y, x1 - x0 - 2, 6), colour);
+    }
+    p.setPen(palette().mid().color());
+    p.drawLine(m.headerWidth, m.rowY(row) + m.rowHeight - 1, viewport()->width(), m.rowY(row) + m.rowHeight - 1);
+}
+
+void TimelineView::showTimeLayerMenu(const QPoint &globalPos, int row)
+{
+    const RowRef ref = rowRef(row);
+    const doc::Cel &cel = m_document->document().celAt(ref.celIndex);
+    const doc::CelId celId = cel.id();
+    const doc::LayerId layer = ref.time;
+    QMenu menu(this);
+    addTimeLayerParentMenu(menu, m_document, cel, layer, this);
+    menu.addSeparator();
+    menu.addAction(icon(IconId::Delete), tr("Delete time layer"), this,
+                   [this, celId, layer] { m_document->removeTimeLayer(celId, layer); });
+    menu.exec(globalPos);
 }
 
 void TimelineView::paintMotionHeader(QPainter &p, int celIndex, int row) const
@@ -1535,6 +1665,10 @@ void TimelineView::paintHeaders(QPainter &p) const
             paintLinkHeader(p, row);
             continue;
         }
+        if (isTimeRow(row)) {
+            paintTimeHeader(p, row);
+            continue;
+        }
         if (isMotionRow(row)) {
             paintMotionHeader(p, celIndex, row);
             continue;
@@ -1674,6 +1808,11 @@ void TimelineView::mousePressEvent(QMouseEvent *event)
             toggleFold(cel.id(), isMotionRow(row));
             return;
         }
+        if (isTimeRow(row)) { // a time layer, by itself: the layer drawn on and transformed, not the whole cel
+            m_document->chooseTimeLayer(cel.id(), rowRef(row).time);
+            viewport()->update();
+            return;
+        }
         if (isLinkRow(row)) { // a trajectory the cel follows: it is chosen (its circle is what moves it)
             m_document->chooseCel(m_document->document().celAt(rowRef(row).link).id());
             return;
@@ -1748,6 +1887,16 @@ void TimelineView::mousePressEvent(QMouseEvent *event)
         }
         setScrubbing(true);
         scrubTo(pos, false);
+        return;
+    }
+    if (const int row = rowAt(pos.y()); row >= 0 && isTimeRow(row)) {
+        // A time layer's bar: the layer chosen, the frame under the pointer shown.
+        const doc::Cel &cel = m_document->document().celAt(celIndexForRow(row));
+        setScrubbing(true);
+        scrubTo(pos, false); // first: the copy chosen is the one of the frame shown
+        m_document->chooseTimeLayer(cel.id(), rowRef(row).time);
+        scrubTo(pos, false);
+        viewport()->update();
         return;
     }
     if (const int row = rowAt(pos.y()); row >= 0 && isMotionRow(row)) {
@@ -2099,6 +2248,8 @@ void TimelineView::mouseDoubleClickEvent(QMouseEvent *event)
             m_document->setCameraKey(frame, m_document->camera()->poseAt(frame));
         return;
     }
+    if (row >= 0 && isTimeRow(row))
+        return; // (renamed in the Layers panel)
     if (event->button() == Qt::LeftButton && row >= 0 && isMotionRow(row) && !isLinkRow(row)) {
         // On the keys' row: a key here, at the pose the cel has. (In its header: nothing.)
         if (pos.x() >= m_metrics.headerWidth) {
@@ -2383,6 +2534,10 @@ void TimelineView::contextMenuEvent(QContextMenuEvent *event)
     const int row = rowAt(event->pos().y());
     if (row < 0)
         return;
+    if (isTimeRow(row)) { // what the time layer follows of its own, and its deletion
+        showTimeLayerMenu(event->globalPos(), row);
+        return;
+    }
     if (event->pos().x() < m_metrics.headerWidth) { // on the cel itself (its name): what is done to the whole cel
         if (isLinkRow(row) || isMotionRow(row))
             return;

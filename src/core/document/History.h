@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <optional>
 
@@ -52,7 +53,24 @@ public:
 
     void clear();
 
+    // Called after each step done, undone, redone or recorded, to put right what follows from the document as it is
+    // (see Document::syncTimeLayers()): what it changes comes with the step's changes, or, for a step recorded
+    // (pushApplied()), goes to `recorded`.
+    void setAfterChange(std::function<ChangeSet()> after, std::function<void(const ChangeSet &)> recorded)
+    {
+        m_after = std::move(after);
+        m_recorded = std::move(recorded);
+    }
+
 private:
+    ChangeSet after(ChangeSet changes) const
+    {
+        if (m_after)
+            changes.merge(m_after());
+        return changes;
+    }
+    std::function<ChangeSet()> m_after;
+    std::function<void(const ChangeSet &)> m_recorded;
     void push(std::unique_ptr<Command> command);
     void enforceLimits();
     void recountBytes();

@@ -43,6 +43,20 @@ const Drawing *Cel::drawingAt(int frame) const
     return drawing(m_timing.drawingAt(frame));
 }
 
+const TimeLayer *Cel::timeLayer(LayerId id) const
+{
+    for (const TimeLayer &t : m_timeLayers)
+        if (t.id == id)
+            return &t;
+    return nullptr;
+}
+
+const Layer *Cel::timeContent(LayerId id) const
+{
+    const auto it = m_timeContent.find(id);
+    return it == m_timeContent.end() ? nullptr : &it->second;
+}
+
 std::string Cel::nextDrawingName() const
 {
     std::set<std::string> used;

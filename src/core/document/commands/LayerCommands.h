@@ -20,6 +20,12 @@ public:
     AddLayerCommand(Document &doc, CelId cel, DrawingId drawing, int index, Layer layer);
 
     LayerId layerId() const { return m_id; }
+    // The layer put in is a time layer (a copy of one put in is not, unless this is called).
+    void makeTimeLayer()
+    {
+        if (m_layer)
+            m_layer->time = true;
+    }
 
     CommandKind kind() const override { return CommandKind::AddLayer; }
     ChangeSet apply(Document &doc) override;

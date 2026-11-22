@@ -135,6 +135,7 @@ private:
     void previewOpacity(int percent);
     void endOpacityPreview();
     void addClicked(doc::LayerKind kind);
+    void addTimeLayerClicked(doc::LayerKind kind); // a time layer in the current cel (see DocumentController::addTimeLayer())
     void removeSelected();
     struct LayerRow
     {
@@ -169,6 +170,7 @@ private:
     QToolButton *m_addLayer;       // a new drawing layer
     QToolButton *m_addPerspective; // a new perspective layer
     QToolButton *m_addVector;      // a new vector layer
+    QToolButton *m_addTimeLayer;   // a new time layer (raster or vector, from its menu)
     QToolButton *m_rasterize;      // the selected vector layers become raster layers
     QToolButton *m_merge;
     QToolButton *m_mergeDown;

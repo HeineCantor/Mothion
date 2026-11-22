@@ -115,6 +115,9 @@ public:
     int celIndexForRow(int row) const; // (cels are bottom-first, rows top-first)
     bool isMotionRow(int row) const;
     bool isLinkRow(int row) const;
+    bool isTimeRow(int row) const; // a time layer's own row (see timeRows())
+    // The time layer a row is of (its own row, or one of what it follows); kNoId for none.
+    doc::LayerId timeLayerOfRow(int row) const { return rowRef(row).time; }
 
 signals:
     void shownKindsChanged(int kinds);
@@ -170,7 +173,18 @@ private:
         int link = -1;
         int depth = 0;  // of such a row: how far down the chain it is (0: the one followed)
         int owner = -1; // of such a row: the cel that follows it, under which it is shown
+        // A time layer of the cel (see doc::TimeLayer): its own row (`link` -1, `celIndex` its cel's), or a row of what it
+        // follows of its own (`link` that one, as above).
+        doc::LayerId time = doc::kNoId;
     };
+    // The time layers of a drawn cel, shown inside it (under its own row and what it follows, unless it is folded): each a
+    // row, with a bar where the cel shows (it is in every frame of it), and under it the rows of the deformer and the
+    // trajectories it follows of its own, with their keys as above.
+    std::vector<doc::LayerId> timeRows(int celIndex) const;
+    std::vector<int> timeLinkChain(int celIndex, doc::LayerId layer) const;
+    void paintTimeHeader(QPainter &p, int row) const;
+    void paintTimeRow(QPainter &p, int row) const;
+    void showTimeLayerMenu(const QPoint &globalPos, int row);
     // The row of keys of a cel folds away under it (an arrow in its header, and at the left of the keys' own header): it is
     // there for a cel that has keys unless it is folded. Only the view: the keys are as they were.
     bool hasKeys(int celIndex) const;

@@ -43,6 +43,7 @@ AddLayerCommand::AddLayerCommand(Document &doc, CelId cel, DrawingId drawing, in
     , m_layer(std::move(layer))
 {
     m_layer->id = m_id;
+    m_layer->time = false;
 }
 
 ChangeSet AddLayerCommand::apply(Document &doc)

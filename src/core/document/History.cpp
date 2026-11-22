@@ -13,13 +13,17 @@ ChangeSet History::execute(Document &doc, std::unique_ptr<Command> command)
         return {};
     ChangeSet changes = command->apply(doc);
     push(std::move(command));
-    return changes;
+    return after(std::move(changes));
 }
 
 void History::pushApplied(std::unique_ptr<Command> command)
 {
-    if (command)
-        push(std::move(command));
+    if (!command)
+        return;
+    push(std::move(command));
+    const ChangeSet changes = after({});
+    if (m_recorded && !changes.isEmpty())
+        m_recorded(changes);
 }
 
 void History::push(std::unique_ptr<Command> command)
@@ -42,7 +46,7 @@ ChangeSet History::undo(Document &doc)
         return {};
     ChangeSet changes = m_commands[--m_applied]->revert(doc);
     recountBytes();
-    return changes;
+    return after(std::move(changes));
 }
 
 ChangeSet History::redo(Document &doc)
@@ -51,7 +55,7 @@ ChangeSet History::redo(Document &doc)
         return {};
     ChangeSet changes = m_commands[m_applied++]->apply(doc);
     recountBytes();
-    return changes;
+    return after(std::move(changes));
 }
 
 const Command *History::undoCommand() const

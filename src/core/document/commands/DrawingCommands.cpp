@@ -28,7 +28,8 @@ Drawing cloneDrawing(Document &doc, const Drawing &source, std::string name)
     copy.id = doc.allocateDrawingId();
     copy.name = std::move(name);
     for (Layer &layer : copy.layers)
-        layer.id = doc.allocateLayerId();
+        if (!layer.time) // a time layer is the same in every drawing of the cel, with the same id
+            layer.id = doc.allocateLayerId();
     return copy;
 }
 

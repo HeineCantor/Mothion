@@ -212,6 +212,8 @@ private:
     // on the cel as it is shown: the pen is taken to the cel's own place before it paints, and what a tool draws over the
     // canvas (the selection, a shape in the making) goes through the pose. Identity for a cel with no keys.
     doc::Matrix2x3 celPose() const;
+    // What the current layer, a time layer of the current cel, follows of its own (doc::TimeLayer): identity for none.
+    doc::Matrix2x3 timeLayerFollow() const;
     bool celIsPosed() const;
     QPointF toCel(const QPointF &page) const;
     // For the fill around `seed` (in the cel's own place): the part of the canvas seen, as the current cel's own pixels

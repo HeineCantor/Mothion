@@ -90,6 +90,9 @@ enum class CommandKind {
     SetMouthShape,
     MouthChart,
     LipSync,
+    AddTimeLayer,
+    RemoveTimeLayer,
+    EditTimeLayer,
 };
 
 // An undoable change to a Document.

@@ -80,6 +80,13 @@ doc::DrawingId drawingOf(const QTreeWidgetItem *item)
     return item->data(0, kDrawingRole).value<doc::DrawingId>();
 }
 
+// The row of a time layer under its cel (not the one of its copy in a frame): a layer row, of the drawing the cel shows
+// now (see markCurrentFrames()).
+bool isTimeRow(const QTreeWidgetItem *item)
+{
+    return item && kindOf(item) == Row::Layer && item->parent() && kindOf(item->parent()) == Row::Cel;
+}
+
 // Where a drawing is shown, 1-based as the timeline counts: "1–2, 5, 9–12".
 QString exposureText(const doc::Timing &timing, doc::DrawingId drawing)
 {
@@ -399,6 +406,7 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     , m_addLayer(actionButton(IconId::AddLayer, tr("New layer"), this))
     , m_addPerspective(actionButton(IconId::AddPerspective, tr("New perspective layer"), this))
     , m_addVector(actionButton(IconId::AddVector, tr("New vector layer"), this))
+    , m_addTimeLayer(actionButton(IconId::AddTimeLayer, tr("New time layer: one layer in every frame of the cel"), this))
     , m_rasterize(actionButton(IconId::Rasterize, tr("Rasterize the selected vector layers: they become raster layers"), this))
     , m_merge(actionButton(IconId::MergeLayers, tr("Merge the selected layers"), this))
     , m_mergeDown(actionButton(IconId::MergeDown, tr("Merge with the layer below"), this))
@@ -483,6 +491,18 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
     m_rasterize->setObjectName(QStringLiteral("rasterize"));
     m_rasterize->setEnabled(false);
     buttons->addWidget(m_rasterize); // next to the one that makes a vector layer
+    m_addTimeLayer->setObjectName(QStringLiteral("addTimeLayer"));
+    m_addTimeLayer->setPopupMode(QToolButton::InstantPopup);
+    {
+        auto *kinds = new QMenu(m_addTimeLayer);
+        kinds->setObjectName(QStringLiteral("timeLayerKinds"));
+        connect(kinds->addAction(icon(IconId::KindRaster), tr("Time layer")), &QAction::triggered, this,
+                [this] { addTimeLayerClicked(doc::LayerKind::Raster); });
+        connect(kinds->addAction(icon(IconId::KindVector), tr("Time vector layer")), &QAction::triggered, this,
+                [this] { addTimeLayerClicked(doc::LayerKind::Vector); });
+        m_addTimeLayer->setMenu(kinds);
+    }
+    buttons->addWidget(m_addTimeLayer);
     buttons->addWidget(m_merge);
     buttons->addWidget(m_mergeDown);
     buttons->addWidget(m_remove);
@@ -660,6 +680,28 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
         m_focus = Focus::Cel;
         selectCurrentRow();
     });
+    // A time layer chosen by itself elsewhere (its row in the timeline): its row under the cel, alone.
+    connect(m_document, &DocumentController::timeLayerPicked, this, [this](doc::CelId cel, doc::LayerId layer) {
+        m_focus = Focus::Layer;
+        QTreeWidgetItem *row = nullptr;
+        if (QTreeWidgetItem *celRow = celItem(cel))
+            for (int f = 0; f < celRow->childCount() && !row; ++f)
+                if (isTimeRow(celRow->child(f)) && layerOf(celRow->child(f)) == layer)
+                    row = celRow->child(f);
+        if (!row) {
+            selectCurrentRow();
+            return;
+        }
+        {
+            const QSignalBlocker block(m_tree);
+            const bool autoScroll = m_tree->hasAutoScroll();
+            m_tree->setAutoScroll(false);
+            m_tree->setCurrentItem(row, 0, QItemSelectionModel::ClearAndSelect);
+            m_tree->setAutoScroll(autoScroll);
+        }
+        m_selected = {layer};
+        syncHeader();
+    });
     // The chosen cel's column is whole, the others' fainter: they follow the current cel.
     connect(m_document, &DocumentController::currentCelChanged, this, [this] { m_tree->viewport()->update(); });
     connect(m_document, &DocumentController::cameraSelectionChanged, this, [this] { m_tree->viewport()->update(); });
@@ -709,7 +751,7 @@ QTreeWidgetItem *LayersPanel::frameItem(doc::DrawingId drawing) const
     for (int i = 0; i < m_tree->topLevelItemCount(); ++i) {
         QTreeWidgetItem *cel = m_tree->topLevelItem(i);
         for (int f = 0; f < cel->childCount(); ++f)
-            if (drawingOf(cel->child(f)) == drawing)
+            if (kindOf(cel->child(f)) == Row::Frame && drawingOf(cel->child(f)) == drawing)
                 return cel->child(f);
     }
     return nullptr;
@@ -834,6 +876,52 @@ void LayersPanel::rebuildTree()
         QTreeWidgetItem *celRow = addRow(nullptr, Row::Cel, celId, doc::kNoId, doc::kNoId, row);
         celRow->setBackground(0, celRowColor(TimelineView::colorSlot(celId), QApplication::palette())); // the cel's color, as in the timeline
 
+        // Its time layers, first: each is in every frame (its row stands for the copy in the frame shown now).
+        for (const doc::TimeLayer &t : cel.timeLayers()) {
+            const doc::Drawing *in = shown && shown->layer(t.id) ? shown : nullptr;
+            for (const auto &[id, drawing] : cel.drawings())
+                if (!in && drawing.layer(t.id))
+                    in = &drawing;
+            if (!in)
+                continue;
+            const doc::Layer &layer = *in->layer(t.id);
+            const doc::LayerId id = t.id;
+            auto [timeRow, th] = rowWidget();
+            auto *timeEye = toggleButton(IconId::Eye, tr("Show / hide"), layer.properties.visible, timeRow);
+            auto *timeLock = toggleButton(IconId::Lock, tr("Lock / unlock"), layer.properties.locked, timeRow);
+            th->addWidget(timeEye);
+            th->addWidget(timeLock);
+            auto *clock = iconLabel(IconId::TimeLayer, timeRow);
+            clock->setObjectName(QStringLiteral("timeIcon"));
+            clock->setToolTip(tr("Time layer: in every frame of the cel"));
+            th->addWidget(clock);
+            th->addWidget(iconLabel(layer.kind == doc::LayerKind::Vector ? IconId::KindVector : IconId::KindRaster, timeRow));
+            auto *timeText = new QLabel(propertiesText(layer.properties.opacity, layer.properties.blend,
+                                                       layer.properties.name),
+                                        timeRow);
+            timeText->setObjectName(QStringLiteral("rowText"));
+            th->addWidget(timeText, 1);
+            auto toggleTime = [this, celId, id](auto change) { // on any copy: the others follow
+                const doc::Cel *c = m_document->document().cel(celId);
+                if (!c)
+                    return;
+                for (const auto &[drawingId, drawing] : c->drawings())
+                    if (const doc::Layer *l = drawing.layer(id)) {
+                        doc::LayerProperties p = l->properties;
+                        change(p);
+                        m_document->execute(doc::makeSetLayerProperties(m_document->document(), celId, drawingId, id, p));
+                        return;
+                    }
+            };
+            connect(timeEye, &QToolButton::clicked, this, [toggleTime](bool visible) {
+                toggleTime([visible](doc::LayerProperties &p) { p.visible = visible; });
+            });
+            connect(timeLock, &QToolButton::clicked, this,
+                    [toggleTime](bool locked) { toggleTime([locked](doc::LayerProperties &p) { p.locked = locked; }); });
+            QTreeWidgetItem *item = addRow(celRow, Row::Layer, celId, in->id, id, timeRow);
+            item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable); // not dragged: where it is is each frame's
+        }
+
         // Its frames, in the order the timeline first shows them (the ones
         // not shown anywhere last).
         std::vector<const doc::Drawing *> drawings;
@@ -896,6 +984,12 @@ void LayersPanel::rebuildTree()
                                      : layer.kind == doc::LayerKind::Perspective ? tr("Perspective layer")
                                                                                  : tr("Raster layer"));
                 lh->addWidget(kindIcon);
+                if (layer.time) {
+                    auto *clock = iconLabel(IconId::TimeLayer, layerRow);
+                    clock->setObjectName(QStringLiteral("timeIcon"));
+                    clock->setToolTip(tr("Time layer: in every frame of the cel"));
+                    lh->addWidget(clock);
+                }
                 auto *layerText = new QLabel(propertiesText(layer.properties.opacity, layer.properties.blend,
                                                             layer.properties.name),
                                              layerRow);
@@ -1000,6 +1094,15 @@ QString LayersPanel::shapeKey() const
     for (int i = 0; i < d.celCount(); ++i) {
         const doc::Cel &cel = d.celAt(i);
         key += QStringLiteral("c%1:").arg(cel.id());
+        // Its time layers' rows show how the layer looks themselves: made anew when that changes.
+        for (const doc::TimeLayer &t : cel.timeLayers())
+            for (const auto &[id, drawing] : cel.drawings())
+                if (const doc::Layer *l = drawing.layer(t.id)) {
+                    const doc::LayerProperties &p = l->properties;
+                    key += QStringLiteral("t%1%2%3%4%5%6,").arg(t.id).arg(QString::fromStdString(p.name)).arg(p.visible).arg(p.locked)
+                               .arg(double(p.opacity)).arg(int(p.blend));
+                    break;
+                }
         for (const auto &[id, drawing] : cel.drawings()) {
             key += QStringLiteral("d%1,%2,%3[").arg(id).arg(QString::fromStdString(drawing.name), exposureText(cel.timing(), id));
             for (const doc::Layer &layer : drawing.layers)
@@ -1158,6 +1261,11 @@ void LayersPanel::markCurrentFrames()
         const doc::Cel *cel = kindOf(celRow) == Row::Cel ? d.cel(celOf(celRow)) : nullptr;
         const doc::DrawingId shown = cel ? cel->timing().drawingAt(m_document->currentFrame()) : doc::kNoId;
         for (int f = 0; f < celRow->childCount(); ++f) {
+            if (QTreeWidgetItem *time = celRow->child(f); cel && isTimeRow(time)) {
+                if (const doc::Drawing *now = cel->drawing(shown); now && now->layer(layerOf(time)))
+                    time->setData(0, kDrawingRole, QVariant::fromValue(now->id)); // the copy shown now
+                continue;
+            }
             QWidget *row = m_tree->itemWidget(celRow->child(f), 0);
             if (auto *text = row ? row->findChild<QLabel *>(QStringLiteral("frameText")) : nullptr) {
                 QFont font = text->font();
@@ -1183,7 +1291,7 @@ void LayersPanel::rowChosen(QTreeWidgetItem *item)
     // A frame not shown here: to the first point it is shown at, if any.
     const doc::DrawingId drawing = drawingOf(item);
     const doc::Cel *cel = m_document->document().cel(celOf(item));
-    if (cel && drawing != doc::kNoId && drawing != m_document->currentDrawingId())
+    if (cel && drawing != doc::kNoId && drawing != m_document->currentDrawingId() && !isTimeRow(item))
         for (const doc::Exposure &e : cel->timing().exposures())
             if (e.drawing == drawing) {
                 m_document->setCurrentFrame(e.start);
@@ -1416,6 +1524,16 @@ void LayersPanel::commitOpacity()
     editSelectedLayers([opacity](doc::LayerProperties &p) { p.opacity = opacity; });
 }
 
+void LayersPanel::addTimeLayerClicked(doc::LayerKind kind)
+{
+    if (m_focus == Focus::Camera)
+        return;
+    m_focus = Focus::Layer; // the new layer is shown as current
+    m_document->setLayerChosen(true);
+    if (m_document->addTimeLayer(kind) == doc::kNoId)
+        emit statusMessage(tr("A time layer is made from a frame of a cel: go to a frame the cel shows"));
+}
+
 void LayersPanel::addClicked(doc::LayerKind kind)
 {
     switch (m_focus) {
@@ -1454,6 +1572,11 @@ void LayersPanel::removeSelected()
     }
     if (m_focus != Focus::Layer)
         return;
+    if (const QTreeWidgetItem *current = m_tree->currentItem(); isTimeRow(current)) { // out of every frame
+        m_selected.clear();
+        m_document->removeTimeLayer(celOf(current), layerOf(current));
+        return;
+    }
     std::vector<std::unique_ptr<doc::Command>> steps;
     for (const auto &[drawing, layers] : removableLayers())
         for (const LayerRow &row : layers)
@@ -1470,8 +1593,8 @@ std::map<std::pair<doc::CelId, doc::DrawingId>, std::vector<LayersPanel::LayerRo
     // frame keeps at least one layer (its lowest chosen one stays when all go).
     std::map<std::pair<doc::CelId, doc::DrawingId>, std::vector<LayerRow>> chosen;
     for (const QTreeWidgetItem *item : m_tree->selectedItems())
-        if (kindOf(item) == Row::Layer)
-            chosen[{celOf(item), drawingOf(item)}].push_back({celOf(item), layerOf(item)});
+        if (kindOf(item) == Row::Layer && !isTimeRow(item) && !m_document->isTimeLayer(celOf(item), layerOf(item)))
+            chosen[{celOf(item), drawingOf(item)}].push_back({celOf(item), layerOf(item)}); // a time layer goes from its cel
     const doc::Document &d = m_document->document();
     for (auto it = chosen.begin(); it != chosen.end();) {
         const doc::Drawing *drawing = d.cel(it->first.first) ? d.cel(it->first.first)->drawing(it->first.second) : nullptr;
@@ -1758,7 +1881,7 @@ bool LayersPanel::dropAt(const QPoint &pos)
     if (m_focus == Focus::Layer) {
         // Within their own frame: before the layer under the pen (after it in
         // its lower half), or on top when dropped on the frame's row.
-        if (kind == Row::Paper || drawingOf(target) != m_document->currentDrawingId())
+        if (kind == Row::Paper || isTimeRow(target) || drawingOf(target) != m_document->currentDrawingId())
             return false;
         if (kind == Row::Frame) {
             moveSelectedToRow(0);
@@ -1927,7 +2050,7 @@ void LayersPanel::syncHeader()
         }
         header = layer != nullptr;
         canAdd = drawing != nullptr;
-        canRemove = !removableLayers().empty();
+        canRemove = !removableLayers().empty() || isTimeRow(m_tree->currentItem());
         canMerge = drawing
                    && m_document->canMergeLayers(std::vector<doc::LayerId>(selected.begin(), selected.end()));
         canMergeDown = drawing
@@ -1956,6 +2079,7 @@ void LayersPanel::syncHeader()
     m_addLayer->setEnabled(canAdd);
     m_addPerspective->setEnabled(canAdd);
     m_addVector->setEnabled(canAdd);
+    m_addTimeLayer->setEnabled(canAdd);
     m_rasterize->setEnabled(canRasterize);
     m_remove->setEnabled(canRemove);
     m_merge->setEnabled(canMerge);

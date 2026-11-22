@@ -79,6 +79,31 @@ private:
     CelProperties m_after;
 };
 
+// The time layers of a cel (Cel::timeLayers(): which there are, and what each follows) set; undo puts back what there was.
+class SetTimeLayersCommand : public Command
+{
+public:
+    SetTimeLayersCommand(CelId cel, std::vector<TimeLayer> before, std::vector<TimeLayer> after, CommandKind kind)
+        : m_id(cel)
+        , m_before(std::move(before))
+        , m_after(std::move(after))
+        , m_kind(kind)
+    {
+    }
+
+    CommandKind kind() const override { return m_kind; }
+    ChangeSet apply(Document &doc) override;
+    ChangeSet revert(Document &doc) override;
+
+private:
+    ChangeSet put(Document &doc, const std::vector<TimeLayer> &layers);
+
+    CelId m_id;
+    std::vector<TimeLayer> m_before;
+    std::vector<TimeLayer> m_after;
+    CommandKind m_kind;
+};
+
 // nullptr if the properties are already `properties`.
 std::unique_ptr<Command> makeSetCelProperties(const Document &doc, CelId cel, CelProperties properties);
 

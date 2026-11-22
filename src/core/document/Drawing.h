@@ -51,6 +51,10 @@ struct Layer
     std::optional<TiledImage> mask;
     // A vector layer's strokes, bottom to top: what `image` is drawn from. Empty on the other kinds.
     std::vector<VectorStroke> strokes;
+    // A time layer (see Cel::timeLayers()): one layer that every drawing of its cel has, the same in each, with the same
+    // id; where it is in the stack is each drawing's own. What is done to it in one drawing is done in all of them (see
+    // Document::syncTimeLayers()). It is not taken out of one drawing: only out of the cel, out of all of them.
+    bool time = false;
 };
 
 // One drawing of a cel, a "frame" in the interface. It exists independently

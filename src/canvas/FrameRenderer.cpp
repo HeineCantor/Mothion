@@ -527,12 +527,110 @@ void FrameRenderer::render(const doc::Document &doc, int frame, const QRect &rec
     }
 }
 
-const doc::Drawing *FrameRenderer::drawingOf(const doc::Cel &cel, int frame) const
+const doc::Drawing *FrameRenderer::drawingOf(const doc::Document &doc, const doc::Cel &cel, int frame) const
 {
+    const doc::Drawing *drawing = cel.drawingAt(frame);
     if (m_shownDrawing != doc::kNoId && cel.id() == m_shownCel)
         if (const doc::Drawing *shown = cel.drawing(m_shownDrawing))
-            return shown;
-    return cel.drawingAt(frame);
+            drawing = shown;
+    return drawing ? timeMoved(doc, cel, *drawing, frame) : nullptr;
+}
+
+const doc::Drawing *FrameRenderer::timeMoved(const doc::Document &doc, const doc::Cel &cel, const doc::Drawing &drawing,
+                                             int frame) const
+{
+    if (cel.timeLayers().empty() || cel.id() == m_asDrawn)
+        return &drawing;
+    std::vector<Moved::How> hows;
+    for (const doc::TimeLayer &t : cel.timeLayers()) {
+        if (t.parent == doc::kNoId || !drawing.layer(t.id))
+            continue;
+        const doc::Cel own = doc::Document::timeLayerAsCel(cel, t);
+        Moved::How how{t.id, doc.followMatrix(own, frame)};
+        const doc::Cel *deformer = cel.id() == m_undeformed ? nullptr : doc.followedDeformer(own);
+        if (deformer && !deformer->deformer().isEmpty()) {
+            how.kind = deformer->properties().deformer;
+            how.deformer = deformer->deformer();
+            how.pose = doc.deformPoseAt(*deformer, frame);
+        }
+        if (!how.matrix.isIdentity() || how.kind != doc::DeformerKind::None)
+            hows.push_back(std::move(how));
+    }
+    if (hows.empty())
+        return &drawing;
+    Moved &moved = m_moved[cel.id()];
+    bool same = moved.drawing == drawing.id && moved.hows == hows && moved.brushes == (m_brushes != nullptr)
+                && moved.sources.size() == drawing.layers.size();
+    for (std::size_t i = 0; same && i < drawing.layers.size(); ++i) {
+        const doc::Layer &l = drawing.layers[i];
+        same = sameTiles(moved.sources[i], l.image) && moved.masks[i].has_value() == l.mask.has_value()
+               && (!l.mask || sameTiles(*moved.masks[i], *l.mask));
+    }
+    if (same)
+        return &moved.result;
+    moved.drawing = drawing.id;
+    moved.hows = hows;
+    moved.brushes = m_brushes != nullptr;
+    moved.sources.clear();
+    moved.masks.clear();
+    for (const doc::Layer &l : drawing.layers) {
+        moved.sources.push_back(l.image);
+        moved.masks.push_back(l.mask);
+    }
+    moved.result = drawing;
+    for (const Moved::How &how : hows) {
+        doc::Layer *layer = moved.result.layer(how.layer);
+        if (!layer)
+            continue;
+        const std::unique_ptr<deform::Field> field =
+            how.kind == doc::DeformerKind::None ? nullptr : deform::makeField(how.kind, how.deformer, how.pose);
+        const doc::Matrix2x3 m = how.matrix;
+        // Bent by its deformer, then moved by its trajectory (as a cel is).
+        auto map = [&](deform::Vec2 p) {
+            if (field)
+                p = field->map(p);
+            double x = 0, y = 0;
+            m.map(p.x, p.y, x, y);
+            return deform::Vec2{x, y};
+        };
+        auto warp = [&](const doc::TiledImage &image) {
+            const std::vector<doc::TileCoord> coords = image.tileCoords();
+            if (coords.empty())
+                return doc::TiledImage();
+            int x0 = coords.front().x, y0 = coords.front().y, x1 = x0, y1 = y0;
+            for (const doc::TileCoord &c : coords) {
+                x0 = std::min(x0, c.x), y0 = std::min(y0, c.y);
+                x1 = std::max(x1, c.x), y1 = std::max(y1, c.y);
+            }
+            const int x = x0 * doc::kTileSize, y = y0 * doc::kTileSize;
+            puppet::RasterImage source(x, y, (x1 - x0 + 1) * doc::kTileSize, (y1 - y0 + 1) * doc::kTileSize);
+            image.read(x, y, source.width, source.height, source.pixels.data(), source.width);
+            const puppet::RasterImage warped = deform::warpImage(source, map);
+            doc::TiledImage out;
+            if (!warped.isEmpty())
+                out.write(warped.x, warped.y, warped.width, warped.height, warped.pixels.data(), warped.width);
+            return out;
+        };
+        if (layer->kind == doc::LayerKind::Vector && m_brushes && !layer->strokes.empty()) {
+            // Stroke by stroke: the lines drawn again where they went, as wide as the move makes them.
+            const deform::Field::Linear turn{m.a, m.c, m.b, m.d};
+            const PointMap strokeMap = [&](puppet::Vec2 p, deform::Field::Linear &linear) {
+                deform::Field::Linear bend;
+                if (field)
+                    bend = field->linearAt(p);
+                linear = {turn.a * bend.a + turn.b * bend.c, turn.a * bend.b + turn.b * bend.d,
+                          turn.c * bend.a + turn.d * bend.c, turn.c * bend.b + turn.d * bend.d};
+                return map(p);
+            };
+            layer->image = doc::TiledImage();
+            drawStrokes(layer->image, warpedStrokes(layer->strokes, strokeMap), *m_brushes, {});
+        } else if (layer->kind != doc::LayerKind::Perspective) {
+            layer->image = warp(layer->image);
+        }
+        if (layer->mask)
+            layer->mask = warp(*layer->mask);
+    }
+    return &moved.result;
 }
 
 QRect FrameRenderer::contentBounds(const doc::Document &doc, int frame) const
@@ -542,7 +640,7 @@ QRect FrameRenderer::contentBounds(const doc::Document &doc, int frame) const
         const doc::Cel &cel = doc.celAt(i);
         if ((m_only != doc::kNoId && cel.id() != m_only) || cel.properties().drawsNothing() || !cel.properties().visible)
             continue;
-        const doc::Drawing *drawing = drawingOf(cel, frame);
+        const doc::Drawing *drawing = drawingOf(doc, cel, frame);
         if (!drawing)
             continue;
         const Deformed *bent = deformed(doc, cel, *drawing, frame);
@@ -579,7 +677,7 @@ void FrameRenderer::compose(QImage &target, const QPoint &origin, const doc::Doc
         if (cel.properties().drawsNothing())
             continue; // not drawn: it only moves or bends what follows it
         const doc::CelProperties &props = cel.properties();
-        const doc::Drawing *drawing = drawingOf(cel, frame);
+        const doc::Drawing *drawing = drawingOf(doc, cel, frame);
         // What the animation does to the cel on this frame (nothing for a cel with no keys, or one shown as drawn).
         const bool animated = !cel.motion().isEmpty() && cel.id() != m_asDrawn;
         const doc::CelPose pose = animated ? cel.motion().poseAt(frame) : doc::CelPose{};

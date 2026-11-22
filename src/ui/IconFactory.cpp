@@ -714,6 +714,22 @@ void drawGlyph(QPainter &p, IconId id)
         path.moveTo(16, 6.5);
         path.lineTo(22, 6.5);
         break;
+    case IconId::TimeLayer: // a clock
+        path.addEllipse(QPointF(12, 12), 8.5, 8.5);
+        path.moveTo(12, 6.5);
+        path.lineTo(12, 12);
+        path.lineTo(16, 14.5);
+        break;
+    case IconId::AddTimeLayer: // a clock, and a plus
+        path.addEllipse(QPointF(10, 10), 7, 7);
+        path.moveTo(10, 5.5);
+        path.lineTo(10, 10);
+        path.lineTo(13, 12);
+        path.moveTo(18.5, 14);
+        path.lineTo(18.5, 22);
+        path.moveTo(14.5, 18);
+        path.lineTo(22.5, 18);
+        break;
     case IconId::Filter: // a funnel
         path.moveTo(4, 5);
         path.lineTo(20, 5);

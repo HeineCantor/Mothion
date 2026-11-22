@@ -186,6 +186,9 @@ DocumentController::DocumentController(QObject *parent)
     , m_document(makeDefaultDocument())
 {
     m_currentCel = m_document->celAt(0).id();
+    // The time layers put right after each step (one changed in a drawing changes in all of them, a new drawing gets them).
+    m_history.setAfterChange([this] { return m_document->syncTimeLayers(); },
+                             [this](const doc::ChangeSet &changes) { publish(changes); });
     applyUndoLimits();
     connect(&tools::Preferences::instance(), &tools::Preferences::changed, this, &DocumentController::applyUndoLimits);
 }
@@ -236,6 +239,7 @@ void DocumentController::replaceDocument(std::unique_ptr<doc::Document> document
         return;
     interruptStroke(); // open edits land in the old document before it goes
     m_document = std::move(document);
+    m_document->syncTimeLayers(); // what each time layer is, known from its copies
     m_history.clear();
     m_history.markClean();
     m_currentCel = m_document->celCount() > 0 ? m_document->celAt(m_document->celCount() - 1).id()
@@ -871,6 +875,90 @@ bool DocumentController::addLayer(bool onTop, doc::LayerKind kind)
     return true;
 }
 
+doc::LayerId DocumentController::addTimeLayer(doc::LayerKind kind)
+{
+    const doc::Cel *cel = m_document->cel(m_currentCel);
+    const doc::Drawing *drawing = currentDrawing();
+    if (!cel || !drawing || cel->properties().drawsNothing() || kind == doc::LayerKind::Perspective)
+        return doc::kNoId;
+    const bool vector = kind == doc::LayerKind::Vector;
+    QString name; // the first free number
+    for (int n = 1;; ++n) {
+        name = vector ? tr("Time vector %1").arg(n) : tr("Time layer %1").arg(n);
+        if (std::none_of(drawing->layers.begin(), drawing->layers.end(),
+                         [&](const doc::Layer &l) { return l.properties.name == name.toStdString(); }))
+            break;
+    }
+    const int at = drawing->indexOf(m_currentLayer);
+    const int index = at < 0 ? int(drawing->layers.size()) : at + 1;
+    auto add = std::make_unique<doc::AddLayerCommand>(*m_document, m_currentCel, drawing->id, index,
+                                                      doc::LayerProperties{name.toStdString()}, doc::TiledImage(), kind);
+    add->makeTimeLayer();
+    const doc::LayerId id = add->layerId();
+    std::vector<doc::TimeLayer> layers = cel->timeLayers();
+    std::vector<doc::TimeLayer> before = layers;
+    layers.push_back({id});
+    std::vector<std::unique_ptr<doc::Command>> steps;
+    steps.push_back(std::move(add));
+    steps.push_back(std::make_unique<doc::SetTimeLayersCommand>(m_currentCel, std::move(before), std::move(layers),
+                                                                doc::CommandKind::AddTimeLayer));
+    execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::AddTimeLayer, std::move(steps)));
+    setCurrentLayer(id);
+    return id;
+}
+
+bool DocumentController::removeTimeLayer(doc::CelId celId, doc::LayerId layer)
+{
+    const doc::Cel *cel = m_document->cel(celId);
+    if (!cel || !cel->timeLayer(layer))
+        return false;
+    std::vector<doc::TimeLayer> layers = cel->timeLayers();
+    std::erase_if(layers, [&](const doc::TimeLayer &t) { return t.id == layer; });
+    std::vector<std::unique_ptr<doc::Command>> steps;
+    steps.push_back(std::make_unique<doc::SetTimeLayersCommand>(celId, cel->timeLayers(), std::move(layers),
+                                                                doc::CommandKind::RemoveTimeLayer));
+    for (const auto &[id, drawing] : cel->drawings())
+        if (drawing.layer(layer)) // each copy, so that an undo puts it back where it was in each frame
+            steps.push_back(std::make_unique<doc::RemoveLayerCommand>(celId, id, layer));
+    execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::RemoveTimeLayer, std::move(steps)));
+    return true;
+}
+
+bool DocumentController::setTimeLayerParent(doc::CelId celId, doc::LayerId layer, doc::CelId parentId, int part)
+{
+    const doc::Cel *cel = m_document->cel(celId);
+    const doc::TimeLayer *now = cel ? cel->timeLayer(layer) : nullptr;
+    if (!now)
+        return false;
+    const doc::Cel *parent = parentId == doc::kNoId ? nullptr : m_document->cel(parentId);
+    if (parentId != doc::kNoId) {
+        if (!parent || parentId == celId || !parent->properties().drawsNothing())
+            return false;
+        if (parent->properties().trajectory)
+            part = -1;
+        else if (part >= int(parent->deformer().bones.size()))
+            return false;
+    }
+    part = parentId == doc::kNoId ? -1 : std::max(-1, part);
+    if (now->parent == parentId && now->parentPart == part)
+        return false;
+    std::vector<doc::TimeLayer> layers = cel->timeLayers();
+    for (doc::TimeLayer &t : layers)
+        if (t.id == layer) {
+            t.parent = parentId;
+            t.parentPart = part;
+        }
+    execute(std::make_unique<doc::SetTimeLayersCommand>(celId, cel->timeLayers(), std::move(layers),
+                                                        doc::CommandKind::EditTimeLayer));
+    return true;
+}
+
+bool DocumentController::isTimeLayer(doc::CelId celId, doc::LayerId layer) const
+{
+    const doc::Cel *cel = m_document->cel(celId);
+    return cel && cel->timeLayer(layer);
+}
+
 std::vector<const doc::Layer *> DocumentController::mergeableLayers(const std::vector<doc::LayerId> &ids,
                                                                      bool *incompatible) const
 {
@@ -885,7 +973,7 @@ std::vector<const doc::Layer *> DocumentController::mergeableLayers(const std::v
         return found;
     for (const doc::Layer &layer : drawing->layers)
         if (std::find(ids.begin(), ids.end(), layer.id) != ids.end() && layer.kind != doc::LayerKind::Perspective
-            && layer.properties.visible && !layer.properties.locked)
+            && layer.properties.visible && !layer.properties.locked && !layer.time) // a time layer is not merged away
             found.push_back(&layer);
     const bool vector = !found.empty() && found.front()->kind == doc::LayerKind::Vector;
     const bool bad = std::any_of(found.begin(), found.end(), [&](const doc::Layer *layer) {
@@ -1123,7 +1211,7 @@ bool DocumentController::pasteLayers(bool merged, const std::vector<doc::LayerId
         int lowest = index;
         std::vector<doc::LayerId> going;
         for (const doc::Layer &layer : drawing->layers)
-            if (!theCopied && !layer.properties.locked
+            if (!theCopied && !layer.properties.locked && !layer.time
                 && std::find(replace.begin(), replace.end(), layer.id) != replace.end()) {
                 going.push_back(layer.id);
                 lowest = std::min(lowest, drawing->indexOf(layer.id));
@@ -1179,6 +1267,14 @@ void DocumentController::commitLayerProperties(const LayerRef &ref, const doc::L
 
 std::string DocumentController::newFrameLayerName() const
 {
+    // On a time layer (which the new frame has already, see doc::Layer::time): named like the frame's own top layer.
+    if (isTimeLayer(m_currentCel, m_currentLayer)) {
+        if (const doc::Drawing *drawing = currentDrawing())
+            for (auto it = drawing->layers.rbegin(); it != drawing->layers.rend(); ++it)
+                if (!it->time)
+                    return it->kind == doc::LayerKind::Raster ? it->properties.name : tr("Layer 1").toStdString();
+        return tr("Layer 1").toStdString();
+    }
     // A vector or perspective layer's name ("Vector 1") would be wrong on a raster layer.
     if (m_currentLayerName.empty() || m_currentLayerKind != doc::LayerKind::Raster)
         return tr("Layer 1").toStdString();
@@ -1535,6 +1631,25 @@ void DocumentController::chooseCel(doc::CelId id)
     if (celSelection() != before)
         emit celSelectionChanged();
     emit celChosen(id);
+}
+
+void DocumentController::chooseTimeLayer(doc::CelId id, doc::LayerId layer)
+{
+    if (!isTimeLayer(id, layer))
+        return;
+    selectCamera(false);
+    setCurrentCel(id);
+    setLayerChosen(true);
+    setCurrentLayer(layer);
+    std::vector<LayerRef> layers;
+    if (const doc::Drawing *drawing = currentDrawing(); drawing && drawing->layer(layer))
+        layers.push_back({id, drawing->id, layer});
+    setLayerSelection(std::move(layers));
+    const std::vector<doc::CelId> before = celSelection();
+    m_celSelection = {id};
+    if (celSelection() != before)
+        emit celSelectionChanged();
+    emit timeLayerPicked(id, layer);
 }
 
 void DocumentController::setLayerChosen(bool chosen)
@@ -2686,6 +2801,15 @@ doc::CelId DocumentController::pasteCel()
         if (const auto it = drawings.find(e.drawing); it != drawings.end())
             cel->timing().setExposure(e.start, e.length, it->second);
     cel->setMotion(m_copiedCel->motion());
+    std::vector<doc::TimeLayer> timeLayers;
+    for (doc::TimeLayer t : m_copiedCel->timeLayers())
+        if (const auto it = layers.find(t.id); it != layers.end()) {
+            t.id = it->second;
+            if (t.parent != doc::kNoId && !d.cel(t.parent))
+                t.parent = doc::kNoId, t.parentPart = -1;
+            timeLayers.push_back(t);
+        }
+    cel->setTimeLayers(std::move(timeLayers));
     const int below = d.indexOf(m_currentCel);
     execute(std::make_unique<doc::AddCelCommand>(std::move(cel), below < 0 ? d.celCount() : below + 1));
     setCurrentCel(id);
@@ -3612,6 +3736,9 @@ QString DocumentController::commandName(doc::CommandKind kind)
     case doc::CommandKind::MoveFrames: return tr("move frames");
     case doc::CommandKind::PasteFrames: return tr("paste frames");
     case doc::CommandKind::MergeLayers: return tr("merge layers");
+    case doc::CommandKind::AddTimeLayer: return tr("new time layer");
+    case doc::CommandKind::RemoveTimeLayer: return tr("delete time layer");
+    case doc::CommandKind::EditTimeLayer: return tr("time layer");
     case doc::CommandKind::PasteLayers: return tr("paste layers");
     case doc::CommandKind::Blend: return tr("blend");
     case doc::CommandKind::Liquify: return tr("liquify");

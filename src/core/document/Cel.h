@@ -49,6 +49,17 @@ inline bool hasChannel(const CelProperties &properties, Channel channel)
     return (properties.deformer != DeformerKind::None) == (channel == Channel::Deform);
 }
 
+// A time layer of a cel (see Layer::time): its id, and what moves or bends it on its own: like a cel, the trajectory it
+// follows or the deformation cel that bends it (kNoId: none), or the part of that deformer it is carried by (-1: bent by
+// it). That comes first, the cel's own motion on top of it (it is the cel's child).
+struct TimeLayer
+{
+    LayerId id = kNoId;
+    CelId parent = kNoId;
+    int parentPart = -1;
+    bool operator==(const TimeLayer &) const = default;
+};
+
 // A cel, a row of the timeline ("element" in Harmony terms): its own set of
 // drawings plus the timing that says which of them is shown on each frame.
 class Cel
@@ -84,6 +95,15 @@ public:
     const std::optional<BlenderLink> &blenderLink() const { return m_blenderLink; }
     void setBlenderLink(std::optional<BlenderLink> link) { m_blenderLink = std::move(link); }
 
+    // The time layers of the cel, in the order they were made (see Layer::time).
+    const std::vector<TimeLayer> &timeLayers() const { return m_timeLayers; }
+    void setTimeLayers(std::vector<TimeLayer> layers) { m_timeLayers = std::move(layers); }
+    const TimeLayer *timeLayer(LayerId id) const;
+    // A time layer as it is in every drawing (what Document::syncTimeLayers() goes by); nullptr if not known yet.
+    const Layer *timeContent(LayerId id) const;
+    void setTimeContent(const Layer &layer) { m_timeContent[layer.id] = layer; }
+    void forgetTimeContent(LayerId id) { m_timeContent.erase(id); }
+
     // Smallest positive number not already used as a name: "1", "2", ...
     std::string nextDrawingName() const;
 
@@ -95,6 +115,8 @@ private:
     CelMotion m_motion;
     Deformer m_deformer;
     std::optional<BlenderLink> m_blenderLink;
+    std::vector<TimeLayer> m_timeLayers;
+    std::map<LayerId, Layer> m_timeContent;
 };
 
 } // namespace mothion::doc

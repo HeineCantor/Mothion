@@ -18,6 +18,8 @@ enum class IconId {
     NewFrame, Onion, NewCel, NewTrajectory, Bones, NewBones, DeformCurve, DeformEnvelope, Filter,
     // Correct line (the control points of vector strokes), and the brushes' symmetry.
     CorrectLine, Symmetry,
+    // A time layer (a layer in every frame of its cel): a clock; a new one, a clock with a plus.
+    TimeLayer, AddTimeLayer,
 };
 
 // Provisional icons, drawn in code as simple line art on a 24x24 grid.
