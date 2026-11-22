@@ -84,6 +84,7 @@ qt_add_library(mothion_gui STATIC
     io/Autosave.h io/Autosave.cpp
     io/FrameExport.h io/FrameExport.cpp
     io/VideoExport.h io/VideoExport.cpp
+    io/VideoImport.h io/VideoImport.cpp
     io/LipSyncJob.h
     io/RhubarbLipSync.h io/RhubarbLipSync.cpp
     io/Fbank.h io/Fbank.cpp

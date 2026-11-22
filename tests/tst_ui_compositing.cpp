@@ -376,6 +376,51 @@ private slots:
     }
 
 
+    // A video taken out as frames at the scene's rate: 2 seconds at 30 fps made 24 frames a second (48 pictures, in order,
+    // the size of the video); stopped from the progress, nothing; a file that is not a video, an error.
+    void videoIsImportedAsFramesThroughFfmpeg()
+    {
+        const QString ffmpeg = io::findFfmpeg();
+        if (ffmpeg.isEmpty())
+            QSKIP("ffmpeg is not installed");
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString video = dir.filePath(QStringLiteral("in.mp4"));
+        QProcess make;
+        make.start(ffmpeg, {QStringLiteral("-hide_banner"), QStringLiteral("-loglevel"), QStringLiteral("error"),
+                            QStringLiteral("-y"), QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+                            QStringLiteral("testsrc=size=64x48:rate=30:duration=2"), QStringLiteral("-pix_fmt"),
+                            QStringLiteral("yuv420p"), video});
+        QVERIFY(make.waitForFinished(60000));
+        QCOMPARE(make.exitCode(), 0);
+        QString error;
+        double lastTotal = 0;
+        const QStringList frames = io::extractVideoFrames(video, dir.filePath(QStringLiteral("frames")), 24.0,
+                                                          [&](double, double total) {
+                                                              lastTotal = total;
+                                                              return true;
+                                                          }, &error);
+        QVERIFY2(!frames.isEmpty(), qPrintable(error));
+        QVERIFY2(std::abs(int(frames.size()) - 48) <= 1, qPrintable(QString::number(frames.size())));
+        QVERIFY(std::abs(lastTotal - 2.0) < 0.1);
+        QVERIFY(frames.first().endsWith(QStringLiteral("frame_000001.png")));
+        const QImage first(frames.first());
+        QCOMPARE(first.size(), QSize(64, 48));
+        QVERIFY(QImage(frames[1]) != first); // the picture moves
+        // Stopped: nothing, and no error.
+        QVERIFY(io::extractVideoFrames(video, dir.filePath(QStringLiteral("stopped")), 24.0,
+                                       [](double, double) { return false; }, &error).isEmpty());
+        QVERIFY(error.isEmpty());
+        // Not a video.
+        const QString text = dir.filePath(QStringLiteral("not.mp4"));
+        QFile f(text);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write("hello");
+        f.close();
+        QVERIFY(io::extractVideoFrames(text, dir.filePath(QStringLiteral("bad")), 24.0, {}, &error).isEmpty());
+        QVERIFY(!error.isEmpty());
+    }
+
     void videoIsExportedThroughFfmpeg()
     {
         if (io::findFfmpeg().isEmpty())

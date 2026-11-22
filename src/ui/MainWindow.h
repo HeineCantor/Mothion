@@ -102,6 +102,9 @@ private:
     void chooseSequence();
     void chooseBlenderScene();
     void importSequence(QStringList files, const QString &name);
+    // A video as frames: ffmpeg takes out its pictures at the scene's frame rate (see io::extractVideoFrames), then, as an
+    // image sequence, it asks where it starts and the frames per picture, and makes a cel of them.
+    void importVideo();
 
 public:
     // The images of `files`, in name order (numbers as numbers: 2 before 10), one new cel with a frame for each,

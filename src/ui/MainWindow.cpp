@@ -26,6 +26,7 @@
 #include "ui/NewProjectDialog.h"
 #include "ui/DockLayout.h"
 #include "io/VideoExport.h"
+#include "io/VideoImport.h"
 #include "ui/ExportDialog.h"
 #include "ui/TweenDialog.h"
 #include "ui/HueSaturationDialog.h"
@@ -471,6 +472,7 @@ void MainWindow::createMenus()
     file->addSeparator();
     file->addAction(tr("Import image…"), this, &MainWindow::importImage);
     file->addAction(tr("Import image sequence…"), this, &MainWindow::chooseSequence);
+    file->addAction(tr("Import video as frames…"), this, &MainWindow::importVideo);
     file->addAction(tr("Import from Blender…"), this, &MainWindow::chooseBlenderScene);
     file->addAction(tr("Refresh from Blender"), this, &MainWindow::refreshFromBlender);
     file->addAction(tr("Import audio…"), this, &MainWindow::importAudio);
@@ -916,6 +918,51 @@ void MainWindow::importSequence(QStringList files, const QString &name)
         return;
     if (importSequenceFiles(files, name, dialog.startFrame(), dialog.hold()) == 0)
         QMessageBox::warning(this, tr("Import image sequence"), tr("None of the files could be read as an image."));
+}
+
+void MainWindow::importVideo()
+{
+    const QString title = tr("Import video as frames");
+    if (io::findFfmpeg().isEmpty()) {
+        QMessageBox::warning(this, title, tr("ffmpeg was not found: it reads the video. Install it, or put it next to "
+                                             "Mothion."));
+        return;
+    }
+    const QString file = QFileDialog::getOpenFileName(
+        this, title, QString(), tr("Videos (%1);;All files (*)").arg(io::videoPatterns().join(QLatin1Char(' '))));
+    if (file.isEmpty())
+        return;
+    QTemporaryDir folder; // the pictures, until they are in the document
+    if (!folder.isValid()) {
+        QMessageBox::warning(this, title, tr("Cannot make a temporary folder for the pictures"));
+        return;
+    }
+    const double fps = m_document->document().frameRate().fps();
+    QProgressDialog progress(tr("Taking the frames out of the video…"), tr("Cancel"), 0, 1000, this);
+    progress.setWindowTitle(title);
+    progress.setWindowModality(Qt::WindowModal);
+    progress.setMinimumDuration(300);
+    QString error;
+    const QStringList frames = io::extractVideoFrames(file, folder.path(), fps, [&](double done, double total) {
+        if (total > 0)
+            progress.setValue(int(1000 * done / total));
+        QCoreApplication::processEvents();
+        return !progress.wasCanceled();
+    }, &error);
+    progress.reset();
+    if (frames.isEmpty()) {
+        if (!error.isEmpty())
+            QMessageBox::warning(this, title, tr("Cannot read %1: %2").arg(QFileInfo(file).fileName(), error));
+        return;
+    }
+    ImportSequenceDialog dialog(int(frames.size()), m_document->currentFrame(), m_document->document().frameCount(),
+                                this);
+    dialog.setWindowTitle(title);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    // As big as the page (a video smaller than it made bigger too), each picture a frame of its own.
+    if (importSequenceFiles(frames, QFileInfo(file).completeBaseName(), dialog.startFrame(), dialog.hold(), true) == 0)
+        QMessageBox::warning(this, title, tr("None of the video's frames could be read."));
 }
 
 QStringList MainWindow::imageFilesIn(const QString &folder)

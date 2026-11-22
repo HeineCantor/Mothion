@@ -30,6 +30,7 @@
 #include "compositing/Graph.h"
 #include "compositing/Evaluator.h"
 #include "io/VideoExport.h"
+#include "io/VideoImport.h"
 #include "ui/compositing/CompositingWindow.h"
 #include "ui/compositing/ImagePreview.h"
 #include "ui/compositing/NodeGraphView.h"
