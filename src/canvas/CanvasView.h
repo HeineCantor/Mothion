@@ -174,6 +174,8 @@ private:
     // keys (Space or Tab + Ctrl/Shift) and the buttons. None means "paint".
     NavigationGesture::Mode navigationModeFor(const PenSample &sample) const;
 
+    // Strokes pasted on the current vector layer as they are, the paste selected; one undo step.
+    bool pasteStrokes(const document::DocumentController::FloatingPaste &pasted, QString *reason);
     void beginStroke(const PenSample &sample);
     void continueStroke(const PenSample &sample);
     void endStroke();

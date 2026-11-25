@@ -261,8 +261,13 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
     // box, ready to be moved, scaled or turned without taking what lies under them along.
     connect(m_document, &DocumentController::floatingPasteStarted, this, [this] {
         if (m_toolState->keyframeMode()) { // (the Transform tool moves the cel then: the paste goes in as it is)
-            if (const auto pasted = m_document->takeFloatingPaste())
-                m_document->pasteImage(pasted->image, pasted->at);
+            if (const auto pasted = m_document->takeFloatingPaste()) {
+                QString reason;
+                if (!(pasted->vector ? pasteStrokes(*pasted, &reason)
+                                     : m_document->pasteImage(pasted->image, pasted->at, &reason))
+                    && !reason.isEmpty())
+                    emit statusMessage(reason);
+            }
             return;
         }
         for (CanvasTool *tool : {m_moveTool.get(), m_rectSelectTool.get(), m_lassoSelectTool.get(), m_puppetTool.get(),
@@ -348,6 +353,29 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
     });
     updateCursor();
     syncPoseMode(); // a document that comes with keys
+}
+
+bool CanvasView::pasteStrokes(const document::DocumentController::FloatingPaste &pasted, QString *reason)
+{
+    const auto target = m_document->beginPaint(false, reason, true, true);
+    if (!target)
+        return false;
+    if (!target->vector) {
+        m_document->cancelPaint();
+        if (reason)
+            *reason = tr("These strokes need a vector layer");
+        return false;
+    }
+    const doc::TiledImage before = *target->image;
+    const QRect painted = drawStrokes(*target->image, pasted.strokes, *m_toolState, {});
+    for (const doc::VectorStroke &stroke : pasted.strokes)
+        m_document->attachStroke(stroke);
+    m_document->notifyPainted(painted);
+    QPainterPath selected;
+    selected.addRect(QRect(pasted.at, pasted.image.size()));
+    m_document->setSelection(selected);
+    m_document->endPaint(before, doc::CommandKind::Paste);
+    return true;
 }
 
 // --- onion skin --------------------------------------------------------------

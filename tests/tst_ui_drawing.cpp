@@ -2438,6 +2438,45 @@ private slots:
         QCOMPARE(doc::alphaOf(again.pixel(180, 120)), 255);
     }
 
+    // On a cel with keys a paste goes in as it is (the Transform tool moves the cel): strokes too, as strokes.
+    void strokesArePastedOnACelWithKeys()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 1, "Layer 1").command);
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Vector));
+        controller.setCelKey(controller.currentCel(), 0, doc::CelPose{});
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(500, 400);
+        QVERIFY(state.keyframeMode());
+        doc::VectorStroke line;
+        line.size = 20;
+        for (int i = 0; i < 40; ++i) {
+            brush::BrushInput in;
+            in.x = 100 + i * 4;
+            in.y = 120;
+            in.pressure = 1;
+            line.points.push_back(in);
+        }
+        const std::vector<doc::VectorStroke> strokes{line};
+        QImage image(180, 30, QImage::Format_ARGB32_Premultiplied);
+        image.fill(Qt::black);
+        QVERIFY(controller.beginFloatingPaste(image, QPoint(95, 105), &strokes));
+        auto layer = [&] { return d.layer(controller.currentCel(), controller.currentDrawingId(), controller.currentLayer()); };
+        QCOMPARE(layer()->strokes.size(), std::size_t(1));
+        QCOMPARE(doc::alphaOf(layer()->image.pixel(180, 120)), 255);
+        QCOMPARE(controller.selection().boundingRect(), QRectF(95, 105, 180, 30));
+        controller.undo();
+        QVERIFY(layer()->strokes.empty() && layer()->image.isEmpty());
+        // Where it cannot go it says so.
+        QSignalSpy said(&canvas, &canvas::CanvasView::statusMessage);
+        controller.setLayerChosen(false);
+        QVERIFY(controller.beginFloatingPaste(image, QPoint(95, 105), &strokes));
+        QVERIFY(layer()->strokes.empty());
+        QCOMPARE(said.size(), 1);
+    }
+
     // A shape on a vector layer is kept as strokes (the outline); rasterizing the layer lets the others tools in.
     void aShapeOnAVectorLayerIsKeptAndRasterizeLetsGo()
     {
