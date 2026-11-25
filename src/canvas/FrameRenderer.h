@@ -68,12 +68,16 @@ public:
     void setCelUndeformed(doc::CelId cel) { m_undeformed = cel; }
     // The brushes (looked up by name), to draw the strokes of a vector layer again as a deformer bends them: then a vector
     // layer bends stroke by stroke (lines as wide as the bend makes them, nothing blurred), each raster layer by itself.
-    // Without them (nullptr) a bent drawing bends as the pixels its layers show together.
+    // Without them (nullptr) they are the default ones; without those either a bent drawing bends as the pixels its
+    // layers show together.
     void setBrushes(const tools::ToolState *brushes)
     {
         m_brushes = brushes;
         m_deformed.clear();
     }
+    // The brushes of every renderer that is given none (the export's, the playback's...), so that what they draw is what
+    // the canvas shows. Not owned: forgotten when it goes.
+    static void setDefaultBrushes(const tools::ToolState *brushes);
     doc::CelId celUndeformed() const { return m_undeformed; }
     // Only this cel is drawn (kNoId: all of them), to see what one cel makes of the frame by itself.
     void setOnlyCel(doc::CelId cel) { m_only = cel; }

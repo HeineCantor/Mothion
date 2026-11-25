@@ -8,6 +8,7 @@
 #include "core/document/commands/CelCommands.h"
 #include "core/document/commands/DrawingCommands.h"
 #include "document/DocumentController.h"
+#include "io/FrameExport.h"
 #include "tools/ToolState.h"
 #include "ui/panels/ToolPropertiesPanel.h"
 #include "ui/AutoplayWindow.h"
@@ -2219,6 +2220,53 @@ private slots:
         controller.previewCelPose(a, 3, alone, {doc::Channel::Position});
         QCOMPARE(controller.celPoseAt(a, 3).x, 9.0);
         QVERIFY(!controller.document().cel(b)->motion().hasTemporary());
+    }
+
+    // A vector layer bent by a deformer is exported (and made into a raster cel) as the canvas shows it: drawn again from
+    // its strokes, not its pixels bent.
+    void aBentVectorLayerIsExportedAsTheCanvasShowsIt()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        doc::Document &d = controller.documentForCommands();
+        const doc::CelId cel = controller.currentCel();
+        controller.execute(doc::makeNewDrawing(d, cel, 0, 1, "Layer 1").command);
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Vector));
+        doc::Layer *layer = d.layer(cel, controller.currentDrawingId(), controller.currentLayer());
+        doc::VectorStroke line;
+        line.size = 12;
+        for (int i = 0; i <= 100; ++i) {
+            brush::BrushInput in;
+            in.x = 800 + i * 4;
+            in.y = 540;
+            in.pressure = 1;
+            line.points.push_back(in);
+        }
+        layer->strokes = {line};
+        canvas::drawStrokes(layer->image, layer->strokes, state, {});
+        controller.addDeformer(doc::DeformerKind::Bones);
+        const doc::CelId bones = controller.currentCel();
+        QCOMPARE(controller.addBone(bones, -1, {800, 540}, {1000, 540}), 0);
+        QCOMPARE(controller.addBone(bones, 0, {1000, 540}, {1200, 540}), 1);
+        std::vector<double> pose = d.cel(bones)->deformer().rest;
+        pose[doc::kBoneParams + doc::BoneAngle] = 70;
+        QVERIFY(controller.setDeformKey(bones, 0, pose));
+
+        canvas::FrameRenderer shown; // as the canvas has it
+        shown.setBrushes(&state);
+        shown.setGuidesVisible(false);
+        shown.setResampleFilter(canvas::ResampleFilter::Bicubic);
+        shown.renderAll(d, 0);
+        QVERIFY(io::renderFrame(d, 0, false) != shown.image()); // no brushes known: the pixels bent
+        canvas::FrameRenderer::setDefaultBrushes(&state);
+        QCOMPARE(io::renderFrame(d, 0, false), shown.image());
+        const doc::CelId raster = controller.rasterCel(cel);
+        QVERIFY(raster != doc::kNoId);
+        canvas::FrameRenderer baked;
+        baked.setOnlyCel(raster);
+        baked.renderAll(d, 0);
+        QCOMPARE(baked.image(), shown.image());
+        canvas::FrameRenderer::setDefaultBrushes(nullptr);
     }
 
     // Cels chosen together are moved by the Transform tool as one piece: a drag on the box does to each of them what it does to

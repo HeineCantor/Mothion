@@ -7,9 +7,11 @@
 #include "canvas/VectorRender.h"
 #include "canvas/VectorWarp.h"
 #include "core/document/Blend.h"
+#include "tools/ToolState.h"
 
 #include <QPainter>
 #include <QPainterPath>
+#include <QPointer>
 
 #include <QLineF>
 
@@ -354,6 +356,19 @@ bool sameTiles(const doc::TiledImage &a, const doc::TiledImage &b)
 }
 } // namespace
 
+namespace {
+QPointer<const tools::ToolState> &defaultBrushes()
+{
+    static QPointer<const tools::ToolState> brushes;
+    return brushes;
+}
+} // namespace
+
+void FrameRenderer::setDefaultBrushes(const tools::ToolState *brushes)
+{
+    defaultBrushes() = brushes;
+}
+
 const FrameRenderer::Deformed *FrameRenderer::deformed(const doc::Document &doc, const doc::Cel &cel,
                                                        const doc::Drawing &drawing, int frame) const
 {
@@ -397,7 +412,8 @@ const FrameRenderer::Deformed *FrameRenderer::deformed(const doc::Document &doc,
     const std::unique_ptr<deform::Field> field = deform::makeField(deformer->properties().deformer, deformer->deformer(), pose);
     if (!field || field->isIdentity() || bent.source.isEmpty())
         return nullptr;
-    const bool strokes = m_brushes && std::any_of(drawing.layers.begin(), drawing.layers.end(), [this](const doc::Layer &l) {
+    const tools::ToolState *brushes = m_brushes ? m_brushes : defaultBrushes().data();
+    const bool strokes = brushes && std::any_of(drawing.layers.begin(), drawing.layers.end(), [this](const doc::Layer &l) {
                              return l.kind == doc::LayerKind::Vector && !l.strokes.empty() && shows(l, m_guides);
                          });
     if (strokes) {
@@ -408,7 +424,7 @@ const FrameRenderer::Deformed *FrameRenderer::deformed(const doc::Document &doc,
                 continue;
             if (l.kind == doc::LayerKind::Vector) {
                 l.image = doc::TiledImage();
-                drawStrokes(l.image, warpedStrokes(l.strokes, *field), *m_brushes, {});
+                drawStrokes(l.image, warpedStrokes(l.strokes, *field), *brushes, {});
             } else {
                 l.image = bentImage(l.image, *field);
             }

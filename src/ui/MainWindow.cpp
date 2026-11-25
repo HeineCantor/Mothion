@@ -1,6 +1,7 @@
 #include "ui/MainWindow.h"
 
 #include "canvas/CanvasView.h"
+#include "canvas/FrameRenderer.h"
 #include "diagnostics/CrashHandler.h"
 #include "io/Autosave.h"
 #include "document/DocumentController.h"
@@ -133,6 +134,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_document(new document::DocumentController(this))
     , m_canvas(new canvas::CanvasView(m_toolState, m_document, this))
 {
+    canvas::FrameRenderer::setDefaultBrushes(m_toolState); // the exports and the playback draw as the canvas does
     // The strokes of vector layers name their brush: the library knows them (the ones imported too).
     m_toolState->setBrushResolver([library = m_brushes](const QString &name) -> tools::BrushDefinitionPtr {
         auto find = [&](tools::ToolId tool) -> tools::BrushDefinitionPtr {
