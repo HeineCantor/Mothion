@@ -1464,6 +1464,36 @@ private slots:
     }
 
 
+    // The mask of the layer merged onto goes into its pixels: it does not hide what the layer above showed.
+    void mergeOntoAMaskedLayerKeepsTheLook()
+    {
+        document::DocumentController controller;
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 1, "Line").command);
+        QVERIFY(controller.addLayer(true));
+        const doc::CelId cel = controller.currentCel();
+        const doc::Drawing &drawing = *controller.currentDrawing();
+        const doc::LayerId low = drawing.layers[0].id, high = drawing.layers[1].id;
+        auto layer = [&](doc::LayerId id) { return d.layer(cel, drawing.id, id); };
+        for (int x = 0; x < 30; ++x)
+            layer(low)->image.setPixel(x, 5, 0xffff0000u);
+        for (int x = 0; x < 10; ++x)
+            layer(high)->image.setPixel(x, 5, 0xff00ff00u);
+        controller.setCurrentLayer(low);
+        QVERIFY(controller.createLayerMask());
+        for (int x = 0; x < 20; ++x)
+            layer(low)->mask->setPixel(x, 5, 0xff000000u); // hidden from 0 to 19
+        QVERIFY(controller.mergeLayers({low, high}));
+        QVERIFY(!layer(low)->mask);
+        QVERIFY(controller.maskEditingLayer() == doc::kNoId);
+        QCOMPARE(layer(low)->image.pixel(5, 5), doc::Pixel(0xff00ff00u));
+        QCOMPARE(layer(low)->image.pixel(15, 5), doc::Pixel(0)); // what was hidden
+        QCOMPARE(layer(low)->image.pixel(25, 5), doc::Pixel(0xffff0000u));
+        controller.undo();
+        QVERIFY(layer(low)->mask && layer(low)->mask->pixel(5, 5) == 0xff000000u);
+        QCOMPARE(layer(low)->image.pixel(15, 5), doc::Pixel(0xffff0000u));
+    }
+
     // Delete takes every selected layer row, whichever frames they are in; a frame keeps one layer.
     void deleteTakesSeveralLayers()
     {

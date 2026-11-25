@@ -981,11 +981,16 @@ bool DocumentController::mergeLayers(const std::vector<doc::LayerId> &ids, QStri
     plain.blend = doc::BlendMode::Normal;
     if (auto look = doc::makeSetLayerProperties(*m_document, m_currentCel, drawing->id, bottom.id, plain))
         steps.push_back(std::move(look));
+    // Its mask too is in the pixels: kept, it would hide what the layers above put there.
+    if (auto unmask = doc::makeRemoveLayerMask(*m_document, m_currentCel, drawing->id, bottom.id))
+        steps.push_back(std::move(unmask));
     for (std::size_t i = 1; i < layers.size(); ++i)
         steps.push_back(std::make_unique<doc::RemoveLayerCommand>(m_currentCel, drawing->id, layers[i]->id));
     const doc::LayerId result = bottom.id;
     execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::MergeLayers, std::move(steps)));
     setCurrentLayer(result);
+    if (m_maskLayer == result)
+        setMaskEditing(doc::kNoId);
     return true;
 }
 
