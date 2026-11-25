@@ -2288,6 +2288,34 @@ private slots:
         QCOMPARE(p.parentPart, 0);
     }
 
+    // Keys are pasted only on a cel that has their channel: not a position on a deformer, nor a deformer's pose on a drawn
+    // cel or on a deformer with other bones.
+    void keysArePastedOnlyWhereTheyBelong()
+    {
+        document::DocumentController controller;
+        const doc::CelId drawn = controller.currentCel();
+        controller.setCelKey(drawn, 0, doc::CelPose{});
+        const auto position = controller.copyCelKeys({{drawn, 0, doc::Channel::Position}});
+        auto bones = [&](int count) {
+            controller.setCurrentCel(drawn);
+            controller.addDeformer(doc::DeformerKind::Bones);
+            const doc::CelId id = controller.currentCel();
+            for (int i = 0; i < count; ++i)
+                controller.addBone(id, i - 1, {i * 50.0, 0}, {i * 50.0 + 50, 0});
+            return id;
+        };
+        const doc::CelId one = bones(1), two = bones(2), alike = bones(1);
+        QVERIFY(!controller.pasteCelKeys(position, 0, one));
+        QVERIFY(controller.celMotion(one)->isEmpty());
+        std::vector<double> pose = controller.document().cel(one)->deformer().rest;
+        QVERIFY(controller.setDeformKey(one, 0, pose));
+        const auto deform = controller.copyCelKeys({{one, 0, doc::Channel::Deform}});
+        QVERIFY(!controller.pasteCelKeys(deform, 5, drawn));
+        QVERIFY(!controller.pasteCelKeys(deform, 5, two));
+        QVERIFY(controller.pasteCelKeys(deform, 5, alike));
+        QVERIFY(controller.celMotion(alike)->hasKeys(doc::Channel::Deform));
+    }
+
     // Cels chosen together are moved by the Transform tool as one piece: a drag on the box does to each of them what it does to
     // the box, in one undo step; a cel with no keys gets its first one.
     void severalChosenCelsAreMovedTogether()

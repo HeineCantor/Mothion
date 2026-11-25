@@ -2110,6 +2110,16 @@ bool DocumentController::pasteCelKeys(const std::vector<CelKeyCopy> &copied, int
         const doc::Cel *cel = m_document->cel(target);
         if (!cel)
             continue;
+        // Only the channels the cel has (a deformer its pose, the others theirs), and a pose only onto as many bones or nodes
+        // of the same kind.
+        if (!doc::hasChannel(cel->properties(), c.channel))
+            continue;
+        if (c.channel == doc::Channel::Deform) {
+            const doc::Cel *from = m_document->cel(c.cel);
+            if (c.key.pose.deform.size() != cel->deformer().rest.size()
+                || (from && from->properties().deformer != cel->properties().deformer))
+                continue;
+        }
         auto [it, fresh] = motions.try_emplace(target, cel->motion());
         if (fresh && it->second.isEmpty())
             startMotion(it->second, *cel, frame); // its first keys: it turns around the middle of what it shows
