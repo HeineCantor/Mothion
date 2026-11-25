@@ -46,6 +46,119 @@ float radius(ResampleFilter filter)
     return 1.0f;
 }
 
+// Along one side of a picture only made bigger, smaller, moved or mirrored along its own sides: for each pixel of the
+// result the pixels it takes, with their weights (that add up to 1), and how much of it the picture covers.
+struct Taps
+{
+    int count = 0;
+    std::vector<int> first;      // of the pixels taken (they may lie out of the picture: the edge's goes on)
+    std::vector<float> weights;  // `count` for each pixel of the result
+    std::vector<float> coverage; // 0: nothing of the picture there
+};
+
+Taps tapsAlong(ResampleFilter filter, int resultSize, int pictureSize, double step, double offset, float feather,
+               float stretch)
+{
+    const int half = int(std::ceil(radius(filter) * stretch));
+    Taps t;
+    t.count = 2 * half;
+    t.first.assign(std::size_t(resultSize), 0);
+    t.weights.assign(std::size_t(resultSize) * std::size_t(t.count), 0.0f);
+    t.coverage.assign(std::size_t(resultSize), 0.0f);
+    for (int i = 0; i < resultSize; ++i) {
+        const float u = float((i + 0.5) * step + offset);
+        const float covered = std::clamp(u * feather + 0.5f, 0.0f, 1.0f)
+                              * std::clamp((float(pictureSize) - u) * feather + 0.5f, 0.0f, 1.0f);
+        if (covered <= 0.0f)
+            continue;
+        const float s = u - 0.5f;
+        const int at = int(std::floor(s));
+        t.first[std::size_t(i)] = at - (half - 1);
+        float *w = t.weights.data() + std::size_t(i) * std::size_t(t.count);
+        float sum = 0;
+        for (int k = 0; k < t.count; ++k)
+            sum += w[k] = weight(filter, (s - float(at + k - (half - 1))) / stretch);
+        if (sum <= 0)
+            continue;
+        for (int k = 0; k < t.count; ++k)
+            w[k] /= sum;
+        t.coverage[std::size_t(i)] = covered;
+    }
+    return t;
+}
+
+// resampleTransformed() for such a transform (and a filter with a kernel): first across, then down, which is the same
+// sum as all the pixels of the kernel at once in much less work.
+void resampleAlongSides(const QImage &image, const QTransform &back, QImage &result, ResampleFilter filter, float feather,
+                        float stretch)
+{
+    const int w = image.width(), h = image.height(), width = result.width(), height = result.height();
+    const Taps across = tapsAlong(filter, width, w, back.m11(), back.dx(), feather, stretch);
+    const Taps down = tapsAlong(filter, height, h, back.m22(), back.dy(), feather, stretch);
+    uchar *bits = result.bits(); // (asked for once: scanLine() from several threads may each detach it)
+    const qsizetype bytesPerLine = result.bytesPerLine();
+    // A band of rows of the result at a time, each from the rows of the picture it looks at: a little memory, whatever the
+    // size of the pictures.
+    const int band = std::clamp(int(64.0 / std::max(1.0, std::abs(back.m22()))), 8, 64);
+    const std::size_t stride = std::size_t(width) * 4;
+    parallelFor((height + band - 1) / band, [&](int part) {
+        const int top = part * band, bottom = std::min(height, top + band);
+        int firstRow = h, lastRow = -1;
+        for (int y = top; y < bottom; ++y)
+            if (down.coverage[std::size_t(y)] > 0.0f) {
+                firstRow = std::min(firstRow, std::clamp(down.first[std::size_t(y)], 0, h - 1));
+                lastRow = std::max(lastRow, std::clamp(down.first[std::size_t(y)] + down.count - 1, 0, h - 1));
+            }
+        if (firstRow > lastRow)
+            return;
+        std::vector<float> rows(stride * std::size_t(lastRow - firstRow + 1), 0.0f);
+        for (int row = firstRow; row <= lastRow; ++row) {
+            const QRgb *line = reinterpret_cast<const QRgb *>(image.constScanLine(row));
+            float *out = rows.data() + stride * std::size_t(row - firstRow);
+            for (int x = 0; x < width; ++x, out += 4) {
+                if (across.coverage[std::size_t(x)] <= 0.0f)
+                    continue;
+                const float *weights = across.weights.data() + std::size_t(x) * std::size_t(across.count);
+                const int from = across.first[std::size_t(x)];
+                float a = 0, r = 0, g = 0, b = 0;
+                for (int i = 0; i < across.count; ++i) {
+                    const QRgb px = line[std::clamp(from + i, 0, w - 1)];
+                    a += weights[i] * float(qAlpha(px));
+                    r += weights[i] * float(qRed(px));
+                    g += weights[i] * float(qGreen(px));
+                    b += weights[i] * float(qBlue(px));
+                }
+                out[0] = a, out[1] = r, out[2] = g, out[3] = b;
+            }
+        }
+        std::vector<float> sum(stride);
+        for (int y = top; y < bottom; ++y) {
+            if (down.coverage[std::size_t(y)] <= 0.0f)
+                continue;
+            std::fill(sum.begin(), sum.end(), 0.0f);
+            const float *weights = down.weights.data() + std::size_t(y) * std::size_t(down.count);
+            for (int j = 0; j < down.count; ++j) {
+                if (weights[j] == 0.0f)
+                    continue;
+                const int row = std::clamp(down.first[std::size_t(y)] + j, 0, h - 1) - firstRow;
+                const float *in = rows.data() + stride * std::size_t(row);
+                for (std::size_t i = 0; i < stride; ++i)
+                    sum[i] += weights[j] * in[i];
+            }
+            QRgb *out = reinterpret_cast<QRgb *>(bits + std::ptrdiff_t(y) * bytesPerLine);
+            for (int x = 0; x < width; ++x) {
+                const float coverage = across.coverage[std::size_t(x)] * down.coverage[std::size_t(y)];
+                if (coverage <= 0.0f)
+                    continue;
+                const float *c = sum.data() + std::size_t(x) * 4;
+                const int alpha = std::clamp(int(c[0] * coverage + 0.5f), 0, 255);
+                auto channel = [&](float v) { return std::clamp(int(v * coverage + 0.5f), 0, alpha); };
+                out[x] = qRgba(channel(c[1]), channel(c[2]), channel(c[3]), alpha);
+            }
+        }
+    });
+}
+
 } // namespace
 
 QString filterName(ResampleFilter filter)
@@ -80,6 +193,10 @@ QImage resampleTransformed(const QImage &source, const QTransform &sourceToResul
     const int taps = filter == ResampleFilter::Nearest ? 1 : 2 * half;
     const float feather = std::max(scale, 1e-3f); // the edge fades over a pixel of the result
 
+    if (filter != ResampleFilter::Nearest && back.type() <= QTransform::TxScale) { // nothing turned
+        resampleAlongSides(image, back, result, filter, feather, stretch);
+        return result;
+    }
     parallelFor(size.height(), [&](int y) {
         QRgb *out = reinterpret_cast<QRgb *>(result.scanLine(y));
         std::vector<float> wx(static_cast<std::size_t>(taps), 0.0f);
