@@ -30,11 +30,12 @@ namespace {
 constexpr int kWorkSize = 220;
 constexpr int kMargin = 24; // px around the drawings, room for what moves outward
 
-// A layer that is part of the picture: pixels that are shown (not hidden, not see-through to nothing). Hidden layers
+// A layer that is part of the picture: pixels that are shown (not hidden, not see-through to nothing), a vector layer's
+// too (the layer made of it is a raster one: its strokes have no pairs to go between). Hidden layers
 // are left out of the tween altogether: they are not paired, not moved, and the frames made do not have them.
 bool isTweened(const doc::Layer &layer)
 {
-    return layer.kind == doc::LayerKind::Raster && layer.properties.visible && layer.properties.opacity > 0.0f
+    return layer.kind != doc::LayerKind::Perspective && layer.properties.visible && layer.properties.opacity > 0.0f
            && !layer.image.isEmpty();
 }
 
@@ -109,7 +110,7 @@ std::optional<DrawingTween> DrawingTween::make(const doc::Drawing &from, const d
     t.m_area = bounds.adjusted(-kMargin, -kMargin, kMargin, kMargin);
 
     // The layers in pairs (the visible ones with pixels): by name first, then what is left in the order it is stacked.
-    std::vector<int> a, b; // the raster layers, as indices
+    std::vector<int> a, b; // the tweened layers, as indices
     for (std::size_t i = 0; i < t.m_from.layers.size(); ++i)
         if (isTweened(t.m_from.layers[i]))
             a.push_back(int(i));

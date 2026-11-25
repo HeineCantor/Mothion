@@ -233,6 +233,24 @@ private slots:
         QVERIFY(tween->area().width() < 400);
     }
 
+    // The pixels of a vector layer are tweened as a raster layer's: the frames made have them, on a raster layer.
+    void vectorLayersAreTweenedAsPixels()
+    {
+        Fixture f;
+        doc::Document &d = f.controller.documentForCommands();
+        d.layer(f.cel, f.a, f.inkA)->kind = doc::LayerKind::Vector;
+        d.layer(f.cel, f.b, f.inkB)->kind = doc::LayerKind::Vector;
+        QString reason;
+        QVERIFY2(f.controller.tweenFrames(f.cel, 0, 8, document::TweenEase::Linear, &reason) == 7, qPrintable(reason));
+        QCOMPARE(f.controller.document().cel(f.cel)->drawingAt(4)->layers.size(), std::size_t(1));
+        QCOMPARE(f.layerAt(4).kind, doc::LayerKind::Raster);
+        const QPointF middle = centroid(f.layerAt(4));
+        QVERIFY(middle.x() > centroid(f.layerAt(0)).x() + 5 && middle.x() < centroid(f.layerAt(8)).x() - 5);
+        f.controller.setCurrentFrame(4);
+        QVERIFY(f.controller.beginPaint(true)); // it can be drawn on
+        f.controller.cancelPaint();
+    }
+
     void perspectiveLayersAreLeftOut()
     {
         Fixture f;

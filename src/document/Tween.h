@@ -22,7 +22,8 @@ double easedTime(TweenEase ease, double u);
 // registerImages on how much ink there is at each point), once, and any picture between them is then made from the
 // two, layer by layer: a layer of one is paired with the layer of the other of the same name (then the rest in the
 // order they are stacked), and a layer with no partner fades out or in. Layers that are hidden (or empty) and
-// perspective layers (guides) are not part of it: they are not paired, and the pictures made do not have them.
+// perspective layers (guides) are not part of it: they are not paired, and the pictures made do not have them. A vector
+// layer goes in as the pixels its strokes make, and comes out a raster layer.
 class DrawingTween
 {
 public:
