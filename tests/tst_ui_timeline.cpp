@@ -891,6 +891,34 @@ private slots:
         QCOMPARE(controller.document().celAt(0).timing().exposures().front().length, 1);
     }
 
+    // With the arrows on a trajectory, which has no layers, the tools have none to act on: not those of the cel before.
+    void aTrajectoryReachedWithTheArrowsLeavesNoLayersChosen()
+    {
+        document::DocumentController controller;
+        const doc::CelId drawn = controller.currentCel();
+        controller.execute(doc::makeNewDrawing(controller.documentForCommands(), drawn, 0, 1, "Line").command);
+        controller.addTrajectory();
+        const doc::CelId trajectory = controller.currentCel();
+        ui::LayersPanel panel(&controller);
+        panel.resize(320, 500);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        controller.setCurrentCel(drawn);
+        auto *tree = panel.findChild<QTreeWidget *>();
+        QTreeWidgetItem *celRow = tree->topLevelItem(0);
+        for (QTreeWidgetItem *row : {celRow->child(0)->child(0), celRow}) { // a layer chosen, then the cel as a whole
+            tree->setCurrentItem(row);
+            QCOMPARE(controller.beginPaintLayers().size(), std::size_t(1));
+            controller.cancelPaint();
+            controller.setCurrentCel(trajectory);
+            QString why;
+            QVERIFY(controller.beginPaintLayers(&why).empty());
+            QVERIFY(!why.isEmpty());
+            controller.setCurrentCel(drawn); // back: its row is chosen again
+            QVERIFY(tree->currentItem());
+        }
+    }
+
     // Delete with several blocks selected, on two cels: their frames taken out (the ones after move back), one step.
     void timelineDeletesTheSelectedFrames()
     {

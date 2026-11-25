@@ -1230,6 +1230,13 @@ void LayersPanel::selectCurrentRow()
         m_selected.clear();
         if (kindOf(target) == Row::Layer)
             m_selected << layerOf(target);
+    } else if (!target && m_tree->currentItem()) {
+        // A trajectory or a deformer, which has no row here: none is chosen (those of another cel would be what the tools
+        // act on).
+        const QSignalBlocker block(m_tree);
+        m_tree->setCurrentItem(nullptr);
+        m_tree->clearSelection();
+        m_selected.clear();
     }
     syncHeader();
 }
