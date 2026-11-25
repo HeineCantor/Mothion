@@ -252,6 +252,7 @@ void DocumentController::replaceDocument(std::unique_ptr<doc::Document> document
     m_cameraSelected = false;
     m_layerChosen = true;
     m_layerSelection.clear();
+    m_frameSelection.clear();
     m_selection = QPainterPath();
     if (const doc::Drawing *drawing = currentDrawing(); drawing && !drawing->layers.empty()) {
         m_currentLayer = drawing->layers.back().id;
@@ -1518,6 +1519,8 @@ void DocumentController::setCelSelection(const std::vector<doc::CelId> &cels, do
             kept.push_back(id);
     if (std::find(kept.begin(), kept.end(), current) == kept.end())
         kept.push_back(current);
+    if (kept.size() > 1)
+        clearFrameSelection(); // whole cels, not some of their frames
     const std::vector<doc::CelId> before = celSelection();
     m_celSelection = kept;
     if (current != m_currentCel)
@@ -1556,6 +1559,7 @@ void DocumentController::chooseCel(doc::CelId id)
     if (!cel)
         return;
     selectCamera(false);
+    clearFrameSelection(); // the whole cel, not some of its frames
     setLayerChosen(false); // a cel is not a layer: the pixel tools wait for one to be chosen
     setCurrentCel(id);
     std::vector<LayerRef> layers;
@@ -3167,6 +3171,7 @@ bool DocumentController::editMouthDrawing(doc::DrawingId drawing)
     if (m_mouthEdit == drawing)
         return true;
     interruptStroke();
+    clearFrameSelection(); // the mouth, not frames of the timeline
     m_mouthEdit = drawing;
     resolveCurrentLayer();
     // A mouth chosen to draw: its layer is the selection, not the cel chosen as a whole before (which would stop the
@@ -3905,6 +3910,34 @@ void DocumentController::setLayerSelection(std::vector<LayerRef> layers)
     emit layerSelectionChanged();
 }
 
+std::vector<DocumentController::LayerRef> DocumentController::layerSelection() const
+{
+    std::vector<LayerRef> layers;
+    for (const auto &[celId, drawingId] : m_frameSelection) {
+        const doc::Cel *cel = m_document->cel(celId);
+        if (const doc::Drawing *drawing = cel ? cel->drawing(drawingId) : nullptr)
+            for (const doc::Layer &layer : drawing->layers)
+                layers.push_back({celId, drawingId, layer.id});
+    }
+    return layers.empty() ? m_layerSelection : layers;
+}
+
+void DocumentController::setFrameSelection(std::vector<FrameRef> frames)
+{
+    if (frames == m_frameSelection)
+        return;
+    m_frameSelection = std::move(frames);
+    emit layerSelectionChanged();
+}
+
+void DocumentController::clearFrameSelection()
+{
+    if (m_frameSelection.empty())
+        return;
+    setFrameSelection({});
+    emit frameSelectionCleared();
+}
+
 std::vector<DocumentController::PaintTarget> DocumentController::beginPaintLayers(QString *reason, bool vectorOk)
 {
     if (m_cameraSelected) { // the camera is what the pen moves: not the layers
@@ -3912,13 +3945,14 @@ std::vector<DocumentController::PaintTarget> DocumentController::beginPaintLayer
             *reason = tr("The camera is selected: choose a cel or a layer first");
         return {};
     }
-    if (m_layerSelection.empty()) {
+    const std::vector<LayerRef> chosen = layerSelection();
+    if (chosen.empty()) {
         const auto target = beginPaint(false, reason, false, vectorOk);
         return target ? std::vector<PaintTarget>{*target} : std::vector<PaintTarget>{};
     }
     interruptStroke(); // a previous stroke left open
     std::vector<PaintTarget> targets;
-    for (const LayerRef &ref : m_layerSelection) {
+    for (const LayerRef &ref : chosen) {
         const doc::Cel *cel = m_document->cel(ref.cel);
         doc::Layer *layer = m_document->layer(ref.cel, ref.drawing, ref.layer);
         if (!layer || !cel->properties().visible || cel->properties().locked || !layer->properties.visible

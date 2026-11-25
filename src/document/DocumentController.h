@@ -614,7 +614,14 @@ public:
     bool pasteLayers(bool merged, const std::vector<doc::LayerId> &replace = {}, QString *reason = nullptr);
 
     void setLayerSelection(std::vector<LayerRef> layers);
-    const std::vector<LayerRef> &layerSelection() const { return m_layerSelection; }
+    // The layers the tools that work on several act on: those of the frames chosen in the timeline (two or more), if there
+    // are, else those chosen in the Layers panel.
+    std::vector<LayerRef> layerSelection() const;
+    // The drawings of the frames chosen together in the timeline (its selected blocks); empty for none. A row chosen in the
+    // Layers panel, or a cel chosen whole, takes their place (frameSelectionCleared()).
+    using FrameRef = std::pair<doc::CelId, doc::DrawingId>;
+    void setFrameSelection(std::vector<FrameRef> frames);
+    void clearFrameSelection();
     // Like beginPaint(false), for every layer of layerSelection() (or the
     // current layer when it is empty) that can be painted: hidden and locked
     // ones, or in hidden or locked cels, are left out. Empty, with `reason`,
@@ -701,6 +708,8 @@ signals:
     void layerChosenChanged();
     // The layers chosen in the Layers panel (layerSelection()) changed.
     void layerSelectionChanged();
+    // The frames chosen in the timeline are not any more: another row was chosen (see setFrameSelection()).
+    void frameSelectionCleared();
     // chooseCel() was called: the Layers panel shows the cel's row as chosen.
     void celChosen(doc::CelId cel);
     // The cels chosen together (celSelection()) changed.
@@ -786,6 +795,7 @@ private:
     QPainterPath m_selection;
     std::shared_ptr<const doc::Cel> m_copiedCel; // (see copyCel())
     std::vector<LayerRef> m_layerSelection;
+    std::vector<FrameRef> m_frameSelection; // (see setFrameSelection())
     std::vector<doc::CelId> m_celSelection; // (see celSelection())
     std::vector<doc::Layer> m_copiedLayers; // bottom to top
     // The layer the chosen ones merge down into: the one under the lowest of them (kNoId if there is none).

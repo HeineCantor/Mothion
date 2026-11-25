@@ -110,7 +110,7 @@ bool TransformTool::start()
     // A paste that floats takes the layer it was made for, and an empty frame gets its drawing (as a paste does).
     std::optional<document::DocumentController::FloatingPaste> pasted = m_document->takeFloatingPaste();
     std::vector<document::DocumentController::PaintTarget> targets;
-    if (pasted && m_document->layerSelection().empty()) {
+    if (pasted) { // (the current layer alone, whatever others are chosen)
         if (const auto target = m_document->beginPaint(true, &reason, false, true))
             targets.push_back(*target);
     } else {

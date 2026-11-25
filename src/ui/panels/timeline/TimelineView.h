@@ -227,6 +227,8 @@ private:
     void dragFrames(int x);
     void dropFrames();
     void pruneSelection(); // blocks gone (undo, other edits) leave the selection
+    // Tells the document the frames the tools act on: the drawings of the blocks selected, when there are two or more.
+    void publishFrames();
 
     void onStructureChanged();
     void updateScrollBars();

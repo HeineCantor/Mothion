@@ -7,6 +7,7 @@
 #include "ui/LipSyncDialog.h"
 #include "core/document/LipSync.h"
 #include "canvas/FrameRenderer.h"
+#include "canvas/MoveTool.h"
 
 #include <QPlainTextEdit>
 
@@ -1082,6 +1083,91 @@ private slots:
         QCOMPARE(d.indexOf(other), 0);
         QVERIFY(change([](doc::CelProperties &p) { p.locked = false; }));
         QVERIFY(controller.deleteCel(cel));
+    }
+
+    // Two blocks or more selected in the timeline are the frames the tools act on, whatever the Layers panel has chosen; one
+    // is not. A row chosen in the panel, or the cel's name, takes their place.
+    void theBlocksSelectedAreWhatTheToolsActOn()
+    {
+        document::DocumentController controller;
+        doc::Document &d = controller.documentForCommands();
+        const doc::CelId cel = controller.currentCel();
+        for (int frame = 0; frame < 4; ++frame) {
+            controller.setCurrentFrame(frame);
+            controller.execute(doc::makeNewDrawing(d, cel, frame, 1, "Line").command);
+            d.layer(cel, controller.currentDrawingId(), controller.currentLayer())->image.setPixel(10, 10, 0xff000000);
+        }
+        controller.setCurrentFrame(0);
+        ui::LayersPanel panel(&controller);
+        panel.resize(320, 500);
+        panel.show();
+        ui::TimelineView view(&controller);
+        view.resize(800, 200);
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        ui::TimelineMetrics m;
+        auto click = [&](int frame, Qt::KeyboardModifiers modifiers = {}) {
+            QTest::mouseClick(view.viewport(), Qt::LeftButton, modifiers, QPoint(m.frameX(frame) + 8, m.rowY(0) + m.rowHeight / 2));
+        };
+        auto targets = [&] {
+            const std::size_t n = controller.beginPaintLayers().size();
+            controller.cancelPaint();
+            return n;
+        };
+        const QPoint name(m.headerWidth - 40, m.rowY(0) + m.rowHeight / 2);
+        QTest::mouseClick(view.viewport(), Qt::LeftButton, {}, name); // the whole cel
+        QCOMPARE(targets(), std::size_t(4));
+        click(1); // one block: as it was
+        QCOMPARE(targets(), std::size_t(4));
+        click(2, Qt::ShiftModifier);
+        QCOMPARE(view.selectedFrames().size(), std::size_t(2));
+        QCOMPARE(targets(), std::size_t(2));
+        controller.setCurrentFrame(3); // another frame shown: they stay
+        QCOMPARE(targets(), std::size_t(2));
+
+        // Moved: those two frames, no other.
+        canvas::MoveTool move(&controller, [](const QString &) {});
+        move.press({100, 100}, Qt::NoModifier);
+        move.release({105, 100}, Qt::NoModifier);
+        for (int frame = 0; frame < 4; ++frame) {
+            const doc::TiledImage &image = d.cel(cel)->drawingAt(frame)->layers[0].image;
+            QCOMPARE(int(doc::alphaOf(image.pixel(15, 10))), frame == 1 || frame == 2 ? 255 : 0);
+        }
+        controller.undo();
+
+        // The cel's name: the whole cel again, the blocks not selected any more.
+        QTest::mouseClick(view.viewport(), Qt::LeftButton, {}, name);
+        QVERIFY(view.selectedFrames().empty());
+        QCOMPARE(targets(), std::size_t(4));
+        // A layer's row of the panel: that layer alone.
+        click(1);
+        click(2, Qt::ShiftModifier);
+        QCOMPARE(targets(), std::size_t(2));
+        auto *tree = panel.findChild<QTreeWidget *>();
+        tree->setCurrentItem(tree->topLevelItem(0)->child(0)->child(0));
+        QVERIFY(view.selectedFrames().empty());
+        QCOMPARE(targets(), std::size_t(1));
+        click(1);
+        click(2, Qt::ShiftModifier);
+        QCOMPARE(targets(), std::size_t(2));
+        tree->scrollToItem(tree->currentItem());
+        QTest::mouseClick(tree->viewport(), Qt::LeftButton, {}, tree->visualItemRect(tree->currentItem()).center()); // again
+        QVERIFY(view.selectedFrames().empty());
+        QCOMPARE(targets(), std::size_t(1));
+        // The blocks deleted: nothing of them left.
+        click(0);
+        click(1, Qt::ShiftModifier);
+        QCOMPARE(targets(), std::size_t(2));
+        view.setFocus();
+        QTest::keyClick(&view, Qt::Key_Delete);
+        QVERIFY(view.selectedFrames().empty());
+        QCOMPARE(targets(), std::size_t(1));
+        // Another project.
+        click(0);
+        click(1, Qt::ShiftModifier);
+        controller.newDocument();
+        QVERIFY(view.selectedFrames().empty());
+        QVERIFY(controller.layerSelection().empty());
     }
 
     // Delete with several blocks selected, on two cels: their frames taken out (the ones after move back), one step.

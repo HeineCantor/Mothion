@@ -577,6 +577,7 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
             rowChosen(item);
     });
     connect(m_tree, &QTreeWidget::itemSelectionChanged, this, [this] {
+        m_document->clearFrameSelection(); // (a row added or taken out with Ctrl or Shift, or an unselected one clicked)
         m_selected.clear();
         const QList<QTreeWidgetItem *> selected = m_tree->selectedItems();
         for (QTreeWidgetItem *item : selected)
@@ -622,6 +623,8 @@ LayersPanel::LayersPanel(DocumentController *document, QWidget *parent)
         syncHeader();
         paintRowColors();
     });
+    // A click on the row chosen already: it is what the tools act on again.
+    connect(m_tree, &QTreeWidget::itemPressed, m_document, &DocumentController::clearFrameSelection);
     connect(m_tree, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *item) { rename(item); });
 
     // Model -> view.
@@ -1176,6 +1179,7 @@ void LayersPanel::rowChosen(QTreeWidgetItem *item)
     if (kind == Row::Paper)
         return;
     m_focus = kind == Row::Cel ? Focus::Cel : kind == Row::Layer ? Focus::Layer : Focus::Frame;
+    m_document->clearFrameSelection(); // what is chosen here is what the tools act on now
     m_document->selectCamera(false);
     m_document->setLayerChosen(m_focus == Focus::Layer);
     m_choosing = true;

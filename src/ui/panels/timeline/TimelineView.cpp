@@ -25,6 +25,7 @@
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QScopeGuard>
 #include <QScrollBar>
 #include <QWheelEvent>
 
@@ -187,6 +188,11 @@ TimelineView::TimelineView(DocumentController *document, QWidget *parent)
                 viewport()->update();
             });
     connect(m_document, &DocumentController::structureChanged, this, &TimelineView::onStructureChanged);
+    connect(m_document, &DocumentController::frameSelectionCleared, this, [this] {
+        m_selected.clear();
+        viewport()->update();
+    });
+    connect(m_document, &DocumentController::documentReplaced, this, [this] { m_selected.clear(); });
     connect(m_document, &DocumentController::currentFrameChanged, this, [this](int frame) {
         ensureFrameVisible(frame);
         viewport()->update();
@@ -510,6 +516,23 @@ void TimelineView::pruneSelection()
         const doc::Exposure *e = cel ? cel->timing().exposureAt(ref.start) : nullptr;
         return !e || e->start != ref.start;
     });
+    publishFrames();
+}
+
+void TimelineView::publishFrames()
+{
+    std::vector<DocumentController::FrameRef> frames;
+    if (m_selected.size() >= 2)
+        for (const doc::ExposureRef &ref : m_selected) {
+            const doc::Cel *cel = m_document->document().cel(ref.cel);
+            const doc::Exposure *e = cel ? cel->timing().exposureAt(ref.start) : nullptr;
+            if (!e || e->start != ref.start)
+                continue;
+            const DocumentController::FrameRef frame{ref.cel, e->drawing};
+            if (std::find(frames.begin(), frames.end(), frame) == frames.end())
+                frames.push_back(frame);
+        }
+    m_document->setFrameSelection(std::move(frames));
 }
 
 void TimelineView::setScrubbing(bool on)
@@ -1641,6 +1664,7 @@ void TimelineView::scrubTo(const QPoint &pos, bool selectCel)
 
 void TimelineView::mousePressEvent(QMouseEvent *event)
 {
+    const auto published = qScopeGuard([this] { publishFrames(); }); // the blocks selected may be others when it is done
     if (m_keyScale) { // a click makes the scale, another button drops it
         m_dropContextMenu = event->button() == Qt::RightButton;
         finishKeyScale(event->button() == Qt::LeftButton);
@@ -1998,6 +2022,7 @@ void TimelineView::mouseMoveEvent(QMouseEvent *event)
 
 void TimelineView::mouseReleaseEvent(QMouseEvent *)
 {
+    const auto published = qScopeGuard([this] { publishFrames(); }); // the blocks selected may be others when it is done
     setScrubbing(false);
     if (m_volumeBefore) {
         const float before = *m_volumeBefore;
@@ -2374,6 +2399,7 @@ void TimelineView::showCelMenu(const QPoint &globalPos, const doc::Cel &cel)
 
 void TimelineView::contextMenuEvent(QContextMenuEvent *event)
 {
+    const auto published = qScopeGuard([this] { publishFrames(); }); // the blocks selected may be others when it is done
     if (std::exchange(m_dropContextMenu, false))
         return;
     if (m_keyScale) {
@@ -2552,6 +2578,7 @@ void TimelineView::wheelEvent(QWheelEvent *event)
 
 void TimelineView::keyPressEvent(QKeyEvent *event)
 {
+    const auto published = qScopeGuard([this] { publishFrames(); }); // the blocks selected may be others when it is done
     if (m_keyScale) {
         const QString text = event->text();
         if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
