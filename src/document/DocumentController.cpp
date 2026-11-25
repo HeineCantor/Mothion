@@ -571,6 +571,7 @@ void DocumentController::addDeformer(doc::DeformerKind kind)
     if (bend) {
         doc::CelProperties child = current->properties();
         child.parent = id;
+        child.parentPart = -1; // bent by it, if a part of another one carried it
         steps.push_back(doc::makeSetCelProperties(d, current->id(), std::move(child)));
     }
     // An Envelope starts round what the cel shows (a rounded box: four nodes at the middles of its sides).

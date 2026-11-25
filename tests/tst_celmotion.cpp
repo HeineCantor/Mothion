@@ -2269,6 +2269,25 @@ private slots:
         canvas::FrameRenderer::setDefaultBrushes(nullptr);
     }
 
+    // A cel carried by a bone, given a deformer of its own, is bent by it.
+    void aCarriedCelGivenADeformerIsBentByIt()
+    {
+        document::DocumentController controller;
+        const doc::CelId hand = controller.currentCel();
+        controller.addDeformer(doc::DeformerKind::Bones);
+        const doc::CelId arm = controller.currentCel();
+        QCOMPARE(controller.addBone(arm, -1, {0, 0}, {50, 0}), 0);
+        QVERIFY(controller.setDeformerParent(hand, arm, 0));
+        controller.setCurrentCel(hand);
+        controller.addDeformer(doc::DeformerKind::Bones);
+        const doc::CelProperties &p = controller.document().cel(hand)->properties();
+        QCOMPARE(p.parent, controller.currentCel());
+        QCOMPARE(p.parentPart, -1);
+        controller.undo();
+        QCOMPARE(p.parent, arm);
+        QCOMPARE(p.parentPart, 0);
+    }
+
     // Cels chosen together are moved by the Transform tool as one piece: a drag on the box does to each of them what it does to
     // the box, in one undo step; a cel with no keys gets its first one.
     void severalChosenCelsAreMovedTogether()
