@@ -2301,7 +2301,8 @@ bool TimelineView::event(QEvent *event)
     if (event->type() == QEvent::ShortcutOverride) {
         const auto *key = static_cast<QKeyEvent *>(event);
         const Shortcuts &keymap = Shortcuts::instance();
-        const bool copy = keymap.matches(QStringLiteral("edit.copy"), key);
+        const bool copy = keymap.matches(QStringLiteral("edit.copy"), key)
+                          || keymap.matches(QStringLiteral("edit.cut"), key);
         const bool paste = keymap.matches(QStringLiteral("edit.paste"), key)
                            || keymap.matches(QStringLiteral("timeline.pasteCopies"), key);
         // The timeline's own when it has blocks to copy, or blocks were copied last; else the window's copy and
@@ -2577,6 +2578,20 @@ void TimelineView::keyPressEvent(QKeyEvent *event)
             copyKeys();
         else
             copyFrames();
+        return;
+    }
+    if (keymap.matches(QStringLiteral("edit.cut"), event) && (!m_chosenKeys.empty() || !m_selected.empty())) {
+        // Copied, then taken out as Delete does (the frames after move back).
+        if (!m_chosenKeys.empty()) {
+            copyKeys();
+            const auto keys = chosenKeyRefs();
+            if (m_document->removeCelKeys(keys))
+                clearKeySelection();
+            viewport()->update();
+        } else {
+            copyFrames();
+            deleteSelectedFrames();
+        }
         return;
     }
     const bool paste = keymap.matches(QStringLiteral("edit.paste"), event);

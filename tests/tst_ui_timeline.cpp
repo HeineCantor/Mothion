@@ -977,6 +977,46 @@ private slots:
         QVERIFY(redOnes() > 0);
     }
 
+    // Cut with the timeline in focus takes the selected blocks (or the chosen keys), to be pasted: not the pixels drawn.
+    void timelineCutsTheSelectedFramesAndKeys()
+    {
+        document::DocumentController controller;
+        doc::Document &d = controller.documentForCommands();
+        const doc::CelId cel = controller.currentCel();
+        doc::NewDrawing a = doc::makeNewDrawing(d, cel, 0, 2, "Line");
+        controller.execute(std::move(a.command));
+        doc::NewDrawing b = doc::makeNewDrawing(d, cel, 2, 1, "Line");
+        controller.execute(std::move(b.command));
+        d.layer(cel, a.id, a.layer)->image.setPixel(5, 5, 0xff000000);
+        ui::TimelineView view(&controller);
+        view.resize(800, 200);
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        ui::TimelineMetrics m;
+        QTest::mouseClick(view.viewport(), Qt::LeftButton, {}, QPoint(m.frameX(0) + 8, m.rowY(0) + m.rowHeight / 2));
+        view.setFocus();
+        QKeyEvent wants(QEvent::ShortcutOverride, Qt::Key_X, Qt::ControlModifier);
+        wants.ignore();
+        QCoreApplication::sendEvent(&view, &wants);
+        QVERIFY(wants.isAccepted()); // not the window's cut
+        QTest::keyClick(&view, Qt::Key_X, Qt::ControlModifier);
+        QCOMPARE(d.cel(cel)->timing().drawingAt(0), b.id); // what came after moves back
+        QCOMPARE(d.layer(cel, a.id, a.layer)->image.pixel(5, 5), doc::Pixel(0xff000000));
+        controller.setCurrentFrame(4);
+        QTest::keyClick(&view, Qt::Key_V, Qt::ControlModifier);
+        QCOMPARE(d.cel(cel)->timing().drawingAt(4), a.id);
+        QCOMPARE(d.cel(cel)->timing().drawingAt(5), a.id);
+        // The keys of a cel.
+        controller.setCelKey(cel, 0, doc::CelPose{});
+        controller.setCurrentFrame(0);
+        QTest::mouseClick(view.viewport(), Qt::LeftButton, {}, QPoint(m.frameX(0) + 8, m.rowY(1) + m.rowHeight / 2));
+        QTest::keyClick(&view, Qt::Key_X, Qt::ControlModifier);
+        QVERIFY(controller.celMotion(cel)->isEmpty());
+        controller.setCurrentFrame(3);
+        QTest::keyClick(&view, Qt::Key_V, Qt::ControlModifier);
+        QVERIFY(controller.celMotion(cel)->hasKeyAt(3));
+    }
+
     // Delete with several blocks selected, on two cels: their frames taken out (the ones after move back), one step.
     void timelineDeletesTheSelectedFrames()
     {
