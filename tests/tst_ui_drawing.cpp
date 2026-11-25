@@ -143,6 +143,30 @@ private slots:
     }
 
 
+    // Erasing the selection, or what is out of it, with the mask being drawn on hides it: the layer is not touched.
+    void erasingTheSelectionOnAMaskHides()
+    {
+        document::DocumentController controller;
+        QImage red(300, 300, QImage::Format_ARGB32);
+        red.fill(Qt::red);
+        controller.importImage(red, QStringLiteral("x")); // centered on the 1920x1080 page
+        QVERIFY(controller.createLayerMask());
+        const doc::Layer &layer = controller.currentDrawing()->layers.front();
+        QPainterPath box;
+        box.addRect(900, 500, 50, 50);
+        controller.setSelection(box);
+        QVERIFY(controller.eraseSelection());
+        QCOMPARE(layer.image.pixel(920, 520), doc::Pixel(0xffff0000));
+        QCOMPARE(layer.mask->pixel(920, 520), doc::Pixel(0xff000000));
+        QCOMPARE(layer.mask->pixel(960, 520), doc::Pixel(0));
+        controller.undo();
+        QCOMPARE(layer.mask->pixel(920, 520), doc::Pixel(0));
+        QVERIFY(controller.eraseOutsideSelection());
+        QCOMPARE(layer.image.pixel(960, 520), doc::Pixel(0xffff0000));
+        QCOMPARE(layer.mask->pixel(960, 520), doc::Pixel(0xff000000));
+        QCOMPARE(layer.mask->pixel(920, 520), doc::Pixel(0));
+    }
+
     // The vector button of the Layers panel adds a vector layer, with a name of its own.
     void theVectorButtonAddsAVectorLayer()
     {

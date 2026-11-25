@@ -2950,6 +2950,35 @@ bool DocumentController::eraseBySelection(bool insideIt, QString *reason)
         return false;
     const canvas::SelectionMask mask = canvas::SelectionMask::fromPath(m_selection);
     doc::TiledImage inside, outside;
+    if (layer->mask && m_maskLayer == layer->id) { // the mask is what is drawn on: erasing hides, as the eraser does
+        const doc::TiledImage maskBefore = *layer->mask;
+        QRect area = mask.bounds;
+        if (insideIt) {
+            canvas::fillByMask(*layer->mask, mask, 0xff000000u, false);
+        } else { // all that the layer has and the page, out of the outline
+            area |= QRect(0, 0, m_document->width(), m_document->height()) | boundsOf(layer->image.tileCoords());
+            QImage black(area.size(), QImage::Format_ARGB32_Premultiplied);
+            black.fill(0xff000000u);
+            doc::TiledImage all;
+            all.write(area.x(), area.y(), area.width(), area.height(),
+                      reinterpret_cast<const doc::Pixel *>(black.constBits()), black.bytesPerLine() / 4);
+            canvas::splitByMask(all, mask, inside, outside);
+            canvas::compositeOver(*layer->mask, outside);
+        }
+        auto paint = doc::PaintCommand::capture(m_currentCel, currentDrawingId(), m_currentLayer, maskBefore,
+                                                *layer->mask, true);
+        if (!paint) {
+            if (reason)
+                *reason = nothing;
+            return false;
+        }
+        std::vector<std::unique_ptr<doc::Command>> steps;
+        steps.push_back(std::move(paint));
+        m_history.pushApplied(std::make_unique<doc::GroupCommand>(doc::CommandKind::ClearLayer, std::move(steps)));
+        emit pixelsChanged(m_currentCel, currentDrawingId(), area);
+        emit historyChanged();
+        return true;
+    }
     canvas::splitByMask(layer->image, mask, inside, outside);
     if (!insideIt)
         std::swap(inside, outside); // `inside` is what goes, `outside` what stays

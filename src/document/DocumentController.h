@@ -447,7 +447,8 @@ public:
     // one undo step and keeps the selection. They return false, with
     // `reason` saying why, when there is no selection, nothing under it, or
     // the layer (or its cel) is hidden (or locked, for the ones that change it).
-    // Erases what is selected; what is not selected.
+    // Erases what is selected; what is not selected. With the mask being drawn on, it is hidden instead (see
+    // PaintTarget::tint()): the layer's pixels stay.
     bool eraseSelection(QString *reason = nullptr) { return eraseBySelection(true, reason); }
     bool eraseOutsideSelection(QString *reason = nullptr) { return eraseBySelection(false, reason); }
     // Fills what is selected with `color` (on a mask: shows the layer there). Not on a vector layer.
