@@ -869,6 +869,28 @@ private slots:
         QCOMPARE(controller.camera()->keys().size(), size_t(3));
     }
 
+    // The cel whose block is being made longer goes with an undo, the button still down: the drag is dropped.
+    void undoWhileAnEdgeIsDraggedDropsTheDrag()
+    {
+        document::DocumentController controller;
+        controller.execute(doc::makeNewDrawing(controller.documentForCommands(), controller.currentCel(), 0, 1, "Line").command);
+        controller.addCel();
+        controller.execute(doc::makeNewDrawing(controller.documentForCommands(), controller.currentCel(), 0, 1, "Line").command);
+        ui::TimelineView view(&controller);
+        view.resize(800, 200);
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        ui::TimelineMetrics m;
+        const QPoint edge(m.frameX(1), m.rowY(0) + m.rowHeight / 2);
+        QTest::mousePress(view.viewport(), Qt::LeftButton, {}, edge);
+        controller.undo();
+        controller.undo(); // the cel goes
+        QCOMPARE(controller.document().celCount(), 1);
+        QTest::mouseMove(view.viewport(), edge + QPoint(60, 0));
+        QTest::mouseRelease(view.viewport(), Qt::LeftButton, {}, edge + QPoint(60, 0));
+        QCOMPARE(controller.document().celAt(0).timing().exposures().front().length, 1);
+    }
+
     // Delete with several blocks selected, on two cels: their frames taken out (the ones after move back), one step.
     void timelineDeletesTheSelectedFrames()
     {

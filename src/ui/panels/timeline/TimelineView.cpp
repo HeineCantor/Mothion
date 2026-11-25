@@ -522,6 +522,10 @@ void TimelineView::setScrubbing(bool on)
 
 void TimelineView::onStructureChanged()
 {
+    // A drag of the blocks or of an edge is of the timing as it was (its cel may be gone, with an undo): dropped.
+    m_resize.reset();
+    m_frameDrag.reset();
+    m_movePreview.clear();
     syncAudio();
     pruneSelection();
     updateScrollBars();
