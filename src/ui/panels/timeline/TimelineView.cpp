@@ -661,7 +661,7 @@ void TimelineView::paintSelection(QPainter &p) const
         p.setPen(QPen(kCursorColor, 3.0));
         p.drawLine(0, y, viewport()->width(), y);
     }
-    if (m_document->camera() && m_document->cameraSelected())
+    if (hasCamera() && m_document->cameraSelected())
         outline(cameraTop());
 }
 
@@ -1076,7 +1076,7 @@ void TimelineView::showMotionMenu(const QPoint &globalPos, int celIndex, int fra
 void TimelineView::paintCamera(QPainter &p) const
 {
     const auto &camera = m_document->camera();
-    if (!camera)
+    if (!hasCamera())
         return;
     const TimelineMetrics &m = m_metrics;
     const int top = cameraTop();
@@ -1114,7 +1114,7 @@ void TimelineView::paintCamera(QPainter &p) const
 void TimelineView::paintCameraHeader(QPainter &p) const
 {
     const auto &camera = m_document->camera();
-    if (!camera)
+    if (!hasCamera())
         return;
     const TimelineMetrics &m = m_metrics;
     const QRect r(0, cameraTop(), m.headerWidth - 1, m.rowHeight);
@@ -1224,7 +1224,7 @@ QRect TimelineView::audioBlockRect(int offset) const
 void TimelineView::paintAudio(QPainter &p) const
 {
     const auto &track = m_document->audioTrack();
-    if (!track)
+    if (!hasAudio())
         return;
     const TimelineMetrics &m = m_metrics;
     const int offset = m_audioDrag ? m_audioDrag->offset : track->offset;
@@ -1267,7 +1267,7 @@ void TimelineView::paintAudio(QPainter &p) const
 void TimelineView::paintAudioHeader(QPainter &p) const
 {
     const auto &track = m_document->audioTrack();
-    if (!track)
+    if (!hasAudio())
         return;
     const QRect r = audioHeaderRect();
     p.fillRect(r.adjusted(0, 0, 1, 0), palette().window());

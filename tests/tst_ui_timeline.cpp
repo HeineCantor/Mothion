@@ -950,6 +950,33 @@ private slots:
         QCOMPARE(opacity(0), 1.0f);
     }
 
+    // The rows of the camera and of the sound are not painted when they are not shown.
+    void theCameraIsNotPaintedWhenNotShown()
+    {
+        document::DocumentController controller;
+        controller.addCamera();
+        controller.selectCamera(true);
+        ui::TimelineView view(&controller);
+        view.setShownKinds(ui::TimelineView::ShowAll & ~ui::TimelineView::ShowCamera);
+        view.resize(800, 200);
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        auto redOnes = [&] { // the red of the camera's key and bar, in the row under the only cel's
+            const QImage shown = view.viewport()->grab().toImage().convertToFormat(QImage::Format_RGB32);
+            ui::TimelineMetrics m;
+            int n = 0;
+            for (int y = m.rowY(1); y < m.rowY(2); ++y)
+                for (int x = 0; x < shown.width(); ++x) {
+                    const QColor c = shown.pixelColor(x, y);
+                    n += c == QColor(235, 55, 55);
+                }
+            return n;
+        };
+        QCOMPARE(redOnes(), 0);
+        view.setShownKinds(ui::TimelineView::ShowAll);
+        QVERIFY(redOnes() > 0);
+    }
+
     // Delete with several blocks selected, on two cels: their frames taken out (the ones after move back), one step.
     void timelineDeletesTheSelectedFrames()
     {
