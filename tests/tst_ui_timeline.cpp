@@ -1017,6 +1017,73 @@ private slots:
         QVERIFY(controller.celMotion(cel)->hasKeyAt(3));
     }
 
+    // A locked cel keeps its frames, its layers and its keys, and is not deleted; its name, whether it is shown and its
+    // place in the stack are free to change.
+    void aLockedCelRefusesWhatWouldChangeIt()
+    {
+        document::DocumentController controller;
+        doc::Document &d = controller.documentForCommands();
+        const doc::CelId cel = controller.currentCel();
+        doc::NewDrawing a = doc::makeNewDrawing(d, cel, 0, 3, "Line");
+        controller.execute(std::move(a.command));
+        controller.setCelKey(cel, 0, doc::CelPose{});
+        controller.addCel();
+        const doc::CelId other = controller.currentCel();
+        controller.setCurrentCel(cel);
+        auto change = [&](auto edit) {
+            doc::CelProperties p = d.cel(cel)->properties();
+            edit(p);
+            return controller.execute(doc::makeSetCelProperties(d, cel, p));
+        };
+        QVERIFY(change([](doc::CelProperties &p) { p.locked = true; }));
+        const doc::Timing timing = d.cel(cel)->timing();
+        const doc::CelMotion motion = d.cel(cel)->motion();
+        QSignalSpy refused(&controller, &document::DocumentController::commandRefused);
+
+        ui::TimelineView view(&controller);
+        view.resize(800, 200);
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        ui::TimelineMetrics m;
+        int row = 0;
+        while (view.isMotionRow(row) || d.celAt(view.celIndexForRow(row)).id() != cel)
+            ++row;
+        QTest::mouseClick(view.viewport(), Qt::LeftButton, {}, QPoint(m.frameX(1) + 8, m.rowY(row) + m.rowHeight / 2));
+        view.setFocus();
+        QTest::keyClick(&view, Qt::Key_Delete);
+        QCOMPARE(refused.size(), 1);
+        QCOMPARE(view.selectedFrames().size(), std::size_t(1)); // still selected
+        const QPoint at(m.frameX(1) + 8, m.rowY(row) + m.rowHeight / 2); // dragged: back where it was
+        QTest::mousePress(view.viewport(), Qt::LeftButton, {}, at);
+        QTest::mouseMove(view.viewport(), at + QPoint(5 * m.frameWidth, 0));
+        QTest::mouseRelease(view.viewport(), Qt::LeftButton, {}, at + QPoint(5 * m.frameWidth, 0));
+        QCOMPARE(refused.size(), 2);
+
+        controller.insertFrame(cel, 0, false);
+        QVERIFY(!controller.changeCurrentHold(2));
+        QVERIFY(!controller.addLayer());
+        QVERIFY(!controller.createLayerMask());
+        QVERIFY(!controller.deleteCel(cel));
+        QVERIFY(!controller.setCelKey(cel, 4, doc::CelPose{}));
+        QVERIFY(!controller.moveCelKey(cel, 0, 5));
+        QVERIFY(!controller.removeCelKey(cel, 0));
+        QVERIFY(!controller.clearCelMotion(cel));
+        doc::CelPose pose;
+        pose.x = 50;
+        controller.setCelPose(cel, 7, pose, doc::Channel::Position);
+        QCOMPARE(controller.celPoseAt(cel, 7).x, 0.0);
+        QVERIFY(d.cel(cel)->timing() == timing);
+        QVERIFY(d.cel(cel)->motion() == motion);
+        QCOMPARE(d.cel(cel)->drawing(a.id)->layers.size(), std::size_t(1));
+
+        QVERIFY(change([](doc::CelProperties &p) { p.name = "Free"; p.visible = false; }));
+        controller.setCelSelection({cel}, cel);
+        QVERIFY(controller.shiftChosenCels(true));
+        QCOMPARE(d.indexOf(other), 0);
+        QVERIFY(change([](doc::CelProperties &p) { p.locked = false; }));
+        QVERIFY(controller.deleteCel(cel));
+    }
+
     // Delete with several blocks selected, on two cels: their frames taken out (the ones after move back), one step.
     void timelineDeletesTheSelectedFrames()
     {
@@ -1407,6 +1474,10 @@ private slots:
         QTest::mouseClick(view, Qt::LeftButton, {}, QPoint(90, y)); // the name: made current
         QCOMPARE(controller.currentCel(), first);
 
+        remove->click(); // locked: it stays
+        QCOMPARE(d.celCount(), 2);
+        QTest::mouseClick(view, Qt::LeftButton, {}, QPoint(38, y));
+        QVERIFY(!d.cel(first)->properties().locked);
         remove->click();
         QCOMPARE(d.celCount(), 1);
         QVERIFY(!remove->isEnabled());

@@ -227,6 +227,8 @@ MainWindow::MainWindow(QWidget *parent)
     m_dockLayout = new DockLayout(this, panels);
     createMenus();
     statusBar()->showMessage(tr("Ready"));
+    connect(m_document, &document::DocumentController::commandRefused, this,
+            [this](const QString &reason) { statusBar()->showMessage(reason, 4000); });
     connect(m_canvas, &canvas::CanvasView::statusMessage, this,
             [this](const QString &text) { statusBar()->showMessage(text, 4000); });
     {

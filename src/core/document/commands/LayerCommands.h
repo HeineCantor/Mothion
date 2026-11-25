@@ -24,6 +24,7 @@ public:
     CommandKind kind() const override { return CommandKind::AddLayer; }
     ChangeSet apply(Document &doc) override;
     ChangeSet revert(Document &doc) override;
+    void addChangedCels(std::set<CelId> &cels) const override { cels.insert(m_cel); }
     std::size_t memoryBytes() const override;
 
 private:
@@ -43,6 +44,7 @@ public:
     CommandKind kind() const override { return CommandKind::RemoveLayer; }
     ChangeSet apply(Document &doc) override;
     ChangeSet revert(Document &doc) override;
+    void addChangedCels(std::set<CelId> &cels) const override { cels.insert(m_cel); }
     std::size_t memoryBytes() const override;
 
 private:
@@ -103,6 +105,7 @@ public:
     CommandKind kind() const override { return CommandKind::ChangeMask; }
     ChangeSet apply(Document &doc) override;
     ChangeSet revert(Document &doc) override;
+    void addChangedCels(std::set<CelId> &cels) const override { cels.insert(m_cel); }
     std::size_t memoryBytes() const override;
 
 private:

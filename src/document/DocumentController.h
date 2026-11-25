@@ -74,8 +74,9 @@ public:
     doc::LayerId currentLayer() const { return m_currentLayer; }
 
     // --- commands -------------------------------------------------------------
-    // Runs a command and records it for undo (nullptr does nothing).
-    void execute(std::unique_ptr<doc::Command> command);
+    // Runs a command and records it for undo (nullptr does nothing). False, with commandRefused() saying why, if it
+    // changes what a locked cel holds (its drawings, frames, keys) or takes the cel away.
+    bool execute(std::unique_ptr<doc::Command> command);
     // Mutable document access for building commands that allocate ids.
     doc::Document &documentForCommands() { return *m_document; }
 
@@ -706,6 +707,8 @@ signals:
     void celSelectionChanged();
     // Which layer's mask is being edited changed (see setMaskEditing()), or a mask was made or taken away.
     void maskEditingChanged();
+    // A command was not run (see execute()).
+    void commandRefused(const QString &reason);
     // Undo/redo availability or labels changed.
     void historyChanged();
     void selectionChanged();

@@ -1879,11 +1879,15 @@ void TimelineView::dropFrames()
         return; // Ctrl took it out of the selection: nothing was dragged
     if (drag.offset != 0 && !drag.blocked) {
         const std::vector<doc::ExposureRef> moving = m_selected;
+        const std::optional<doc::ExposureRef> anchor = m_anchor;
         for (doc::ExposureRef &ref : m_selected) // where they will be
             ref.start += drag.offset;
         if (drag.grabbed.cel != doc::kNoId)
             m_anchor = doc::ExposureRef{drag.grabbed.cel, drag.grabbed.start + drag.offset};
-        m_document->execute(doc::makeMoveExposures(m_document->document(), moving, drag.offset));
+        if (!m_document->execute(doc::makeMoveExposures(m_document->document(), moving, drag.offset))) {
+            m_selected = moving; // refused: where they were
+            m_anchor = anchor;
+        }
     }
     updateScrollBars();
     viewport()->update();
@@ -2287,7 +2291,8 @@ bool TimelineView::pasteFrames(bool asCopies)
     auto command = doc::makePasteExposures(m_document->documentForCommands(), m_copied, frame, asCopies);
     if (!command)
         return false;
-    m_document->execute(std::move(command));
+    if (!m_document->execute(std::move(command)))
+        return true; // refused, and said why
     m_selected.clear(); // the pasted ones
     for (const doc::ExposureCopy &c : m_copied)
         m_selected.push_back({c.cel, frame + c.start});
@@ -2529,11 +2534,9 @@ void TimelineView::contextMenuEvent(QContextMenuEvent *event)
 
 void TimelineView::deleteSelectedFrames()
 {
-    auto command = doc::makeRemoveExposures(m_document->document(), m_selected);
-    m_selected.clear();
+    if (m_document->execute(doc::makeRemoveExposures(m_document->document(), m_selected)))
+        m_selected.clear(); // (refused: they stay selected)
     viewport()->update();
-    if (command)
-        m_document->execute(std::move(command));
 }
 
 void TimelineView::wheelEvent(QWheelEvent *event)
@@ -2614,9 +2617,11 @@ void TimelineView::keyPressEvent(QKeyEvent *event)
     // A key of motion chosen (its channel's, or those of the frame): Delete takes it away, one undo step.
     if ((event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) && !m_chosenKeys.empty()) {
         const auto keys = chosenKeyRefs();
-        clearKeySelection();
+        const bool removed = m_document->removeCelKeys(keys);
+        if (removed || keys.empty())
+            clearKeySelection(); // (refused: they stay chosen)
         viewport()->update();
-        if (m_document->removeCelKeys(keys))
+        if (removed || !keys.empty())
             return;
     }
     // Blocks selected: Delete takes their frames out (the ones after move back), one undo step.

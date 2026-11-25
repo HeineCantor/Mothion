@@ -4,6 +4,7 @@
 #include "core/document/Tile.h"
 
 #include <cstddef>
+#include <set>
 #include <vector>
 
 namespace mothion::doc {
@@ -106,6 +107,10 @@ public:
     virtual CommandKind kind() const = 0;
     virtual ChangeSet apply(Document &doc) = 0;
     virtual ChangeSet revert(Document &doc) = 0;
+
+    // The cels whose drawings, layers, frames or motion it changes (or that it takes away), added to `cels`: what a locked
+    // cel refuses. Its name, looks and place in the stack are not among them.
+    virtual void addChangedCels(std::set<CelId> &) const {}
 
     // Approximate memory kept alive by this command (for History limits).
     virtual std::size_t memoryBytes() const { return 256; }

@@ -24,6 +24,12 @@ ChangeSet GroupCommand::revert(Document &doc)
     return changes;
 }
 
+void GroupCommand::addChangedCels(std::set<CelId> &cels) const
+{
+    for (const auto &c : m_commands)
+        c->addChangedCels(cels);
+}
+
 std::size_t GroupCommand::memoryBytes() const
 {
     std::size_t total = 0;

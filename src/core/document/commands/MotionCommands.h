@@ -18,6 +18,7 @@ public:
     CommandKind kind() const override { return CommandKind::EditMotion; }
     ChangeSet apply(Document &doc) override;
     ChangeSet revert(Document &doc) override;
+    void addChangedCels(std::set<CelId> &cels) const override { cels.insert(m_cel); }
     std::size_t memoryBytes() const override;
 
 private:
@@ -35,6 +36,7 @@ public:
     CommandKind kind() const override { return CommandKind::EditDeformer; }
     ChangeSet apply(Document &doc) override;
     ChangeSet revert(Document &doc) override;
+    void addChangedCels(std::set<CelId> &cels) const override { cels.insert(m_cel); }
     std::size_t memoryBytes() const override;
 
 private:

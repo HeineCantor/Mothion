@@ -17,6 +17,7 @@ public:
     CommandKind kind() const override { return m_kind; }
     ChangeSet apply(Document &doc) override;
     ChangeSet revert(Document &doc) override;
+    void addChangedCels(std::set<CelId> &cels) const override;
     std::size_t memoryBytes() const override;
 
 private:

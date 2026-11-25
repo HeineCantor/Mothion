@@ -17,6 +17,7 @@ public:
     CommandKind kind() const override { return CommandKind::Paint; }
     ChangeSet apply(Document &doc) override;
     ChangeSet revert(Document &doc) override;
+    void addChangedCels(std::set<CelId> &cels) const override { cels.insert(m_cel); }
     std::size_t memoryBytes() const override;
 
 private:
@@ -37,6 +38,7 @@ public:
     CommandKind kind() const override { return CommandKind::Transform; }
     ChangeSet apply(Document &doc) override;
     ChangeSet revert(Document &doc) override;
+    void addChangedCels(std::set<CelId> &cels) const override { cels.insert(m_cel); }
     std::size_t memoryBytes() const override;
 
 private:
@@ -55,6 +57,7 @@ public:
     CommandKind kind() const override { return CommandKind::ChangeLayerProperties; }
     ChangeSet apply(Document &doc) override;
     ChangeSet revert(Document &doc) override;
+    void addChangedCels(std::set<CelId> &cels) const override { cels.insert(m_cel); }
     std::size_t memoryBytes() const override;
 
 private:

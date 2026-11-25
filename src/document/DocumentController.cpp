@@ -288,13 +288,21 @@ void DocumentController::markUnsaved()
 
 // --- commands ------------------------------------------------------------------
 
-void DocumentController::execute(std::unique_ptr<doc::Command> command)
+bool DocumentController::execute(std::unique_ptr<doc::Command> command)
 {
     if (!command)
-        return;
+        return true;
+    std::set<doc::CelId> changed;
+    command->addChangedCels(changed);
+    for (const doc::CelId id : changed)
+        if (const doc::Cel *cel = m_document->cel(id); cel && cel->properties().locked) {
+            emit commandRefused(tr("Cel “%1” is locked").arg(QString::fromStdString(cel->properties().name)));
+            return false;
+        }
     interruptStroke();
     publish(m_history.execute(*m_document, std::move(command)));
     emit historyChanged();
+    return true;
 }
 
 void DocumentController::addCel()
@@ -515,8 +523,7 @@ bool DocumentController::setTrajectoryParent(doc::CelId childId, doc::CelId pare
     doc::CelProperties properties = child->properties();
     properties.parent = parentId;
     properties.parentPart = -1;
-    execute(doc::makeSetCelProperties(*m_document, childId, std::move(properties)));
-    return true;
+    return execute(doc::makeSetCelProperties(*m_document, childId, std::move(properties)));
 }
 
 bool DocumentController::setDeformerParent(doc::CelId childId, doc::CelId deformerId, int part)
@@ -532,8 +539,7 @@ bool DocumentController::setDeformerParent(doc::CelId childId, doc::CelId deform
     doc::CelProperties properties = child->properties();
     properties.parent = deformerId;
     properties.parentPart = part;
-    execute(doc::makeSetCelProperties(*m_document, childId, std::move(properties)));
-    return true;
+    return execute(doc::makeSetCelProperties(*m_document, childId, std::move(properties)));
 }
 
 void DocumentController::addDeformer(doc::DeformerKind kind)
@@ -647,8 +653,7 @@ int DocumentController::addBone(doc::CelId celId, int parent, QPointF from, QPoi
                     pose.push_back(rest[i]);
             })));
     const int index = int(cel->deformer().bones.size());
-    execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::EditDeformer, std::move(steps)));
-    return index;
+    return execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::EditDeformer, std::move(steps))) ? index : -1;
 }
 
 int DocumentController::addNode(doc::CelId celId, QPointF at, int after)
@@ -727,8 +732,7 @@ int DocumentController::addNode(doc::CelId celId, QPointF at, int after)
     for (std::size_t k = 0; k < renumbered.size(); ++k)
         renumbered[k] = int(k < index ? k : k + 1);
     carriedRenumbered(celId, renumbered, steps);
-    execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::EditDeformer, std::move(steps)));
-    return int(index);
+    return execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::EditDeformer, std::move(steps))) ? int(index) : -1;
 }
 
 void DocumentController::carriedRenumbered(doc::CelId deformer, const std::vector<int> &renumbered,
@@ -778,8 +782,7 @@ bool DocumentController::removeDeformerPart(doc::CelId celId, int bone)
         for (std::size_t i = 0; i < renumbered.size(); ++i)
             renumbered[i] = int(i) == bone ? -1 : int(i) > bone ? int(i) - 1 : int(i);
         carriedRenumbered(celId, renumbered, steps);
-        execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::EditDeformer, std::move(steps)));
-        return true;
+        return execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::EditDeformer, std::move(steps)));
     }
     const doc::Deformer &old = cel->deformer();
     // The bone and all under it (a parent comes before its children).
@@ -815,8 +818,7 @@ bool DocumentController::removeDeformerPart(doc::CelId celId, int bone)
     if (cel->motion().hasKeys(doc::Channel::Deform))
         steps.push_back(std::make_unique<doc::SetCelMotionCommand>(celId, withDeformKeys(cel->motion(), keep)));
     carriedRenumbered(celId, newIndex, steps);
-    execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::EditDeformer, std::move(steps)));
-    return true;
+    return execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::EditDeformer, std::move(steps)));
 }
 
 bool DocumentController::setDeformerRest(doc::CelId celId, doc::Deformer deformer)
@@ -826,8 +828,7 @@ bool DocumentController::setDeformerRest(doc::CelId celId, doc::Deformer deforme
         || deformer.bones.size() != cel->deformer().bones.size())
         return false;
     deformer.rest.resize(deformer.bones.size() * std::size_t(doc::partParams(cel->properties().deformer)), 0.0);
-    execute(std::make_unique<doc::SetDeformerCommand>(celId, std::move(deformer)));
-    return true;
+    return execute(std::make_unique<doc::SetDeformerCommand>(celId, std::move(deformer)));
 }
 
 bool DocumentController::setDeformKey(doc::CelId celId, int frame, std::vector<double> pose)
@@ -841,8 +842,7 @@ bool DocumentController::setDeformKey(doc::CelId celId, int frame, std::vector<d
     motion.setKey(doc::Channel::Deform, frame, p);
     if (motion == cel->motion())
         return false;
-    execute(std::make_unique<doc::SetCelMotionCommand>(celId, std::move(motion)));
-    return true;
+    return execute(std::make_unique<doc::SetCelMotionCommand>(celId, std::move(motion)));
 }
 
 bool DocumentController::addLayer(bool onTop, doc::LayerKind kind)
@@ -866,7 +866,8 @@ bool DocumentController::addLayer(bool onTop, doc::LayerKind kind)
     auto command = std::make_unique<doc::AddLayerCommand>(*m_document, m_currentCel, drawing->id, index,
                                                           std::move(properties), doc::TiledImage(), kind);
     const doc::LayerId id = command->layerId();
-    execute(std::move(command));
+    if (!execute(std::move(command)))
+        return false;
     setCurrentLayer(id);
     return true;
 }
@@ -1225,7 +1226,8 @@ void DocumentController::insertFrame(doc::CelId cel, int frame, bool after)
     const std::string layerName = newFrameLayerName();
     doc::NewDrawing made = doc::makeInbetween(*m_document, cel, at, layerName,
                                               after ? doc::CommandKind::InsertInbetween : doc::CommandKind::AddDrawing);
-    execute(std::move(made.command));
+    if (!execute(std::move(made.command)))
+        return;
     setCurrentCel(cel);
     setCurrentFrame(at);
 }
@@ -1269,7 +1271,8 @@ bool DocumentController::changeCurrentHold(int delta)
     auto command = doc::makeResizeExposure(*m_document, m_currentCel, before.start, std::max(1, before.length + delta));
     if (!command)
         return false;
-    execute(std::move(command));
+    if (!execute(std::move(command)))
+        return false;
     const doc::Exposure *after = m_document->cel(m_currentCel)->timing().exposureAt(before.start);
     if (after && m_currentFrame >= after->end())
         setCurrentFrame(after->end() - 1);
@@ -1338,8 +1341,7 @@ bool DocumentController::importAudio(const QString &path, QString *reason)
     // A new song begins where the old one did, or at the start.
     if (const auto &old = m_document->audio())
         track.offset = old->offset;
-    execute(std::make_unique<doc::SetAudioCommand>(std::move(track), doc::CommandKind::SetAudio));
-    return true;
+    return execute(std::make_unique<doc::SetAudioCommand>(std::move(track), doc::CommandKind::SetAudio));
 }
 
 void DocumentController::removeAudio()
@@ -1536,8 +1538,7 @@ bool DocumentController::moveChosenCels(int insertAt)
     auto step = doc::makeMoveCels(*m_document, celSelection(), insertAt);
     if (!step)
         return false;
-    execute(std::move(step));
-    return true;
+    return execute(std::move(step));
 }
 
 bool DocumentController::shiftChosenCels(bool up)
@@ -1545,8 +1546,7 @@ bool DocumentController::shiftChosenCels(bool up)
     auto step = doc::makeShiftCels(*m_document, celSelection(), up);
     if (!step)
         return false;
-    execute(std::move(step));
-    return true;
+    return execute(std::move(step));
 }
 
 void DocumentController::chooseCel(doc::CelId id)
@@ -1602,7 +1602,8 @@ bool DocumentController::createLayerMask()
     auto step = doc::makeAddLayerMask(*m_document, m_currentCel, drawing, m_currentLayer);
     if (!step)
         return false;
-    execute(std::move(step));
+    if (!execute(std::move(step)))
+        return false;
     setMaskEditing(m_currentLayer); // the mask is what is drawn on now
     emit maskEditingChanged();
     return true;
@@ -1614,7 +1615,8 @@ bool DocumentController::deleteLayerMask()
     auto step = doc::makeRemoveLayerMask(*m_document, m_currentCel, drawing, m_currentLayer);
     if (!step)
         return false;
-    execute(std::move(step));
+    if (!execute(std::move(step)))
+        return false;
     if (m_maskLayer == m_currentLayer)
         setMaskEditing(doc::kNoId);
     emit maskEditingChanged();
@@ -1671,8 +1673,7 @@ bool DocumentController::setCelKey(doc::CelId id, int frame, const doc::CelPose 
     doc::CelMotion motion;
     if (!celKeyMotion(*cel, frame, pose, motion))
         return false;
-    execute(std::make_unique<doc::SetCelMotionCommand>(id, std::move(motion)));
-    return true;
+    return execute(std::make_unique<doc::SetCelMotionCommand>(id, std::move(motion)));
 }
 
 bool DocumentController::setCelChannelKey(doc::CelId id, doc::Channel channel, int frame, const doc::CelPose &given)
@@ -1690,8 +1691,7 @@ bool DocumentController::setCelChannelKey(doc::CelId id, doc::Channel channel, i
     if (const doc::CelKey *existing = motion.keyAt(channel, frame); existing && existing->pose == doc::channelOf(channel, pose))
         return false;
     motion.setKey(channel, frame, pose);
-    execute(std::make_unique<doc::SetCelMotionCommand>(id, std::move(motion)));
-    return true;
+    return execute(std::make_unique<doc::SetCelMotionCommand>(id, std::move(motion)));
 }
 
 void DocumentController::startMotion(doc::CelMotion &motion, const doc::Cel &cel, int frame) const
@@ -1807,6 +1807,10 @@ void DocumentController::setCelPose(doc::CelId id, int frame, const doc::CelPose
     const doc::Cel *cel = m_document->cel(id);
     if (!cel || frame < 0 || cel->motion().isEmpty())
         return;
+    if (cel->properties().locked) {
+        emit commandRefused(tr("Cel “%1” is locked").arg(QString::fromStdString(cel->properties().name)));
+        return;
+    }
     if (cel->motion().keyAt(channel, frame))
         setCelChannelKey(id, channel, frame, pose);
     else
@@ -1913,8 +1917,7 @@ bool DocumentController::setCelKeyEasing(doc::CelId id, int frame, const doc::Ea
     }
     if (!changed)
         return false;
-    execute(std::make_unique<doc::SetCelMotionCommand>(id, std::move(motion)));
-    return true;
+    return execute(std::make_unique<doc::SetCelMotionCommand>(id, std::move(motion)));
 }
 
 bool DocumentController::removeCelKey(doc::CelId id, int frame, std::optional<doc::Channel> channel)
@@ -1926,8 +1929,7 @@ bool DocumentController::removeCelKey(doc::CelId id, int frame, std::optional<do
     doc::CelMotion motion = cel->motion();
     if (!(channel ? motion.removeKey(*channel, frame) : motion.removeKeysAt(frame)))
         return false;
-    execute(std::make_unique<doc::SetCelMotionCommand>(id, std::move(motion)));
-    return true;
+    return execute(std::make_unique<doc::SetCelMotionCommand>(id, std::move(motion)));
 }
 
 namespace {
@@ -1964,8 +1966,7 @@ bool DocumentController::removeCelKeys(const std::vector<CelKeyRef> &keys)
     auto command = motionsCommand(*m_document, motions);
     if (!command)
         return false;
-    execute(std::move(command));
-    return true;
+    return execute(std::move(command));
 }
 
 bool DocumentController::setCelKeysEasing(const std::vector<CelKeyRef> &keys, const doc::Easing &easing)
@@ -1983,8 +1984,7 @@ bool DocumentController::setCelKeysEasing(const std::vector<CelKeyRef> &keys, co
     auto command = motionsCommand(*m_document, motions);
     if (!command)
         return false;
-    execute(std::move(command));
-    return true;
+    return execute(std::move(command));
 }
 
 bool DocumentController::movedKeyMotions(const std::vector<CelKeyRef> &keys, const std::function<int(int)> &to,
@@ -2021,8 +2021,7 @@ bool DocumentController::moveCelKeys(const std::vector<CelKeyRef> &keys, int del
     auto command = motionsCommand(*m_document, motions);
     if (!command)
         return false;
-    execute(std::move(command));
-    return true;
+    return execute(std::move(command));
 }
 
 void DocumentController::previewKeyMove(const std::vector<CelKeyRef> &keys, int delta)
@@ -2055,8 +2054,7 @@ bool DocumentController::scaleCelKeys(const std::vector<CelKeyRef> &keys, int pi
     auto command = motionsCommand(*m_document, motions);
     if (!command)
         return false; // all where they were
-    execute(std::move(command));
-    return true;
+    return execute(std::move(command));
 }
 
 void DocumentController::previewKeyScale(const std::vector<CelKeyRef> &keys, int pivot, double factor)
@@ -2119,8 +2117,7 @@ bool DocumentController::pasteCelKeys(const std::vector<CelKeyCopy> &copied, int
     auto command = motionsCommand(*m_document, motions);
     if (!command)
         return false;
-    execute(std::move(command));
-    return true;
+    return execute(std::move(command));
 }
 
 bool DocumentController::moveCelKey(doc::CelId id, int frame, int to, std::optional<doc::Channel> channel)
@@ -2132,8 +2129,7 @@ bool DocumentController::moveCelKey(doc::CelId id, int frame, int to, std::optio
     doc::CelMotion motion = cel->motion();
     if (!(channel ? motion.moveKey(*channel, frame, to) : motion.moveKeysAt(frame, to)))
         return false;
-    execute(std::make_unique<doc::SetCelMotionCommand>(id, std::move(motion)));
-    return true;
+    return execute(std::make_unique<doc::SetCelMotionCommand>(id, std::move(motion)));
 }
 
 bool DocumentController::setCelPivot(doc::CelId id, double x, double y)
@@ -2144,8 +2140,7 @@ bool DocumentController::setCelPivot(doc::CelId id, double x, double y)
     doc::CelMotion motion = cel->motion();
     motion.pivotX = x;
     motion.pivotY = y;
-    execute(std::make_unique<doc::SetCelMotionCommand>(id, std::move(motion)));
-    return true;
+    return execute(std::make_unique<doc::SetCelMotionCommand>(id, std::move(motion)));
 }
 
 bool DocumentController::clearCelMotion(doc::CelId id)
@@ -2153,8 +2148,7 @@ bool DocumentController::clearCelMotion(doc::CelId id)
     const doc::Cel *cel = m_document->cel(id);
     if (!cel || cel->motion().isEmpty())
         return false;
-    execute(std::make_unique<doc::SetCelMotionCommand>(id, doc::CelMotion{}));
-    return true;
+    return execute(std::make_unique<doc::SetCelMotionCommand>(id, doc::CelMotion{}));
 }
 
 bool DocumentController::reverseCelMotion(doc::CelId id)
@@ -2165,8 +2159,7 @@ bool DocumentController::reverseCelMotion(doc::CelId id)
     doc::CelMotion turned = cel->motion().reversed();
     if (turned == cel->motion())
         return false;
-    execute(std::make_unique<doc::SetCelMotionCommand>(id, std::move(turned)));
-    return true;
+    return execute(std::make_unique<doc::SetCelMotionCommand>(id, std::move(turned)));
 }
 
 bool DocumentController::setMarker(int frame, const QString &name)
@@ -2178,8 +2171,7 @@ bool DocumentController::setMarker(int frame, const QString &name)
     if (const auto it = markers.find(frame); it != markers.end() && it->second == text)
         return false;
     markers[frame] = text;
-    execute(std::make_unique<doc::SetMarkersCommand>(std::move(markers)));
-    return true;
+    return execute(std::make_unique<doc::SetMarkersCommand>(std::move(markers)));
 }
 
 bool DocumentController::removeMarker(int frame)
@@ -2187,8 +2179,7 @@ bool DocumentController::removeMarker(int frame)
     std::map<int, std::string> markers = m_document->markers();
     if (markers.erase(frame) == 0)
         return false;
-    execute(std::make_unique<doc::SetMarkersCommand>(std::move(markers)));
-    return true;
+    return execute(std::make_unique<doc::SetMarkersCommand>(std::move(markers)));
 }
 
 bool DocumentController::moveMarker(int from, int to)
@@ -2201,8 +2192,7 @@ bool DocumentController::moveMarker(int from, int to)
         return false;
     markers[to] = it->second;
     markers.erase(from);
-    execute(std::make_unique<doc::SetMarkersCommand>(std::move(markers)));
-    return true;
+    return execute(std::make_unique<doc::SetMarkersCommand>(std::move(markers)));
 }
 
 void DocumentController::toggleMarker()
@@ -2325,8 +2315,7 @@ bool DocumentController::removeCameraKey(int frame)
     doc::Camera camera = *m_document->camera();
     if (!camera.removeKey(frame))
         return false;
-    execute(std::make_unique<doc::SetCameraCommand>(std::move(camera)));
-    return true;
+    return execute(std::make_unique<doc::SetCameraCommand>(std::move(camera)));
 }
 
 bool DocumentController::moveCameraKey(int from, int to)
@@ -2336,8 +2325,7 @@ bool DocumentController::moveCameraKey(int from, int to)
     doc::Camera camera = *m_document->camera();
     if (!camera.moveKey(from, to))
         return false;
-    execute(std::make_unique<doc::SetCameraCommand>(std::move(camera)));
-    return true;
+    return execute(std::make_unique<doc::SetCameraCommand>(std::move(camera)));
 }
 
 bool DocumentController::setCameraEasing(int frame, const doc::Easing &easing)
@@ -2349,8 +2337,7 @@ bool DocumentController::setCameraEasing(int frame, const doc::Easing &easing)
         return false;
     if (camera == *m_document->camera())
         return true; // already so
-    execute(std::make_unique<doc::SetCameraCommand>(std::move(camera)));
-    return true;
+    return execute(std::make_unique<doc::SetCameraCommand>(std::move(camera)));
 }
 
 doc::CameraPose DocumentController::cameraPoseAt(int frame) const
@@ -2695,8 +2682,7 @@ bool DocumentController::deleteCel(doc::CelId celId)
 {
     if (!m_document->cel(celId) || m_document->celCount() <= 1)
         return false;
-    execute(std::make_unique<doc::RemoveCelCommand>(celId));
-    return true;
+    return execute(std::make_unique<doc::RemoveCelCommand>(celId));
 }
 
 bool DocumentController::cutCel(doc::CelId celId)
@@ -3084,8 +3070,7 @@ bool DocumentController::renameDrawing(doc::CelId celId, doc::DrawingId drawingI
             return fail(tr("Another frame of “%1” is named “%2”")
                             .arg(QString::fromStdString(cel->properties().name), QString::fromStdString(wanted)));
     interruptStroke();
-    execute(std::make_unique<doc::RenameDrawingCommand>(celId, drawingId, drawing->name, wanted));
-    return true;
+    return execute(std::make_unique<doc::RenameDrawingCommand>(celId, drawingId, drawing->name, wanted));
 }
 
 bool DocumentController::setMouthChart(doc::CelId celId, bool on, QString *reason)
@@ -3120,8 +3105,7 @@ bool DocumentController::setMouthChart(doc::CelId celId, bool on, QString *reaso
             drawing.layers.push_back(std::move(layer));
             steps.push_back(std::make_unique<doc::AddDrawingCommand>(celId, std::move(drawing)));
         }
-    execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::MouthChart, std::move(steps)));
-    return true;
+    return execute(std::make_unique<doc::GroupCommand>(doc::CommandKind::MouthChart, std::move(steps)));
 }
 
 bool DocumentController::applyMouthCues(const std::vector<doc::MouthCue> &cues, int minFrames, QString *reason)
@@ -3425,6 +3409,11 @@ bool DocumentController::selectionToLayer(bool cut, QString *reason)
     doc::Layer *layer = workLayer(cut, nothing, reason, true);
     if (!layer)
         return false;
+    if (const doc::Cel *cel = m_document->cel(m_currentCel); cel->properties().locked) { // no new layer in it either
+        if (reason)
+            *reason = tr("Cel “%1” is locked").arg(QString::fromStdString(cel->properties().name));
+        return false;
+    }
     doc::Document &d = *m_document;
     const doc::DrawingId drawingId = currentDrawingId();
     const canvas::SelectionMask mask = canvas::SelectionMask::fromPath(m_selection);
