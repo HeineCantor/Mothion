@@ -128,6 +128,10 @@ private:
     void paintRowColors();    // the text and glyphs of the selected rows, in the highlighted text color
     void rowChosen(QTreeWidgetItem *item);
     void rename(QTreeWidgetItem *item);
+    // The same for what a row stands for (a menu stays open while the rows may be made anew).
+    void renameCel(doc::CelId cel);
+    void renameFrame(doc::CelId cel, doc::DrawingId drawing);
+    void renameLayer(doc::CelId cel, doc::DrawingId drawing, doc::LayerId layer);
     void commitOpacity();
     // While the opacity slider is dragged the canvas follows it: the cel or the
     // selected layers show the value at once, and on release they go back to

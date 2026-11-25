@@ -1583,8 +1583,22 @@ void LayersPanel::showContextMenu(const QPoint &at)
         m_tree->setCurrentItem(item);
     QMenu menu(this);
     // As the double click: the row under the pointer, whichever kind it is.
-    menu.addAction(tr("Rename…"), this, [this, item] { rename(item); });
-    menu.addSeparator();
+    // (By what the row stands for: the rows may be made anew while the menu is open.)
+    const doc::CelId rowCel = celOf(item);
+    const doc::DrawingId rowDrawing = drawingOf(item);
+    const doc::LayerId rowLayer = layerOf(item);
+    const Row rowKind = kindOf(item);
+    if (rowKind != Row::Paper) {
+        menu.addAction(tr("Rename…"), this, [this, rowKind, rowCel, rowDrawing, rowLayer] {
+            if (rowKind == Row::Cel)
+                renameCel(rowCel);
+            else if (rowKind == Row::Frame)
+                renameFrame(rowCel, rowDrawing);
+            else
+                renameLayer(rowCel, rowDrawing, rowLayer);
+        });
+        menu.addSeparator();
+    }
     if (kindOf(item) == Row::Cel) {
         // What the cel shows, keys and all, as plain pictures in a new cel.
         const doc::CelId celId = celOf(item);
@@ -1715,38 +1729,57 @@ void LayersPanel::moveSelected(int direction)
 
 void LayersPanel::rename(QTreeWidgetItem *item)
 {
-    const doc::Document &d = m_document->document();
-    const Row kind = kindOf(item);
-    if (kind == Row::Cel) {
-        const doc::CelId id = celOf(item);
-        const doc::Cel *cel = d.cel(id);
-        bool ok = false;
-        const QString name = cel ? QInputDialog::getText(this, tr("Rename cel"), tr("Name:"), QLineEdit::Normal,
-                                                         QString::fromStdString(cel->properties().name), &ok)
-                                 : QString();
-        cel = m_document->document().cel(id);
-        if (!ok || name.trimmed().isEmpty() || !cel)
-            return;
-        doc::CelProperties props = cel->properties();
-        props.name = name.trimmed().toStdString();
-        m_document->execute(doc::makeSetCelProperties(d, id, props));
-    } else if (kind == Row::Layer) {
-        const doc::CelId cel = celOf(item);
-        const doc::LayerId id = layerOf(item);
-        const doc::DrawingId drawing = d.cel(cel) ? d.cel(cel)->timing().drawingAt(m_document->currentFrame())
-                                                  : doc::kNoId;
-        const doc::Layer *layer = d.layer(cel, drawing, id);
-        bool ok = false;
-        const QString name = layer ? QInputDialog::getText(this, tr("Rename layer"), tr("Name:"), QLineEdit::Normal,
-                                                           QString::fromStdString(layer->properties.name), &ok)
-                                   : QString();
-        layer = m_document->document().layer(cel, drawing, id);
-        if (!ok || name.trimmed().isEmpty() || !layer)
-            return;
-        doc::LayerProperties props = layer->properties;
-        props.name = name.trimmed().toStdString();
-        m_document->execute(doc::makeSetLayerProperties(d, cel, drawing, id, props));
+    const doc::CelId cel = celOf(item);
+    switch (kindOf(item)) {
+    case Row::Cel: renameCel(cel); break;
+    case Row::Frame: renameFrame(cel, drawingOf(item)); break;
+    case Row::Layer: renameLayer(cel, drawingOf(item), layerOf(item)); break;
+    case Row::Paper: break;
     }
+}
+
+void LayersPanel::renameCel(doc::CelId id)
+{
+    const doc::Cel *cel = m_document->document().cel(id);
+    bool ok = false;
+    const QString name = cel ? QInputDialog::getText(this, tr("Rename cel"), tr("Name:"), QLineEdit::Normal,
+                                                     QString::fromStdString(cel->properties().name), &ok)
+                             : QString();
+    cel = m_document->document().cel(id);
+    if (!ok || name.trimmed().isEmpty() || !cel)
+        return;
+    doc::CelProperties props = cel->properties();
+    props.name = name.trimmed().toStdString();
+    m_document->execute(doc::makeSetCelProperties(m_document->document(), id, props));
+}
+
+void LayersPanel::renameFrame(doc::CelId celId, doc::DrawingId id)
+{
+    const doc::Cel *cel = m_document->document().cel(celId);
+    const doc::Drawing *drawing = cel ? cel->drawing(id) : nullptr;
+    if (!drawing)
+        return;
+    bool ok = false;
+    const QString name = QInputDialog::getText(this, tr("Rename frame"), tr("Name:"), QLineEdit::Normal,
+                                               QString::fromStdString(drawing->name), &ok);
+    QString reason;
+    if (ok && !m_document->renameDrawing(celId, id, name, &reason))
+        emit statusMessage(reason);
+}
+
+void LayersPanel::renameLayer(doc::CelId cel, doc::DrawingId drawing, doc::LayerId id)
+{
+    const doc::Layer *layer = m_document->document().layer(cel, drawing, id);
+    bool ok = false;
+    const QString name = layer ? QInputDialog::getText(this, tr("Rename layer"), tr("Name:"), QLineEdit::Normal,
+                                                       QString::fromStdString(layer->properties.name), &ok)
+                               : QString();
+    layer = m_document->document().layer(cel, drawing, id);
+    if (!ok || name.trimmed().isEmpty() || !layer)
+        return;
+    doc::LayerProperties props = layer->properties;
+    props.name = name.trimmed().toStdString();
+    m_document->execute(doc::makeSetLayerProperties(m_document->document(), cel, drawing, id, props));
 }
 
 // --- drops ------------------------------------------------------------------------------

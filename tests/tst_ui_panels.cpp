@@ -1,6 +1,7 @@
 // Tests for the UI layer: the panels: layers, brush size, color sets, tool properties.
 
 #include "test_common.h"
+#include <QInputDialog>
 #include "ui/panels/PressureCurveEditor.h"
 #include "ui/panels/SliderField.h"
 
@@ -1492,6 +1493,44 @@ private slots:
         controller.undo();
         QVERIFY(layer(low)->mask && layer(low)->mask->pixel(5, 5) == 0xff000000u);
         QCOMPARE(layer(low)->image.pixel(15, 5), doc::Pixel(0xffff0000u));
+    }
+
+    // Frames and layers are renamed from their rows, a frame the timeline does not show (a mouth of a chart) too.
+    void framesAndLayersAreRenamedFromTheirRows()
+    {
+        document::DocumentController controller;
+        const doc::CelId cel = controller.currentCel();
+        QVERIFY(controller.setMouthChart(cel, true)); // its frames are off the timeline
+        ui::LayersPanel panel(&controller);
+        panel.resize(320, 800);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        auto *tree = panel.findChild<QTreeWidget *>();
+        auto renamed = [&](QTreeWidgetItem *row, const QString &name) {
+            bool asked = false;
+            QTimer::singleShot(0, &panel, [&] {
+                if (auto *dialog = qobject_cast<QInputDialog *>(QApplication::activeModalWidget())) {
+                    asked = true;
+                    dialog->setTextValue(name);
+                    dialog->accept();
+                }
+            });
+            emit tree->itemDoubleClicked(row, 0);
+            QCoreApplication::processEvents();
+            return asked;
+        };
+        QTreeWidgetItem *frame = tree->topLevelItem(0)->child(0);
+        QVERIFY(renamed(frame->child(0), QStringLiteral("Lips")));
+        const auto &drawings = controller.document().cel(cel)->drawings();
+        auto layerNamed = [&](const std::string &name) {
+            return std::any_of(drawings.begin(), drawings.end(), [&](const auto &d) {
+                return !d.second.layers.empty() && d.second.layers[0].properties.name == name;
+            });
+        };
+        QVERIFY(layerNamed("Lips"));
+        QTest::qWait(20);
+        QVERIFY(renamed(tree->topLevelItem(0)->child(0), QStringLiteral("Smile")));
+        QVERIFY(std::any_of(drawings.begin(), drawings.end(), [](const auto &d) { return d.second.name == "Smile"; }));
     }
 
     // Delete takes every selected layer row, whichever frames they are in; a frame keeps one layer.
