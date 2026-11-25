@@ -735,13 +735,13 @@ private:
     bool selectionToLayer(bool cut, QString *reason);
     bool flipSelection(bool horizontal, QString *reason);
     bool eraseBySelection(bool inside, QString *reason);
-    // The first key of a cel: where it turns around (the middle of what it shows).
-    void clearTemporaryPose();
+    // The poses that are not keys, of all the cels but `except`, go.
+    void clearTemporaryPose(const std::set<doc::CelId> &except = {});
     // The cels carried by a part of `deformer` (see doc::CelProperties::parentPart) given its new number, as `renumbered`
     // has it for each old one (-1: gone): the steps that do it, added to `steps`.
     void carriedRenumbered(doc::CelId deformer, const std::vector<int> &renumbered,
                            std::vector<std::unique_ptr<doc::Command>> &steps) const;
-    doc::CelId m_tempPoseCel = doc::kNoId; // the cel that has a pose that is not a key (one at a time)
+    std::set<doc::CelId> m_tempPoseCels; // the cels that have a pose that is not a key (one, or those moved together)
     void startMotion(doc::CelMotion &motion, const doc::Cel &cel, int frame) const;
     // The motion the cel would have with a key on `frame` from `pose` (set in `out`); false if that changes nothing.
     // Changes the cel's motion as previewCelPose() does, without telling the views; false if there is no such cel.

@@ -260,7 +260,7 @@ void DocumentController::replaceDocument(std::unique_ptr<doc::Document> document
         m_lastLayerOf[currentDrawingId()] = m_currentLayer;
     }
 
-    m_tempPoseCel = doc::kNoId;
+    m_tempPoseCels.clear();
     m_floating.reset();
     emit playRangeChanged();
     emit documentReplaced();
@@ -1766,10 +1766,8 @@ bool DocumentController::applyCelPose(doc::CelId id, int frame, const doc::CelPo
             motion.setKey(channel, frame, pose);
         } else {
             // No key of this channel here: the value stays only while this frame is the one shown (or until it is made a key).
-            if (m_tempPoseCel != id)
-                clearTemporaryPose();
             motion.setTemporary(channel, frame, pose);
-            m_tempPoseCel = id;
+            m_tempPoseCels.insert(id);
         }
     }
     cel->setMotion(std::move(motion));
@@ -1779,6 +1777,7 @@ bool DocumentController::applyCelPose(doc::CelId id, int frame, const doc::CelPo
 void DocumentController::previewCelPose(doc::CelId id, int frame, const doc::CelPose &pose,
                                         const std::vector<doc::Channel> &channels)
 {
+    clearTemporaryPose({id}); // another cel's goes
     if (!applyCelPose(id, frame, pose, channels))
         return;
     doc::ChangeSet changes;
@@ -1789,6 +1788,10 @@ void DocumentController::previewCelPose(doc::CelId id, int frame, const doc::Cel
 void DocumentController::previewCelPoses(const std::vector<CelPoseChange> &changes)
 {
     // All of them, then the views hear of it once: the frame is drawn again once, not for each cel.
+    std::set<doc::CelId> together;
+    for (const CelPoseChange &c : changes)
+        together.insert(c.cel);
+    clearTemporaryPose(together); // those of the other cels go
     bool any = false;
     for (const CelPoseChange &c : changes)
         any = applyCelPose(c.cel, c.frame, c.pose, c.channels) || any;
@@ -1810,18 +1813,25 @@ void DocumentController::setCelPose(doc::CelId id, int frame, const doc::CelPose
         previewCelPose(id, frame, pose, {channel});
 }
 
-void DocumentController::clearTemporaryPose()
+void DocumentController::clearTemporaryPose(const std::set<doc::CelId> &except)
 {
-    if (m_tempPoseCel == doc::kNoId)
+    bool any = false;
+    for (auto it = m_tempPoseCels.begin(); it != m_tempPoseCels.end();) {
+        if (except.contains(*it)) {
+            ++it;
+            continue;
+        }
+        doc::Cel *cel = m_document->cel(*it);
+        it = m_tempPoseCels.erase(it);
+        if (!cel || !cel->motion().hasTemporary())
+            continue;
+        doc::CelMotion motion = cel->motion();
+        motion.clearTemporary();
+        cel->setMotion(std::move(motion));
+        any = true;
+    }
+    if (!any)
         return;
-    const doc::CelId id = m_tempPoseCel;
-    m_tempPoseCel = doc::kNoId;
-    doc::Cel *cel = m_document->cel(id);
-    if (!cel || !cel->motion().hasTemporary())
-        return;
-    doc::CelMotion motion = cel->motion();
-    motion.clearTemporary();
-    cel->setMotion(std::move(motion));
     doc::ChangeSet changes;
     changes.motion = true;
     publish(changes);

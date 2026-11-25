@@ -2175,6 +2175,52 @@ private slots:
         QCOMPARE(controller.document().cel(warped)->timing().exposures().size(), size_t(11));
     }
 
+    // Cels moved together on a frame with no key all go, not the last one only; leaving the frame takes them all back,
+    // and the Cel key button keeps them all.
+    void severalCelsMovedWhereTheyHaveNoKeyAllGo()
+    {
+        document::DocumentController controller;
+        controller.setSceneLength(30);
+        QImage red(60, 40, QImage::Format_ARGB32);
+        red.fill(Qt::red);
+        controller.importImage(red, QStringLiteral("a"));
+        const doc::CelId a = controller.currentCel();
+        controller.importImage(red, QStringLiteral("b"));
+        const doc::CelId b = controller.currentCel();
+        for (doc::CelId id : {a, b})
+            for (int frame : {0, 10})
+                controller.setCelKey(id, frame, doc::CelPose{});
+        controller.setCelSelection({a, b}, b);
+        auto drag = [&](double x) {
+            doc::CelPose pose;
+            pose.x = x;
+            controller.previewCelPoses({{a, 5, pose, {doc::Channel::Position}}, {b, 5, pose, {doc::Channel::Position}}});
+        };
+        controller.setCurrentFrame(5);
+        drag(40);
+        drag(77);
+        QCOMPARE(controller.celPoseAt(a, 5).x, 77.0);
+        QCOMPARE(controller.celPoseAt(b, 5).x, 77.0);
+        controller.setCurrentFrame(6);
+        QCOMPARE(controller.document().cel(a)->motion().hasTemporary(), false);
+        QCOMPARE(controller.document().cel(b)->motion().hasTemporary(), false);
+        controller.setCurrentFrame(5);
+        drag(77);
+        controller.toggleChosenCelKeys();
+        for (doc::CelId id : {a, b}) {
+            QVERIFY(controller.celMotion(id)->hasKeyAt(5));
+            QCOMPARE(controller.celPoseAt(id, 5).x, 77.0);
+        }
+        // One cel posed alone: what was left on the other goes.
+        controller.setCurrentFrame(3);
+        drag(20);
+        doc::CelPose alone;
+        alone.x = 9;
+        controller.previewCelPose(a, 3, alone, {doc::Channel::Position});
+        QCOMPARE(controller.celPoseAt(a, 3).x, 9.0);
+        QVERIFY(!controller.document().cel(b)->motion().hasTemporary());
+    }
+
     // Cels chosen together are moved by the Transform tool as one piece: a drag on the box does to each of them what it does to
     // the box, in one undo step; a cel with no keys gets its first one.
     void severalChosenCelsAreMovedTogether()
