@@ -1516,9 +1516,11 @@ void LayersPanel::mergeSelected()
         return;
     const QList<doc::LayerId> layers = selectedLayers();
     QString reason;
-    m_selected.clear(); // the result is chosen when it becomes the current layer
-    if (!m_document->mergeLayers(std::vector<doc::LayerId>(layers.begin(), layers.end()), &reason))
+    const QList<doc::LayerId> selected = std::exchange(m_selected, {}); // the result is chosen when it becomes the current layer
+    if (!m_document->mergeLayers(std::vector<doc::LayerId>(layers.begin(), layers.end()), &reason)) {
+        m_selected = selected; // refused: as chosen
         emit statusMessage(reason);
+    }
 }
 
 void LayersPanel::mergeSelectedDown()
@@ -1527,9 +1529,11 @@ void LayersPanel::mergeSelectedDown()
         return;
     const QList<doc::LayerId> layers = selectedLayers();
     QString reason;
-    m_selected.clear(); // the result is chosen when it becomes the current layer
-    if (!m_document->mergeDown(std::vector<doc::LayerId>(layers.begin(), layers.end()), &reason))
+    const QList<doc::LayerId> selected = std::exchange(m_selected, {}); // the result is chosen when it becomes the current layer
+    if (!m_document->mergeDown(std::vector<doc::LayerId>(layers.begin(), layers.end()), &reason)) {
+        m_selected = selected; // refused: as chosen
         emit statusMessage(reason);
+    }
 }
 
 void LayersPanel::copyLayers()

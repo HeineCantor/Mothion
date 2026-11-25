@@ -1533,6 +1533,51 @@ private slots:
         QVERIFY(std::any_of(drawings.begin(), drawings.end(), [](const auto &d) { return d.second.name == "Smile"; }));
     }
 
+    // A merge refused leaves the layers chosen as they were.
+    void aRefusedMergeKeepsTheSelection()
+    {
+        document::DocumentController controller;
+        doc::Document &d = controller.documentForCommands();
+        const doc::CelId cel = controller.currentCel();
+        controller.execute(doc::makeNewDrawing(d, cel, 0, 1, "Line").command);
+        std::vector<doc::LayerId> ids;
+        for (bool erase : {false, true}) { // the upper one has an eraser's stroke over the lower one's line
+            QVERIFY(controller.addLayer(true, doc::LayerKind::Vector));
+            doc::Layer *layer = d.layer(cel, controller.currentDrawingId(), controller.currentLayer());
+            doc::VectorStroke line;
+            line.size = 20;
+            line.erase = erase;
+            for (int i = 0; i < 20; ++i) {
+                brush::BrushInput in;
+                in.x = 100 + i * 4;
+                in.y = 100;
+                line.points.push_back(in);
+                if (!erase)
+                    layer->image.setPixel(100 + i * 4, 100, 0xff000000u);
+            }
+            layer->strokes = {line};
+            ids.push_back(layer->id);
+        }
+        ui::LayersPanel panel(&controller);
+        panel.resize(320, 600);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        auto *tree = panel.findChild<QTreeWidget *>();
+        QTreeWidgetItem *frame = tree->topLevelItem(0)->child(0);
+        tree->setCurrentItem(frame->child(0)); // the top two
+        frame->child(1)->setSelected(true);
+        QCOMPARE(panel.selectedLayers().size(), 2);
+        QToolButton *merge = nullptr;
+        for (QToolButton *b : panel.findChildren<QToolButton *>())
+            if (b->toolTip() == QStringLiteral("Merge the selected layers"))
+                merge = b;
+        QVERIFY(merge && merge->isEnabled());
+        QSignalSpy said(&panel, &ui::LayersPanel::statusMessage);
+        merge->click();
+        QCOMPARE(said.size(), 1);
+        QCOMPARE(panel.selectedLayers().size(), 2);
+    }
+
     // Delete takes every selected layer row, whichever frames they are in; a frame keeps one layer.
     void deleteTakesSeveralLayers()
     {
