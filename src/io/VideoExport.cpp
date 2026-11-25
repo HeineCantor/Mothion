@@ -4,7 +4,9 @@
 #include "io/FrameExport.h"
 
 #include <QCoreApplication>
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QObject>
 #include <QPainter>
 #include <QProcess>
@@ -12,6 +14,8 @@
 #include <QStandardPaths>
 
 #include <algorithm>
+#include <filesystem>
+#include <system_error>
 
 namespace mothion::io {
 
@@ -155,7 +159,11 @@ bool exportVideo(const doc::Document &document, int first, int last, const QStri
              << QStringLiteral("-vendor") << QStringLiteral("apl0");
         break;
     }
-    args << path;
+    // Into a file beside it, which takes its name once it is whole: a video that was there stays if this one is stopped or
+    // fails.
+    const QFileInfo target(path);
+    const QString part = target.dir().filePath(QStringLiteral(".%1.exporting.%2").arg(target.completeBaseName(), target.suffix()));
+    args << part;
     QProcess process;
     process.setProcessChannelMode(QProcess::MergedChannels); // ffmpeg's complaints, read at the end
     process.start(ffmpeg, args);
@@ -187,7 +195,7 @@ bool exportVideo(const doc::Document &document, int first, int last, const QStri
     if (cancelled) {
         process.kill();
         process.waitForFinished(3000);
-        QFile::remove(path);
+        QFile::remove(part);
         return true; // stopped by the user: not a failure
     }
     process.closeWriteChannel();
@@ -195,9 +203,15 @@ bool exportVideo(const doc::Document &document, int first, int last, const QStri
         process.kill();
     messages += process.readAll();
     if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
-        QFile::remove(path);
+        QFile::remove(part);
         const QString said = QString::fromLocal8Bit(messages).trimmed();
         return fail(QObject::tr("ffmpeg failed: %1").arg(said.isEmpty() ? process.errorString() : said));
+    }
+    std::error_code ec; // replaces what was there
+    std::filesystem::rename(std::filesystem::path(part.toStdU16String()), std::filesystem::path(path.toStdU16String()), ec);
+    if (ec) {
+        QFile::remove(part);
+        return fail(QObject::tr("Cannot write %1: %2").arg(target.fileName(), QString::fromStdString(ec.message())));
     }
     return true;
 }

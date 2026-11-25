@@ -457,6 +457,14 @@ private slots:
         const QString stopped = dir.filePath(QStringLiteral("stopped.mp4"));
         QVERIFY(io::exportVideo(d, 0, 5, stopped, {}, [](int done, int) { return done < 2; }, &error));
         QVERIFY(!QFileInfo::exists(stopped));
+        // A video that was there stays as it was when the new one is stopped or fails; one that is done takes its place.
+        const QByteArray whole = [&] { QFile f(file); return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray(); }();
+        auto now = [&] { QFile f(file); return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray(); };
+        QVERIFY(io::exportVideo(d, 0, 5, file, {}, [](int done, int) { return done < 2; }, &error));
+        QCOMPARE(now(), whole);
+        QVERIFY2(io::exportVideo(d, 0, 5, file, {}, {}, &error), qPrintable(error));
+        QVERIFY(now() != whole);
+        QCOMPARE(QDir(dir.path()).entryList(QDir::Files | QDir::Hidden).filter(QStringLiteral("exporting")).size(), 0);
         // A folder that is not there is an error, with ffmpeg's words.
         QVERIFY(!io::exportVideo(d, 0, 1, dir.filePath(QStringLiteral("no/such/dir/x.mp4")), {}, {}, &error));
         QVERIFY(!error.isEmpty());
