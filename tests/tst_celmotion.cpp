@@ -2134,6 +2134,47 @@ private slots:
         QVERIFY(controller.rasterCel(doc::kNoId, &why) == doc::kNoId);
     }
 
+    // Raster into new Cel takes what the cel follows too: a trajectory that moves it, a deformer that bends it.
+    void rasterCelBakesWhatTheCelFollows()
+    {
+        document::DocumentController controller;
+        controller.setSceneLength(30);
+        QImage image(60, 40, QImage::Format_ARGB32);
+        image.fill(Qt::red);
+        controller.importImage(image, QStringLiteral("piece")); // x 930..989, y 520..559, one drawing for the scene
+        const doc::CelId cel = controller.currentCel();
+        controller.addTrajectory();
+        const doc::CelId path = controller.currentCel();
+        doc::CelPose pose = controller.celPoseAt(path, 0);
+        controller.setCelKey(path, 0, pose);
+        pose.x += 100;
+        controller.setCelKey(path, 10, pose);
+        QVERIFY(controller.setTrajectoryParent(cel, path));
+        QString why;
+        const doc::CelId moved = controller.rasterCel(cel, &why);
+        QVERIFY2(moved != doc::kNoId, qPrintable(why));
+        const doc::Cel *made = controller.document().cel(moved);
+        QCOMPARE(made->timing().exposures().size(), size_t(11)); // frames 0-9 each, 10-29 the same one held
+        QVERIFY((made->drawingAt(0)->layers[0].image.pixel(940, 540) >> 24) != 0);
+        QVERIFY((made->drawingAt(20)->layers[0].image.pixel(1070, 540) >> 24) != 0);
+        QVERIFY((made->drawingAt(20)->layers[0].image.pixel(940, 540) >> 24) == 0);
+        controller.undo();
+
+        controller.setTrajectoryParent(cel, doc::kNoId);
+        controller.setCurrentCel(cel);
+        controller.addDeformer(doc::DeformerKind::Bones); // the cel is bent by it
+        const doc::CelId bones = controller.currentCel();
+        QCOMPARE(controller.addBone(bones, -1, {930, 540}, {990, 540}), 0);
+        std::vector<double> bent = controller.document().cel(bones)->deformer().rest;
+        QVERIFY(controller.setDeformKey(bones, 0, bent));
+        for (double &v : bent)
+            v += 0.5;
+        QVERIFY(controller.setDeformKey(bones, 10, bent));
+        const doc::CelId warped = controller.rasterCel(cel, &why);
+        QVERIFY2(warped != doc::kNoId, qPrintable(why));
+        QCOMPARE(controller.document().cel(warped)->timing().exposures().size(), size_t(11));
+    }
+
     // Cels chosen together are moved by the Transform tool as one piece: a drag on the box does to each of them what it does to
     // the box, in one undo step; a cel with no keys gets its first one.
     void severalChosenCelsAreMovedTogether()

@@ -2609,14 +2609,22 @@ doc::CelId DocumentController::rasterCel(doc::CelId celId, QString *reason)
     if (first < 0)
         return fail(tr("The cel has no drawings."));
 
-    // The frames with a drawing, in stretches that look the same: the same drawing under the same pose.
+    // The frames with a drawing, in stretches that look the same: the same drawing under the same pose, moved the same
+    // by what the cel follows and bent the same.
     std::vector<std::pair<int, int>> runs;
     auto poseAt = [cel](int frame) { return cel->motion().isEmpty() ? doc::CelPose{} : cel->motion().poseAt(frame); };
+    const doc::Cel *deformer = m_document->followedDeformer(*cel);
+    auto sameAsBefore = [&](int frame) {
+        const doc::Matrix2x3 a = m_document->followMatrix(*cel, frame - 1), b = m_document->followMatrix(*cel, frame);
+        return poseAt(frame - 1) == poseAt(frame) && a.a == b.a && a.b == b.b && a.c == b.c && a.d == b.d && a.e == b.e
+               && a.f == b.f
+               && (!deformer || m_document->deformPoseAt(*deformer, frame - 1) == m_document->deformPoseAt(*deformer, frame));
+    };
     for (int f = first; f < last; ++f) {
         if (!cel->drawingAt(f))
             continue;
         if (!runs.empty() && runs.back().first + runs.back().second == f && cel->drawingAt(f - 1) == cel->drawingAt(f) &&
-            poseAt(f - 1) == poseAt(f))
+            sameAsBefore(f))
             ++runs.back().second;
         else
             runs.emplace_back(f, 1);
