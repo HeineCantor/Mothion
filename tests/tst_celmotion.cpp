@@ -2078,6 +2078,21 @@ private slots:
         QVERIFY(!bluish(960));
     }
 
+    // A deformation cel pasted is bent by the bones it had, not by none.
+    void aPastedDeformerKeepsItsBones()
+    {
+        document::DocumentController controller;
+        controller.addDeformer(doc::DeformerKind::Bones);
+        const doc::CelId bones = controller.currentCel();
+        QCOMPARE(controller.addBone(bones, -1, {100, 100}, {200, 100}), 0);
+        QCOMPARE(controller.addBone(bones, 0, {200, 100}, {300, 100}), 1);
+        controller.copyCel(bones);
+        const doc::CelId pasted = controller.pasteCel();
+        QVERIFY(pasted != doc::kNoId && pasted != bones);
+        QCOMPARE(controller.document().cel(pasted)->deformer().bones.size(), size_t(2));
+        QVERIFY(controller.document().cel(pasted)->deformer() == controller.document().cel(bones)->deformer());
+    }
+
     // Raster into new Cel: what the keys make of the cel is drawn as pictures in a new cel above it, without keys; a stretch
     // that looks the same stays one held picture; one undo step.
     void rasterCelBakesTheKeys()

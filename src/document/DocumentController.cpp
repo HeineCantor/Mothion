@@ -2686,6 +2686,7 @@ doc::CelId DocumentController::pasteCel()
         if (const auto it = drawings.find(e.drawing); it != drawings.end())
             cel->timing().setExposure(e.start, e.length, it->second);
     cel->setMotion(m_copiedCel->motion());
+    cel->setDeformer(m_copiedCel->deformer()); // a deformation cel's bones or nodes
     const int below = d.indexOf(m_currentCel);
     execute(std::make_unique<doc::AddCelCommand>(std::move(cel), below < 0 ? d.celCount() : below + 1));
     setCurrentCel(id);
