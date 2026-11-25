@@ -950,6 +950,32 @@ bool DocumentController::mergeLayers(const std::vector<doc::LayerId> &ids, QStri
                                    : tr("Choose at least two shown, unlocked layers to merge");
         return false;
     }
+    // An eraser's stroke takes away from its own layer only: joined with the strokes under it, it would take from them
+    // too once they are drawn again.
+    for (std::size_t i = 1; i < layers.size(); ++i)
+        for (const doc::VectorStroke &stroke : layers[i]->strokes) {
+            if (!stroke.erase || stroke.points.empty())
+                continue;
+            QRectF reach;
+            for (const brush::BrushInput &in : stroke.points)
+                reach |= QRectF(in.x - stroke.size / 2 - 2, in.y - stroke.size / 2 - 2, stroke.size + 4, stroke.size + 4);
+            const QRect area = reach.toAlignedRect();
+            for (std::size_t below = 0; below < i; ++below) {
+                const QRect overlap = area & boundsOf(layers[below]->image.tileCoords());
+                if (overlap.isEmpty())
+                    continue;
+                QImage under(overlap.size(), QImage::Format_ARGB32_Premultiplied);
+                layers[below]->image.read(overlap.x(), overlap.y(), overlap.width(), overlap.height(),
+                                          reinterpret_cast<doc::Pixel *>(under.bits()), under.bytesPerLine() / 4);
+                if (opaqueBounds(under).isEmpty())
+                    continue;
+                if (reason)
+                    *reason = tr("“%1” has eraser strokes over “%2”: merged, they would erase it too. Rasterize the layers first")
+                                  .arg(QString::fromStdString(layers[i]->properties.name),
+                                       QString::fromStdString(layers[below]->properties.name));
+                return false;
+            }
+        }
     const doc::Drawing *drawing = currentDrawing();
     // What they show together, as one image (each with its own opacity and blend).
     doc::Drawing together;
@@ -970,7 +996,8 @@ bool DocumentController::mergeLayers(const std::vector<doc::LayerId> &ids, QStri
         std::vector<doc::VectorStroke> all;
         for (const doc::Layer *layer : layers)
             for (doc::VectorStroke stroke : layer->strokes) {
-                stroke.opacity *= double(layer->properties.opacity);
+                if (!stroke.erase) // (an eraser takes away as much, whatever the layer's opacity)
+                    stroke.opacity *= double(layer->properties.opacity);
                 all.push_back(std::move(stroke));
             }
         steps.push_back(std::make_unique<doc::SetVectorStrokesCommand>(m_currentCel, drawing->id, bottom.id,

@@ -2394,6 +2394,50 @@ private slots:
         QVERIFY(!controller.canMergeLayers({raster, lower}));
     }
 
+    // The eraser's strokes of a vector layer are not merged over ink of the layer under it, which they would erase once
+    // drawn again; where they reach nothing of it they are, and the layer drawn again is as it was shown.
+    void mergingVectorLayersKeepsWhatAnEraserAboveDidNotReach()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 1, "Layer 1").command);
+        auto line = [](double y, bool erase) {
+            doc::VectorStroke s;
+            s.size = 20;
+            s.erase = erase;
+            for (int i = 0; i < 40; ++i) {
+                brush::BrushInput in;
+                in.x = 100 + i * 4;
+                in.y = y;
+                in.pressure = 1;
+                s.points.push_back(in);
+            }
+            return s;
+        };
+        auto vectorLayer = [&](std::vector<doc::VectorStroke> strokes) {
+            controller.addLayer(true, doc::LayerKind::Vector);
+            doc::Layer *layer = d.layer(controller.currentCel(), controller.currentDrawingId(), controller.currentLayer());
+            canvas::drawStrokes(layer->image, strokes, state, {});
+            layer->strokes = std::move(strokes);
+            return layer->id;
+        };
+        const doc::LayerId low = vectorLayer({line(120, false)});
+        const doc::LayerId over = vectorLayer({line(300, false), line(120, true)});
+        QString why;
+        QVERIFY(!controller.mergeLayers({low, over}, &why));
+        QVERIFY(!why.isEmpty());
+        QVERIFY(!controller.mergeDown({over}, &why));
+        const doc::LayerId apart = vectorLayer({line(500, false), line(500, true)}); // it erases its own line only
+        QVERIFY2(controller.mergeLayers({low, apart}, &why), qPrintable(why));
+        const doc::Layer *merged = d.layer(controller.currentCel(), controller.currentDrawingId(), low);
+        doc::TiledImage again;
+        canvas::drawStrokes(again, merged->strokes, state, {});
+        for (const double y : {120.0, 500.0})
+            QCOMPARE(doc::alphaOf(again.pixel(180, int(y))), doc::alphaOf(merged->image.pixel(180, int(y))));
+        QCOMPARE(doc::alphaOf(again.pixel(180, 120)), 255);
+    }
+
     // A shape on a vector layer is kept as strokes (the outline); rasterizing the layer lets the others tools in.
     void aShapeOnAVectorLayerIsKeptAndRasterizeLetsGo()
     {
