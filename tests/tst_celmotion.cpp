@@ -9,6 +9,7 @@
 #include "core/document/commands/DrawingCommands.h"
 #include "document/DocumentController.h"
 #include "io/FrameExport.h"
+#include "io/ProjectFile.h"
 #include "tools/ToolState.h"
 #include "ui/panels/ToolPropertiesPanel.h"
 #include "ui/AutoplayWindow.h"
@@ -25,6 +26,7 @@
 #include <QPushButton>
 #include <QSignalSpy>
 #include <QToolButton>
+#include <QTemporaryDir>
 #include <QtTest>
 
 #include <cmath>
@@ -2314,6 +2316,27 @@ private slots:
         QVERIFY(!controller.pasteCelKeys(deform, 5, two));
         QVERIFY(controller.pasteCelKeys(deform, 5, alike));
         QVERIFY(controller.celMotion(alike)->hasKeys(doc::Channel::Deform));
+    }
+
+    // A trajectory without keys (any more, or read from a file) has its circle in the middle of the page.
+    void aTrajectoryWithoutKeysStaysOnThePage()
+    {
+        document::DocumentController controller;
+        controller.addTrajectory();
+        const doc::CelId id = controller.currentCel();
+        const double x = controller.document().width() / 2.0, y = controller.document().height() / 2.0;
+        auto middle = [&](const doc::CelMotion &m) { return m.isEmpty() && m.pivotX == x && m.pivotY == y; };
+        QVERIFY(middle(*controller.celMotion(id)));
+        controller.setCelKey(id, 0, controller.celPoseAt(id, 0));
+        QVERIFY(controller.clearCelMotion(id));
+        QVERIFY(middle(*controller.celMotion(id)));
+        QTemporaryDir dir;
+        const QString path = dir.filePath(QStringLiteral("t.moth"));
+        QString error;
+        QVERIFY2(io::saveProject(controller.document(), path, &error), qPrintable(error));
+        const auto loaded = io::loadProject(path, &error);
+        QVERIFY2(loaded, qPrintable(error));
+        QVERIFY(middle(loaded->cel(id)->motion()));
     }
 
     // Cels chosen together are moved by the Transform tool as one piece: a drag on the box does to each of them what it does to

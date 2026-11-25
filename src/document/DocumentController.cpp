@@ -2159,7 +2159,12 @@ bool DocumentController::clearCelMotion(doc::CelId id)
     const doc::Cel *cel = m_document->cel(id);
     if (!cel || cel->motion().isEmpty())
         return false;
-    return execute(std::make_unique<doc::SetCelMotionCommand>(id, doc::CelMotion{}));
+    doc::CelMotion still;
+    if (cel->properties().trajectory) { // its circle stays on the page, as a new one's
+        still.pivotX = m_document->width() / 2.0;
+        still.pivotY = m_document->height() / 2.0;
+    }
+    return execute(std::make_unique<doc::SetCelMotionCommand>(id, std::move(still)));
 }
 
 bool DocumentController::reverseCelMotion(doc::CelId id)

@@ -26,6 +26,7 @@
 #include <cmath>
 #include <filesystem>
 #include <map>
+#include <set>
 #include <system_error>
 
 namespace mothion::io {
@@ -835,8 +836,8 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
     }
     for (int i = 0; i < d.celCount(); ++i) {
         const doc::Cel &celHere = d.celAt(i);
-        if (celHere.motion().isEmpty())
-            continue;
+        if (celHere.motion().isEmpty() && !celHere.properties().trajectory)
+            continue; // (a trajectory with no keys keeps where its circle stands)
         QSqlQuery motion(db);
         motion.prepare(QStringLiteral("insert into cel_motion values (?, ?)"));
         motion.addBindValue(qint64(celHere.id()));
@@ -1194,11 +1195,24 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
         d->setAudio(std::move(track));
     }
 
+    std::set<doc::CelId> withMotion;
     if (version >= 11 && q.exec(QStringLiteral("select cel, data from cel_motion"))) {
         while (q.next())
-            if (doc::Cel *cel = d->cel(doc::CelId(q.value(0).toLongLong())))
+            if (doc::Cel *cel = d->cel(doc::CelId(q.value(0).toLongLong()))) {
                 cel->setMotion(motionFromJson(q.value(1).toString()));
+                withMotion.insert(cel->id());
+            }
     }
+
+    // A trajectory with no keys was not in that table before: where its circle stands, the middle of the page as when it
+    // is made.
+    for (int i = 0; i < d->celCount(); ++i)
+        if (doc::Cel &cel = d->celAt(i); cel.properties().trajectory && !withMotion.contains(cel.id())) {
+            doc::CelMotion motion;
+            motion.pivotX = d->width() / 2.0;
+            motion.pivotY = d->height() / 2.0;
+            cel.setMotion(std::move(motion));
+        }
 
     if (version >= 12 && q.exec(QStringLiteral("select cel, path, scene, start, percent from blender_links"))) {
         while (q.next())
