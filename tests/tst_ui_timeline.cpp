@@ -919,6 +919,37 @@ private slots:
         }
     }
 
+    // The frame changes while a layer's opacity is dragged: the change is still of the layer it was begun on, and one step.
+    void layerOpacityDraggedOverAFrameChangeIsOneStep()
+    {
+        document::DocumentController controller;
+        const doc::CelId cel = controller.currentCel();
+        for (int frame : {0, 5}) {
+            controller.setCurrentFrame(frame);
+            controller.execute(doc::makeNewDrawing(controller.documentForCommands(), cel, frame, 1, "Line").command);
+        }
+        controller.setCurrentFrame(0);
+        ui::LayersPanel panel(&controller);
+        panel.resize(320, 500);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        QSlider *slider = nullptr;
+        for (QSlider *s : panel.findChildren<QSlider *>())
+            if (s->isEnabled() && s->maximum() == 100)
+                slider = s;
+        QVERIFY(slider);
+        auto opacity = [&](int frame) { return controller.document().cel(cel)->drawingAt(frame)->layers[0].properties.opacity; };
+        slider->setSliderDown(true);
+        slider->setSliderPosition(30);
+        QCOMPARE(opacity(0), 0.3f);
+        controller.setCurrentFrame(5);
+        slider->setSliderDown(false);
+        QCOMPARE(opacity(0), 0.3f);
+        QCOMPARE(opacity(5), 1.0f);
+        controller.undo();
+        QCOMPARE(opacity(0), 1.0f);
+    }
+
     // Delete with several blocks selected, on two cels: their frames taken out (the ones after move back), one step.
     void timelineDeletesTheSelectedFrames()
     {

@@ -1385,36 +1385,48 @@ void LayersPanel::editSelectedLayers(Edit edit)
 
 void LayersPanel::previewOpacity(int percent)
 {
-    const float opacity = float(percent) / 100.0f;
-    if (!m_opacityPreview) { // the drag begins: what it will go back to
+    if (!m_opacityPreview) { // the drag begins: the layers it is of (whatever is current when it ends), as they were
         OpacityPreview start;
         if (const doc::Drawing *drawing = m_document->currentDrawing()) {
+            start.cel = m_document->currentCel();
+            start.drawing = drawing->id;
             for (doc::LayerId id : selectedLayers())
                 start.layersBefore.emplace_back(id, drawing->layer(id)->properties);
         }
         m_opacityPreview = std::move(start);
     }
-    const doc::Drawing *drawing = m_document->currentDrawing();
-    if (!drawing)
-        return;
+    m_opacityPreview->opacity = float(percent) / 100.0f;
     for (const auto &[id, before] : m_opacityPreview->layersBefore) {
         doc::LayerProperties shown = before;
-        shown.opacity = opacity;
-        m_document->previewLayerProperties({m_document->currentCel(), drawing->id, id}, shown);
+        shown.opacity = m_opacityPreview->opacity;
+        m_document->previewLayerProperties({m_opacityPreview->cel, m_opacityPreview->drawing, id}, shown);
     }
 }
 
 void LayersPanel::endOpacityPreview()
 {
-    if (m_opacityPreview) { // back to the start, so the command records the whole change
-        const OpacityPreview start = std::move(*m_opacityPreview);
-        m_opacityPreview.reset();
-        if (const doc::Drawing *drawing = m_document->currentDrawing()) {
-            for (const auto &[id, before] : start.layersBefore)
-                m_document->previewLayerProperties({m_document->currentCel(), drawing->id, id}, before);
-        }
+    if (!m_opacityPreview) {
+        commitOpacity();
+        return;
     }
-    commitOpacity();
+    const OpacityPreview drag = std::move(*m_opacityPreview);
+    m_opacityPreview.reset();
+    // Back to the start, so the command records the whole change.
+    std::vector<std::unique_ptr<doc::Command>> steps;
+    for (const auto &[id, before] : drag.layersBefore) {
+        if (!m_document->previewLayerProperties({drag.cel, drag.drawing, id}, before))
+            continue; // gone meanwhile
+        doc::LayerProperties after = before;
+        after.opacity = drag.opacity;
+        if (auto step = doc::makeSetLayerProperties(m_document->document(), drag.cel, drag.drawing, id, after))
+            steps.push_back(std::move(step));
+    }
+    if (steps.size() == 1)
+        m_document->execute(std::move(steps.front()));
+    else if (!steps.empty())
+        m_document->execute(
+            std::make_unique<doc::GroupCommand>(doc::CommandKind::ChangeLayerProperties, std::move(steps)));
+    syncHeader();
 }
 
 void LayersPanel::commitOpacity()

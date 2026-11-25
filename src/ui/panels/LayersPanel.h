@@ -191,7 +191,10 @@ private:
     Focus m_focus = Focus::Layer;
     struct OpacityPreview
     {
+        doc::CelId cel = doc::kNoId; // of the drawing the drag began on
+        doc::DrawingId drawing = doc::kNoId;
         std::vector<std::pair<doc::LayerId, doc::LayerProperties>> layersBefore;
+        float opacity = 1.0f; // as it was last shown
     };
     std::optional<OpacityPreview> m_opacityPreview; // while the slider is dragged
     bool m_choosing = false;        // a row click is making its cel and layer current
