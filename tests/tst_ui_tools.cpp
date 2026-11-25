@@ -1,6 +1,7 @@
 // Tests for the UI layer: the canvas tools: move, selection, transform, fill, paste.
 
 #include "test_common.h"
+#include "canvas/VectorRender.h"
 #include "tools/SubToolMemory.h"
 #include "tools/BrushLibrary.h"
 #include "ui/HueSaturationDialog.h"
@@ -614,6 +615,81 @@ private slots:
         QVERIFY(controller.selection().contains(QPointF(70, 30))); // closed: a triangle
     }
 
+
+    // With the transparent color the bucket takes the fill away (the lines stay), as the brush does: on a raster layer, on
+    // a mask (it hides) and on a vector layer; on an empty frame it does nothing.
+    void theTransparentColorMakesTheBucketErase()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::FrameRenderer frame;
+        canvas::FillTool tool(&controller, &state, [&](const QPoint &, bool) {
+            frame.renderAll(controller.document(), controller.currentFrame());
+            return canvas::FillTool::Shown{frame.area(), frame.image()};
+        }, [](const QString &) {});
+        state.setOpacity(tools::ToolId::Fill, 1.0);
+        state.setTransparentSelected(true);
+        tool.press({960, 540}, Qt::NoModifier);
+        QVERIFY(!controller.currentDrawing()); // no frame made to erase on
+
+        QImage ring(100, 100, QImage::Format_ARGB32);
+        ring.fill(Qt::transparent);
+        {
+            QPainter p(&ring);
+            p.setPen(QPen(Qt::black, 4));
+            p.drawRect(10, 10, 80, 80);
+        }
+        controller.importImage(ring, QStringLiteral("lines")); // at 910..1009, 490..589
+        auto layer = [&]() -> const doc::Layer & { return *controller.currentDrawing()->layer(controller.currentLayer()); };
+        state.setColor(QColor(255, 0, 0));
+        QVERIFY(!state.transparentSelected());
+        tool.press({960, 540}, Qt::NoModifier);
+        QCOMPARE(layer().image.pixel(960, 540), doc::Pixel(0xffff0000));
+        state.setTransparentSelected(true);
+        tool.press({960, 540}, Qt::NoModifier);
+        QCOMPARE(layer().image.pixel(960, 540), doc::Pixel(0));
+        QCOMPARE(layer().image.pixel(920, 540), doc::Pixel(0xff000000)); // the line
+        QCOMPARE(controller.undoText(), QStringLiteral("Undo fill"));
+        controller.undo();
+        QCOMPARE(layer().image.pixel(960, 540), doc::Pixel(0xffff0000));
+        QVERIFY(controller.createLayerMask());
+        tool.press({960, 540}, Qt::NoModifier); // hides
+        QCOMPARE(layer().mask->pixel(960, 540), doc::Pixel(0xff000000));
+        QCOMPARE(layer().image.pixel(960, 540), doc::Pixel(0xffff0000));
+        controller.setMaskEditing(doc::kNoId);
+
+        // A vector layer: its fill goes, its line stays; the lasso takes both.
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Vector));
+        doc::Layer *vector = controller.documentForCommands().layer(controller.currentCel(), controller.currentDrawingId(),
+                                                                    controller.currentLayer());
+        doc::VectorStroke line;
+        line.size = 6;
+        for (int i = 0; i <= 40; ++i) {
+            brush::BrushInput in;
+            in.x = 200 + i * 5;
+            in.y = 300;
+            in.pressure = 1;
+            line.points.push_back(in);
+        }
+        vector->strokes = {canvas::makeFill({{{200, 200}, {400, 200}, {400, 298}, {200, 298}}}, 0xff00ff00, 1.0), line};
+        canvas::drawStrokes(vector->image, vector->strokes, state, {});
+        tool.press({300, 250}, Qt::NoModifier);
+        QCOMPARE(qAlpha(layer().image.pixel(300, 250)), 0);
+        QCOMPARE(qAlpha(layer().image.pixel(300, 300)), 255);
+        for (const doc::VectorStroke &s : layer().strokes)
+            QVERIFY(!s.fill);
+        controller.undo();
+        QCOMPARE(layer().strokes.size(), std::size_t(2));
+        QCOMPARE(qAlpha(layer().image.pixel(300, 250)), 255);
+        tools::FillSettings lasso = state.fillSettings();
+        lasso.mode = tools::FillSettings::Mode::Lasso;
+        state.setFillSettings(lasso);
+        tool.press({190, 190}, Qt::NoModifier);
+        for (const QPointF &p : {QPointF(410, 190), QPointF(410, 320), QPointF(190, 320)})
+            tool.move(p, Qt::NoModifier);
+        tool.release({190, 200}, Qt::NoModifier);
+        QVERIFY(layer().strokes.empty());
+    }
 
     // The bucket fills inside the lines, under their edge, within the
     // selection, as one undo step.

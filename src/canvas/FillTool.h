@@ -62,6 +62,9 @@ private:
     // layer drawn again; one undo step with `before`, the layer's pixels at beginPaint().
     void putFill(const document::DocumentController::PaintTarget &target, doc::VectorStroke fill,
                  const doc::TiledImage &before);
+    // On a vector layer: what its fills (and, with `linesToo`, its lines) have in `area` taken away; one undo step.
+    void eraseShape(const document::DocumentController::PaintTarget &target, const QPainterPath &area, bool linesToo,
+                    const doc::TiledImage &before);
     // The main color at the fill opacity, premultiplied.
     doc::Pixel fillColor(const QColor &color) const; // the main color (a mask's: its gray) with the opacity
 

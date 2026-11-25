@@ -139,13 +139,18 @@ void FillTool::fillLasso()
         return;
 
     QString reason;
-    const auto target = m_document->beginPaint(true, &reason, true, true);
+    const bool erase = m_state->transparentSelected(); // the transparent color takes away, as with the brush
+    const auto target = m_document->beginPaint(!erase, &reason, true, true);
     if (!target) {
         if (!reason.isEmpty())
             m_status(reason);
         return;
     }
     const doc::TiledImage before = *target->image;
+    if (target->vector && erase) {
+        eraseShape(*target, area, true, before);
+        return;
+    }
     if (target->vector) { // the outline is the shape
         const QColor c = target->tint(m_state->color());
         putFill(*target, fillShaped(makeFill({}, c.rgba(), m_state->settings(tools::ToolId::Fill).opacity), area), before);
@@ -153,7 +158,7 @@ void FillTool::fillLasso()
     }
     const QRect box = mask.bounds;
     const doc::Pixel color = fillColor(target->tint(m_state->color()));
-    fillByMask(*target->image, mask, color, target->mask);
+    fillByMask(*target->image, mask, color, erase != target->mask); // (on a mask filling shows, erasing hides)
     m_document->notifyPainted(box);
     m_document->endPaint(before, doc::CommandKind::Fill);
 }
@@ -173,7 +178,8 @@ void FillTool::fillAround(const QPointF &docPos)
         return m_status(QObject::tr("Click inside the selection to fill it"));
 
     QString reason;
-    const auto target = m_document->beginPaint(true, &reason, true, true);
+    const bool erase = m_state->transparentSelected(); // the transparent color takes away, as with the brush
+    const auto target = m_document->beginPaint(!erase, &reason, true, true);
     if (!target) {
         if (!reason.isEmpty())
             m_status(reason);
@@ -272,6 +278,13 @@ void FillTool::fillAround(const QPointF &docPos)
         }
         doc::VectorStroke shape = makeFill(outlines, target->tint(m_state->color()).rgba(),
                                            m_state->settings(tools::ToolId::Fill).opacity);
+        if (erase) {
+            QPainterPath gone = fillPath(shape);
+            if (m_document->hasSelection())
+                gone = gone.intersected(m_document->selection());
+            eraseShape(*target, gone, false, before);
+            return;
+        }
         if (m_document->hasSelection())
             shape = fillShaped(shape, fillPath(shape).intersected(m_document->selection()));
         putFill(*target, std::move(shape), before);
@@ -293,9 +306,15 @@ void FillTool::fillAround(const QPointF &docPos)
             doc::Pixel &p = pixels[std::size_t(y) * std::size_t(box.width()) + std::size_t(x)];
             if (!coverage)
                 continue;
-            if (target->mask)
+            const bool inArea = clicked[std::size_t(dy - area.y()) * std::size_t(w) + std::size_t(dx - area.x())];
+            if (erase) { // of the area itself: the lines round it, which it grows under, stay
+                if (target->mask)
+                    p = over(p, color, coverage);
+                else if (inArea)
+                    p = clearedBy(p, coverage * int(color >> 24) / 255);
+            } else if (target->mask)
                 p = clearedBy(p, coverage * int(color >> 24) / 255);
-            else if (clicked[std::size_t(dy - area.y()) * std::size_t(w) + std::size_t(dx - area.x())])
+            else if (inArea)
                 p = over(p, color, coverage);
             else
                 p = behind(p, color, coverage);
@@ -303,6 +322,37 @@ void FillTool::fillAround(const QPointF &docPos)
     }
     target->image->write(box.x(), box.y(), box.width(), box.height(), pixels.data(), box.width());
     m_document->notifyPainted(box);
+    m_document->endPaint(before, doc::CommandKind::Fill);
+}
+
+void FillTool::eraseShape(const document::DocumentController::PaintTarget &target, const QPainterPath &area, bool linesToo,
+                          const doc::TiledImage &before)
+{
+    const doc::Layer *layer = m_document->document().layer(target.cel, target.drawing, target.layer);
+    if (!layer || area.isEmpty()) {
+        m_document->cancelPaint();
+        return;
+    }
+    const SelectionMask mask = SelectionMask::fromPath(area);
+    std::vector<doc::VectorStroke> after;
+    for (const doc::VectorStroke &stroke : layer->strokes) {
+        if (!stroke.fill && !linesToo) {
+            after.push_back(stroke);
+            continue;
+        }
+        const SplitStroke cut = splitStrokeByMask(stroke, mask, area);
+        after.insert(after.end(), cut.outside.begin(), cut.outside.end());
+    }
+    if (after == layer->strokes) { // nothing there
+        m_document->cancelPaint();
+        return;
+    }
+    const QRect was = tileBounds(before);
+    m_document->attachStrokeChange(target, layer->strokes, after);
+    doc::TiledImage drawn;
+    const QRect painted = drawStrokes(drawn, after, *m_state, {});
+    *target.image = std::move(drawn);
+    m_document->notifyPainted(was | painted);
     m_document->endPaint(before, doc::CommandKind::Fill);
 }
 
