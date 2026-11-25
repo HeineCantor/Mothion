@@ -251,6 +251,29 @@ private slots:
         f.controller.cancelPaint();
     }
 
+    // What a mask hides stays hidden in the frames between.
+    void whatAMaskHidesIsNotTweened()
+    {
+        Fixture f;
+        doc::Document &d = f.controller.documentForCommands();
+        for (const auto &[drawing, id, x] : {std::tuple{f.a, f.inkA, 700}, std::tuple{f.b, f.inkB, 700}}) {
+            doc::Layer &layer = *d.layer(f.cel, drawing, id);
+            layer.mask.emplace();
+            for (int j = 0; j < 40; ++j)
+                for (int i = 0; i < 40; ++i) {
+                    layer.image.setPixel(x + i, 300 + j, 0xffff0000);
+                    layer.mask->setPixel(x + i, 300 + j, 0xff000000);
+                }
+        }
+        QCOMPARE(f.controller.tweenFrames(f.cel, 0, 8), 7);
+        const doc::Layer &made = f.layerAt(4);
+        QVERIFY(!made.mask);
+        for (int j = 0; j < 40; ++j)
+            for (int i = 0; i < 40; ++i)
+                QCOMPARE(doc::alphaOf(made.image.pixel(700 + i, 300 + j)), 0);
+        QVERIFY(centroid(made).x() > 100); // the rest is there
+    }
+
     void perspectiveLayersAreLeftOut()
     {
         Fixture f;

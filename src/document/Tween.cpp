@@ -47,6 +47,26 @@ puppet::RasterImage rasterOf(const doc::Layer *layer, const QRect &area)
     return image;
 }
 
+// The layers that have a mask made what they show through it, without it.
+void throughMasks(doc::Drawing &drawing)
+{
+    for (doc::Layer &layer : drawing.layers) {
+        if (!layer.mask || layer.kind == doc::LayerKind::Perspective)
+            continue;
+        doc::Drawing alone;
+        alone.layers.push_back(layer);
+        alone.layers.front().properties = doc::LayerProperties{}; // shown, plainly
+        doc::TiledImage shown;
+        if (const QRect area = canvas::drawingBounds(alone, false); !area.isEmpty()) {
+            const QImage image = canvas::composeDrawing(alone, area, false);
+            shown.write(area.x(), area.y(), area.width(), area.height(),
+                        reinterpret_cast<const doc::Pixel *>(image.constBits()), image.bytesPerLine() / 4);
+        }
+        layer.image = std::move(shown);
+        layer.mask.reset();
+    }
+}
+
 // The pixels of a layer, where they are (tile bounds), nothing for none.
 QRect boundsOf(const doc::Layer *layer)
 {
@@ -107,6 +127,9 @@ std::optional<DrawingTween> DrawingTween::make(const doc::Drawing &from, const d
     DrawingTween t;
     t.m_from = from;
     t.m_to = to;
+    // What the masks hide is not part of the pictures: their layers as they show.
+    throughMasks(t.m_from);
+    throughMasks(t.m_to);
     t.m_area = bounds.adjusted(-kMargin, -kMargin, kMargin, kMargin);
 
     // The layers in pairs (the visible ones with pixels): by name first, then what is left in the order it is stacked.
