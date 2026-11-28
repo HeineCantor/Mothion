@@ -2,6 +2,7 @@
 
 #include "core/document/Camera.h"
 
+#include <algorithm>
 #include <array>
 #include <optional>
 #include <vector>
@@ -95,6 +96,19 @@ public:
     // last of all the channels together, so they stay in step), and each curve is turned around (an ease in becomes an
     // ease out), so that the way there is the way back. The pivot stays.
     CelMotion reversed() const;
+
+    // The motion with the way from the key on `from` to the one on `to` drawn as a spacing chart says: for each of
+    // `channels` that has a key on both, one key for each share (how far from the first key's pose to the second's: 0 to
+    // 1, and past them for an overshoot or an anticipation), in the order of the shares, on the frames right after
+    // `from`, in place of the keys there were between the two. Each of them, and the one on `from`, holds. The key on `to`
+    // comes right after the last of them (see spacingEnd()), nearer or further than it was, and every key from there on
+    // (of any channel) goes with it.
+    CelMotion spaced(const std::vector<Channel> &channels, int from, int to, std::vector<double> shares) const;
+    // The last frame between `from` and `to` that a channel not among `channels` has a key on (`from` if none does).
+    int spacingBlock(const std::vector<Channel> &channels, int from, int to) const;
+    // Where the key that was on `to` goes with `count` keys after `from`: the frame after the last of them, but never
+    // back over `block` (see spacingBlock()), whose keys stay where they are.
+    static int spacingEnd(int from, int count, int block) { return std::max(from + count, block) + 1; }
 
     // A value of a channel the cel has on one frame that is not a key (yet): what the Transform and Move tools leave on a
     // frame with no key of the channel. It shows (poseAt answers it there, over what the keys say) but is not part of the

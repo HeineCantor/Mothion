@@ -2,6 +2,7 @@
 
 #include "ui/TrajectoryMenu.h"
 #include "ui/ModelDialogs.h"
+#include "ui/SpacingChartDialog.h"
 
 #include "core/document/commands/CelCommands.h"
 #include "core/document/commands/DrawingCommands.h"
@@ -1171,6 +1172,39 @@ void TimelineView::showMotionMenu(const QPoint &globalPos, int celIndex, int fra
         else
             menu.addAction(channel ? tr("Delete keyframe") : tr("Delete keyframes"), this,
                            [this, id, frame, channel] { m_document->removeCelKey(id, frame, channel); });
+    }
+    // Two keyframes of this cel chosen: the ones between them drawn as a spacing chart.
+    {
+        std::set<int> ends;
+        bool here = !chosen.empty();
+        for (const auto &k : chosen) {
+            here = here && k.cel == id;
+            ends.insert(k.frame);
+        }
+        std::vector<doc::Channel> charted; // those with a key chosen on both
+        if (here && ends.size() == 2)
+            for (doc::Channel c : doc::kChannels)
+                if (std::count_if(chosen.begin(), chosen.end(), [c](const auto &k) { return k.channel == c; }) == 2)
+                    charted.push_back(c);
+        if (!charted.empty()) {
+            const int from = *ends.begin(), to = *ends.rbegin();
+            menu.addAction(tr("Set spacing chart…"), this, [this, id, charted, from, to] {
+                std::set<int> between; // the keyframes it will replace
+                int block = from;
+                if (const doc::CelMotion *m = m_document->celMotion(id)) {
+                    block = m->spacingBlock(charted, from, to);
+                    for (doc::Channel c : charted)
+                        for (const doc::CelKey &k : m->keys(c))
+                            if (k.frame > from && k.frame < to)
+                                between.insert(k.frame);
+                }
+                SpacingChartDialog dialog(from, to, int(between.size()), block, this);
+                if (dialog.exec() != QDialog::Accepted)
+                    return;
+                clearKeySelection();
+                m_document->setSpacingChart(id, charted, from, to, dialog.shares());
+            });
+        }
     }
     if (channel) {
         if (!key)

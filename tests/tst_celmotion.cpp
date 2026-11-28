@@ -13,13 +13,16 @@
 #include "tools/ToolState.h"
 #include "ui/panels/ToolPropertiesPanel.h"
 #include "ui/AutoplayWindow.h"
+#include "ui/SpacingChartDialog.h"
 #include "ui/TrajectoryMenu.h"
 #include "ui/panels/timeline/TimelinePanel.h"
 #include "ui/panels/timeline/TimelineView.h"
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QContextMenuEvent>
 #include <QDoubleSpinBox>
+#include <QTimer>
 #include <QMenu>
 #include <QPainter>
 #include <QPen>
@@ -1122,6 +1125,111 @@ private slots:
     // A trajectory cel: made from the arrow next to the new cel button's plus (here, directly), it has no drawings and is not drawn;
     // selected, it shows a circle (its middle moves it, its arrow turns it, its edge scales it) whatever the tool, and what is
     // dragged becomes its keys, in one undo step; nothing can be drawn on it.
+    void aSpacingChartMakesTheKeysBetweenTwo()
+    {
+        using C = doc::Channel;
+        doc::CelMotion motion;
+        motion.setKey(C::Position, 0, at(0, 0), doc::Easing::easeInOut());
+        motion.setKey(C::Position, 3, at(50, 0)); // an old inbetween
+        motion.setKey(C::Position, 10, at(100, 40), doc::Easing::easeIn());
+        motion.setKey(C::Rotation, 5, at(0, 0, 15)); // another channel: not charted
+        // The keys right after A, in the order of the shares, all holding; B right after them, but for the rotation's
+        // key between, which it does not go back over.
+        doc::CelMotion made = motion.spaced({C::Position}, 0, 10, {0.5, 0.1, 1.2});
+        QCOMPARE(made.keys(C::Position).size(), std::size_t(5));
+        QCOMPARE(made.keyAt(C::Position, 1)->pose.x, 10.0);
+        QCOMPARE(made.keyAt(C::Position, 2)->pose.x, 50.0);
+        QCOMPARE(made.keyAt(C::Position, 3)->pose.x, 120.0); // past B: an overshoot
+        QCOMPARE(made.keyAt(C::Position, 3)->pose.y, 48.0);
+        for (int frame : {0, 1, 2, 3})
+            QCOMPARE(made.keyAt(C::Position, frame)->easing, doc::Easing::hold());
+        QCOMPARE(motion.spacingBlock({C::Position}, 0, 10), 5);
+        QVERIFY(made.keyAt(C::Position, 6));
+        QCOMPARE(made.keyAt(C::Position, 6)->easing, doc::Easing::easeIn()); // B's way on as it was
+        QCOMPARE(made.keys(C::Rotation), motion.keys(C::Rotation));
+        // With nothing in the way B comes right after the last, and what follows it comes back with it.
+        doc::CelMotion wide;
+        wide.setKey(C::Position, 0, at(0, 0));
+        wide.setKey(C::Position, 19, at(100, 0));
+        wide.setKey(C::Opacity, 25, at(0, 0, 0, 1, 0.5));
+        made = wide.spaced({C::Position}, 0, 19, {0.25, 0.5, 0.75});
+        QCOMPARE(made.keyFrames(), (std::vector<int>{0, 1, 2, 3, 4, 10}));
+        QCOMPARE(made.keyAt(C::Position, 4)->pose.x, 100.0);
+
+        // More ticks than frames between: B goes on, and what comes after it in any channel with it.
+        doc::CelMotion tight;
+        tight.setKey(C::Position, 2, at(0, 0));
+        tight.setKey(C::Position, 4, at(40, 0));
+        tight.setKey(C::Opacity, 6, at(0, 0, 0, 1, 0.5));
+        made = tight.spaced({C::Position, C::Rotation}, 2, 4, {0.25, 0.5, 0.75}); // Rotation has no keys there
+        QCOMPARE(made.keyFrames(), (std::vector<int>{2, 3, 4, 5, 6, 8}));
+        QCOMPARE(made.keyAt(C::Position, 4)->pose.x, 20.0);
+        QCOMPARE(made.keyAt(C::Position, 6)->pose.x, 40.0);
+        QVERIFY(made.keyAt(C::Opacity, 8));
+        QVERIFY(!made.hasKeys(C::Rotation));
+        QCOMPARE(tight.spaced({C::Position}, 2, 4, {}), tight); // no ticks: nothing
+    }
+
+    void theSpacingChartIsDrawnFromTheTimelinesMenu()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        controller.setSceneLength(30);
+        const doc::CelId cel = controller.currentCel();
+        controller.setCelKey(cel, 0, at(0, 0));
+        controller.setCelKey(cel, 8, at(100, 0));
+        ui::TimelinePanel panel(&controller, &state);
+        panel.resize(900, 360);
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        ui::TimelineView *view = panel.view();
+        QWidget *vp = view->viewport();
+        ui::TimelineMetrics m;
+        auto diamond = [&](int frame) { return QPoint(m.frameX(frame) + m.frameWidth / 2, m.rowY(1) + m.rowHeight / 2); };
+        QTest::mouseClick(vp, Qt::LeftButton, {}, diamond(0));
+        QTest::mouseClick(vp, Qt::LeftButton, Qt::ControlModifier, diamond(8));
+
+        // The menu's entry opens the chart; three ticks (and one on A, which is not one) and OK.
+        bool asked = false;
+        QTimer::singleShot(0, this, [&] {
+            auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+            QVERIFY(menu);
+            QAction *chart = nullptr;
+            for (QAction *a : menu->actions())
+                if (a->text() == QStringLiteral("Set spacing chart…"))
+                    chart = a;
+            QVERIFY(chart);
+            QTimer::singleShot(0, this, [&] {
+                auto *dialog = qobject_cast<ui::SpacingChartDialog *>(QApplication::activeModalWidget());
+                QVERIFY(dialog);
+                asked = true;
+                ui::SpacingChartCanvas *canvas = dialog->canvas();
+                for (double share : {0.5, 0.0, 0.75, 0.25}) {
+                    const QPoint on = canvas->pointAt(share).toPoint();
+                    QTest::mousePress(canvas, Qt::LeftButton, {}, on - QPoint(0, 20));
+                    QTest::mouseMove(canvas, on + QPoint(0, 20));
+                    QTest::mouseRelease(canvas, Qt::LeftButton, {}, on + QPoint(0, 20));
+                }
+                QCOMPARE(dialog->shares().size(), std::size_t(3));
+                dialog->accept();
+            });
+            chart->trigger();
+            menu->close();
+        });
+        QContextMenuEvent event(QContextMenuEvent::Mouse, diamond(8), vp->mapToGlobal(diamond(8)));
+        QApplication::sendEvent(vp, &event);
+        QTRY_VERIFY(asked);
+
+        const doc::CelMotion &motion = controller.document().cel(cel)->motion();
+        QCOMPARE(motion.keyFrames(), (std::vector<int>{0, 1, 2, 3, 4}));
+        QVERIFY(std::abs(motion.interpolatedAt(1).x - 25) < 0.5);
+        QVERIFY(std::abs(motion.interpolatedAt(2).x - 50) < 0.5);
+        QVERIFY(std::abs(motion.interpolatedAt(3).x - 75) < 0.5);
+        QCOMPARE(motion.interpolatedAt(4).x, 100.0);
+        controller.undo(); // one step
+        QCOMPARE(controller.document().cel(cel)->motion().keyFrames(), (std::vector<int>{0, 8}));
+    }
+
     void bonesAreDrawnInRigModeAndTurnedToAnimate()
     {
         tools::ToolState state;

@@ -165,6 +165,7 @@ qt_add_library(mothion_gui STATIC
     ui/BlenderSessionDialog.h ui/BlenderSessionDialog.cpp
     ui/TweenDialog.h ui/TweenDialog.cpp
     ui/ModelDialogs.h ui/ModelDialogs.cpp
+    ui/SpacingChartDialog.h ui/SpacingChartDialog.cpp
     ui/HueSaturationDialog.h ui/HueSaturationDialog.cpp
     ui/LipSyncDialog.h ui/LipSyncDialog.cpp
     ui/PanelDock.h ui/PanelDock.cpp

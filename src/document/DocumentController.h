@@ -237,6 +237,10 @@ public:
         bool operator==(const CelKeyRef &) const = default;
     };
     bool removeCelKeys(const std::vector<CelKeyRef> &keys);
+    // The keys between those of `channels` on `from` and `to` made as a spacing chart says (see doc::CelMotion::spaced()).
+    // One undo step; false if nothing changes or the cel is locked.
+    bool setSpacingChart(doc::CelId cel, const std::vector<doc::Channel> &channels, int from, int to,
+                         const std::vector<double> &shares);
     // The curve to the next key of all of them; false if none changes.
     bool setCelKeysEasing(const std::vector<CelKeyRef> &keys, const doc::Easing &easing);
     // All of them `delta` frames on (or back): refused if one would go before the first frame or on a key that is not moved too.

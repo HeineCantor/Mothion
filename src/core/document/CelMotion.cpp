@@ -52,6 +52,35 @@ template <class Keys> auto keyAtOrAfter(Keys &keys, int frame)
 }
 } // namespace
 
+namespace {
+// The pose of `channel` a share `k` of the way from `a` to `b` (0 is a, 1 is b; past them with k out of 0..1).
+CelPose between(Channel channel, const CelPose &a, const CelPose &b, double k)
+{
+    auto straight = [k](double p, double q) { return p + (q - p) * k; };
+    // By ratios: a steady scale has the same ratio at each step (and straight when one of them is not positive).
+    auto ratio = [k](double p, double q) { return p > 0 && q > 0 ? p * std::pow(q / p, k) : p + (q - p) * k; };
+    CelPose pose;
+    switch (channel) {
+    case Channel::Position:
+        pose.x = straight(a.x, b.x);
+        pose.y = straight(a.y, b.y);
+        break;
+    case Channel::Rotation: pose.rotation = straight(a.rotation, b.rotation); break;
+    case Channel::Scale:
+        pose.scaleX = ratio(a.scaleX, b.scaleX);
+        pose.scaleY = ratio(a.scaleY, b.scaleY);
+        break;
+    case Channel::Opacity: pose.opacity = std::clamp(straight(a.opacity, b.opacity), 0.0, 1.0); break;
+    case Channel::Deform:
+        pose.deform = a.deform.size() >= b.deform.size() ? a.deform : b.deform;
+        for (std::size_t i = 0; i < std::min(a.deform.size(), b.deform.size()); ++i)
+            pose.deform[i] = straight(a.deform[i], b.deform[i]);
+        break;
+    }
+    return pose;
+}
+} // namespace
+
 bool CelMotion::isEmpty() const
 {
     for (const auto &keys : m_keys)
@@ -126,29 +155,7 @@ CelPose CelMotion::channelPose(Channel channel, int frame) const
         return from.pose; // after the last one
     const double u = double(frame - from.frame) / double(next->frame - from.frame);
     const double k = from.easing.apply(u);
-    const CelPose &a = from.pose, &b = next->pose;
-    auto straight = [k](double p, double q) { return p + (q - p) * k; };
-    // By ratios: a steady scale has the same ratio at each step (and straight when one of them is not positive).
-    auto ratio = [k](double p, double q) { return p > 0 && q > 0 ? p * std::pow(q / p, k) : p + (q - p) * k; };
-    CelPose pose;
-    switch (channel) {
-    case Channel::Position:
-        pose.x = straight(a.x, b.x);
-        pose.y = straight(a.y, b.y);
-        break;
-    case Channel::Rotation: pose.rotation = straight(a.rotation, b.rotation); break;
-    case Channel::Scale:
-        pose.scaleX = ratio(a.scaleX, b.scaleX);
-        pose.scaleY = ratio(a.scaleY, b.scaleY);
-        break;
-    case Channel::Opacity: pose.opacity = std::clamp(straight(a.opacity, b.opacity), 0.0, 1.0); break;
-    case Channel::Deform:
-        pose.deform = a.deform.size() >= b.deform.size() ? a.deform : b.deform;
-        for (std::size_t i = 0; i < std::min(a.deform.size(), b.deform.size()); ++i)
-            pose.deform[i] = straight(a.deform[i], b.deform[i]);
-        break;
-    }
-    return pose;
+    return between(channel, from.pose, next->pose, k);
 }
 
 void CelMotion::setKey(Channel channel, int frame, const CelPose &pose)
@@ -221,6 +228,45 @@ bool CelMotion::removeKeysAt(int frame)
     for (Channel c : kChannels)
         any |= removeKey(c, frame);
     return any;
+}
+
+int CelMotion::spacingBlock(const std::vector<Channel> &channels, int from, int to) const
+{
+    int block = from;
+    for (Channel c : kChannels)
+        if (std::find(channels.begin(), channels.end(), c) == channels.end())
+            for (const CelKey &k : keys(c))
+                if (k.frame > from && k.frame < to)
+                    block = std::max(block, k.frame);
+    return block;
+}
+
+CelMotion CelMotion::spaced(const std::vector<Channel> &channels, int from, int to, std::vector<double> shares) const
+{
+    CelMotion out = *this;
+    std::vector<Channel> charted;
+    for (Channel c : channels)
+        if (keyAt(c, from) && keyAt(c, to))
+            charted.push_back(c);
+    const int count = int(shares.size());
+    if (charted.empty() || count == 0 || to <= from)
+        return out;
+    std::sort(shares.begin(), shares.end());
+    const int shift = spacingEnd(from, count, spacingBlock(charted, from, to)) - to;
+    for (Channel c : charted) // the old in-betweens go
+        std::erase_if(out.m_keys[int(c)], [=](const CelKey &k) { return k.frame > from && k.frame < to; });
+    // The later key, and all that comes after it in any channel, goes to right after the new ones.
+    for (auto &keys : out.m_keys)
+        for (CelKey &k : keys)
+            if (k.frame >= to)
+                k.frame += shift;
+    for (Channel c : charted) {
+        const CelPose a = keyAt(c, from)->pose, b = keyAt(c, to)->pose;
+        out.setEasing(c, from, Easing::hold());
+        for (int i = 0; i < count; ++i)
+            out.setKey(c, from + 1 + i, between(c, a, b, shares[std::size_t(i)]), Easing::hold());
+    }
+    return out;
 }
 
 CelMotion CelMotion::reversed() const

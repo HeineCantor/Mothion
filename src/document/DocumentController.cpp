@@ -2127,6 +2127,18 @@ std::unique_ptr<doc::Command> motionsCommand(const doc::Document &document, std:
 
 } // namespace
 
+bool DocumentController::setSpacingChart(doc::CelId id, const std::vector<doc::Channel> &channels, int from, int to,
+                                         const std::vector<double> &shares)
+{
+    clearTemporaryPose();
+    const doc::Cel *cel = m_document->cel(id);
+    if (!cel)
+        return false;
+    std::map<doc::CelId, doc::CelMotion> motions{{id, cel->motion().spaced(channels, from, to, shares)}};
+    auto command = motionsCommand(*m_document, motions);
+    return command && execute(std::move(command));
+}
+
 bool DocumentController::removeCelKeys(const std::vector<CelKeyRef> &keys)
 {
     clearTemporaryPose();
