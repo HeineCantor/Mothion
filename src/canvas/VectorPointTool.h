@@ -36,7 +36,8 @@ namespace mothion::canvas {
 //    Shift+click chooses those from the anchor clicked last to this one, Ctrl+click one more or takes it away, Ctrl+A
 //    them all); a press on the line of a stroke chosen adds an anchor there, which the drag moves; Alt+click on an
 //    anchor takes it away (the line is laid smooth again there, or cut short at an end). An end of a stroke dropped on
-//    an end of another stroke chosen makes the two one (see mergedStrokes()). The anchors chosen show their Bezier
+//    an end of another stroke chosen makes the two one (see mergedStrokes()); dropped on its own other end, it makes the
+//    line a loop (see closedStroke()). The anchors chosen show their Bezier
 //    handles (see anchorHandle()), and each run of them the handle of the anchor next to each of its ends, towards it.
 //    A handle dragged bends the line on its side (the handle on the other side of a smooth anchor turns with it, unless
 //    Alt is held); dropped on its anchor it goes into it, and the anchor is a corner (a handle in its anchor is not
@@ -44,7 +45,7 @@ namespace mothion::canvas {
 //    drag still takes it away);
 //  - Width: an anchor dragged up makes the line wider round it, down thinner (the anchors chosen together);
 //  - Corner: a click on an anchor makes it a corner, or smooth again;
-//  - Cut: a click on the line of a stroke chosen cuts it in two there;
+//  - Cut: a click on the line of a stroke chosen cuts it in two there; a loop is opened there;
 //  - Lasso: a drag draws a loop round anchors of the strokes chosen, which become the anchors chosen (Shift: they are
 //    chosen too, Alt: they are no longer chosen), to be moved or widened together in the other modes. A click without a
 //    drag chooses the anchor there (Shift, Alt alike), or, on no anchor, chooses a stroke as in the other modes. A stroke
@@ -215,8 +216,8 @@ private:
     std::optional<HandleRef> handleAt(const QPointF &docPos) const;
     // The topmost stroke of the current layer that `docPos` is on, or -1.
     int strokeAt(const QPointF &docPos) const;
-    // An end of a stroke chosen (not `except`) within reach of `docPos`.
-    std::optional<End> endAt(const QPointF &docPos, int except) const;
+    // An end of a stroke chosen within reach of `docPos`, other than `except` (the end dragged); loops have none.
+    std::optional<End> endAt(const QPointF &docPos, const End &except) const;
     // The stroke `index` the one chosen (`add`: one more chosen, or taken away if it was).
     void choose(int index, bool add = false);
     Picked makePicked(int index) const;
@@ -234,7 +235,7 @@ private:
     // A change of the stroke `index` made at once (an anchor taken away, a corner, a cut): `apply` changes the layer's
     // strokes, true if it did.
     void changeAtOnce(int index, const std::function<bool(std::vector<doc::VectorStroke> &)> &apply);
-    // `from` (dragged) and `to` made one stroke, as one undo step.
+    // `from` (dragged) and `to` made one stroke, or, the two ends of one, a loop; as one undo step.
     void merge(const End &from, const End &to);
 
     document::DocumentController *m_document;

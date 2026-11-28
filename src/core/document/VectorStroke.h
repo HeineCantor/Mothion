@@ -28,6 +28,9 @@ struct VectorStroke
     bool cornerTips = true;           // sharp corners keep a point
     bool startCorrectedAfter = false; // the start is corrected after the stroke, not tapered live
     std::vector<brush::BrushInput> points; // before brush::finalPoints()
+    // A loop: a line with no ends, its last point on its first (the same place, written twice). It is drawn without the
+    // brush's tapers at a start, and where the two points are makes no difference to what can be done to it.
+    bool closed = false;
     // A fill (a shape of colour, as the bucket makes on a vector layer): not a line drawn with a brush but the closed
     // outlines in `points` (only x and y count) filled with `color` at `opacity`, holes by the even-odd rule. Each
     // outline after the first starts at the point whose index is in `outlines`. The brush, size and seed are unused.

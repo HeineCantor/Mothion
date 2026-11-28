@@ -122,6 +122,17 @@ doc::VectorStroke mergedStrokes(const doc::VectorStroke &first, bool firstAtEnd,
 std::optional<std::pair<doc::VectorStroke, doc::VectorStroke>> cutStroke(const doc::VectorStroke &stroke,
                                                                          const PathPlace &place, double snap);
 
+// A loop (doc::VectorStroke::closed): its anchors are as an open line's, the last one on the first: both stand for the
+// one node there. The functions above that take anchors treat that node as any other inside the line (what is done to
+// either of the two is done to the node), and removeAnchor() refuses when only two nodes would be left.
+//
+// A line made a loop: its ends joined as mergedStrokes() joins two (a smooth curve over what is between them).
+doc::VectorStroke closedStroke(const doc::VectorStroke &stroke);
+// A loop cut open at `place` (a point is put there if none is within `snap`): one open line, from there round to there.
+doc::VectorStroke openedStroke(const doc::VectorStroke &loop, const PathPlace &place, double snap);
+// What the two points of a loop's joint are (a corner, with handles in it) made the same on both.
+void syncJoint(doc::VectorStroke &stroke);
+
 // The area the stroke can paint (its points, and the widest its brush gets round them).
 QRectF strokeReach(const doc::VectorStroke &stroke);
 // The same for its points `from` to `to` (both included, clamped to the stroke).

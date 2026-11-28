@@ -271,6 +271,20 @@ void VectorEraseState::erase(const std::vector<QPointF> &pathPoints, double radi
             addDirty(entry.box);
             continue;
         }
+        // A loop is begun again at a point that goes: then no piece that stays runs over the joint, and going out from
+        // what is touched finds the crossings on both sides of it.
+        if (stroke.closed && q.size() > 2) {
+            const std::size_t start = std::size_t(std::find(touched.begin(), touched.end(), 1) - touched.begin());
+            if (start > 0 && start + 1 < q.size()) {
+                const std::ptrdiff_t by = std::ptrdiff_t(start);
+                q.pop_back();
+                touched.pop_back();
+                std::rotate(q.begin(), q.begin() + by, q.end());
+                std::rotate(touched.begin(), touched.begin() + by, touched.end());
+                q.push_back(q.front());
+                touched.push_back(touched.front());
+            }
+        }
 
         // What goes, as stretches of positions along `q`.
         std::vector<std::pair<double, double>> gone;
@@ -345,6 +359,7 @@ void VectorEraseState::erase(const std::vector<QPointF> &pathPoints, double radi
             if (points.size() < 2)
                 return;
             doc::VectorStroke piece = stroke;
+            piece.closed = false;
             piece.points = std::move(points);
             const QRectF box = strokeBox(piece);
             next.push_back({std::move(piece), entry.origin, box});

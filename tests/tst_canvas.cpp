@@ -1028,6 +1028,95 @@ private slots:
         QCOMPARE(mergedStrokes(left, true, touching, false).points.size(), std::size_t(21));
     }
 
+    // A line made a loop: the gap filled, the last point on the first; opened again it is one line from the cut to the
+    // cut. The control points at the joint work as any other; the eraser and the selection leave no piece cut at it.
+    void aLineIsClosedIntoALoopAndOpened()
+    {
+        // Three sides of a square of side 100, the fourth left open (from (0, 100) back up to (0, 0)).
+        doc::VectorStroke open;
+        auto put = [&open](double x, double y) {
+            brush::BrushInput in = point(x, y);
+            open.points.push_back(in);
+        };
+        for (int i = 0; i < 50; ++i)
+            put(2.0 * i, 0);
+        for (int i = 0; i < 50; ++i)
+            put(100, 2.0 * i);
+        for (int i = 0; i <= 50; ++i)
+            put(100 - 2.0 * i, 100);
+        open.size = 4;
+        const doc::VectorStroke loop = canvas::closedStroke(open);
+        QVERIFY(loop.closed);
+        QVERIFY(loop.points.size() > open.points.size() + 20);
+        QCOMPARE(loop.points.front().x, loop.points.back().x);
+        QCOMPARE(loop.points.front().y, loop.points.back().y);
+        for (std::size_t i = 1; i < loop.points.size(); ++i) // no jumps, nothing run twice
+            QVERIFY(std::hypot(loop.points[i].x - loop.points[i - 1].x, loop.points[i].y - loop.points[i - 1].y) < 5.0);
+        QCOMPARE(canvas::closedStroke(loop), loop);
+
+        // Opened at the bottom side: both ends there, the same length of line.
+        const auto place = canvas::nearestPlace(loop, QPointF(50, 100));
+        const doc::VectorStroke opened = canvas::openedStroke(loop, *place, 2.0);
+        QVERIFY(!opened.closed);
+        QVERIFY(std::abs(opened.points.front().x - 50) < 2.1 && std::abs(opened.points.front().y - 100) < 1e-6);
+        QCOMPARE(opened.points.front().x, opened.points.back().x);
+        QVERIFY(opened.points.size() >= loop.points.size());
+
+        // The node at the joint moved: both its points, and the loop stays closed.
+        const std::vector<int> anchors = canvas::controlPoints(loop, 3.0);
+        std::vector<QPointF> offsets(anchors.size());
+        offsets.front() = QPointF(-10, -10);
+        const doc::VectorStroke moved = canvas::movedAnchors(loop, anchors, offsets);
+        QVERIFY(moved.closed);
+        QCOMPARE(moved.points.front().x, loop.points.front().x - 10);
+        QCOMPARE(moved.points.back().x, moved.points.front().x);
+        QCOMPARE(moved.points.back().y, moved.points.front().y);
+        // A handle of the joint's, a corner there, and the node taken away: still a loop.
+        std::vector<int> after = anchors;
+        const auto in = canvas::anchorHandle(loop, anchors, int(anchors.size()) - 1, false);
+        QVERIFY(in);
+        canvas::HandleChange change;
+        const doc::VectorStroke bent = canvas::movedHandle(loop, anchors, 0, true, QPointF(30, -20), true, {}, &change);
+        QVERIFY(bent.closed);
+        QCOMPARE(change.anchors.size(), anchors.size());
+        QCOMPARE(change.anchors.front(), 0);
+        QCOMPARE(change.anchors.back(), int(bent.points.size()) - 1);
+        QCOMPARE(bent.points.front().x, loop.points.front().x);
+        QCOMPARE(bent.points.back().x, loop.points.front().x);
+        doc::VectorStroke cornered = loop;
+        canvas::toggleCorner(cornered, anchors, 0);
+        QVERIFY(cornered.closed);
+        QCOMPARE(cornered.points.front().corner, !loop.points.front().corner);
+        QCOMPARE(cornered.points.back().corner, cornered.points.front().corner);
+        doc::VectorStroke fewer = loop;
+        QVERIFY(canvas::removeAnchor(fewer, after, 0));
+        QVERIFY(fewer.closed);
+        QCOMPARE(after.size(), anchors.size() - 1);
+        QCOMPARE(fewer.points.front().x, fewer.points.back().x);
+        QCOMPARE(fewer.points.front().y, fewer.points.back().y);
+
+        // The eraser through the joint (the middle of the left side, in the gap that was filled), or anywhere: one open
+        // line is left.
+        for (const QPointF at : {QPointF(-25, 50), QPointF(100, 50)}) { // (the gap's curve bulges to the left)
+            const canvas::VectorErasure erased =
+                canvas::eraseFromStrokes({loop}, {at}, 8, canvas::VectorEraseMode::Part);
+            QCOMPARE(erased.strokes.size(), std::size_t(1));
+            QVERIFY(!erased.strokes[0].closed);
+        }
+        // Up to the intersection, touched on one side of the joint: it goes from a line crossing it to the other,
+        // round past the joint.
+        doc::VectorStroke across;
+        for (int i = -40; i <= 120; ++i) // crossing both sides of the loop
+            across.points.push_back(point(i, 50));
+        across.size = 2;
+        doc::VectorStroke rolled = loop;
+        const canvas::VectorErasure half =
+            canvas::eraseFromStrokes({rolled, across}, {QPointF(50, 0)}, 3, canvas::VectorEraseMode::ToIntersection);
+        QCOMPARE(half.strokes.size(), std::size_t(2));
+        for (const brush::BrushInput &p : half.strokes[0].points)
+            QVERIFY(p.y >= 50 - 1.5); // the half below the line crossing it
+    }
+
     // Hue / Saturation / Value: the hue turned round the wheel, saturation and value moved towards none or full; the
     // alpha kept, a premultiplied pixel shifted as its color is.
     void colorsAreShiftedInHsv()

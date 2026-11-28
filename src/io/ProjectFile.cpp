@@ -184,6 +184,8 @@ QString strokesToJson(const std::vector<doc::VectorStroke> &strokes)
             {QStringLiteral("startAfter"), st.startCorrectedAfter},
             {QStringLiteral("points"), points},
         };
+        if (st.closed)
+            object.insert(QStringLiteral("closed"), true);
         if (st.fill) { // a shape of colour: its outlines (where each after the first starts)
             object.insert(QStringLiteral("fill"), true);
             QJsonArray outlines;
@@ -214,6 +216,7 @@ std::vector<doc::VectorStroke> strokesFromJson(const QString &text)
         st.erase = o.value(QStringLiteral("erase")).toBool(false);
         st.cornerTips = o.value(QStringLiteral("cornerTips")).toBool(true);
         st.startCorrectedAfter = o.value(QStringLiteral("startAfter")).toBool(false);
+        st.closed = o.value(QStringLiteral("closed")).toBool(false);
         st.fill = o.value(QStringLiteral("fill")).toBool(false);
         for (const QJsonValue &start : o.value(QStringLiteral("outlines")).toArray())
             st.outlines.push_back(start.toInt());

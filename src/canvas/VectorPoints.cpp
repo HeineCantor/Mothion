@@ -106,20 +106,85 @@ QPointF catmullRom(const QPointF &p0, const QPointF &p1, const QPointF &p2, cons
 
 // The points between anchors k and k + 1 laid again on a smooth curve through the anchors round them (an anchor that
 // is a corner, or an end, stands in for the one beyond it: the curve leaves it straight).
-void relayRun(std::vector<BrushInput> &points, const std::vector<int> &anchors, std::size_t k)
+void relayRun(std::vector<BrushInput> &points, const std::vector<int> &anchors, std::size_t k, bool loop = false)
 {
     const int from = anchors[k], to = anchors[k + 1];
     if (to - from < 2)
         return;
     const QPointF p1 = at(points[from]), p2 = at(points[to]);
-    const QPointF p0 = points[from].corner || k == 0 ? p1 : at(points[anchors[k - 1]]);
-    const QPointF p3 = points[to].corner || k + 2 >= anchors.size() ? p2 : at(points[anchors[k + 2]]);
+    // (On a loop the line goes on past the joint: the node beyond it is on the other side of the list.)
+    const std::size_t count = anchors.size();
+    const QPointF p0 = points[from].corner ? p1 : k > 0 ? at(points[anchors[k - 1]]) : loop ? at(points[anchors[count - 2]]) : p1;
+    const QPointF p3 = points[to].corner        ? p2
+                       : k + 2 < count          ? at(points[anchors[k + 2]])
+                       : loop && count > 2      ? at(points[anchors[1]])
+                                                : p2;
     const std::vector<double> s = runFractions(points, from, to);
     for (int i = from + 1; i < to; ++i) {
         const QPointF p = catmullRom(p0, p1, p2, p3, s[std::size_t(i - from)]);
         points[i].x = p.x();
         points[i].y = p.y();
     }
+}
+
+// A loop's points and anchors begun at node `by` (of its anchors.size() - 1 nodes) instead.
+void rotateLoop(std::vector<BrushInput> &points, std::vector<int> &anchors, int by)
+{
+    const int nodes = int(anchors.size()) - 1;
+    if (nodes < 1 || by % nodes == 0)
+        return;
+    const int distinct = int(points.size()) - 1; // the last is the first again
+    const int cut = anchors[std::size_t(by)];
+    std::vector<BrushInput> turned(points.begin() + cut, points.begin() + distinct);
+    turned.insert(turned.end(), points.begin(), points.begin() + cut + 1);
+    std::vector<int> moved;
+    for (int i = 0; i < nodes; ++i)
+        moved.push_back((anchors[std::size_t((by + i) % nodes)] - cut + distinct) % distinct);
+    moved.push_back(distinct);
+    points = std::move(turned);
+    anchors = std::move(moved);
+}
+
+// A loop turned so that node `node` is well inside the list of its points, where what is done to an anchor inside a
+// line can be done to it; turned back by back().
+struct TurnedLoop
+{
+    doc::VectorStroke stroke;
+    std::vector<int> anchors;
+    int nodes = 0, by = 0, node = 0; // the node asked for, as it is numbered now
+
+    TurnedLoop(const doc::VectorStroke &loop, const std::vector<int> &original, int k)
+        : stroke(loop), anchors(original), nodes(int(original.size()) - 1)
+    {
+        const int asked = k % nodes;
+        by = (asked + nodes / 2) % nodes;
+        node = (asked - by + nodes) % nodes;
+        rotateLoop(stroke.points, anchors, by);
+        stroke.closed = false; // worked on as an open line
+    }
+    // A handle's place as numbered before and after the turn (the joint's in handle is the last anchor's).
+    int turned(int k) const { return (k % nodes - by + nodes) % nodes; }
+    int unturned(int j, bool out) const
+    {
+        const int k = (j + by) % nodes;
+        return !out && k == 0 ? nodes : k;
+    }
+    int turnedHandle(int k, bool out) const
+    {
+        const int j = turned(k);
+        return !out && j == 0 ? nodes : j;
+    }
+    void back(doc::VectorStroke &result, std::vector<int> &moved) const
+    {
+        rotateLoop(result.points, moved, (nodes - by) % nodes);
+        result.closed = true;
+        syncJoint(result);
+    }
+};
+
+bool isLoop(const doc::VectorStroke &stroke, const std::vector<int> &anchors)
+{
+    return stroke.closed && anchors.size() >= 3;
 }
 
 // The point put at `place` (or the one there, within `snap`): its index.
@@ -477,6 +542,10 @@ RunCurve curveOf(const std::vector<BrushInput> &points, const std::vector<int> &
 std::optional<QPointF> anchorHandle(const doc::VectorStroke &stroke, const std::vector<int> &anchors, int k, bool out)
 {
     const int n = int(anchors.size());
+    if (isLoop(stroke, anchors) && k >= 0 && k < n) {
+        const TurnedLoop loop(stroke, anchors, k);
+        return anchorHandle(loop.stroke, loop.anchors, loop.node, out);
+    }
     if (k < 0 || k >= n || (out ? k + 1 >= n : k == 0))
         return std::nullopt;
     const RunCurve c = out ? fitRun(stroke.points, anchors[std::size_t(k)], anchors[std::size_t(k + 1)])
@@ -487,6 +556,20 @@ std::optional<QPointF> anchorHandle(const doc::VectorStroke &stroke, const std::
 doc::VectorStroke movedHandle(const doc::VectorStroke &original, const std::vector<int> &anchors, int k, bool out,
                               const QPointF &to, bool mirrored, const KnownHandle &known, HandleChange *change)
 {
+    if (isLoop(original, anchors) && k >= 0 && k < int(anchors.size())) {
+        const TurnedLoop loop(original, anchors, k);
+        const KnownHandle there = !known ? KnownHandle() : KnownHandle([&](int j, bool towardsNext) {
+            return known(loop.unturned(j, towardsNext), towardsNext);
+        });
+        HandleChange done;
+        doc::VectorStroke result = movedHandle(loop.stroke, loop.anchors, loop.node, out, to, mirrored, there, &done);
+        loop.back(result, done.anchors);
+        for (HandleChange::Handle &h : done.handles)
+            h.k = loop.unturned(h.k, h.out);
+        if (change)
+            *change = std::move(done);
+        return result;
+    }
     doc::VectorStroke result = original;
     std::vector<int> moved = anchors;
     const int n = int(anchors.size());
@@ -541,6 +624,20 @@ doc::VectorStroke movedHandle(const doc::VectorStroke &original, const std::vect
 doc::VectorStroke pulledHandles(const doc::VectorStroke &original, const std::vector<int> &anchors, int k,
                                 const QPointF &outTo, const KnownHandle &known, HandleChange *change)
 {
+    if (isLoop(original, anchors) && k >= 0 && k < int(anchors.size())) {
+        const TurnedLoop loop(original, anchors, k);
+        const KnownHandle there = !known ? KnownHandle() : KnownHandle([&](int j, bool towardsNext) {
+            return known(loop.unturned(j, towardsNext), towardsNext);
+        });
+        HandleChange done;
+        doc::VectorStroke result = pulledHandles(loop.stroke, loop.anchors, loop.node, outTo, there, &done);
+        loop.back(result, done.anchors);
+        for (HandleChange::Handle &h : done.handles)
+            h.k = loop.unturned(h.k, h.out);
+        if (change)
+            *change = std::move(done);
+        return result;
+    }
     doc::VectorStroke result = original;
     std::vector<int> moved = anchors;
     const int n = int(anchors.size());
@@ -592,6 +689,14 @@ doc::VectorStroke movedAnchors(const doc::VectorStroke &original, const std::vec
     if (anchors.empty() || offsets.size() != anchors.size()
         || std::all_of(offsets.begin(), offsets.end(), [](const QPointF &d) { return d.isNull(); }))
         return out;
+    if (isLoop(original, anchors)) { // the joint's two anchors go together
+        std::vector<QPointF> both = offsets;
+        const QPointF joint = both.front().isNull() ? both.back() : both.front();
+        if (!joint.isNull() && (both.front() != joint || both.back() != joint)) {
+            both.front() = both.back() = joint;
+            return movedAnchors(original, anchors, both, anchorsAfter);
+        }
+    }
     std::vector<BrushInput> &points = out.points;
     if (anchors.size() == 1) {
         for (BrushInput &in : points) {
@@ -626,6 +731,14 @@ doc::VectorStroke movedAnchors(const doc::VectorStroke &original, const std::vec
 doc::VectorStroke scaledWidths(const doc::VectorStroke &original, const std::vector<int> &anchors,
                                const std::vector<double> &factors)
 {
+    if (isLoop(original, anchors) && factors.size() == anchors.size()) { // the joint's two anchors go together
+        const double joint = factors.front() == 1.0 ? factors.back() : factors.front();
+        if (factors.front() != joint || factors.back() != joint) {
+            std::vector<double> both = factors;
+            both.front() = both.back() = joint;
+            return scaledWidths(original, anchors, both);
+        }
+    }
     doc::VectorStroke out = original;
     if (anchors.empty() || factors.size() != anchors.size())
         return out;
@@ -688,6 +801,25 @@ int addAnchor(doc::VectorStroke &stroke, std::vector<int> &anchors, const PathPl
 
 bool removeAnchor(doc::VectorStroke &stroke, std::vector<int> &anchors, int k)
 {
+    if (isLoop(stroke, anchors)) {
+        if (anchors.size() <= 3 || k < 0 || k >= int(anchors.size()))
+            return false;
+        TurnedLoop loop(stroke, anchors, k);
+        const std::size_t node = std::size_t(loop.node);
+        auto &points = loop.stroke.points;
+        BrushInput &gone = points[std::size_t(loop.anchors[node])];
+        gone.corner = false;
+        gone.keptAnchor = false;
+        gone.heldHandles = 0;
+        loop.anchors.erase(loop.anchors.begin() + std::ptrdiff_t(node));
+        relayRun(points, loop.anchors, node - 1, true);
+        refreshDirections(points);
+        stroke = std::move(loop.stroke); // (it stays begun where it was turned to: where makes no difference)
+        stroke.closed = true;
+        syncJoint(stroke);
+        anchors = std::move(loop.anchors);
+        return true;
+    }
     if (anchors.size() <= 2 || k < 0 || k >= int(anchors.size()))
         return false;
     auto &points = stroke.points;
@@ -715,6 +847,13 @@ void toggleCorner(doc::VectorStroke &stroke, const std::vector<int> &anchors, in
 {
     if (k < 0 || k >= int(anchors.size()))
         return;
+    if (isLoop(stroke, anchors)) {
+        TurnedLoop loop(stroke, anchors, k);
+        toggleCorner(loop.stroke, loop.anchors, loop.node);
+        loop.back(loop.stroke, loop.anchors);
+        stroke = std::move(loop.stroke);
+        return;
+    }
     BrushInput &in = stroke.points[anchors[std::size_t(k)]];
     in.corner = !in.corner;
     in.heldHandles = 0; // smooth, or a corner with its handles out
@@ -783,12 +922,57 @@ void reverse(std::vector<BrushInput> &points)
         in.direction = std::remainder(in.direction + 180.0, 360.0);
 }
 
+// `b` put after `line`, a smooth curve that leaves and meets each along its way filling the gap between them (the
+// pen's pressure and the rest going from one to the other on it).
+void joinAcross(std::vector<BrushInput> &line, std::vector<BrushInput> b)
+{
+    const BrushInput p = line.back(), q = b.front();
+    const QPointF from = at(p), to = at(q);
+    const double gap = std::hypot(to.x() - from.x(), to.y() - from.y());
+    if (gap <= 1e-9) {
+        line.insert(line.end(), b.begin() + 1, b.end()); // the ends on each other: one point
+        return;
+    }
+    // Leaving the first along its line, meeting the second along its own (a cubic Hermite curve).
+    const double back = std::clamp(gap / 2.0, 2.0, 12.0);
+    const QPointF straight = (to - from) / gap;
+    QPointF leave = wayAtEnd(line, back);
+    std::vector<BrushInput> reversedB = b;
+    std::reverse(reversedB.begin(), reversedB.end());
+    QPointF meet = -wayAtEnd(reversedB, back);
+    if (leave.isNull())
+        leave = straight;
+    if (meet.isNull())
+        meet = straight;
+    const QPointF m0 = leave * gap, m1 = meet * gap;
+    // As close together as the lines' points are, about.
+    double spacing = 0;
+    int steps = 0;
+    for (const std::vector<BrushInput> *points : {&std::as_const(line), &std::as_const(b)})
+        for (std::size_t i = 1; i < points->size(); ++i, ++steps)
+            spacing += std::hypot((*points)[i].x - (*points)[i - 1].x, (*points)[i].y - (*points)[i - 1].y);
+    spacing = std::clamp(steps > 0 ? spacing / steps : 2.0, 0.5, 4.0);
+    const int n = std::max(1, int(std::ceil(gap / spacing)));
+    for (int i = 1; i < n; ++i) {
+        const double t = double(i) / n, t2 = t * t, t3 = t2 * t;
+        const QPointF point = (2 * t3 - 3 * t2 + 1) * from + (t3 - 2 * t2 + t) * m0 + (-2 * t3 + 3 * t2) * to
+                              + (t3 - t2) * m1;
+        BrushInput in = brush::DabGenerator::interpolate(p, q, t);
+        in.x = point.x();
+        in.y = point.y();
+        in.corner = false;
+        line.push_back(in);
+    }
+    line.insert(line.end(), b.begin(), b.end());
+}
+
 } // namespace
 
 doc::VectorStroke mergedStrokes(const doc::VectorStroke &first, bool firstAtEnd, const doc::VectorStroke &second,
                                 bool secondAtEnd)
 {
     doc::VectorStroke out = first;
+    out.closed = false;
     std::vector<BrushInput> a = first.points, b = second.points;
     if (!firstAtEnd)
         reverse(a);
@@ -805,47 +989,72 @@ doc::VectorStroke mergedStrokes(const doc::VectorStroke &first, bool firstAtEnd,
     std::reverse(b.begin(), b.end());
     liftEndPressure(b, std::max(4.0 * second.size, 24.0));
     std::reverse(b.begin(), b.end());
-    const BrushInput p = a.back(), q = b.front();
-    const QPointF from = at(p), to = at(q);
-    const double gap = std::hypot(to.x() - from.x(), to.y() - from.y());
     out.points = std::move(a);
-    if (gap > 1e-9) {
-        // Leaving the first along its line, meeting the second along its own (a cubic Hermite curve).
-        const double back = std::clamp(gap / 2.0, 2.0, 12.0);
-        const QPointF straight = (to - from) / gap;
-        QPointF leave = wayAtEnd(out.points, back);
-        std::vector<BrushInput> reversedB = b;
-        std::reverse(reversedB.begin(), reversedB.end());
-        QPointF meet = -wayAtEnd(reversedB, back);
-        if (leave.isNull())
-            leave = straight;
-        if (meet.isNull())
-            meet = straight;
-        const QPointF m0 = leave * gap, m1 = meet * gap;
-        // As close together as the strokes' points are, about.
-        double spacing = 0;
-        int steps = 0;
-        for (const std::vector<BrushInput> *line : {&out.points, &b})
-            for (std::size_t i = 1; i < line->size(); ++i, ++steps)
-                spacing += std::hypot((*line)[i].x - (*line)[i - 1].x, (*line)[i].y - (*line)[i - 1].y);
-        spacing = std::clamp(steps > 0 ? spacing / steps : 2.0, 0.5, 4.0);
-        const int n = std::max(1, int(std::ceil(gap / spacing)));
-        for (int i = 1; i < n; ++i) {
-            const double t = double(i) / n, t2 = t * t, t3 = t2 * t;
-            const QPointF point = (2 * t3 - 3 * t2 + 1) * from + (t3 - 2 * t2 + t) * m0 + (-2 * t3 + 3 * t2) * to
-                                  + (t3 - t2) * m1;
-            BrushInput in = brush::DabGenerator::interpolate(p, q, t);
-            in.x = point.x();
-            in.y = point.y();
-            in.corner = false;
-            out.points.push_back(in);
-        }
-        out.points.insert(out.points.end(), b.begin(), b.end());
-    } else {
-        out.points.insert(out.points.end(), b.begin() + 1, b.end()); // the ends on each other: one point
-    }
+    joinAcross(out.points, std::move(b));
     refreshDirections(out.points);
     return out;
+}
+
+doc::VectorStroke closedStroke(const doc::VectorStroke &stroke)
+{
+    doc::VectorStroke out = stroke;
+    if (stroke.closed || stroke.fill || stroke.points.size() < 3)
+        return out;
+    std::vector<BrushInput> points = stroke.points;
+    points.front().corner = false;
+    points.back().corner = false;
+    // No thinning at the joint: the pressure let fall at both ends lifted back.
+    const double reach = std::max(4.0 * stroke.size, 24.0);
+    liftEndPressure(points, reach);
+    std::reverse(points.begin(), points.end());
+    liftEndPressure(points, reach);
+    std::reverse(points.begin(), points.end());
+    // Round to the start again: the start of the line goes after its end, the gap filled between, and what came after
+    // the first of its points (on the line already) is cut off again.
+    const std::size_t had = points.size();
+    const std::vector<BrushInput> start(points.begin(), points.begin() + std::ptrdiff_t(std::min<std::size_t>(had, 64)));
+    const bool touching = std::hypot(points.back().x - points.front().x, points.back().y - points.front().y) <= 1e-9;
+    if (!touching) {
+        joinAcross(points, start);
+        points.resize(points.size() - (start.size() - 1));
+    }
+    points.back() = points.front();
+    out.points = std::move(points);
+    out.closed = true;
+    refreshDirections(out.points);
+    return out;
+}
+
+doc::VectorStroke openedStroke(const doc::VectorStroke &loop, const PathPlace &place, double snap)
+{
+    doc::VectorStroke out = loop;
+    out.closed = false;
+    if (!loop.closed || out.points.size() < 3)
+        return out;
+    int index = pointAt(out.points, place, snap);
+    const int distinct = int(out.points.size()) - 1;
+    if (index >= distinct)
+        index = 0;
+    std::vector<BrushInput> turned(out.points.begin() + index, out.points.begin() + distinct);
+    turned.insert(turned.end(), out.points.begin(), out.points.begin() + index + 1);
+    for (BrushInput *end : {&turned.front(), &turned.back()}) {
+        end->corner = false;
+        end->heldHandles = 0;
+    }
+    refreshDirections(turned);
+    out.points = std::move(turned);
+    return out;
+}
+
+void syncJoint(doc::VectorStroke &stroke)
+{
+    if (!stroke.closed || stroke.points.size() < 2)
+        return;
+    BrushInput &first = stroke.points.front(), &last = stroke.points.back();
+    first.corner = last.corner = first.corner || last.corner;
+    first.keptAnchor = last.keptAnchor = first.keptAnchor || last.keptAnchor;
+    const auto held = decltype(first.heldHandles)(first.corner ? first.heldHandles | last.heldHandles : 0);
+    first.heldHandles = last.heldHandles = held;
 }
 
 std::optional<std::pair<doc::VectorStroke, doc::VectorStroke>> cutStroke(const doc::VectorStroke &stroke,

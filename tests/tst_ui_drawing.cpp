@@ -1005,6 +1005,94 @@ private slots:
     // Correct line: a click chooses a stroke of the vector layer; on its line a press adds a control point and the
     // drag bends the line (the pixels drawn again), Alt+click takes the point away, the width and the corner change
     // at a point, and a click cuts the line. Each change is one undo step.
+    // Correct line: an end dropped on the other end of its line closes it; Cut opens the loop again; one step each, and
+    // the loop is saved with the project.
+    void correctLineClosesALineAndCutsItOpen()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(500, 400);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 4, "Line").command);
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Vector));
+        QCoreApplication::processEvents();
+        auto strokes = [&]() -> const std::vector<doc::VectorStroke> & {
+            return controller.currentDrawing()->layer(controller.currentLayer())->strokes;
+        };
+        state.setActiveTool(tools::ToolId::Brush);
+        const QTransform toView = canvas.view().documentToView();
+        const std::vector<QPointF> corners{{900, 540}, {1100, 540}, {1100, 700}, {900, 700}, {900, 580}};
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, toView.map(corners.front()).toPoint());
+        for (std::size_t c = 1; c < corners.size(); ++c)
+            for (int i = 1; i <= 20; ++i)
+                QTest::mouseMove(&canvas, toView.map(corners[c - 1] + (corners[c] - corners[c - 1]) * i / 20.0).toPoint());
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, toView.map(corners.back()).toPoint());
+        QCOMPARE(strokes().size(), std::size_t(1));
+        const std::vector<doc::VectorStroke> drawn = strokes();
+
+        state.setActiveTool(tools::ToolId::VectorPoint);
+        state.setVectorPoints({tools::VectorPointSettings::Mode::Move});
+        canvas::VectorPointTool tool(&controller, &state, [](const QString &) {});
+        tool.setViewZoom(canvas.view().zoom());
+        auto drag = [&](const QPointF &from, const QPointF &to) {
+            tool.press(from, Qt::NoModifier);
+            if (tool.isActive()) {
+                tool.move((from + to) / 2, Qt::NoModifier);
+                tool.move(to, Qt::NoModifier);
+                tool.release(to, Qt::NoModifier);
+            }
+        };
+        drag(QPointF(1000, drawn[0].points.front().y), QPointF(1000, drawn[0].points.front().y)); // chosen
+        QCOMPARE(tool.chosenStroke(), 0);
+        const int last = int(tool.anchors().size()) - 1;
+        const QPointF end = *tool.anchorPoint(last), start = *tool.anchorPoint(0);
+        drag(end, start);
+        QCOMPARE(strokes().size(), std::size_t(1));
+        QVERIFY(strokes()[0].closed);
+        QCOMPARE(strokes()[0].points.front().x, strokes()[0].points.back().x);
+        const std::vector<doc::VectorStroke> loop = strokes();
+        controller.undo();
+        QCOMPARE(strokes(), drawn);
+        controller.redo();
+        QCOMPARE(strokes(), loop);
+
+        // The joint's node dragged: the loop goes with it.
+        const QPointF joint = *tool.anchorPoint(0);
+        drag(joint, joint + QPointF(-20, -20));
+        QVERIFY(strokes()[0].closed);
+        QCOMPARE(strokes()[0].points.front().x, strokes()[0].points.back().x);
+        QCOMPARE(strokes()[0].points.front().y, strokes()[0].points.back().y);
+        controller.undo();
+        QCOMPARE(strokes(), loop);
+
+        QTemporaryDir dir;
+        QString error;
+        QVERIFY2(io::saveProject(controller.document(), dir.filePath("loop.moth"), &error), qPrintable(error));
+        const auto loaded = io::loadProject(dir.filePath("loop.moth"), &error);
+        QVERIFY2(loaded, qPrintable(error));
+        QCOMPARE(loaded->layer(controller.currentCel(), controller.currentDrawingId(), controller.currentLayer())->strokes,
+                 strokes());
+
+        // Cut: a click on the loop opens it there, still one stroke.
+        state.setVectorPoints({tools::VectorPointSettings::Mode::Cut});
+        canvas::VectorPointTool cut(&controller, &state, [](const QString &) {});
+        cut.setViewZoom(canvas.view().zoom());
+        const QPointF side(1100, 620);
+        cut.press(side, Qt::NoModifier); // chosen
+        cut.release(side, Qt::NoModifier);
+        cut.press(side, Qt::NoModifier); // cut
+        if (cut.isActive())
+            cut.release(side, Qt::NoModifier);
+        QCOMPARE(strokes().size(), std::size_t(1));
+        QVERIFY(!strokes()[0].closed);
+        QVERIFY(std::abs(strokes()[0].points.front().x - 1100) < 8 && std::abs(strokes()[0].points.front().y - 620) < 8); // (snapped to a point)
+        controller.undo();
+        QCOMPARE(strokes(), loop);
+    }
+
     void correctLineChangesTheControlPointsOfAStroke()
     {
         tools::ToolState state;

@@ -59,13 +59,12 @@ SplitStroke splitStrokeByMask(const doc::VectorStroke &stroke, const SelectionMa
     }
     std::vector<brush::BrushInput> run;
     bool runIn = in(stroke.points.front());
+    std::vector<std::pair<bool, std::vector<brush::BrushInput>>> runs; // inside or not, and its points
     auto flush = [&] {
         if (run.empty())
             return;
-        doc::VectorStroke piece = stroke;
-        piece.points = std::move(run);
+        runs.emplace_back(runIn, std::move(run));
         run.clear();
-        (runIn ? out.inside : out.outside).push_back(std::move(piece));
     };
     run.push_back(stroke.points.front());
     for (std::size_t i = 1; i < stroke.points.size(); ++i) {
@@ -90,6 +89,20 @@ SplitStroke splitStrokeByMask(const doc::VectorStroke &stroke, const SelectionMa
         run.push_back(b);
     }
     flush();
+    // A loop that is cut: the run that ends it goes on into the one that starts it (they meet at the joint). Whole on
+    // one side, it stays a loop.
+    const bool cut = runs.size() > 1;
+    if (stroke.closed && cut && runs.front().first == runs.back().first) {
+        std::vector<brush::BrushInput> &last = runs.back().second;
+        last.insert(last.end(), runs.front().second.begin() + 1, runs.front().second.end());
+        runs.erase(runs.begin());
+    }
+    for (auto &[inside, points] : runs) {
+        doc::VectorStroke piece = stroke;
+        piece.closed = stroke.closed && !cut;
+        piece.points = std::move(points);
+        (inside ? out.inside : out.outside).push_back(std::move(piece));
+    }
     return out;
 }
 
@@ -227,6 +240,11 @@ QRect drawStrokes(doc::TiledImage &target, const std::vector<doc::VectorStroke> 
             style.startTaper = 0.0;
         else
             style.startCorrection = 0;
+        if (s.closed) { // a loop has no start or end to taper
+            style.startTaper = 0.0;
+            style.startCorrection = 0;
+            style.inOut.in = style.inOut.out = false;
+        }
         style.mix.on = false;
         style.waterEdge.on = false;
         auto stamper = std::make_shared<DabStamper>(QColor::fromRgba(s.color), style.hardness, definition->tips,
