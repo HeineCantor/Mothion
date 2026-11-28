@@ -161,10 +161,6 @@ int Document::trajectoryStartFrame(CelId trajectory) const
 Matrix2x3 Document::followMatrix(const Cel &cel, int frame, bool turned) const
 {
     Matrix2x3 part = partMatrix(cel, frame);
-    const Cel *trajectory = followedTrajectory(cel);
-    const int start = trajectory ? trajectoryStartFrame(trajectory->id()) : -1;
-    if (start < 0)
-        return part;
     if (turned)
         if (const std::optional<PathTurn> turn = pathTurn(cel, frame); turn && turn->degrees != 0) {
             // Around where the centre of mass is once the cel's own pose (and its part) has put it.
@@ -177,16 +173,19 @@ Matrix2x3 Document::followMatrix(const Cel &cel, int frame, bool turned) const
             about.rotation = turn->degrees;
             part = part.then(about.matrix(cx, cy));
         }
+    const Cel *trajectory = followedTrajectory(cel);
+    const int start = trajectory ? trajectoryStartFrame(trajectory->id()) : -1;
+    if (start < 0)
+        return part;
     // Relative: what the trajectory has done since its first key, so the cel is where it is drawn until then.
     return part.then(trajectoryMatrix(trajectory->id(), start).inverted().then(trajectoryMatrix(trajectory->id(), frame)));
 }
 
 std::optional<Document::PathTurn> Document::pathTurn(const Cel &cel, int frame) const
 {
-    if (!cel.properties().orientToPath || cel.properties().drawsNothing())
-        return std::nullopt;
-    const Cel *trajectory = followedTrajectory(cel);
-    const Drawing *drawing = trajectory ? cel.drawingAt(frame) : nullptr;
+    const CelId with = cel.properties().turnsWith;
+    const Cel *trajectory = with != kNoId && !cel.properties().drawsNothing() ? this->cel(with) : nullptr;
+    const Drawing *drawing = trajectory && trajectory->properties().trajectory ? cel.drawingAt(frame) : nullptr;
     const auto centre = drawing ? centreOfMass(*drawing) : std::nullopt;
     if (!centre)
         return std::nullopt;
@@ -205,52 +204,89 @@ double Document::pathAngle(CelId trajectory, int frame) const
         if (c->properties().visible && !c->motion().isEmpty())
             last = std::max(last, c->motion().keyFrames().back());
 
-    // The way of each step from a frame to the next, in degrees, going on from the one before (never jumping by a turn).
-    std::vector<std::optional<double>> ways;
+    // A step from a frame to the next is held when it is on a held way between two position keys, and nothing else (a
+    // parent) is moving smoothly then.
+    auto held = [&](int f) {
+        bool holding = false, moving = false;
+        int level = 0;
+        for (const Cel *c = own; c && level <= celCount(); c = trajectoryParent(*c), ++level) {
+            if (!c->properties().visible)
+                continue;
+            const std::vector<CelKey> &keys = c->motion().keys(Channel::Position);
+            for (std::size_t k = 0; k + 1 < keys.size(); ++k)
+                if (keys[k].frame <= f && f < keys[k + 1].frame) {
+                    if (keys[k].easing.kind == Easing::Kind::Hold)
+                        holding = true;
+                    else if (channelsDiffer(Channel::Position, keys[k].pose, keys[k + 1].pose))
+                        moving = true;
+                }
+        }
+        return holding && !moving;
+    };
+
+    // The way of each step, in degrees, going on from the one before (never jumping by a turn); none where it stays.
+    struct Step
+    {
+        std::optional<double> way;
+        bool held = false;
+    };
+    std::vector<Step> steps;
     std::optional<double> previous;
     double fromX = 0, fromY = 0;
     for (int f = first; f <= last; ++f) {
         double x = 0, y = 0;
         trajectoryMatrix(trajectory, f).map(own->motion().pivotX, own->motion().pivotY, x, y);
         if (f > first) {
-            std::optional<double> way;
+            Step step{std::nullopt, held(f - 1)};
             if (std::hypot(x - fromX, y - fromY) > 0.01) {
                 double angle = std::atan2(y - fromY, x - fromX) * 180.0 / std::numbers::pi;
                 if (previous)
                     angle = *previous + std::remainder(angle - *previous, 360.0);
-                way = previous = angle;
+                step.way = previous = angle;
             }
-            ways.push_back(way);
+            steps.push_back(step);
         }
         fromX = x;
         fromY = y;
     }
     if (!previous)
         return 0; // it goes nowhere
-    // Standing still: the way it had, or (before it first moves) the first it takes.
+    const int count = int(steps.size());
+    // Held: the way of the jump that ends it, all the while before it.
+    for (int i = count - 2; i >= 0; --i)
+        if (steps[std::size_t(i)].held && !steps[std::size_t(i)].way && steps[std::size_t(i + 1)].held)
+            steps[std::size_t(i)].way = steps[std::size_t(i + 1)].way;
+    // Standing still otherwise: the way it had, or (before it first moves) the first it takes.
     double kept = 0;
-    for (const std::optional<double> &way : ways)
-        if (way) {
-            kept = *way;
+    for (const Step &step : steps)
+        if (step.way) {
+            kept = *step.way;
             break;
         }
-    std::vector<double> steps;
-    for (const std::optional<double> &way : ways)
-        steps.push_back(kept = way.value_or(kept));
+    for (Step &step : steps)
+        step.way = kept = step.way.value_or(kept);
 
-    // Eased over the steps around a frame, nearer ones counting more; past the ends, the first and the last go on.
+    // The way on a frame (`at` frames from the first). Held, as it is. Else eased over the steps around it, nearer ones
+    // counting more, not past a held one; at the ends of what moves, the first and the last way go on.
     constexpr int kReach = 4;
-    const int count = int(steps.size());
-    auto eased = [&](int at) { // `at` in frames from the first
+    auto wayAt = [&](int at) {
+        const int here = std::min(at, count - 1);
+        if (steps[std::size_t(here)].held)
+            return *steps[std::size_t(here)].way;
+        int from = here, to = here;
+        while (from > 0 && !steps[std::size_t(from - 1)].held)
+            --from;
+        while (to + 1 < count && !steps[std::size_t(to + 1)].held)
+            ++to;
         double sum = 0, weights = 0;
         for (int i = at - kReach; i < at + kReach; ++i) {
             const double weight = kReach - std::abs(i + 0.5 - at);
-            sum += weight * steps[std::size_t(std::clamp(i, 0, count - 1))];
+            sum += weight * *steps[std::size_t(std::clamp(i, from, to))].way;
             weights += weight;
         }
         return sum / weights;
     };
-    return eased(std::clamp(frame, first, last) - first) - eased(0);
+    return wayAt(std::clamp(frame, first, last) - first) - wayAt(0);
 }
 
 void Document::holdCentres(bool held) const
@@ -300,7 +336,7 @@ Cel Document::timeLayerAsCel(const Cel &cel, const TimeLayer &layer)
     CelProperties properties = cel.properties();
     properties.parent = layer.parent;
     properties.parentPart = layer.parentPart;
-    properties.orientToPath = false; // the cel's own choice, for its drawings: not a time layer's
+    properties.turnsWith = kNoId; // the cel's own choice, for its drawings: not a time layer's
     return Cel(cel.id(), properties);
 }
 

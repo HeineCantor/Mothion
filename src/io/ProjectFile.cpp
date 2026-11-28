@@ -104,8 +104,8 @@ const char *const kSchema[] = {
     // JSON (their poses are the keys of their motion's Deform channel).
     "create table model_cels (cel integer primary key references cels(id), file_name text not null, model blob not null, "
     "joints text not null)",
-    // Format 23: the cels that turn with the path of the trajectory they follow.
-    "create table oriented_cels (cel integer primary key references cels(id))",
+    // Format 24: the trajectory a cel turns with.
+    "create table turning_cels (cel integer primary key references cels(id), trajectory integer not null)",
 };
 
 // Stored by name, so reordering the enum cannot change old files.
@@ -807,8 +807,8 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
         return false;
     }
 
-    QSqlQuery cel(db), drawing(db), layer(db), exposure(db), tile(db), mask(db), maskTile(db), clipped(db), trajectory(db), trajectoryParent(db), vectorStrokes(db), mouthChart(db), deformer(db), deformerPart(db), timeLayer(db), timePlace(db), modelCel(db), oriented(db);
-    oriented.prepare(QStringLiteral("insert into oriented_cels values (?)"));
+    QSqlQuery cel(db), drawing(db), layer(db), exposure(db), tile(db), mask(db), maskTile(db), clipped(db), trajectory(db), trajectoryParent(db), vectorStrokes(db), mouthChart(db), deformer(db), deformerPart(db), timeLayer(db), timePlace(db), modelCel(db), turning(db);
+    turning.prepare(QStringLiteral("insert into turning_cels values (?, ?)"));
     timeLayer.prepare(QStringLiteral("insert into time_layers values (?, ?, ?, ?, ?)"));
     timePlace.prepare(QStringLiteral("insert into time_layer_places values (?, ?, ?)"));
     cel.prepare(QStringLiteral("insert into cels values (?, ?, ?, ?, ?, ?, ?)"));
@@ -845,7 +845,7 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
             return false;
         if (p.trajectory && !exec(trajectory, {idValue(l.id())}))
             return false;
-        if (p.orientToPath && !exec(oriented, {idValue(l.id())}))
+        if (p.turnsWith != doc::kNoId && !exec(turning, {idValue(l.id()), idValue(p.turnsWith)}))
             return false;
         if (p.deformer != doc::DeformerKind::None
             && !exec(deformer, {idValue(l.id()), QString::fromLatin1(deformerKindName(p.deformer)), deformerToJson(l.deformer())}))
@@ -1195,15 +1195,6 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
             }
     }
 
-    if (version >= 23 && q.exec(QStringLiteral("select cel from oriented_cels"))) {
-        while (q.next())
-            if (doc::Cel *cel = d->cel(idFrom(q.value(0)))) {
-                doc::CelProperties properties = cel->properties();
-                properties.orientToPath = true;
-                cel->setProperties(std::move(properties));
-            }
-    }
-
     if (version >= 19 && q.exec(QStringLiteral("select cel from mouth_charts"))) {
         while (q.next())
             if (doc::Cel *cel = d->cel(idFrom(q.value(0)))) {
@@ -1264,6 +1255,26 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
                 properties.trajectory = true;
                 cel->setProperties(std::move(properties));
             }
+    }
+
+    if (version >= 24 && q.exec(QStringLiteral("select cel, trajectory from turning_cels"))) {
+        while (q.next())
+            if (doc::Cel *cel = d->cel(idFrom(q.value(0)))) {
+                doc::CelProperties properties = cel->properties();
+                properties.turnsWith = idFrom(q.value(1));
+                cel->setProperties(std::move(properties));
+            }
+    }
+
+    // (Format 23: it turned with the trajectory it followed.)
+    if (version == 23 && q.exec(QStringLiteral("select cel from oriented_cels"))) {
+        while (q.next())
+            if (doc::Cel *cel = d->cel(idFrom(q.value(0))))
+                if (const doc::Cel *trajectory = d->followedTrajectory(*cel)) {
+                    doc::CelProperties properties = cel->properties();
+                    properties.turnsWith = trajectory->id();
+                    cel->setProperties(std::move(properties));
+                }
     }
 
     if (version >= 13 && q.exec(QStringLiteral("select layer from clipped_layers"))) {

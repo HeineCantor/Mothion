@@ -640,7 +640,7 @@ private slots:
         document.cel(bar)->setProperties(follower);
         const doc::Cel &cel = *document.cel(bar);
         QVERIFY(!document.pathTurn(cel, 20)); // not asked to turn
-        follower.orientToPath = true;
+        follower.turnsWith = trajectory.id();
         document.cel(bar)->setProperties(follower);
 
         QCOMPARE(document.pathTurn(cel, 20)->x, 60.0);
@@ -661,6 +661,17 @@ private slots:
         QCOMPARE(renderer.image().pixelColor(160, 162), QColor(Qt::red));
         QCOMPARE(renderer.image().pixelColor(143, 145), QColor(Qt::white));
 
+        // Without following it, it turns where it is.
+        follower.parent = doc::kNoId;
+        document.cel(bar)->setProperties(follower);
+        document.followMatrix(cel, 20).map(60, 45, x, y);
+        QVERIFY(std::abs(x - 60) < 1e-9 && std::abs(y - 45) < 1e-9);
+        renderer.renderAll(document, 20);
+        QCOMPARE(renderer.image().pixelColor(60, 28), QColor(Qt::red));
+        QCOMPARE(renderer.image().pixelColor(43, 45), QColor(Qt::white));
+        follower.parent = trajectory.id();
+        document.cel(bar)->setProperties(follower);
+
         // Held, the middle stays what it was as more is drawn; let go, it is taken again.
         document.holdCentres(true);
         QCOMPARE(document.pathTurn(cel, 20)->x, 60.0);
@@ -670,6 +681,30 @@ private slots:
         QCOMPARE(document.pathTurn(cel, 20)->x, 60.0);
         document.holdCentres(false);
         QCOMPARE(document.pathTurn(cel, 20)->x, 80.0);
+    }
+
+    // A held way between two keys turns nothing in between: the turn comes with the jump.
+    void aHeldWayTurnsInSteps()
+    {
+        doc::Document document(300, 300);
+        document.setFrameCount(40);
+        doc::CelProperties line{"Path"};
+        line.trajectory = true;
+        doc::Cel &trajectory = document.insertCel(0, std::make_unique<doc::Cel>(document.allocateCelId(), line));
+        doc::CelMotion motion;
+        motion.setKey(doc::Channel::Position, 0, doc::CelPose{0, 0}, doc::Easing::hold());
+        motion.setKey(doc::Channel::Position, 10, doc::CelPose{100, 0}, doc::Easing::hold());
+        motion.setKey(doc::Channel::Position, 20, doc::CelPose{100, 100}, doc::Easing::hold());
+        motion.setKey(doc::Channel::Position, 30, doc::CelPose{0, 100});
+        trajectory.setMotion(motion);
+        for (int f = 0; f < 40; ++f)
+            QCOMPARE(document.pathAngle(trajectory.id(), f), f < 10 ? 0.0 : f < 20 ? 90.0 : 180.0);
+
+        // A smooth way before a held one eases only within itself.
+        motion.setKey(doc::Channel::Position, 0, doc::CelPose{0, 0}, doc::Easing::linear());
+        trajectory.setMotion(motion);
+        QCOMPARE(document.pathAngle(trajectory.id(), 9), 0.0);
+        QCOMPARE(document.pathAngle(trajectory.id(), 10), 90.0);
     }
 
     // With the cel turned by its way, the Move tool still takes it where the pen goes; the switch is one undo step.
@@ -688,11 +723,11 @@ private slots:
         controller.importImage(image, QStringLiteral("piece"));
         const doc::CelId piece = controller.currentCel();
         QVERIFY(controller.setTrajectoryParent(piece, trajectory));
-        QVERIFY(controller.setOrientToPath(piece, true));
-        QVERIFY(!controller.setOrientToPath(piece, true));
-        QVERIFY(!controller.setOrientToPath(trajectory, true));
+        QVERIFY(controller.setTurnWithPath(piece, trajectory));
+        QVERIFY(!controller.setTurnWithPath(piece, trajectory));
+        QVERIFY(!controller.setTurnWithPath(trajectory, trajectory));
         controller.undo();
-        QVERIFY(!controller.document().cel(piece)->properties().orientToPath);
+        QCOMPARE(controller.document().cel(piece)->properties().turnsWith, doc::kNoId);
         controller.redo();
         QVERIFY(controller.setCelKey(piece, 0, at(0, 0))); // keyed: the Move tool moves the cel, not its pixels
         controller.setCurrentFrame(20);

@@ -110,9 +110,9 @@ public:
     // where it is drawn at that frame and before it.
     // `turned`: with the turn of pathTurn() too.
     Matrix2x3 followMatrix(const Cel &cel, int frame, bool turned = true) const;
-    // What "Turn with the path" does to a cel on `frame` (see CelProperties::orientToPath): so many degrees clockwise
+    // What "Turn with path" does to a cel on `frame` (see CelProperties::turnsWith): so many degrees clockwise
     // around the centre of mass of what its drawing shows there, a point of the drawing (before the cel's pose). Nothing
-    // for a cel that does not turn, or shows no pixels.
+    // for a cel that does not turn, or shows no pixels. (It needs no trajectory to follow.)
     struct PathTurn
     {
         double degrees = 0;
@@ -120,7 +120,8 @@ public:
     };
     std::optional<PathTurn> pathTurn(const Cel &cel, int frame) const;
     // How far the way a trajectory's middle goes has turned on `frame` since the first key, in degrees clockwise: the
-    // angles at its corners are eased over a few frames, and where it stands still it keeps the way it had.
+    // angles at its corners are eased over a few frames, and where it stands still it keeps the way it had. On a held way
+    // between two keys it is turned the way of the jump to come, and turns when it jumps.
     double pathAngle(CelId trajectory, int frame) const;
     // While held, each drawing keeps the centre of mass it was first asked for, so that what is being drawn does not
     // move under the pen. (Only how the document is shown: not part of it.)

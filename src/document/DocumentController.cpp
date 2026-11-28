@@ -546,13 +546,17 @@ bool DocumentController::setTrajectoryParent(doc::CelId childId, doc::CelId pare
     return execute(doc::makeSetCelProperties(*m_document, childId, std::move(properties)));
 }
 
-bool DocumentController::setOrientToPath(doc::CelId celId, bool on)
+bool DocumentController::setTurnWithPath(doc::CelId celId, doc::CelId trajectoryId)
 {
     const doc::Cel *cel = m_document->cel(celId);
-    if (!cel || cel->properties().drawsNothing() || cel->properties().model3d || cel->properties().orientToPath == on)
+    if (!cel || cel->properties().drawsNothing() || cel->properties().model3d
+        || cel->properties().turnsWith == trajectoryId)
+        return false;
+    const doc::Cel *trajectory = m_document->cel(trajectoryId);
+    if (trajectoryId != doc::kNoId && (!trajectory || !trajectory->properties().trajectory))
         return false;
     doc::CelProperties properties = cel->properties();
-    properties.orientToPath = on;
+    properties.turnsWith = trajectoryId;
     return execute(doc::makeSetCelProperties(*m_document, celId, std::move(properties)));
 }
 

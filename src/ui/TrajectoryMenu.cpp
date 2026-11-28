@@ -52,19 +52,35 @@ void addParentTrajectoryMenu(QMenu &menu, document::DocumentController *document
             action->setToolTip(tr("It follows this trajectory: it cannot be its parent too"));
         any = any || !loop;
     }
-    // A drawn cel that follows one (its own, or its deformer's) can turn as the way goes.
-    if (!cel.properties().drawsNothing() && !cel.properties().model3d) {
-        parents->addSeparator();
-        const bool on = cel.properties().orientToPath;
-        QAction *turn = parents->addAction(tr("Turn with the path"), context,
-                                           [document, celId, on] { document->setOrientToPath(celId, !on); });
-        turn->setCheckable(true);
-        turn->setChecked(on);
-        turn->setEnabled(on || d.followedTrajectory(cel));
-        turn->setToolTip(tr("The drawing turns around its center of mass as the trajectory's way turns"));
-    }
     parents->setToolTipsVisible(true);
-    parents->setEnabled(any || parent || d.followedTrajectory(cel));
+    parents->setEnabled(any || parent);
+
+    // A drawn cel can turn as a trajectory's way does, whether it follows one or not.
+    if (!cel.properties().drawsNothing() && !cel.properties().model3d) {
+        QMenu *turns = menu.addMenu(tr("Turn with path"));
+        const doc::Cel *with = d.cel(cel.properties().turnsWith);
+        if (with && !with->properties().trajectory)
+            with = nullptr;
+        QAction *still = turns->addAction(tr("None"), context,
+                                          [document, celId] { document->setTurnWithPath(celId, doc::kNoId); });
+        still->setCheckable(true);
+        still->setChecked(!with);
+        bool anyPath = false;
+        for (int i = d.celCount() - 1; i >= 0; --i) {
+            const doc::Cel &t = d.celAt(i);
+            if (!t.properties().trajectory)
+                continue;
+            const doc::CelId id = t.id();
+            QAction *action = turns->addAction(QString::fromStdString(t.properties().name), context,
+                                               [document, celId, id] { document->setTurnWithPath(celId, id); });
+            action->setCheckable(true);
+            action->setChecked(with && with->id() == id);
+            action->setToolTip(tr("The drawing turns around its center of mass as that way turns; it is not moved"));
+            anyPath = true;
+        }
+        turns->setToolTipsVisible(true);
+        turns->setEnabled(anyPath || with);
+    }
 
     // A drawn cel can be bent by a deformer instead (its parent then is the deformer).
     if (cel.properties().drawsNothing())

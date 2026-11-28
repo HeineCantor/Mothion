@@ -133,11 +133,12 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
                 if (cel && shown != doc::kNoId && (drawing == doc::kNoId || shown == drawing)) {
                     // A cel moved by its keys shows these pixels somewhere else: where the pose puts them.
                     // (One that turns around its centre of mass moves whole as its pixels change, once that is not held.)
-                    if (cel->properties().orientToPath && !m_document->document().centresHeld())
+                    if (cel->properties().turnsWith != doc::kNoId && !m_document->document().centresHeld())
                         renderWholeFrame();
                     else if (cel->id() == m_document->currentCel())
                         renderDocumentRect(posedRect(rect));
-                    else if (!cel->motion().isEmpty() || m_document->document().followedTrajectory(*cel))
+                    else if (!cel->motion().isEmpty() || cel->properties().turnsWith != doc::kNoId
+                             || m_document->document().followedTrajectory(*cel))
                         renderWholeFrame();
                     else
                         renderDocumentRect(rect);
@@ -1774,7 +1775,7 @@ void CanvasView::releaseCentres()
         return;
     m_document->document().holdCentres(false);
     // A cel that turns with the path turns around where its centre of mass is now.
-    if (const doc::Cel *cel = m_document->document().cel(m_document->currentCel()); cel && cel->properties().orientToPath) {
+    if (const doc::Cel *cel = m_document->document().cel(m_document->currentCel()); cel && cel->properties().turnsWith != doc::kNoId) {
         m_onionImages.clear();
         renderWholeFrame();
     }
