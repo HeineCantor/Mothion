@@ -12,6 +12,7 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include <utility>
 
 namespace mothion::doc {
 
@@ -107,7 +108,24 @@ public:
     // What the trajectory a cel follows does to it on `frame` (identity for a cel that follows none), after what the bone
     // it is carried by does (see partMatrix()): on top of the cel's own pose, and relative: only what the trajectory has done since its first key (see trajectoryStartFrame()), so the cel is
     // where it is drawn at that frame and before it.
-    Matrix2x3 followMatrix(const Cel &cel, int frame) const;
+    // `turned`: with the turn of pathTurn() too.
+    Matrix2x3 followMatrix(const Cel &cel, int frame, bool turned = true) const;
+    // What "Turn with the path" does to a cel on `frame` (see CelProperties::orientToPath): so many degrees clockwise
+    // around the centre of mass of what its drawing shows there, a point of the drawing (before the cel's pose). Nothing
+    // for a cel that does not turn, or shows no pixels.
+    struct PathTurn
+    {
+        double degrees = 0;
+        double x = 0, y = 0;
+    };
+    std::optional<PathTurn> pathTurn(const Cel &cel, int frame) const;
+    // How far the way a trajectory's middle goes has turned on `frame` since the first key, in degrees clockwise: the
+    // angles at its corners are eased over a few frames, and where it stands still it keeps the way it had.
+    double pathAngle(CelId trajectory, int frame) const;
+    // While held, each drawing keeps the centre of mass it was first asked for, so that what is being drawn does not
+    // move under the pen. (Only how the document is shown: not part of it.)
+    void holdCentres(bool held) const;
+    bool centresHeld() const { return m_heldCentres.has_value(); }
     // The frame of the first key of a trajectory or of the ones it follows; -1 if none has a key.
     int trajectoryStartFrame(CelId trajectory) const;
     // Whether making `parent` the parent of `child` would be a loop or cannot be: the parent is no trajectory or deformation
@@ -149,6 +167,8 @@ public:
     const Layer *layer(CelId cel, DrawingId drawing, LayerId layer) const;
 
 private:
+    std::optional<std::pair<double, double>> centreOfMass(const Drawing &drawing) const;
+    mutable std::optional<std::map<DrawingId, std::optional<std::pair<double, double>>>> m_heldCentres;
     int m_width;
     int m_height;
     FrameRate m_frameRate;

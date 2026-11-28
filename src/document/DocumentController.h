@@ -102,6 +102,8 @@ public:
     // `child` follows `parent` (a trajectory; kNoId lets it go); its own keys then come on top of the parent's way. The child
     // is a trajectory or any cel. One undo step. False if that would be a loop, or the parent is no trajectory, or nothing changes.
     bool setTrajectoryParent(doc::CelId child, doc::CelId parent);
+    // "Turn with the path" of a drawn cel (see doc::CelProperties::orientToPath).
+    bool setOrientToPath(doc::CelId cel, bool on);
     // `child` (a drawn cel) is carried by a part of the deformation cel `deformer` (a bone, or a node): moved and turned as
     // that part is, not bent (see doc::CelProperties::parentPart); `part` -1: bent by it. One undo step; false if it cannot
     // be (no such part, the child is not a drawn cel) or nothing changes.

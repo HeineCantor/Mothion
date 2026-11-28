@@ -132,7 +132,10 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
                                                                                  : cel->timing().drawingAt(m_document->currentFrame());
                 if (cel && shown != doc::kNoId && (drawing == doc::kNoId || shown == drawing)) {
                     // A cel moved by its keys shows these pixels somewhere else: where the pose puts them.
-                    if (cel->id() == m_document->currentCel())
+                    // (One that turns around its centre of mass moves whole as its pixels change, once that is not held.)
+                    if (cel->properties().orientToPath && !m_document->document().centresHeld())
+                        renderWholeFrame();
+                    else if (cel->id() == m_document->currentCel())
                         renderDocumentRect(posedRect(rect));
                     else if (!cel->motion().isEmpty() || m_document->document().followedTrajectory(*cel))
                         renderWholeFrame();
@@ -1087,6 +1090,8 @@ void CanvasView::handleSample(const PenSample &sample)
                       || m_boneGizmo.isDragging() || m_curveGizmo.isDragging() || m_modelGizmo.isDragging()
                       || m_flip.has_value();
     const QPointF docPos = m_view.mapToDocument(QPointF(sample.x, sample.y));
+    if (sample.phase == SamplePhase::Press && !busy)
+        m_document->document().holdCentres(true); // (before toCel(): what is drawn stays under the pen)
     const QPointF celPos = toCel(docPos);
     // The place a tool is given: the cel's own, but for the tools that work on what is shown.
     auto at = [&](const CanvasTool *tool) { return tool && toolWorksInCel(tool) ? celPos : docPos; };
@@ -1209,6 +1214,7 @@ void CanvasView::handleSample(const PenSample &sample)
                 m_eyedropperTool->release(flip.docPos, modifiers);
                 emit editStepsChanged();
             }
+            releaseCentres();
             break;
         }
         m_gesture.end();
@@ -1257,6 +1263,7 @@ void CanvasView::handleSample(const PenSample &sample)
             update();
             emit editStepsChanged();
         }
+        releaseCentres();
         break;
     case SamplePhase::Hover:
         if (!busy && m_cameraGizmo.hover(docPos, m_view)) {
@@ -1761,6 +1768,18 @@ void CanvasView::paintStraightLinePreview(QPainter &p) const
     p.restore();
 }
 
+void CanvasView::releaseCentres()
+{
+    if (!m_document->document().centresHeld())
+        return;
+    m_document->document().holdCentres(false);
+    // A cel that turns with the path turns around where its centre of mass is now.
+    if (const doc::Cel *cel = m_document->document().cel(m_document->currentCel()); cel && cel->properties().orientToPath) {
+        m_onionImages.clear();
+        renderWholeFrame();
+    }
+}
+
 void CanvasView::cancelStroke()
 {
     m_gizmo.cancel();
@@ -1788,8 +1807,10 @@ void CanvasView::cancelStroke()
             tool->commit();
     emit editStepsChanged();
     emit transformChanged();
-    if (!m_stroke)
+    if (!m_stroke) {
+        releaseCentres();
         return;
+    }
     // Restore pixels first: cancelPaint() may remove the drawing they live in.
     m_stroke->cancel();
     m_snapHeld.clear();
@@ -1803,6 +1824,7 @@ void CanvasView::cancelStroke()
     m_heldSamples.clear();
     m_document->cancelPaint();
     renderWholeFrame();
+    releaseCentres();
 }
 
 brush::BrushInput CanvasView::brushInput(const PenSample &smoothed)

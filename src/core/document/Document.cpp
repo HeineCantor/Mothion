@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 
 namespace mothion::doc {
 
@@ -157,15 +158,141 @@ int Document::trajectoryStartFrame(CelId trajectory) const
     return first;
 }
 
-Matrix2x3 Document::followMatrix(const Cel &cel, int frame) const
+Matrix2x3 Document::followMatrix(const Cel &cel, int frame, bool turned) const
 {
-    const Matrix2x3 part = partMatrix(cel, frame);
+    Matrix2x3 part = partMatrix(cel, frame);
     const Cel *trajectory = followedTrajectory(cel);
     const int start = trajectory ? trajectoryStartFrame(trajectory->id()) : -1;
     if (start < 0)
         return part;
+    if (turned)
+        if (const std::optional<PathTurn> turn = pathTurn(cel, frame); turn && turn->degrees != 0) {
+            // Around where the centre of mass is once the cel's own pose (and its part) has put it.
+            double x = turn->x, y = turn->y;
+            if (!cel.motion().isEmpty())
+                cel.motion().poseAt(frame).matrix(cel.motion().pivotX, cel.motion().pivotY).map(turn->x, turn->y, x, y);
+            double cx = 0, cy = 0;
+            part.map(x, y, cx, cy);
+            CelPose about;
+            about.rotation = turn->degrees;
+            part = part.then(about.matrix(cx, cy));
+        }
     // Relative: what the trajectory has done since its first key, so the cel is where it is drawn until then.
     return part.then(trajectoryMatrix(trajectory->id(), start).inverted().then(trajectoryMatrix(trajectory->id(), frame)));
+}
+
+std::optional<Document::PathTurn> Document::pathTurn(const Cel &cel, int frame) const
+{
+    if (!cel.properties().orientToPath || cel.properties().drawsNothing())
+        return std::nullopt;
+    const Cel *trajectory = followedTrajectory(cel);
+    const Drawing *drawing = trajectory ? cel.drawingAt(frame) : nullptr;
+    const auto centre = drawing ? centreOfMass(*drawing) : std::nullopt;
+    if (!centre)
+        return std::nullopt;
+    return PathTurn{pathAngle(trajectory->id(), frame), centre->first, centre->second};
+}
+
+double Document::pathAngle(CelId trajectory, int frame) const
+{
+    const Cel *own = cel(trajectory);
+    const int first = own ? trajectoryStartFrame(trajectory) : -1;
+    if (first < 0)
+        return 0;
+    int last = first;
+    int depth = 0;
+    for (const Cel *c = own; c && depth <= celCount(); c = trajectoryParent(*c), ++depth)
+        if (c->properties().visible && !c->motion().isEmpty())
+            last = std::max(last, c->motion().keyFrames().back());
+
+    // The way of each step from a frame to the next, in degrees, going on from the one before (never jumping by a turn).
+    std::vector<std::optional<double>> ways;
+    std::optional<double> previous;
+    double fromX = 0, fromY = 0;
+    for (int f = first; f <= last; ++f) {
+        double x = 0, y = 0;
+        trajectoryMatrix(trajectory, f).map(own->motion().pivotX, own->motion().pivotY, x, y);
+        if (f > first) {
+            std::optional<double> way;
+            if (std::hypot(x - fromX, y - fromY) > 0.01) {
+                double angle = std::atan2(y - fromY, x - fromX) * 180.0 / std::numbers::pi;
+                if (previous)
+                    angle = *previous + std::remainder(angle - *previous, 360.0);
+                way = previous = angle;
+            }
+            ways.push_back(way);
+        }
+        fromX = x;
+        fromY = y;
+    }
+    if (!previous)
+        return 0; // it goes nowhere
+    // Standing still: the way it had, or (before it first moves) the first it takes.
+    double kept = 0;
+    for (const std::optional<double> &way : ways)
+        if (way) {
+            kept = *way;
+            break;
+        }
+    std::vector<double> steps;
+    for (const std::optional<double> &way : ways)
+        steps.push_back(kept = way.value_or(kept));
+
+    // Eased over the steps around a frame, nearer ones counting more; past the ends, the first and the last go on.
+    constexpr int kReach = 4;
+    const int count = int(steps.size());
+    auto eased = [&](int at) { // `at` in frames from the first
+        double sum = 0, weights = 0;
+        for (int i = at - kReach; i < at + kReach; ++i) {
+            const double weight = kReach - std::abs(i + 0.5 - at);
+            sum += weight * steps[std::size_t(std::clamp(i, 0, count - 1))];
+            weights += weight;
+        }
+        return sum / weights;
+    };
+    return eased(std::clamp(frame, first, last) - first) - eased(0);
+}
+
+void Document::holdCentres(bool held) const
+{
+    if (!held)
+        m_heldCentres.reset();
+    else if (!m_heldCentres)
+        m_heldCentres.emplace();
+}
+
+std::optional<std::pair<double, double>> Document::centreOfMass(const Drawing &drawing) const
+{
+    if (m_heldCentres)
+        if (const auto it = m_heldCentres->find(drawing.id); it != m_heldCentres->end())
+            return it->second;
+    // Every pixel of what shows, weighted by how opaque it is.
+    double sumX = 0, sumY = 0, sum = 0;
+    for (const Layer &layer : drawing.layers) {
+        if (!layer.properties.visible || layer.kind == LayerKind::Perspective)
+            continue;
+        for (const TileCoord &at : layer.image.tileCoords()) {
+            const TilePtr tile = layer.image.tile(at);
+            for (int y = 0; y < kTileSize; ++y) {
+                const Pixel *row = tile->row(y);
+                double weight = 0, across = 0;
+                for (int x = 0; x < kTileSize; ++x) {
+                    const double alpha = alphaOf(row[x]);
+                    weight += alpha;
+                    across += alpha * x;
+                }
+                sum += weight;
+                sumX += across + weight * (at.x * kTileSize + 0.5);
+                sumY += weight * (at.y * kTileSize + y + 0.5);
+            }
+        }
+    }
+    std::optional<std::pair<double, double>> centre;
+    if (sum > 0)
+        centre = {sumX / sum, sumY / sum};
+    if (m_heldCentres)
+        m_heldCentres->emplace(drawing.id, centre);
+    return centre;
 }
 
 Cel Document::timeLayerAsCel(const Cel &cel, const TimeLayer &layer)
@@ -173,6 +300,7 @@ Cel Document::timeLayerAsCel(const Cel &cel, const TimeLayer &layer)
     CelProperties properties = cel.properties();
     properties.parent = layer.parent;
     properties.parentPart = layer.parentPart;
+    properties.orientToPath = false; // the cel's own choice, for its drawings: not a time layer's
     return Cel(cel.id(), properties);
 }
 

@@ -114,6 +114,9 @@ std::optional<AnimateTool::Shape> AnimateTool::shape() const
     }
     s.matrix = s.pose.matrix(s.pivot.x(), s.pivot.y());
     s.follow = d.followMatrix(*cel, frame);
+    s.unturned = d.followMatrix(*cel, frame, false);
+    s.part = d.partMatrix(*cel, frame);
+    s.turn = d.pathTurn(*cel, frame);
     return s;
 }
 
@@ -234,6 +237,7 @@ void AnimateTool::press(const QPointF &pagePos, Qt::KeyboardModifiers)
     d.members = members;
     d.start = *s;
     d.press = docPos;
+    d.pressPage = pagePos;
     if (picked.handle >= 0) {
         d.handle = handlePoint(*s, picked.handle);
         // The opposite corner, or the middle of the opposite side.
@@ -256,18 +260,42 @@ void AnimateTool::move(const QPointF &pagePos, Qt::KeyboardModifiers modifiers)
     doc::CelPose pose = start.pose;
     // The turn and the scale are around the pivot; the point that stays put (the box's middle, the anchor) is then brought
     // back to where it was by the move.
+    // (A cel that turns with the path turns around where the pose puts its centre of mass: counted too.)
     auto keepPut = [&](const QPointF &local) {
-        const QPointF before = mapped(start, local);
+        auto put = [&](const doc::CelPose &p) {
+            const doc::Matrix2x3 m = p.matrix(start.pivot.x(), start.pivot.y());
+            double x = 0, y = 0;
+            m.map(local.x(), local.y(), x, y);
+            start.part.map(x, y, x, y);
+            if (start.turn) {
+                double cx = 0, cy = 0;
+                m.map(start.turn->x, start.turn->y, cx, cy);
+                start.part.map(cx, cy, cx, cy);
+                doc::CelPose about;
+                about.rotation = start.turn->degrees;
+                about.matrix(cx, cy).map(x, y, x, y);
+            }
+            return QPointF(x, y);
+        };
+        const QPointF off = put(start.pose) - put(pose);
+        doc::Matrix2x3 linear = start.part;
+        linear.e = linear.f = 0;
         double x = 0, y = 0;
-        pose.matrix(start.pivot.x(), start.pivot.y()).map(local.x(), local.y(), x, y);
-        pose.x += before.x() - x;
-        pose.y += before.y() - y;
+        linear.inverted().map(off.x(), off.y(), x, y);
+        pose.x += x;
+        pose.y += y;
     };
     switch (d.grip) {
-    case Grip::Move:
-        pose.x = start.pose.x + docPos.x() - d.press.x();
-        pose.y = start.pose.y + docPos.y() - d.press.y();
+    case Grip::Move: {
+        // The turn goes along with what is moved: the pen's way is taken back through the rest alone.
+        const doc::Matrix2x3 back = start.unturned.inverted();
+        double x = 0, y = 0, fromX = 0, fromY = 0;
+        back.map(pagePos.x(), pagePos.y(), x, y);
+        back.map(d.pressPage.x(), d.pressPage.y(), fromX, fromY);
+        pose.x = start.pose.x + x - fromX;
+        pose.y = start.pose.y + y - fromY;
         break;
+    }
     case Grip::Rotate: {
         // By how much the pen has gone round the middle of the box (past a half turn too, not wrapped).
         const QPointF centre = mapped(start, start.box.center());

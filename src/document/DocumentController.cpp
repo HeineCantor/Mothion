@@ -546,6 +546,16 @@ bool DocumentController::setTrajectoryParent(doc::CelId childId, doc::CelId pare
     return execute(doc::makeSetCelProperties(*m_document, childId, std::move(properties)));
 }
 
+bool DocumentController::setOrientToPath(doc::CelId celId, bool on)
+{
+    const doc::Cel *cel = m_document->cel(celId);
+    if (!cel || cel->properties().drawsNothing() || cel->properties().model3d || cel->properties().orientToPath == on)
+        return false;
+    doc::CelProperties properties = cel->properties();
+    properties.orientToPath = on;
+    return execute(doc::makeSetCelProperties(*m_document, celId, std::move(properties)));
+}
+
 bool DocumentController::setDeformerParent(doc::CelId childId, doc::CelId deformerId, int part)
 {
     const doc::Cel *child = m_document->cel(childId);

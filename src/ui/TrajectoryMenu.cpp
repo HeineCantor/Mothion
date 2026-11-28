@@ -52,8 +52,19 @@ void addParentTrajectoryMenu(QMenu &menu, document::DocumentController *document
             action->setToolTip(tr("It follows this trajectory: it cannot be its parent too"));
         any = any || !loop;
     }
+    // A drawn cel that follows one (its own, or its deformer's) can turn as the way goes.
+    if (!cel.properties().drawsNothing() && !cel.properties().model3d) {
+        parents->addSeparator();
+        const bool on = cel.properties().orientToPath;
+        QAction *turn = parents->addAction(tr("Turn with the path"), context,
+                                           [document, celId, on] { document->setOrientToPath(celId, !on); });
+        turn->setCheckable(true);
+        turn->setChecked(on);
+        turn->setEnabled(on || d.followedTrajectory(cel));
+        turn->setToolTip(tr("The drawing turns around its center of mass as the trajectory's way turns"));
+    }
     parents->setToolTipsVisible(true);
-    parents->setEnabled(any || parent);
+    parents->setEnabled(any || parent || d.followedTrajectory(cel));
 
     // A drawn cel can be bent by a deformer instead (its parent then is the deformer).
     if (cel.properties().drawsNothing())

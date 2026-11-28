@@ -241,6 +241,7 @@ private:
     void syncAnimateTool();
     void syncPoseMode(); // the current cel has keys: Transform and Move move it as a piece
     void renderWholeFrame();                     // frame, layers or timing changed
+    void releaseCentres();                       // the pen is up: see doc::Document::holdCentres()
     void renderDocumentRect(const QRect &docRect); // pixels changed
     void updateDocumentRect(const QRect &docRect);
     void updateBrushOutline(const QPointF &newPos);

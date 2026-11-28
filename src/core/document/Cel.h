@@ -27,6 +27,9 @@ struct CelProperties
     // too), or the deformation cel that bends it (which may follow a trajectory). Its own keys come on top of what the
     // trajectory does. For a trajectory `visible` is "active": an inactive one does nothing of its own.
     CelId parent = kNoId;
+    // A drawn cel that follows a trajectory turns, around its drawing's centre of mass, as much as the way of the
+    // trajectory has turned since its first key (see Document::pathTurn()): "Turn with the path".
+    bool orientToPath = false;
     // A deformation cel: like a trajectory, a cel with no drawings that is never drawn; it bends the drawings of the cels
     // that follow it (their parent is it) as its pose on the frame says (see Deformer, and its Deform keys). It can follow
     // a trajectory, which then moves what it bent. Fixed when it is made; None for any other cel.

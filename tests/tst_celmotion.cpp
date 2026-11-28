@@ -616,6 +616,114 @@ private slots:
 
     // A cel that follows a trajectory is drawn where the trajectory takes it, on top of its own keys; and only a trajectory
     // can be followed. One undo step; a trajectory that goes lets the cel go.
+    void aCelTurnsWithThePath()
+    {
+        // A bar lying across, its middle at (60, 45), following a way that goes right and then down.
+        doc::Document document(300, 300);
+        document.setFrameCount(30);
+        document.setPaperColor(0xffffffff);
+        const doc::CelId bar = addSquare(document, 40, 40, 10, 0);
+        auto &image = document.cel(bar)->drawing(document.cel(bar)->drawings().begin()->first)->layers.front().image;
+        for (int y = 40; y < 50; ++y)
+            for (int x = 50; x < 80; ++x)
+                image.setPixel(x, y, 0xffff0000u);
+        doc::CelProperties line{"Path"};
+        line.trajectory = true;
+        doc::Cel &trajectory = document.insertCel(1, std::make_unique<doc::Cel>(document.allocateCelId(), line));
+        doc::CelMotion motion;
+        motion.setKey(doc::Channel::Position, 0, doc::CelPose{0, 0});
+        motion.setKey(doc::Channel::Position, 10, doc::CelPose{100, 0});
+        motion.setKey(doc::Channel::Position, 20, doc::CelPose{100, 100});
+        trajectory.setMotion(motion);
+        doc::CelProperties follower = document.cel(bar)->properties();
+        follower.parent = trajectory.id();
+        document.cel(bar)->setProperties(follower);
+        const doc::Cel &cel = *document.cel(bar);
+        QVERIFY(!document.pathTurn(cel, 20)); // not asked to turn
+        follower.orientToPath = true;
+        document.cel(bar)->setProperties(follower);
+
+        QCOMPARE(document.pathTurn(cel, 20)->x, 60.0);
+        QCOMPARE(document.pathTurn(cel, 20)->y, 45.0);
+        QCOMPARE(document.pathAngle(trajectory.id(), 0), 0.0);
+        QCOMPARE(document.pathAngle(trajectory.id(), 5), 0.0);
+        QCOMPARE(document.pathAngle(trajectory.id(), 10), 45.0); // eased at the corner
+        QVERIFY(document.pathAngle(trajectory.id(), 9) > 0 && document.pathAngle(trajectory.id(), 9) < 45);
+        QCOMPARE(document.pathAngle(trajectory.id(), 20), 90.0);
+        QCOMPARE(document.pathAngle(trajectory.id(), 29), 90.0);
+        // It turns about its own middle, which goes where it went without the turn.
+        double x = 0, y = 0;
+        document.followMatrix(cel, 20).map(60, 45, x, y);
+        QVERIFY(std::abs(x - 160) < 1e-9 && std::abs(y - 145) < 1e-9);
+        canvas::FrameRenderer renderer;
+        renderer.renderAll(document, 20);
+        QCOMPARE(renderer.image().pixelColor(160, 128), QColor(Qt::red)); // standing up now
+        QCOMPARE(renderer.image().pixelColor(160, 162), QColor(Qt::red));
+        QCOMPARE(renderer.image().pixelColor(143, 145), QColor(Qt::white));
+
+        // Held, the middle stays what it was as more is drawn; let go, it is taken again.
+        document.holdCentres(true);
+        QCOMPARE(document.pathTurn(cel, 20)->x, 60.0);
+        for (int py = 40; py < 50; ++py)
+            for (int px = 80; px < 120; ++px)
+                image.setPixel(px, py, 0xffff0000u);
+        QCOMPARE(document.pathTurn(cel, 20)->x, 60.0);
+        document.holdCentres(false);
+        QCOMPARE(document.pathTurn(cel, 20)->x, 80.0);
+    }
+
+    // With the cel turned by its way, the Move tool still takes it where the pen goes; the switch is one undo step.
+    void aTurnedCelIsMovedWithThePen()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        controller.setSceneLength(30);
+        controller.addTrajectory();
+        const doc::CelId trajectory = controller.currentCel();
+        QVERIFY(controller.setCelKey(trajectory, 0, at(0, 0)));
+        QVERIFY(controller.setCelKey(trajectory, 10, at(0, 100)));
+        QVERIFY(controller.setCelKey(trajectory, 20, at(-100, 100)));
+        QImage image(60, 40, QImage::Format_ARGB32);
+        image.fill(Qt::red);
+        controller.importImage(image, QStringLiteral("piece"));
+        const doc::CelId piece = controller.currentCel();
+        QVERIFY(controller.setTrajectoryParent(piece, trajectory));
+        QVERIFY(controller.setOrientToPath(piece, true));
+        QVERIFY(!controller.setOrientToPath(piece, true));
+        QVERIFY(!controller.setOrientToPath(trajectory, true));
+        controller.undo();
+        QVERIFY(!controller.document().cel(piece)->properties().orientToPath);
+        controller.redo();
+        QVERIFY(controller.setCelKey(piece, 0, at(0, 0))); // keyed: the Move tool moves the cel, not its pixels
+        controller.setCurrentFrame(20);
+
+        canvas::CanvasView canvas(&state, &controller);
+        canvas.resize(900, 520);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        const doc::Document &d = controller.document();
+        const auto turn = d.pathTurn(*d.cel(piece), 20);
+        QVERIFY(turn && std::abs(turn->degrees - 90) < 1e-9);
+        auto middle = [&] {
+            const doc::Cel &cel = *d.cel(piece);
+            double x = 0, y = 0;
+            const doc::CelMotion &m = cel.motion();
+            m.poseAt(20).matrix(m.pivotX, m.pivotY).map(turn->x, turn->y, x, y);
+            d.followMatrix(cel, 20).map(x, y, x, y);
+            return QPointF(x, y);
+        };
+        const QPointF before = middle();
+        state.setActiveTool(tools::ToolId::Move);
+        const QTransform toView = canvas.view().documentToView();
+        const QPoint from = toView.map(before).toPoint(), to = from + QPoint(40, 30);
+        QTest::mousePress(&canvas, Qt::LeftButton, {}, from);
+        QTest::mouseMove(&canvas, to);
+        QTest::mouseRelease(&canvas, Qt::LeftButton, {}, to);
+        const QPointF went = toView.inverted().map(QPointF(to)) - toView.inverted().map(QPointF(from));
+        const QPointF got = middle() - before;
+        QVERIFY2(QLineF(went, got).length() < 1.5, qPrintable(QStringLiteral("%1 %2 / %3 %4").arg(got.x()).arg(got.y()).arg(went.x()).arg(went.y())));
+    }
+
     void aCelFollowsATrajectory()
     {
         document::DocumentController controller;

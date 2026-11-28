@@ -483,7 +483,7 @@ private slots:
         child.visible = false; // (inactive)
         child.parent = path_cel.id();
         original->insertCel(1, std::make_unique<doc::Cel>(original->allocateCelId(), child));
-        original->celAt(2).setProperties([&] { auto p = original->celAt(2).properties(); p.parent = path_cel.id(); return p; }());
+        original->celAt(2).setProperties([&] { auto p = original->celAt(2).properties(); p.parent = path_cel.id(); p.orientToPath = true; return p; }());
         QString error;
         QVERIFY2(io::saveProject(*original, path, &error), qPrintable(error));
         const auto loaded = io::loadProject(path, &error);
@@ -496,6 +496,8 @@ private slots:
         QVERIFY(!loaded->celAt(2).properties().trajectory);
         QCOMPARE(loaded->celAt(2).properties().parent, loaded->celAt(0).id()); // a plain cel that follows the path
         QVERIFY(loaded->celAt(0).motion().hasKeyAt(3));
+        QVERIFY(loaded->celAt(2).properties().orientToPath); // format 23
+        QVERIFY(!loaded->celAt(1).properties().orientToPath);
     }
 
     // Format 20: the deformation cels, their bones and rest, and the keys of their pose.

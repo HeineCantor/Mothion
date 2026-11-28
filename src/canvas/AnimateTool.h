@@ -3,6 +3,7 @@
 #include "canvas/CanvasTool.h"
 #include "core/document/Cel.h"
 #include "core/document/CelMotion.h"
+#include "core/document/Document.h"
 #include "core/document/Ids.h"
 
 #include <QRectF>
@@ -76,6 +77,10 @@ private:
         // What the trajectory the cel follows does to it, on top of its pose: the tool works in the space before it (the pen is
         // taken back through it), the box and the handles are shown after it.
         doc::Matrix2x3 follow;
+        // ... and its pieces, for a cel that turns with the path (the turn goes with the pose being dragged):
+        doc::Matrix2x3 unturned; // `follow` without the turn
+        doc::Matrix2x3 part;     // what the part that carries the cel does, before the turn
+        std::optional<doc::Document::PathTurn> turn;
     };
     // The cels moved together, when several are chosen and show something here: the chosen ones that are free, on view, and
     // have pixels on the current frame. Fewer than two: the current cel alone.
@@ -112,6 +117,7 @@ private:
         doc::CelMotion before; // the motion when the pen went down
         Shape start;           // the shape then
         QPointF press;
+        QPointF pressPage; // the same on the page
         QPointF handle;        // the grabbed handle, in the cel's coordinates
         QPointF anchor;        // the point that stays put (the opposite corner or side)
         bool horizontal = false; // a side handle: which way it scales
