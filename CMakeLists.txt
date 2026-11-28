@@ -44,7 +44,7 @@ if(WIN32 AND NOT Qt6_DIR AND NOT CMAKE_PREFIX_PATH AND NOT DEFINED ENV{CMAKE_PRE
     endif()
 endif()
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets Multimedia) # Multimedia: decoding and playing the audio track
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets Multimedia OpenGL) # Multimedia: decoding and playing the audio track; OpenGL: drawing 3D models
 qt_standard_project_setup()
 
 # Qt is LGPL: it is linked dynamically, so the Qt DLLs handed out with Mothion can be replaced with another build.

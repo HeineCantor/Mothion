@@ -1,6 +1,7 @@
 #include "ui/panels/timeline/TimelineView.h"
 
 #include "ui/TrajectoryMenu.h"
+#include "ui/ModelDialogs.h"
 
 #include "core/document/commands/CelCommands.h"
 #include "core/document/commands/DrawingCommands.h"
@@ -2365,7 +2366,15 @@ void TimelineView::addCelActions(QMenu &menu, const doc::Cel &cel)
     // A cel follows a trajectory (Follow trajectory), a trajectory another (Parent to): what it does comes on top of the
     // cel's own keys.
     addParentTrajectoryMenu(menu, m_document, cel, this);
-    if (!cel.properties().drawsNothing()) {
+    if (cel.properties().model3d) {
+        // The weights of the model's blend shapes on the current frame.
+        QAction *shapes = menu.addAction(tr("Blend shapes…"), this, [this, celId] {
+            auto *dialog = new BlendShapesDialog(m_document, celId, this);
+            dialog->show();
+        });
+        shapes->setEnabled(!cel.model().isEmpty() && !cel.model().model()->morphs.empty());
+    }
+    if (!cel.properties().drawsNothing() && !cel.properties().model3d) {
         // Lip sync: the cel's drawings are mouths (A to H, X), drawn in the Mouth chart panel and put by the mouth bar.
         QAction *chart = menu.addAction(tr("Mouth chart (lip sync)"), this, [this, celId](bool on) {
             QString reason;

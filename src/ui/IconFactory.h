@@ -18,6 +18,8 @@ enum class IconId {
     NewFrame, Onion, NewCel, NewTrajectory, Bones, NewBones, DeformCurve, DeformEnvelope, Filter,
     // Correct line (the control points of vector strokes), and the brushes' symmetry.
     CorrectLine, Symmetry,
+    // A 3D model cel: a cube with a plus (a new one).
+    NewModel3D,
 };
 
 // Provisional icons, drawn in code as simple line art on a 24x24 grid.

@@ -22,6 +22,8 @@ std::size_t celBytes(const Cel *cel)
     if (cel)
         for (const auto &[id, d] : cel->drawings())
             total += d.memoryBytes();
+    if (cel && cel->model().source) // a 3D model: its file (its mesh read from it is about as big again)
+        total += 2 * cel->model().source->bytes.size();
     return total;
 }
 

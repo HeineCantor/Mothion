@@ -128,6 +128,19 @@ private:
     // what it is made of changes: the drawing's layers (their tiles: the copies kept here make a tile written to be a new
     // one), the deformer's bones or its pose.
     const Deformed *deformed(const doc::Document &doc, const doc::Cel &cel, const doc::Drawing &drawing, int frame) const;
+    // A 3D model cel's model as its pose on `frame` puts it, drawn on the page (cut to what it covers); nullptr for a cel
+    // with no model, or one that covers nothing. Kept for each cel, made again only when its model, its settings, its
+    // pose or the page's size change.
+    const Deformed *modelImage(const doc::Document &doc, const doc::Cel &cel, int frame) const;
+    struct ModelShot
+    {
+        doc::ModelRig rig;
+        std::vector<double> pose;
+        QSize size;
+        bool empty = true;
+        Deformed result;
+    };
+    mutable std::map<doc::CelId, ModelShot> m_models;
     doc::CelId m_undeformed = doc::kNoId;
     const tools::ToolState *m_brushes = nullptr;
     struct Bent

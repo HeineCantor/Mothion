@@ -9,6 +9,7 @@
 #include "canvas/TrajectoryGizmo.h"
 #include "canvas/BoneGizmo.h"
 #include "canvas/CurveGizmo.h"
+#include "canvas/ModelGizmo.h"
 #include "canvas/PerspectiveGizmo.h"
 #include "canvas/PerspectiveSnap.h"
 #include "canvas/StrokeSession.h"
@@ -82,6 +83,7 @@ public:
     const TrajectoryGizmo &trajectoryGizmo() const { return m_trajectoryGizmo; }
     const BoneGizmo &boneGizmo() const { return m_boneGizmo; }
     const CurveGizmo &curveGizmo() const { return m_curveGizmo; }
+    ModelGizmo &modelGizmo() { return m_modelGizmo; }
     // Shift held with a paint tool: the straight line from the last point waits for the pen (see updateStraightLine()).
     bool straightLineArmed() const { return m_lineArmed; }
     const SymmetryGizmo &symmetryGizmo() const { return m_symmetryGizmo; }
@@ -149,6 +151,8 @@ signals:
     void shapeChanged();
     // The puppet warp opened, changed or closed (see puppetBounds()).
     void puppetChanged();
+    // A joint of a 3D model cel was double clicked: its settings are asked for.
+    void modelJointEditRequested(mothion::doc::CelId cel, int node);
 
 protected:
     void paintEvent(QPaintEvent *event) override;
@@ -288,6 +292,7 @@ private:
     TrajectoryGizmo m_trajectoryGizmo;
     BoneGizmo m_boneGizmo;
     CurveGizmo m_curveGizmo;
+    ModelGizmo m_modelGizmo;
     SymmetryGizmo m_symmetryGizmo;
     void updateGizmoCursor(); // over a handle: the hand
     std::optional<brush::DabGenerator> m_dabs;

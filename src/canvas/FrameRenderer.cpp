@@ -2,6 +2,7 @@
 
 #include "canvas/BlendDraw.h"
 #include "canvas/TileQt.h"
+#include "canvas/ModelRenderer.h"
 #include "core/deform/Field.h"
 #include "core/deform/DeformRaster.h"
 #include "canvas/VectorRender.h"
@@ -551,6 +552,41 @@ const doc::Drawing *FrameRenderer::drawingOf(const doc::Cel &cel, int frame) con
     return cel.drawingAt(frame);
 }
 
+const FrameRenderer::Deformed *FrameRenderer::modelImage(const doc::Document &doc, const doc::Cel &cel, int frame) const
+{
+    if (!cel.properties().model3d || cel.model().isEmpty())
+        return nullptr;
+    const std::vector<double> pose = doc.deformPoseAt(cel, frame);
+    const QSize size(doc.width(), doc.height());
+    ModelShot &shot = m_models[cel.id()];
+    if (shot.rig == cel.model() && shot.pose == pose && shot.size == size)
+        return shot.empty ? nullptr : &shot.result;
+    shot.rig = cel.model();
+    shot.pose = pose;
+    shot.size = size;
+    const QImage page = renderModel(cel.model(), pose, size);
+    // Only what it covers: the rows and columns with something drawn.
+    int left = page.width(), right = -1, top = page.height(), bottom = -1;
+    for (int y = 0; y < page.height(); ++y) {
+        const auto *row = reinterpret_cast<const QRgb *>(page.constScanLine(y));
+        for (int x = 0; x < page.width(); ++x)
+            if (qAlpha(row[x]) != 0) {
+                left = std::min(left, x);
+                right = std::max(right, x);
+                top = std::min(top, y);
+                bottom = std::max(bottom, y);
+            }
+    }
+    shot.empty = right < 0;
+    if (shot.empty) {
+        shot.result = {};
+        return nullptr;
+    }
+    const QRect covered(QPoint(left, top), QPoint(right, bottom));
+    shot.result = {page.copy(covered), covered};
+    return &shot.result;
+}
+
 QRect FrameRenderer::contentBounds(const doc::Document &doc, int frame) const
 {
     QRect bounds;
@@ -559,9 +595,11 @@ QRect FrameRenderer::contentBounds(const doc::Document &doc, int frame) const
         if ((m_only != doc::kNoId && cel.id() != m_only) || cel.properties().drawsNothing() || !cel.properties().visible)
             continue;
         const doc::Drawing *drawing = drawingOf(cel, frame);
-        if (!drawing)
+        if (!drawing && !cel.properties().model3d)
             continue;
-        const Deformed *bent = deformed(doc, cel, *drawing, frame);
+        const Deformed *bent = cel.properties().model3d ? modelImage(doc, cel, frame) : deformed(doc, cel, *drawing, frame);
+        if (!bent && !drawing)
+            continue;
         const QRect own = bent ? bent->rect : drawingBounds(*drawing, m_guides);
         if (own.isEmpty())
             continue;
@@ -602,18 +640,22 @@ void FrameRenderer::compose(QImage &target, const QPoint &origin, const doc::Doc
         // On top of its own pose, what the trajectory it follows does (shown as drawn, it is not moved by it either).
         const doc::Matrix2x3 follow = cel.id() != m_asDrawn ? doc.followMatrix(cel, frame) : doc::Matrix2x3{};
         const float opacity = props.opacity * float(pose.opacity);
-        if (!props.visible || opacity <= 0.0f || !drawing)
+        // A 3D model cel has no drawing: its model drawn on the page is what it shows.
+        if (!props.visible || opacity <= 0.0f || (!drawing && !props.model3d))
             continue;
         const doc::Layer *only = nullptr; // the one layer shown, if there is just one
         int shown = 0;
-        for (const doc::Layer &layer : drawing->layers)
-            if (shows(layer, m_guides)) {
-                only = &layer;
-                ++shown;
-            }
-        if (shown == 0)
+        if (drawing)
+            for (const doc::Layer &layer : drawing->layers)
+                if (shows(layer, m_guides)) {
+                    only = &layer;
+                    ++shown;
+                }
+        if (shown == 0 && !props.model3d)
             continue;
-        const Deformed *bent = deformed(doc, cel, *drawing, frame);
+        const Deformed *bent = props.model3d ? modelImage(doc, cel, frame) : deformed(doc, cel, *drawing, frame);
+        if (props.model3d && !bent)
+            continue;
         if (bent || (animated && !pose.movesNothing()) || !follow.isIdentity()) {
             // Moved as one piece: what its layers show together (bent by its deformation cel), read through the pose into
             // this area.

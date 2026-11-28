@@ -3,6 +3,7 @@
 #include "core/document/CelMotion.h"
 #include "core/document/Command.h"
 #include "core/document/Deformer.h"
+#include "core/document/ModelCel.h"
 
 namespace mothion::doc {
 
@@ -43,6 +44,24 @@ private:
     CelId m_cel;
     Deformer m_after;
     Deformer m_before;
+};
+
+// Sets a 3D model cel's model and the settings of its bones (see Cel::model()).
+class SetModelRigCommand : public Command
+{
+public:
+    SetModelRigCommand(CelId cel, ModelRig after);
+
+    CommandKind kind() const override { return CommandKind::EditModel; }
+    ChangeSet apply(Document &doc) override;
+    ChangeSet revert(Document &doc) override;
+    void addChangedCels(std::set<CelId> &cels) const override { cels.insert(m_cel); }
+    std::size_t memoryBytes() const override;
+
+private:
+    CelId m_cel;
+    ModelRig m_after;
+    ModelRig m_before;
 };
 
 } // namespace mothion::doc

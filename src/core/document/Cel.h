@@ -4,6 +4,7 @@
 #include "core/document/CelMotion.h"
 #include "core/document/Deformer.h"
 #include "core/document/Drawing.h"
+#include "core/document/ModelCel.h"
 #include "core/document/Timing.h"
 
 #include <map>
@@ -36,6 +37,10 @@ struct CelProperties
     // A mouth chart, for the lip sync (see LipSync.h): a drawing for each mouth shape, named after it, shown frame by
     // frame as the sound says. The Timeline's mouth bar and the Mouth chart panel are for these cels only.
     bool mouthChart = false;
+    // A 3D model cel: no drawings; it shows its model (see Cel::model()) as its Deform keys pose it (see rig3d::Pose),
+    // drawn on the page through the pose's camera, then moved, turned, scaled and faded by its other keys as any cel.
+    // Fixed when it is made.
+    bool model3d = false;
 
     // A trajectory or a deformation cel: a cel with no drawings, never drawn.
     bool drawsNothing() const { return trajectory || deformer != DeformerKind::None; }
@@ -43,9 +48,12 @@ struct CelProperties
     bool operator==(const CelProperties &) const = default;
 };
 
-// Whether a cel has keys of `channel`: a deformation cel only of Deform (its pose), any other of all but Deform.
+// Whether a cel has keys of `channel`: a deformation cel only of Deform (its pose), a 3D model cel of all (Deform: its
+// model's pose), any other of all but Deform.
 inline bool hasChannel(const CelProperties &properties, Channel channel)
 {
+    if (properties.model3d)
+        return true;
     return (properties.deformer != DeformerKind::None) == (channel == Channel::Deform);
 }
 
@@ -80,6 +88,9 @@ public:
     // A deformation cel's bones and their rest (see CelProperties::deformer); empty for any other.
     const Deformer &deformer() const { return m_deformer; }
     void setDeformer(Deformer deformer) { m_deformer = std::move(deformer); }
+    // A 3D model cel's model and the settings of its bones (see CelProperties::model3d); empty for any other.
+    const ModelRig &model() const { return m_model; }
+    void setModel(ModelRig model) { m_model = std::move(model); }
     // The Blender scene the cel was rendered from, if it was (see BlenderLink).
     const std::optional<BlenderLink> &blenderLink() const { return m_blenderLink; }
     void setBlenderLink(std::optional<BlenderLink> link) { m_blenderLink = std::move(link); }
@@ -94,6 +105,7 @@ private:
     Timing m_timing;
     CelMotion m_motion;
     Deformer m_deformer;
+    ModelRig m_model;
     std::optional<BlenderLink> m_blenderLink;
 };
 

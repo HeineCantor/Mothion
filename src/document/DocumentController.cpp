@@ -28,6 +28,7 @@
 #include <limits>
 #include <map>
 #include <QFile>
+#include <QDir>
 #include <QFileInfo>
 
 #include <algorithm>
@@ -600,6 +601,55 @@ void DocumentController::addDeformer(doc::DeformerKind kind)
     chooseCel(id);
 }
 
+bool DocumentController::addModelCel(const QString &path, QString *error)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        if (error)
+            *error = tr("Cannot read %1: %2").arg(QDir::toNativeSeparators(path), file.errorString());
+        return false;
+    }
+    const QByteArray bytes = file.readAll();
+    std::string why;
+    const QFileInfo info(path);
+    auto source = doc::makeModelSource(info.fileName().toStdString(), std::vector<std::uint8_t>(bytes.begin(), bytes.end()), &why);
+    if (!source) {
+        if (error)
+            *error = tr("%1 is no model Mothion can read: %2").arg(info.fileName(), QString::fromStdString(why));
+        return false;
+    }
+    doc::Document &d = *m_document;
+    doc::CelProperties properties{info.completeBaseName().toStdString()};
+    properties.model3d = true;
+    auto cel = std::make_unique<doc::Cel>(d.allocateCelId(), std::move(properties));
+    doc::ModelRig rig;
+    rig.source = std::move(source);
+    rig.joints.resize(rig.model()->nodes.size());
+    doc::Deformer rest; // its rest pose, where a first key starts from
+    rest.rest = doc::modelRestPose(rig);
+    cel->setDeformer(std::move(rest));
+    cel->setModel(std::move(rig));
+    const doc::CelId id = cel->id();
+    if (!execute(std::make_unique<doc::AddCelCommand>(std::move(cel), d.indexOf(m_currentCel) + 1)))
+        return false;
+    chooseCel(id);
+    return true;
+}
+
+bool DocumentController::setModelJoint(doc::CelId celId, int node, const rig3d::JointSettings &settings)
+{
+    const doc::Cel *cel = m_document->cel(celId);
+    if (!cel || !cel->properties().model3d || cel->model().isEmpty() || node < 0
+        || node >= int(cel->model().model()->nodes.size()))
+        return false;
+    doc::ModelRig rig = cel->model();
+    rig.joints.resize(rig.model()->nodes.size());
+    if (rig.joints[std::size_t(node)] == settings)
+        return false;
+    rig.joints[std::size_t(node)] = settings;
+    return execute(std::make_unique<doc::SetModelRigCommand>(celId, std::move(rig)));
+}
+
 namespace {
 // A deformation cel's motion with the numbers of every Deform key changed by `change`.
 doc::CelMotion withDeformKeys(const doc::CelMotion &motion, const std::function<void(std::vector<double> &)> &change)
@@ -836,7 +886,7 @@ bool DocumentController::setDeformerRest(doc::CelId celId, doc::Deformer deforme
 bool DocumentController::setDeformKey(doc::CelId celId, int frame, std::vector<double> pose)
 {
     const doc::Cel *cel = m_document->cel(celId);
-    if (!cel || cel->properties().deformer == doc::DeformerKind::None)
+    if (!cel || (cel->properties().deformer == doc::DeformerKind::None && !cel->properties().model3d))
         return false;
     doc::CelMotion motion = cel->motion();
     doc::CelPose p;
@@ -1647,7 +1697,7 @@ bool DocumentController::celKeyMotion(const doc::Cel &cel, int frame, const doc:
     if (first)
         startMotion(motion, cel, frame);
     doc::CelPose pose = given;
-    if (pose.deform.empty() && cel.properties().deformer != doc::DeformerKind::None)
+    if (pose.deform.empty() && (cel.properties().deformer != doc::DeformerKind::None || cel.properties().model3d))
         pose.deform = m_document->deformPoseAt(cel, frame); // a deformer with no keys yet: its rest
     doc::CelPose now = motion.interpolatedAt(frame);
     if (now.deform.empty())
@@ -1875,12 +1925,17 @@ void DocumentController::finishCelPoses(const std::vector<std::pair<doc::CelId, 
 void DocumentController::beginFirstKey(doc::CelId id, int frame)
 {
     doc::Cel *cel = m_document->cel(id);
-    if (!cel || frame < 0 || !cel->motion().isEmpty())
+    if (!cel || frame < 0)
+        return;
+    // A 3D model cel: the first key of its pose, at rest (its other channels may have keys already).
+    const bool model = cel->properties().model3d;
+    if (model ? cel->motion().hasKeys(doc::Channel::Deform) : !cel->motion().isEmpty())
         return;
     clearTemporaryPose();
     doc::CelMotion motion = cel->motion();
-    startMotion(motion, *cel, frame);
-    if (cel->properties().deformer != doc::DeformerKind::None) { // a deformer: its pose, at rest
+    if (motion.isEmpty())
+        startMotion(motion, *cel, frame);
+    if (cel->properties().deformer != doc::DeformerKind::None || model) { // a deformer, or a model: its pose, at rest
         doc::CelPose rest;
         rest.deform = cel->deformer().rest;
         motion.setKey(doc::Channel::Deform, frame, rest);
@@ -3682,6 +3737,7 @@ QString DocumentController::commandName(doc::CommandKind kind)
     case doc::CommandKind::Flip: return tr("flip");
     case doc::CommandKind::EditMotion: return tr("keyframes");
     case doc::CommandKind::EditDeformer: return tr("bones");
+    case doc::CommandKind::EditModel: return tr("3D model joints");
     case doc::CommandKind::EditBlenderLink: return tr("Blender link");
     case doc::CommandKind::AdjustColor: return tr("hue/saturation/value");
     case doc::CommandKind::RenameDrawing: return tr("rename frame");
@@ -3849,6 +3905,9 @@ std::optional<DocumentController::PaintTarget> DocumentController::beginPaint(bo
         return fail(tr("“%1” is a trajectory: nothing is drawn on it").arg(QString::fromStdString(cel->properties().name)));
     if (cel->properties().deformer != doc::DeformerKind::None)
         return fail(tr("“%1” is a deformer: nothing is drawn on it, it bends the cels that follow it")
+                        .arg(QString::fromStdString(cel->properties().name)));
+    if (cel->properties().model3d)
+        return fail(tr("“%1” is a 3D model: nothing is drawn on it, it is posed by its bones")
                         .arg(QString::fromStdString(cel->properties().name)));
     if (!cel->properties().visible)
         return fail(tr("Cel “%1” is hidden").arg(QString::fromStdString(cel->properties().name)));

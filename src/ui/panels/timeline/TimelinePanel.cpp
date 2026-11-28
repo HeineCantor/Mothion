@@ -23,6 +23,7 @@
 #include "ui/panels/timeline/TimelineView.h"
 
 #include <QColorDialog>
+#include <QFileDialog>
 #include <QComboBox>
 #include <QFormLayout>
 #include <QHBoxLayout>
@@ -462,6 +463,11 @@ QLayout *TimelinePanel::celBar()
         addBones->setMenu(kinds);
         addBones->setPopupMode(QToolButton::MenuButtonPopup);
     }
+    auto *addModel = celButton(IconId::NewModel3D, QStringLiteral("model3dAdd"),
+                               tr("New 3D model cel above the current one, from a glTF file (.glb or .gltf): drag its "
+                                  "joints to pose it, Shift+drag for IK, Ctrl+drag to twist a bone, drag on nothing to "
+                                  "turn round it"),
+                               this);
     auto *remove = celButton(IconId::Delete, QStringLiteral("celRemove"), tr("Delete the current cel"), this);
     auto *up = celButton(IconId::ArrowUp, QStringLiteral("celUp"), tr("Move the current cel up"), this);
     auto *down = celButton(IconId::ArrowDown, QStringLiteral("celDown"), tr("Move the current cel down"), this);
@@ -484,7 +490,7 @@ QLayout *TimelinePanel::celBar()
     auto *row = new QHBoxLayout;
     row->setContentsMargins(4, 0, 4, 2);
     row->setSpacing(4);
-    for (QWidget *w : std::initializer_list<QWidget *>{add, addTrajectory, addBones, remove, up, down})
+    for (QWidget *w : std::initializer_list<QWidget *>{add, addTrajectory, addBones, addModel, remove, up, down})
         row->addWidget(w);
     row->addSpacing(4);
     row->addWidget(rowFilter());
@@ -519,6 +525,15 @@ QLayout *TimelinePanel::celBar()
     connect(addBones, &QToolButton::clicked, this, [this] {
         m_document->addDeformer(doc::DeformerKind::Bones);
         m_toolState->setRigMode(true); // its bones are to be drawn first
+    });
+    connect(addModel, &QToolButton::clicked, this, [this] {
+        const QString path = QFileDialog::getOpenFileName(this, tr("New 3D model cel"), QString(),
+                                                          tr("glTF models (*.glb *.gltf)"));
+        if (path.isEmpty())
+            return;
+        QString error;
+        if (!m_document->addModelCel(path, &error))
+            QMessageBox::warning(this, tr("New 3D model cel"), error);
     });
     connect(remove, &QToolButton::clicked, this, [this] {
         if (m_document->document().celCount() > 1) // keep at least one

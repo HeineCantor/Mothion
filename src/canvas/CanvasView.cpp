@@ -104,6 +104,7 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
     , m_trajectoryGizmo(document)
     , m_boneGizmo(document)
     , m_curveGizmo(document)
+    , m_modelGizmo(document)
     , m_symmetryGizmo(document, toolState)
     , m_overlay(new DebugOverlay(this))
 {
@@ -297,11 +298,23 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
     m_boneGizmo.setRepaint([this] { update(); });
     m_curveGizmo.setRigMode(m_toolState->rigMode());
     m_curveGizmo.setRepaint([this] { update(); });
+    // A 3D model cel: its joints posed by dragging (a drag on nothing turns its camera, but with the tools that move cels).
+    m_modelGizmo.setRigMode(m_toolState->rigMode());
+    m_modelGizmo.setRepaint([this] { update(); });
+    m_modelGizmo.setEditJoint([this](doc::CelId cel, int node) { emit modelJointEditRequested(cel, node); });
+    auto orbitOnEmpty = [this] {
+        const ToolId tool = m_toolState->activeTool();
+        m_modelGizmo.setOrbitOnEmpty(tool != ToolId::Transform && tool != ToolId::Move);
+    };
+    orbitOnEmpty();
+    connect(m_toolState, &ToolState::activeToolChanged, this, orbitOnEmpty);
     connect(m_toolState, &ToolState::rigModeChanged, this, [this](bool on) {
         m_boneGizmo.cancel();
         m_boneGizmo.setRigMode(on);
         m_curveGizmo.cancel();
         m_curveGizmo.setRigMode(on);
+        m_modelGizmo.cancel();
+        m_modelGizmo.setRigMode(on);
         update();
     });
     connect(m_toolState, &ToolState::trajectoryModeChanged, this, [this](bool on) {
@@ -661,6 +674,7 @@ void CanvasView::paintEvent(QPaintEvent *)
     m_trajectoryGizmo.paint(p, m_view);
     m_boneGizmo.paint(p, m_view);
     m_curveGizmo.paint(p, m_view);
+    m_modelGizmo.paint(p, m_view);
     m_symmetryGizmo.paint(p, m_view);
     paintSnapGuide(p);
     paintStraightLinePreview(p);
@@ -1035,7 +1049,7 @@ void CanvasView::handleSample(const PenSample &sample)
 
     const bool busy = m_gesture.isActive() || m_stroke.has_value() || m_editTool || m_gizmo.isDragging()
                       || m_cameraGizmo.isDragging() || m_trajectoryGizmo.isDragging() || m_symmetryGizmo.isDragging()
-                      || m_boneGizmo.isDragging() || m_curveGizmo.isDragging()
+                      || m_boneGizmo.isDragging() || m_curveGizmo.isDragging() || m_modelGizmo.isDragging()
                       || m_flip.has_value();
     const QPointF docPos = m_view.mapToDocument(QPointF(sample.x, sample.y));
     const QPointF celPos = toCel(docPos);
@@ -1062,6 +1076,8 @@ void CanvasView::handleSample(const PenSample &sample)
             update(); // the bones of a deformer: made and placed in rig mode, else turned, whatever the tool
         } else if (sample.tipDown() && m_curveGizmo.press(docPos, m_view, modifiers)) {
             update(); // the nodes of a curve or an envelope: the same
+        } else if (sample.tipDown() && m_modelGizmo.press(docPos, m_view, modifiers)) {
+            update(); // the joints of a 3D model: posed, whatever the tool (a drag on nothing turns its camera)
         } else if (sample.tipDown() && m_gizmo.press(docPos, m_view)) {
             update(); // a handle of the perspective layer, whatever the tool
         } else if (sample.tipDown() && m_trajectoryGizmo.pathShown()
@@ -1133,6 +1149,9 @@ void CanvasView::handleSample(const PenSample &sample)
         } else if (m_curveGizmo.isDragging()) {
             m_curveGizmo.move(docPos, modifiers);
             update();
+        } else if (m_modelGizmo.isDragging()) {
+            m_modelGizmo.move(docPos, modifiers);
+            update();
         } else if (m_gizmo.isDragging()) {
             m_gizmo.move(docPos, m_view);
             update();
@@ -1181,6 +1200,10 @@ void CanvasView::handleSample(const PenSample &sample)
             m_curveGizmo.release(docPos);
             update();
         }
+        if (m_modelGizmo.isDragging()) {
+            m_modelGizmo.release(docPos);
+            update();
+        }
         if (m_gizmo.isDragging()) {
             const bool menu = m_gizmo.release(docPos);
             update();
@@ -1216,6 +1239,8 @@ void CanvasView::handleSample(const PenSample &sample)
         if (!busy && m_boneGizmo.hover(docPos, m_view))
             update();
         if (!busy && m_curveGizmo.hover(docPos, m_view))
+            update();
+        if (!busy && m_modelGizmo.hover(docPos, m_view))
             update();
         if (!busy && m_gizmo.hover(docPos, m_view)) {
             updateGizmoCursor();
@@ -1708,6 +1733,7 @@ void CanvasView::cancelStroke()
     m_trajectoryGizmo.cancel();
     m_boneGizmo.cancel();
     m_curveGizmo.cancel();
+    m_modelGizmo.cancel();
     m_symmetryGizmo.cancel();
     if (m_editTool) {
         // A drag cut short is dropped, unless it belongs to a longer edit.

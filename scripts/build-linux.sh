@@ -81,7 +81,7 @@ elif command -v pacman >/dev/null; then
     install() { sudo pacman -S --needed --noconfirm "$@"; }
     optional=(ffmpeg)
 elif command -v zypper >/dev/null; then
-    packages=(gcc-c++ cmake ninja qt6-base-devel qt6-sql-sqlite qt6-multimedia-devel qt6-wayland eigen3-devel)
+    packages=(gcc-c++ cmake ninja qt6-base-devel qt6-opengl-devel qt6-sql-sqlite qt6-multimedia-devel qt6-wayland eigen3-devel)
     is_installed() { rpm -q "$1" >/dev/null 2>&1; }
     install() { sudo zypper --non-interactive install "$@"; }
     # openSUSE's ffmpeg has no H.264 encoder either: Packman's has.

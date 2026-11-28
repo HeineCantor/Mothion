@@ -85,6 +85,7 @@ enum class CommandKind {
     Flip,
     EditMotion,
     EditDeformer,
+    EditModel,
     EditBlenderLink,
     AdjustColor,
     RenameDrawing,

@@ -79,4 +79,37 @@ std::size_t SetDeformerCommand::memoryBytes() const
            + (m_after.rest.size() + m_before.rest.size()) * sizeof(double);
 }
 
+SetModelRigCommand::SetModelRigCommand(CelId cel, ModelRig after)
+    : m_cel(cel)
+    , m_after(std::move(after))
+{
+}
+
+ChangeSet SetModelRigCommand::apply(Document &doc)
+{
+    ChangeSet changes;
+    if (Cel *cel = doc.cel(m_cel)) {
+        m_before = cel->model();
+        cel->setModel(m_after);
+        changes.motion = true; // drawn again, as for a key
+    }
+    return changes;
+}
+
+ChangeSet SetModelRigCommand::revert(Document &doc)
+{
+    ChangeSet changes;
+    if (Cel *cel = doc.cel(m_cel)) {
+        cel->setModel(m_before);
+        changes.motion = true;
+    }
+    return changes;
+}
+
+std::size_t SetModelRigCommand::memoryBytes() const
+{
+    // The model itself is shared with the cel: only the settings are this step's own.
+    return sizeof(SetModelRigCommand) + (m_after.joints.size() + m_before.joints.size()) * sizeof(rig3d::JointSettings);
+}
+
 } // namespace mothion::doc
