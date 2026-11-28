@@ -117,6 +117,25 @@ SetCelPropertiesCommand::SetCelPropertiesCommand(CelId cel, CelProperties before
 {
 }
 
+ChangeSet SetTimeLayersCommand::put(Document &doc, const std::vector<TimeLayer> &layers)
+{
+    if (Cel *cel = doc.cel(m_id))
+        cel->setTimeLayers(layers);
+    ChangeSet changes = structural();
+    changes.motion = true;
+    return changes;
+}
+
+ChangeSet SetTimeLayersCommand::apply(Document &doc)
+{
+    return put(doc, m_after);
+}
+
+ChangeSet SetTimeLayersCommand::revert(Document &doc)
+{
+    return put(doc, m_before);
+}
+
 ChangeSet SetCelPropertiesCommand::put(Document &doc, const CelProperties &properties)
 {
     if (Cel *cel = doc.cel(m_id))

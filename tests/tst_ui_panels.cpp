@@ -1056,8 +1056,8 @@ private slots:
         QCoreApplication::processEvents();
         controller.chooseCel(controller.currentCel()); // the cel's row, as chosen in the timeline
         QCoreApplication::processEvents();
-        for (auto *button : panel.findChildren<QToolButton *>())
-            QVERIFY2(!button->menu(), qPrintable(button->toolTip())); // no menu offers a kind of cel
+        for (auto *button : panel.findChildren<QToolButton *>()) // no menu offers a kind of cel (a time layer's: of layer)
+            QVERIFY2(!button->menu() || button->objectName() == QStringLiteral("addTimeLayer"), qPrintable(button->toolTip()));
         QVERIFY(panel.findChild<QToolButton *>(QStringLiteral("addLayer")));
         QVERIFY(panel.findChild<QToolButton *>(QStringLiteral("addPerspective")));
         const int cels = controller.document().celCount();

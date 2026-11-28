@@ -22,6 +22,8 @@
 #include <QtEndian>
 
 #include <algorithm>
+#include <set>
+#include <tuple>
 #include <array>
 #include <cmath>
 #include <filesystem>
@@ -91,6 +93,13 @@ const char *const kSchema[] = {
     "create table deformer_cels (cel integer primary key references cels(id), kind text not null, data text not null)",
     // ... and the cels carried by one of their parts (a bone or a node), not bent.
     "create table deformer_parts (cel integer primary key references cels(id), part integer not null)",
+    // Format 21: the time layers of the cels (one layer in every drawing of its cel): which there are, in order, and what
+    // each follows of its own. Its pixels are with the first drawing that has it, in `layers`...
+    "create table time_layers (layer integer primary key references layers(id), cel integer not null references cels(id),"
+    " position integer not null, parent integer, part integer not null)",
+    // ... and where it is in each other drawing of the cel.
+    "create table time_layer_places (layer integer not null references time_layers(layer),"
+    " drawing integer not null references drawings(id), position integer not null, primary key (layer, drawing))",
 };
 
 // Stored by name, so reordering the enum cannot change old files.
@@ -730,7 +739,9 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
         return false;
     }
 
-    QSqlQuery cel(db), drawing(db), layer(db), exposure(db), tile(db), mask(db), maskTile(db), clipped(db), trajectory(db), trajectoryParent(db), vectorStrokes(db), mouthChart(db), deformer(db), deformerPart(db);
+    QSqlQuery cel(db), drawing(db), layer(db), exposure(db), tile(db), mask(db), maskTile(db), clipped(db), trajectory(db), trajectoryParent(db), vectorStrokes(db), mouthChart(db), deformer(db), deformerPart(db), timeLayer(db), timePlace(db);
+    timeLayer.prepare(QStringLiteral("insert into time_layers values (?, ?, ?, ?, ?)"));
+    timePlace.prepare(QStringLiteral("insert into time_layer_places values (?, ?, ?)"));
     cel.prepare(QStringLiteral("insert into cels values (?, ?, ?, ?, ?, ?, ?)"));
     drawing.prepare(QStringLiteral("insert into drawings values (?, ?, ?)"));
     layer.prepare(QStringLiteral("insert into layers values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
@@ -771,11 +782,24 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
             return false;
         if (p.parent != doc::kNoId && p.parentPart >= 0 && !exec(deformerPart, {idValue(l.id()), p.parentPart}))
             return false;
+        std::set<doc::LayerId> timeWritten; // a time layer's pixels go once, with the first drawing that has it
         for (const auto &[id, dr] : l.drawings()) {
             if (!exec(drawing, {idValue(id), idValue(l.id()), QString::fromStdString(dr.name)}))
                 return false;
             for (std::size_t position = 0; position < dr.layers.size(); ++position) {
                 const doc::Layer &ly = dr.layers[position];
+                if (const doc::TimeLayer *t = ly.time ? l.timeLayer(ly.id) : nullptr) {
+                    if (timeWritten.count(ly.id)) {
+                        if (!exec(timePlace, {idValue(ly.id), idValue(id), int(position)}))
+                            return false;
+                        continue;
+                    }
+                    timeWritten.insert(ly.id);
+                    const int order = int(t - l.timeLayers().data());
+                    if (!exec(timeLayer, {idValue(ly.id), idValue(l.id()), order,
+                                          t->parent == doc::kNoId ? QVariant() : idValue(t->parent), t->parentPart}))
+                        return false;
+                }
                 const doc::LayerProperties &lp = ly.properties;
                 const bool perspective = ly.kind == doc::LayerKind::Perspective;
                 if (!exec(layer, {idValue(ly.id), idValue(id), int(position), QString::fromStdString(lp.name),
@@ -1247,6 +1271,35 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
     {
         d->setCompositing(graphFromJson(q.value(0).toString()));
         d->setCompositingView(viewFromJson(q.value(0).toString()));
+    }
+
+    if (version >= 21 && q.exec(QStringLiteral("select layer, cel, parent, part from time_layers order by cel, position"))) {
+        while (q.next()) {
+            doc::Cel *cel = d->cel(idFrom(q.value(1)));
+            const doc::LayerId id = idFrom(q.value(0));
+            const auto it = layers.find(id);
+            if (!cel || it == layers.end())
+                continue;
+            it->second->time = true;
+            std::vector<doc::TimeLayer> times = cel->timeLayers();
+            times.push_back({id, q.value(2).isNull() ? doc::kNoId : idFrom(q.value(2)), std::max(-1, q.value(3).toInt())});
+            cel->setTimeLayers(std::move(times));
+        }
+        // Its copies in the other drawings, each where it was (low places first, so that each lands where it was).
+        std::vector<std::tuple<doc::LayerId, doc::DrawingId, int>> places;
+        if (q.exec(QStringLiteral("select layer, drawing, position from time_layer_places order by drawing, position")))
+            while (q.next())
+                places.emplace_back(idFrom(q.value(0)), idFrom(q.value(1)), q.value(2).toInt());
+        for (const auto &[id, drawingId, position] : places) {
+            const auto layer = layers.find(id);
+            const auto drawing = drawings.find(drawingId);
+            if (layer == layers.end() || drawing == drawings.end() || drawing->second->layer(id))
+                continue;
+            doc::Layer copy = *layer->second;
+            std::vector<doc::Layer> &stack = drawing->second->layers;
+            stack.insert(stack.begin() + std::clamp(position, 0, int(stack.size())), std::move(copy));
+            // (`layers` points into the drawings' vectors: those of the drawings grown are not used again here.)
+        }
     }
 
     d->restoreIdCounters(nextCel, nextDrawing, nextLayer);

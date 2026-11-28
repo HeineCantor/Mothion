@@ -146,6 +146,18 @@ public:
     bool mergeDown(const std::vector<doc::LayerId> &layers, QString *reason = nullptr);
     bool canMergeDown(const std::vector<doc::LayerId> &layers) const;
     bool addLayer(bool onTop = false, doc::LayerKind kind = doc::LayerKind::Raster);
+    // A time layer of `kind` (raster or vector) in the current cel, above the current layer of the current frame (on top
+    // without one), then in every frame of the cel, the same in all of them (see doc::Layer::time). One undo step; kNoId
+    // if the cel draws nothing or has no frame here.
+    doc::LayerId addTimeLayer(doc::LayerKind kind = doc::LayerKind::Raster);
+    // The time layer taken out of every frame of its cel (the only way it goes). One undo step.
+    bool removeTimeLayer(doc::CelId cel, doc::LayerId layer);
+    // What a time layer follows of its own (see doc::TimeLayer), before what its cel does: a trajectory, or a deformation
+    // cel (bent by it, `part` -1, or carried by that part); kNoId: nothing. One undo step; false if it cannot be (no such
+    // part, not a trajectory or deformer) or nothing changes.
+    bool setTimeLayerParent(doc::CelId cel, doc::LayerId layer, doc::CelId parent, int part = -1);
+    // Whether the layer is a time layer of the cel.
+    bool isTimeLayer(doc::CelId cel, doc::LayerId layer) const;
     // Puts a new frame (a drawing with one empty layer, named like the layer
     // worked on) at `frame` of `cel`, the frames from there on moving one
     // place to the right, and makes it current. "New frame" puts it at the
@@ -651,6 +663,11 @@ public slots:
     // The cel as a whole is chosen (its name in the timeline, as its row in the Layers panel): it is current, no layer is, and
     // the layers of all its frames are the ones the tools act on together (a transform moves every frame of it).
     void chooseCel(doc::CelId cel);
+    // A time layer of a cel is chosen by itself (its row in the timeline): the cel current, the layer current and the only
+    // one the tools act on (its copy in the frame shown, which the others follow), not the rest of the cel.
+    void chooseTimeLayer(doc::CelId cel, doc::LayerId layer);
+    // The layer chosen is a time layer of the current cel (see chooseTimeLayer()).
+    bool timeLayerChosen() const { return m_layerChosen && isTimeLayer(m_currentCel, m_currentLayer); }
     // The cels chosen together (Ctrl and Shift in the timeline and the Layers panel), bottom up: always the current cel, and
     // the others that were chosen with it and are still there. Only the current cel is acted on by the tools.
     std::vector<doc::CelId> celSelection() const;
@@ -712,6 +729,8 @@ signals:
     void frameSelectionCleared();
     // chooseCel() was called: the Layers panel shows the cel's row as chosen.
     void celChosen(doc::CelId cel);
+    // A time layer was chosen by itself elsewhere (see chooseTimeLayer()).
+    void timeLayerPicked(doc::CelId cel, doc::LayerId layer);
     // The cels chosen together (celSelection()) changed.
     void celSelectionChanged();
     // Which layer's mask is being edited changed (see setMaskEditing()), or a mask was made or taken away.

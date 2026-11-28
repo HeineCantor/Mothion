@@ -3,6 +3,7 @@
 #include "core/document/Audio.h"
 #include "core/document/Camera.h"
 #include "core/document/Cel.h"
+#include "core/document/Command.h"
 #include "core/document/Compositing.h"
 
 #include <limits>
@@ -117,6 +118,15 @@ public:
     Matrix2x3 trajectoryMatrix(CelId trajectory, int frame) const;
     // Only what its parents do: where the trajectory's own pose is applied.
     Matrix2x3 trajectoryParentMatrix(CelId trajectory, int frame) const;
+
+    // A time layer seen as a cel of its own, for what follows a parent (followMatrix(), followedDeformer(), partMatrix()):
+    // `cel`'s id and properties, with the time layer's parent and part.
+    static Cel timeLayerAsCel(const Cel &cel, const TimeLayer &layer);
+    // The time layers put right in every cel (see Layer::time): the one copy changed since (by a command, an undo...)
+    // copied to the others; a drawing without one given one (where it is in another drawing, or on top); one whose time
+    // layer the cel no longer has loses it. What it changed: pixels of the copies changed, structure if a layer came, went
+    // or changed otherwise.
+    ChangeSet syncTimeLayers();
 
     // Cels are heap objects, so Cel references stay valid across reordering.
     Cel &insertCel(int index, std::unique_ptr<Cel> cel);

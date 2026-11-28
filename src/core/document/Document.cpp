@@ -168,6 +168,113 @@ Matrix2x3 Document::followMatrix(const Cel &cel, int frame) const
     return part.then(trajectoryMatrix(trajectory->id(), start).inverted().then(trajectoryMatrix(trajectory->id(), frame)));
 }
 
+Cel Document::timeLayerAsCel(const Cel &cel, const TimeLayer &layer)
+{
+    CelProperties properties = cel.properties();
+    properties.parent = layer.parent;
+    properties.parentPart = layer.parentPart;
+    return Cel(cel.id(), properties);
+}
+
+namespace {
+
+bool sameTiles(const TiledImage &a, const TiledImage &b)
+{
+    if (a.tileCount() != b.tileCount())
+        return false;
+    for (const TileCoord &c : a.tileCoords())
+        if (a.tile(c) != b.tile(c))
+            return false;
+    return true;
+}
+
+// The same content (not where it is in the stack).
+bool sameLayer(const Layer &a, const Layer &b)
+{
+    return a.properties == b.properties && a.kind == b.kind && sameTiles(a.image, b.image)
+           && a.mask.has_value() == b.mask.has_value() && (!a.mask || sameTiles(*a.mask, *b.mask)) && a.strokes == b.strokes;
+}
+
+std::vector<TileCoord> unitedTiles(const TiledImage &a, const TiledImage &b)
+{
+    std::vector<TileCoord> out = a.tileCoords();
+    for (const TileCoord &c : b.tileCoords())
+        if (std::find(out.begin(), out.end(), c) == out.end())
+            out.push_back(c);
+    return out;
+}
+
+} // namespace
+
+ChangeSet Document::syncTimeLayers()
+{
+    ChangeSet changes;
+    for (const std::unique_ptr<Cel> &owned : m_cels) {
+        Cel &cel = *owned;
+        bool any = !cel.timeLayers().empty();
+        for (const auto &[id, d] : cel.drawings())
+            for (const Layer &l : d.layers)
+                any = any || l.time;
+        if (!any)
+            continue;
+        // A copy of a time layer the cel does not have any more (its making undone): gone.
+        for (const auto &[id, d] : cel.drawings()) {
+            Drawing &drawing = *cel.drawing(id);
+            const auto gone = std::erase_if(drawing.layers, [&](const Layer &l) { return l.time && !cel.timeLayer(l.id); });
+            if (gone > 0)
+                changes.structure = true;
+        }
+        for (const TimeLayer &t : cel.timeLayers()) {
+            const Layer *known = cel.timeContent(t.id);
+            const Layer *changed = nullptr;
+            int place = -1; // where it is in the first drawing that has it
+            for (const auto &[id, d] : cel.drawings()) {
+                const int i = d.indexOf(t.id);
+                if (i < 0)
+                    continue;
+                if (place < 0)
+                    place = i;
+                const Layer &copy = d.layers[std::size_t(i)];
+                if (!known || !sameLayer(copy, *known)) {
+                    changed = &copy;
+                    break;
+                }
+            }
+            if (changed) {
+                Layer content = *changed;
+                content.time = true;
+                cel.setTimeContent(content);
+            }
+            const Layer *content = cel.timeContent(t.id);
+            if (!content)
+                continue; // no drawing has it yet: given to the first one that comes by its making
+            for (const auto &[id, d] : cel.drawings()) {
+                Drawing &drawing = *cel.drawing(id);
+                Layer *copy = drawing.layer(t.id);
+                if (!copy) {
+                    const int at = std::clamp(place < 0 ? int(drawing.layers.size()) : place, 0, int(drawing.layers.size()));
+                    drawing.layers.insert(drawing.layers.begin() + at, *content);
+                    changes.structure = true;
+                    continue;
+                }
+                if (sameLayer(*copy, *content))
+                    continue;
+                if (copy->properties != content->properties || copy->kind != content->kind
+                    || copy->mask.has_value() != content->mask.has_value())
+                    changes.structure = true;
+                changes.pixels.push_back({cel.id(), id, t.id, unitedTiles(copy->image, content->image)});
+                copy->properties = content->properties;
+                copy->kind = content->kind;
+                copy->image = content->image;
+                copy->mask = content->mask;
+                copy->strokes = content->strokes;
+                copy->time = true;
+            }
+        }
+    }
+    return changes;
+}
+
 Matrix2x3 Document::trajectoryParentMatrix(CelId trajectory, int frame) const
 {
     const Cel *c = cel(trajectory);

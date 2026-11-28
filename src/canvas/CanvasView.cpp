@@ -717,11 +717,23 @@ doc::Matrix2x3 CanvasView::celPose() const
     const doc::Cel *cel = m_document->document().cel(m_document->currentCel());
     if (!cel)
         return {};
-    // Its own pose, then what the trajectory it follows does.
+    // Its own pose, then what the trajectory it follows does; before both, on a time layer, what that follows of its own.
     const doc::Matrix2x3 follow = m_document->document().followMatrix(*cel, m_document->currentFrame());
+    const doc::Matrix2x3 own = timeLayerFollow();
     if (cel->motion().isEmpty())
-        return follow;
-    return m_document->celPoseAt(cel->id(), m_document->currentFrame()).matrix(cel->motion().pivotX, cel->motion().pivotY).then(follow);
+        return own.then(follow);
+    return own.then(m_document->celPoseAt(cel->id(), m_document->currentFrame())
+                        .matrix(cel->motion().pivotX, cel->motion().pivotY)
+                        .then(follow));
+}
+
+doc::Matrix2x3 CanvasView::timeLayerFollow() const
+{
+    const doc::Cel *cel = m_document->document().cel(m_document->currentCel());
+    const doc::TimeLayer *time = cel ? cel->timeLayer(m_document->currentLayer()) : nullptr;
+    if (!time || time->parent == doc::kNoId)
+        return {};
+    return m_document->document().followMatrix(doc::Document::timeLayerAsCel(*cel, *time), m_document->currentFrame());
 }
 
 QRect CanvasView::visibleDocumentRect() const
@@ -850,7 +862,8 @@ bool CanvasView::celIsPosed() const
     const doc::Cel *cel = m_document->document().cel(m_document->currentCel());
     if (!cel)
         return false;
-    if (!m_document->document().followMatrix(*cel, m_document->currentFrame()).isIdentity())
+    if (!m_document->document().followMatrix(*cel, m_document->currentFrame()).isIdentity()
+        || !timeLayerFollow().isIdentity())
         return true;
     return !cel->motion().isEmpty() && !m_document->celPoseAt(cel->id(), m_document->currentFrame()).movesNothing();
 }

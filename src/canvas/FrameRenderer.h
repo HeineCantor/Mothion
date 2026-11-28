@@ -116,7 +116,38 @@ private:
     doc::CelId m_only = doc::kNoId;
     doc::CelId m_shownCel = doc::kNoId;
     doc::DrawingId m_shownDrawing = doc::kNoId;
-    const doc::Drawing *drawingOf(const doc::Cel &cel, int frame) const;
+    // The drawing the cel shows on the frame (see setDrawingShown()), its time layers moved or bent by what they follow of
+    // their own (see timeMoved()).
+    const doc::Drawing *drawingOf(const doc::Document &doc, const doc::Cel &cel, int frame) const;
+    // `drawing` with each time layer of `cel` that follows a trajectory or a deformer of its own (doc::TimeLayer) moved or
+    // bent by it, before the cel's own motion; `drawing` itself if none does. Kept for each cel, and made again only when
+    // the drawing's layers (their tiles) or what moves the time layers change. Not bent while the cel is drawn undeformed.
+    const doc::Drawing *timeMoved(const doc::Document &doc, const doc::Cel &cel, const doc::Drawing &drawing,
+                                  int frame) const;
+    struct Moved
+    {
+        struct How // what moves a time layer on the frame
+        {
+            doc::LayerId layer = doc::kNoId;
+            doc::Matrix2x3 matrix;
+            doc::DeformerKind kind = doc::DeformerKind::None;
+            doc::Deformer deformer;
+            std::vector<double> pose;
+            bool operator==(const How &o) const
+            {
+                const doc::Matrix2x3 &m = matrix, &n = o.matrix;
+                return layer == o.layer && m.a == n.a && m.b == n.b && m.c == n.c && m.d == n.d && m.e == n.e && m.f == n.f
+                       && kind == o.kind && deformer == o.deformer && pose == o.pose;
+            }
+        };
+        doc::DrawingId drawing = doc::kNoId;
+        std::vector<doc::TiledImage> sources; // the drawing's layers' pixels as they were
+        std::vector<std::optional<doc::TiledImage>> masks;
+        std::vector<How> hows;
+        bool brushes = false;
+        doc::Drawing result;
+    };
+    mutable std::map<doc::CelId, Moved> m_moved;
 
     // A drawing bent by the deformation cel that bends its cel, placed where it landed.
     struct Deformed
