@@ -2924,7 +2924,8 @@ doc::CelId DocumentController::pasteCel()
         if (const auto it = drawings.find(e.drawing); it != drawings.end())
             cel->timing().setExposure(e.start, e.length, it->second);
     cel->setMotion(m_copiedCel->motion());
-    cel->setDeformer(m_copiedCel->deformer()); // a deformation cel's bones or nodes
+    cel->setDeformer(m_copiedCel->deformer()); // a deformation cel's bones or nodes (a 3D model cel's rest pose)
+    cel->setModel(m_copiedCel->model());       // a 3D model cel's model and joint settings (the model itself shared)
     std::vector<doc::TimeLayer> timeLayers;
     for (doc::TimeLayer t : m_copiedCel->timeLayers())
         if (const auto it = layers.find(t.id); it != layers.end()) {

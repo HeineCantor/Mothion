@@ -206,6 +206,24 @@ private slots:
         QVERIFY(!loaded->cel(id)->model().isEmpty());
     }
 
+    void copiedAndPasted()
+    {
+        QTemporaryDir dir;
+        document::DocumentController controller;
+        QVERIFY(controller.addModelCel(writeArm(dir)));
+        const doc::CelId id = controller.currentCel();
+        rig3d::JointSettings s;
+        s.anchor = true;
+        QVERIFY(controller.setModelJoint(id, 1, s));
+        controller.copyCel(id);
+        const doc::CelId pasted = controller.pasteCel();
+        QVERIFY(pasted != doc::kNoId && pasted != id);
+        const doc::Cel *copy = controller.document().cel(pasted);
+        QVERIFY(copy->properties().model3d);
+        QVERIFY(copy->model() == controller.document().cel(id)->model()); // the model and the joints' settings
+        QCOMPARE(copy->deformer().rest, controller.document().cel(id)->deformer().rest);
+    }
+
     void jointSettingsAreAnUndoStep()
     {
         QTemporaryDir dir;
