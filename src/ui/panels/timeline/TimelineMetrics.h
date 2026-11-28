@@ -16,7 +16,8 @@ namespace mothion::ui {
 //    headerWidth   frameWidth per frame, scrolled by scrollX
 struct TimelineMetrics
 {
-    int headerWidth = 130;
+    static constexpr int kNameWidth = 130; // the narrowest the names get, and how they start
+    int headerWidth = kNameWidth;           // dragged wider by its right edge
     int rulerHeight = 34;
     int markerStrip = 12; // the top of the ruler, where the markers are (the frame numbers are below)
     int rowHeight = 22;

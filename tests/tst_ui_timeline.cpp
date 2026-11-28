@@ -91,6 +91,39 @@ private slots:
     // it, the slider picks a frame, the speed sets the pace.
     // A whole cel is copied, cut, pasted (a new cel above the current one, with new ids: drawings, timing and keys as they
     // were) and deleted, one undo step each; the last cel stays.
+    // The names' column is widened by dragging its right edge, kept for the next time, and a double click takes it back.
+    void theNamesColumnIsWidened()
+    {
+        QSettings().remove(QStringLiteral("timeline/nameWidth"));
+        document::DocumentController controller;
+        ui::TimelineView view(&controller);
+        view.resize(800, 300);
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        QCOMPARE(view.nameWidth(), 130);
+        QWidget *area = view.viewport();
+        auto drag = [&](int from, int to) {
+            QTest::mousePress(area, Qt::LeftButton, {}, QPoint(from, 80));
+            QTest::mouseMove(area, QPoint(to, 80));
+            QTest::mouseRelease(area, Qt::LeftButton, {}, QPoint(to, 80));
+        };
+        drag(130, 260);
+        QCOMPARE(view.nameWidth(), 260);
+        QCOMPARE(ui::TimelineView(&controller).nameWidth(), 260);
+        drag(260, 20); // no narrower than it started
+        QCOMPARE(view.nameWidth(), 130);
+        drag(130, 2000); // some cells stay in sight
+        QCOMPARE(view.nameWidth(), area->width() - 80);
+        drag(view.nameWidth(), 300);
+        view.resize(260, 300); // a narrow view narrows it, until it is wide again
+        QCOMPARE(view.nameWidth(), area->width() - 80);
+        view.resize(800, 300);
+        QCOMPARE(view.nameWidth(), 300);
+        QTest::mouseDClick(area, Qt::LeftButton, {}, QPoint(300, 80));
+        QCOMPARE(view.nameWidth(), 130);
+        QSettings().remove(QStringLiteral("timeline/nameWidth"));
+    }
+
     void aCelIsCopiedCutPastedAndDeleted()
     {
         document::DocumentController controller;

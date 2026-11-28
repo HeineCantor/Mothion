@@ -121,6 +121,8 @@ public:
     // The time layer a row is of (its own row, or one of what it follows); kNoId for none.
     doc::LayerId timeLayerOfRow(int row) const { return rowRef(row).time; }
 
+    int nameWidth() const { return m_metrics.headerWidth; } // of the column of the cels' names
+
 signals:
     void shownKindsChanged(int kinds);
     void frameWidthChanged(int width);
@@ -153,6 +155,12 @@ private:
     int m_roomRight = 0;
     int m_playFirst = 0;
     int m_playLast = -1; // -1: no range shown (the whole scene)
+    // The column of the names, widened by dragging its right edge (a double click there: as it started).
+    bool onNameEdge(const QPoint &pos) const;
+    void setNameWidth(int width);
+    void fitNameWidth(); // as wide as chosen, or as the view lets it be
+    int m_chosenNameWidth = TimelineMetrics::kNameWidth;
+    std::optional<int> m_nameDrag; // while dragged: from the pointer to the edge
     // Hold-length drag in progress.
     struct Resize
     {

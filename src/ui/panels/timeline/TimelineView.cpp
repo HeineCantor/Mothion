@@ -167,6 +167,9 @@ TimelineView::TimelineView(DocumentController *document, QWidget *parent)
     setFocusPolicy(Qt::StrongFocus);
     connect(horizontalScrollBar(), &QScrollBar::sliderReleased, this, &TimelineView::updateScrollBars);
     viewport()->setMouseTracking(true); // resize cursor over block edges
+    m_chosenNameWidth = std::max(TimelineMetrics::kNameWidth,
+                                 QSettings().value(QStringLiteral("timeline/nameWidth"), TimelineMetrics::kNameWidth).toInt());
+    m_metrics.headerWidth = m_chosenNameWidth;
 
     connect(QGuiApplication::clipboard(), &QClipboard::dataChanged, this, [this] {
         m_blocksNewer = false;
@@ -639,9 +642,36 @@ void TimelineView::ensureFrameVisible(int frame)
         horizontalScrollBar()->setValue(horizontalScrollBar()->value() + (x + m_metrics.frameWidth - right));
 }
 
+constexpr int kCellsLeft = 80; // of the cells, past the widest the names get
+
+bool TimelineView::onNameEdge(const QPoint &pos) const
+{
+    return std::abs(pos.x() - m_metrics.headerWidth) <= 3;
+}
+
+void TimelineView::setNameWidth(int width)
+{
+    // Never so wide that no cells are left to see.
+    const int widest = std::max(TimelineMetrics::kNameWidth, viewport()->width() - kCellsLeft);
+    m_chosenNameWidth = std::clamp(width, TimelineMetrics::kNameWidth, widest);
+    fitNameWidth();
+}
+
+void TimelineView::fitNameWidth()
+{
+    const int widest = std::max(TimelineMetrics::kNameWidth, viewport()->width() - kCellsLeft);
+    const int width = std::min(m_chosenNameWidth, widest);
+    if (width == m_metrics.headerWidth)
+        return;
+    m_metrics.headerWidth = width;
+    updateScrollBars();
+    viewport()->update();
+}
+
 void TimelineView::resizeEvent(QResizeEvent *event)
 {
     QAbstractScrollArea::resizeEvent(event);
+    fitNameWidth();
     updateScrollBars();
 }
 
@@ -1839,6 +1869,10 @@ void TimelineView::mousePressEvent(QMouseEvent *event)
         finishKeyScale(event->button() == Qt::LeftButton);
         return;
     }
+    if (event->button() == Qt::LeftButton && onNameEdge(event->position().toPoint())) {
+        m_nameDrag = m_metrics.headerWidth - event->position().toPoint().x();
+        return;
+    }
     if (event->button() != Qt::LeftButton || event->position().x() < m_metrics.headerWidth) {
         // In a header: the toggles, or the cel made current.
         if (event->button() == Qt::LeftButton && inCameraRow(int(event->position().y()))) {
@@ -2104,6 +2138,10 @@ void TimelineView::dropFrames()
 void TimelineView::mouseMoveEvent(QMouseEvent *event)
 {
     const QPoint pos = event->position().toPoint();
+    if (m_nameDrag) {
+        setNameWidth(pos.x() + *m_nameDrag);
+        return;
+    }
     if (m_keyScale) {
         m_keyScale->pointer = std::max(0.0, (pos.x() - cursorX()) / m_keyScale->reference);
         if (m_keyScale->typed.isEmpty())
@@ -2201,12 +2239,19 @@ void TimelineView::mouseMoveEvent(QMouseEvent *event)
         scrubTo(pos, false);
         return;
     }
-    viewport()->setCursor(edgeAt(pos) || markerAt(pos) ? Qt::SizeHorCursor : Qt::ArrowCursor); // a flag moves sideways
+    viewport()->setCursor(onNameEdge(pos)                ? Qt::SplitHCursor
+                          : edgeAt(pos) || markerAt(pos) ? Qt::SizeHorCursor // a flag moves sideways
+                                                         : Qt::ArrowCursor);
 }
 
 void TimelineView::mouseReleaseEvent(QMouseEvent *)
 {
     const auto published = qScopeGuard([this] { publishFrames(); }); // the blocks selected may be others when it is done
+    if (m_nameDrag) {
+        m_nameDrag.reset();
+        QSettings().setValue(QStringLiteral("timeline/nameWidth"), m_chosenNameWidth);
+        return;
+    }
     setScrubbing(false);
     if (m_volumeBefore) {
         const float before = *m_volumeBefore;
@@ -2301,6 +2346,11 @@ void TimelineView::mouseDoubleClickEvent(QMouseEvent *event)
 {
     const int row = rowAt(int(event->position().y()));
     const QPoint pos = event->position().toPoint();
+    if (event->button() == Qt::LeftButton && onNameEdge(pos)) {
+        setNameWidth(TimelineMetrics::kNameWidth);
+        QSettings().setValue(QStringLiteral("timeline/nameWidth"), m_chosenNameWidth);
+        return;
+    }
     if (event->button() == Qt::LeftButton && pos.y() < m_metrics.markerStrip && pos.x() >= m_metrics.headerWidth) {
         const int frame = frameAt(pos.x()); // on a flag: its name; on the strip elsewhere: a marker here
         if (frame >= 0) {
