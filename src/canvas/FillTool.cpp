@@ -132,8 +132,8 @@ void FillTool::fillLasso()
             copy.closeSubpath();
             area = area.united(copy);
         }
-    if (m_document->hasSelection())
-        area = area.intersected(m_document->selection());
+    if (m_document->hasAreaSelection())
+        area = area.intersected(m_document->areaSelection());
     const SelectionMask mask = SelectionMask::fromPath(area);
     if (mask.isEmpty())
         return;
@@ -173,8 +173,8 @@ void FillTool::fillAround(const QPointF &docPos)
     if (!area.contains(seedX, seedY))
         return;
     const int w = area.width(), h = area.height();
-    const SelectionMask selection = SelectionMask::fromPath(m_document->selection());
-    if (m_document->hasSelection() && selection.at(seedX, seedY) == 0)
+    const SelectionMask selection = SelectionMask::fromPath(m_document->areaSelection());
+    if (m_document->hasAreaSelection() && selection.at(seedX, seedY) == 0)
         return m_status(QObject::tr("Click inside the selection to fill it"));
 
     QString reason;
@@ -215,7 +215,7 @@ void FillTool::fillAround(const QPointF &docPos)
         const QPoint seed = seeds[i] - area.topLeft();
         if (seed.x() < 0 || seed.y() < 0 || seed.x() >= w || seed.y() >= h)
             continue;
-        if (i > 0 && m_document->hasSelection() && selection.at(seeds[i].x(), seeds[i].y()) == 0)
+        if (i > 0 && m_document->hasAreaSelection() && selection.at(seeds[i].x(), seeds[i].y()) == 0)
             continue; // a copy out of the selection
         if (clicked[std::size_t(seed.y()) * std::size_t(w) + std::size_t(seed.x())])
             continue; // in an area found already
@@ -280,13 +280,13 @@ void FillTool::fillAround(const QPointF &docPos)
                                            m_state->settings(tools::ToolId::Fill).opacity);
         if (erase) {
             QPainterPath gone = fillPath(shape);
-            if (m_document->hasSelection())
-                gone = gone.intersected(m_document->selection());
+            if (m_document->hasAreaSelection())
+                gone = gone.intersected(m_document->areaSelection());
             eraseShape(*target, gone, false, before);
             return;
         }
-        if (m_document->hasSelection())
-            shape = fillShaped(shape, fillPath(shape).intersected(m_document->selection()));
+        if (m_document->hasAreaSelection())
+            shape = fillShaped(shape, fillPath(shape).intersected(m_document->areaSelection()));
         putFill(*target, std::move(shape), before);
         return;
     }
@@ -301,7 +301,7 @@ void FillTool::fillAround(const QPointF &docPos)
         for (int x = 0; x < box.width(); ++x) {
             const int dx = box.x() + x, dy = box.y() + y;
             int coverage = region.at(dx - area.x(), dy - area.y());
-            if (m_document->hasSelection())
+            if (m_document->hasAreaSelection())
                 coverage = coverage * selection.at(dx, dy) / 255;
             doc::Pixel &p = pixels[std::size_t(y) * std::size_t(box.width()) + std::size_t(x)];
             if (!coverage)

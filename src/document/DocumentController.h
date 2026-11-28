@@ -3,6 +3,7 @@
 #include <limits>
 #include <set>
 #include "core/document/Document.h"
+#include "tools/ToolState.h"
 #include "core/document/History.h"
 #include "core/document/LipSync.h"
 #include "document/Tween.h"
@@ -14,6 +15,7 @@
 
 #include <map>
 #include <string>
+#include <QPointer>
 #include <QPointF>
 #include <QRect>
 #include <QString>
@@ -21,6 +23,9 @@
 #include <memory>
 #include <optional>
 
+namespace mothion::canvas {
+struct SelectionMask;
+}
 namespace mothion::document {
 
 // All of the canvas (it has no end), for a change that may be anywhere: whoever draws keeps to what it shows.
@@ -459,6 +464,53 @@ public:
     bool hasSelection() const { return !m_selection.isEmpty(); }
     // Not kept to the page: the canvas has no end (Select All and Invert are of the page, the scene's frame).
     void setSelection(const QPainterPath &area);
+
+    // Whole lines selected on a vector layer (see tools::VectorSelectSettings), rather than an area: which of the layer's
+    // strokes (`count` of them), by their place. The selection (selection()) is then the box round them, and what works on
+    // a selection takes those strokes whole and leaves the others; painting is not held inside it. It goes when the layer
+    // is not the current one any more, or its strokes are more or fewer; setSelection() makes it an area again.
+    struct StrokePick
+    {
+        doc::CelId cel = doc::kNoId;
+        doc::DrawingId drawing = doc::kNoId;
+        doc::LayerId layer = doc::kNoId;
+        std::vector<int> strokes; // ascending
+        std::size_t count = 0;
+        QPointer<const tools::ToolState> brushes; // to draw them by themselves
+        bool operator==(const StrokePick &) const = default;
+    };
+    const std::optional<StrokePick> &pickedStrokes() const { return m_pick; }
+    // The strokes `indices` of the current vector layer selected; none of them (or no vector layer) selects nothing. One
+    // undo step.
+    void selectStrokes(std::vector<int> indices, const tools::ToolState &brushes);
+    // The outline moved as what is selected moves (a Move, a Transform): whole lines selected stay so.
+    void moveSelection(const QPainterPath &area);
+    // The selection that holds what is painted inside it: none while whole lines are selected.
+    QPainterPath areaSelection() const { return m_pick ? QPainterPath() : m_selection; }
+    bool hasAreaSelection() const { return !m_pick && !m_selection.isEmpty(); }
+    // A layer's strokes, as the selection parts them: cut along its outline, or the lines selected and the others (none
+    // is selected on any other layer than theirs).
+    struct SelectionParts
+    {
+        std::vector<doc::VectorStroke> inside, outside;
+    };
+    SelectionParts splitStrokes(doc::CelId cel, doc::DrawingId drawing, doc::LayerId layer,
+                                const std::vector<doc::VectorStroke> &strokes, const canvas::SelectionMask &mask) const;
+    // The layer's pixels parted the same way: by the outline, or the lines selected drawn by themselves and the others.
+    void splitPixels(doc::CelId cel, doc::DrawingId drawing, doc::LayerId layer,
+                     const std::vector<doc::VectorStroke> &strokes, const doc::TiledImage &image,
+                     const canvas::SelectionMask &mask, doc::TiledImage &inside, doc::TiledImage &outside) const;
+    // The strokes of a layer again after `inside` (those of splitStrokes(), changed) and `outside`: lines selected each
+    // back in their place; of an area, what stayed and then what changed.
+    std::vector<doc::VectorStroke> rejoined(doc::CelId cel, doc::DrawingId drawing, doc::LayerId layer,
+                                            const std::vector<doc::VectorStroke> &original,
+                                            const std::vector<doc::VectorStroke> &outside,
+                                            const std::vector<doc::VectorStroke> &inside) const;
+    // Whether whole lines are selected on this layer (so its pixels are to be drawn again from the strokes put back).
+    bool picksOn(doc::CelId cel, doc::DrawingId drawing, doc::LayerId layer) const
+    {
+        return m_pick && m_pick->cel == cel && m_pick->drawing == drawing && m_pick->layer == layer;
+    }
     void selectAll();
     void clearSelection();
     // Selects what was not selected (all if nothing was).
@@ -791,7 +843,11 @@ private:
     bool applyCelPose(doc::CelId cel, int frame, const doc::CelPose &pose, const std::vector<doc::Channel> &channels);
     bool celKeyMotion(const doc::Cel &cel, int frame, const doc::CelPose &pose, doc::CelMotion &out) const;
     // Sets the selection as is, recording nothing.
-    void assignSelection(const QPainterPath &area);
+    void assignSelection(const QPainterPath &area, std::optional<StrokePick> pick = std::nullopt);
+    // A selection made (or an area, with no `pick`) as one undo step, or with the edit open.
+    void changeSelection(const QPainterPath &area, std::optional<StrokePick> pick);
+    // Whole lines selected of a layer no longer current, or of other strokes: nothing selected.
+    void dropStalePick();
     void publish(const doc::ChangeSet &changes);
     void ensureValidCurrentCel();
     // Puts the current layer back in the current drawing (see currentLayer()).
@@ -824,6 +880,7 @@ private:
     std::string newFrameLayerName() const;
     std::map<doc::DrawingId, doc::LayerId> m_lastLayerOf; // the layer last current in each drawing (this session)
     QPainterPath m_selection;
+    std::optional<StrokePick> m_pick;
     std::shared_ptr<const doc::Cel> m_copiedCel; // (see copyCel())
     std::vector<LayerRef> m_layerSelection;
     std::vector<FrameRef> m_frameSelection; // (see setFrameSelection())
@@ -842,6 +899,7 @@ private:
         std::vector<doc::VectorStroke> strokes;       // the strokes of a vector layer (attachStroke())
         std::vector<std::unique_ptr<doc::Command>> strokeChanges; // applied, not yet recorded (attachStrokeChange())
         QPainterPath selectionBefore;
+        std::optional<StrokePick> pickBefore;
     };
     std::optional<PaintState> m_paint;
     doc::LayerId m_maskLayer = doc::kNoId;

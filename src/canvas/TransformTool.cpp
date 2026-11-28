@@ -155,15 +155,21 @@ bool TransformTool::start()
                 part.restStrokes = layer->strokes;
             } else if (!mask) {
                 part.strokes = layer->strokes;
-            } else { // the strokes are cut along the outline: those inside move, the rest stays
-                for (const doc::VectorStroke &stroke : layer->strokes) {
-                    SplitStroke cut = splitStrokeByMask(stroke, *mask, m_document->selection());
-                    part.strokes.insert(part.strokes.end(), cut.inside.begin(), cut.inside.end());
-                    part.restStrokes.insert(part.restStrokes.end(), cut.outside.begin(), cut.outside.end());
-                }
+            } else { // the strokes are cut along the outline (or the lines selected): those inside move, the rest stays
+                auto split = m_document->splitStrokes(target.cel, target.drawing, target.layer, layer->strokes, *mask);
+                part.strokes = std::move(split.inside);
+                part.restStrokes = std::move(split.outside);
             }
         }
     }
+    if (mask && m_document->pickedStrokes() && !pastes) // whole lines selected: drawn by themselves
+        for (std::size_t i = 0; i < targets.size(); ++i) {
+            const auto &target = targets[i];
+            const doc::Layer *layer = m_document->document().layer(target.cel, target.drawing, target.layer);
+            m_document->splitPixels(target.cel, target.drawing, target.layer,
+                                    layer ? layer->strokes : std::vector<doc::VectorStroke>(), *target.image, *mask,
+                                    parts[i].moving, parts[i].rest);
+        }
     parallelFor(int(targets.size()), [&](int i) {
         const auto &target = targets[std::size_t(i)];
         Part &part = parts[std::size_t(i)];
@@ -175,8 +181,10 @@ bool TransformTool::start()
                 part.moving.write(pasted->at.x(), pasted->at.y(), pasted->image.width(), pasted->image.height(),
                                   reinterpret_cast<const doc::Pixel *>(pasted->image.constBits()),
                                   pasted->image.bytesPerLine() / 4);
-        } else if (mask) {
+        } else if (mask && !m_document->pickedStrokes()) {
             splitByMask(part.before, *mask, part.moving, part.rest);
+        } else if (mask) {
+            // Drawn below, one at a time (the brushes are looked up in the library).
         } else {
             part.moving = part.before;
         }
@@ -461,7 +469,7 @@ void TransformTool::show()
     for (Part &part : s.parts)
         *part.image = part.before;
     if (!s.selection.isEmpty())
-        m_document->setSelection(s.selection);
+        m_document->moveSelection(s.selection);
     m_document->notifyPainted(s.shown | s.box);
     s.changed = false;
     m_repaint();
@@ -526,10 +534,12 @@ void TransformTool::renderParts(bool onlyLive)
     // The vector layers: their strokes drawn again at the transform, not stretched (one at a time: the brushes are
     // looked up in the library).
     for (Part *part : drawnAgain) {
-        std::vector<doc::VectorStroke> moved = part->restStrokes;
-        moved.reserve(moved.size() + part->strokes.size());
+        std::vector<doc::VectorStroke> turned;
+        turned.reserve(part->strokes.size());
         for (const doc::VectorStroke &stroke : part->strokes)
-            moved.push_back(transformedStroke(stroke, s.transform));
+            turned.push_back(transformedStroke(stroke, s.transform));
+        const std::vector<doc::VectorStroke> moved = m_document->rejoined(
+            part->cel, part->drawing, part->layer, part->allStrokes, part->restStrokes, turned);
         doc::TiledImage result;
         drawStrokes(result, moved, *m_toolState, reach); // out of the canvas too
         *part->image = std::move(result);
@@ -568,7 +578,7 @@ void TransformTool::renderParts(bool onlyLive)
     });
     s.everythingDrawn = !skipped;
     if (!s.selection.isEmpty())
-        m_document->setSelection(s.transform.map(s.selection)); // the outline follows live
+        m_document->moveSelection(s.transform.map(s.selection)); // the outline follows live
     m_document->notifyPainted(s.shown | now);
     s.shown = now.isEmpty() ? s.shown : now;
     s.changed = true;
@@ -594,10 +604,12 @@ void TransformTool::commit()
             if (!part.vector)
                 continue;
             // The strokes of a vector layer go where the transform took them, in the same undo step as its pixels.
-            std::vector<doc::VectorStroke> moved = part.restStrokes; // what stays, then what moved
-            moved.reserve(moved.size() + part.strokes.size());
+            std::vector<doc::VectorStroke> turned;
+            turned.reserve(part.strokes.size());
             for (const doc::VectorStroke &stroke : part.strokes)
-                moved.push_back(transformedStroke(stroke, s->transform));
+                turned.push_back(transformedStroke(stroke, s->transform));
+            std::vector<doc::VectorStroke> moved = m_document->rejoined(part.cel, part.drawing, part.layer,
+                                                                        part.allStrokes, part.restStrokes, turned);
             document::DocumentController::PaintTarget target;
             target.cel = part.cel;
             target.drawing = part.drawing;
@@ -629,7 +641,7 @@ void TransformTool::cancel()
         else
             m_document->setSelection(s->priorSelection);
     } else if (!s->selection.isEmpty()) {
-        m_document->setSelection(s->selection);
+        m_document->moveSelection(s->selection);
     }
     m_document->notifyPainted(s->shown | s->box);
     m_document->cancelPaint();

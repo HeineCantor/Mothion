@@ -304,6 +304,14 @@ void ToolState::setVectorPoints(const VectorPointSettings &settings)
     emit vectorPointsChanged();
 }
 
+void ToolState::setVectorSelect(const VectorSelectSettings &settings)
+{
+    if (settings == m_vectorSelect)
+        return;
+    m_vectorSelect = settings;
+    emit vectorSelectChanged();
+}
+
 void ToolState::setVectorEraser(const VectorEraserSettings &settings)
 {
     if (settings == m_vectorEraser)

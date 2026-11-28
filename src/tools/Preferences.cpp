@@ -24,6 +24,7 @@ constexpr auto kUndoSteps = "undoSteps";
 constexpr auto kMousePressure = "mousePressure";
 constexpr auto kAutosave = "autosaveMinutes";
 constexpr auto kVectorEraserMode = "vectorEraserMode";
+constexpr auto kVectorSelectMode = "vectorSelectMode";
 constexpr auto kSymmetryKind = "symmetryKind";
 constexpr auto kSymmetryCount = "symmetryCount";
 constexpr auto kSymmetryTiles = "symmetryTiles";
@@ -61,6 +62,7 @@ Preferences::Preferences()
     m_mousePressure = std::clamp(settings.value(path(kMousePressure), 100).toInt(), 10, 100);
     m_autosaveMinutes = std::clamp(settings.value(path(kAutosave), kDefaultAutosaveMinutes).toInt(), 0, 120);
     m_vectorEraserMode = std::clamp(settings.value(path(kVectorEraserMode), 0).toInt(), 0, 3);
+    m_vectorSelectMode = std::clamp(settings.value(path(kVectorSelectMode), 0).toInt(), 0, 2);
     m_symmetryKind = std::clamp(settings.value(path(kSymmetryKind), 0).toInt(), 0, 6);
     m_symmetryCount = std::clamp(settings.value(path(kSymmetryCount), 4).toInt(), 2, 12);
     m_symmetryTiles = std::clamp(settings.value(path(kSymmetryTiles), 2).toInt(), 2, 4);
@@ -133,6 +135,15 @@ void Preferences::setVectorEraserMode(int mode)
         return;
     m_vectorEraserMode = mode;
     save(kVectorEraserMode, mode);
+}
+
+void Preferences::setVectorSelectMode(int mode)
+{
+    mode = std::clamp(mode, 0, 2);
+    if (mode == m_vectorSelectMode)
+        return;
+    m_vectorSelectMode = mode;
+    save(kVectorSelectMode, mode);
 }
 
 void Preferences::setSymmetryShape(int kind, int count, int tiles)

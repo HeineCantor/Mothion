@@ -50,17 +50,16 @@ void MoveTool::press(const QPointF &docPos, Qt::KeyboardModifiers)
                 m.allStrokes = layer->strokes;
                 if (!mask) {
                     m.strokes = layer->strokes;
-                } else { // cut along the outline: the strokes inside move, the rest stays
-                    for (const doc::VectorStroke &stroke : layer->strokes) {
-                        SplitStroke cut = splitStrokeByMask(stroke, *mask, m_document->selection());
-                        m.strokes.insert(m.strokes.end(), cut.inside.begin(), cut.inside.end());
-                        m.restStrokes.insert(m.restStrokes.end(), cut.outside.begin(), cut.outside.end());
-                    }
+                } else { // cut along the outline (or the lines selected): the strokes inside move, the rest stays
+                    auto parts = m_document->splitStrokes(target.cel, target.drawing, target.layer, layer->strokes, *mask);
+                    m.strokes = std::move(parts.inside);
+                    m.restStrokes = std::move(parts.outside);
                 }
             }
         }
         if (mask) {
-            splitByMask(m.before, *mask, m.floating, m.rest);
+            m_document->splitPixels(target.cel, target.drawing, target.layer, m.allStrokes, m.before, *mask, m.floating,
+                                    m.rest);
         } else {
             for (const doc::TileCoord &c : m.before.tileCoords())
                 s.content |= tileRect(c);
@@ -109,7 +108,7 @@ void MoveTool::moveTo(QPoint offset)
         }
     }
     if (!s.selection.isEmpty())
-        m_document->setSelection(s.selection.translated(offset)); // the outline follows live
+        m_document->moveSelection(s.selection.translated(offset)); // the outline follows live
     m_document->notifyPainted(old | s.content.translated(offset));
 }
 
@@ -129,11 +128,21 @@ void MoveTool::release(const QPointF &docPos, Qt::KeyboardModifiers modifiers)
             continue;
         // The strokes of a vector layer go with its pixels, in the same undo step.
         const QTransform shift = QTransform::fromTranslate(s.offset.x(), s.offset.y());
-        std::vector<doc::VectorStroke> moved = m.restStrokes; // what stays, then what moved
-        moved.reserve(moved.size() + m.strokes.size());
+        std::vector<doc::VectorStroke> shifted;
+        shifted.reserve(m.strokes.size());
         for (const doc::VectorStroke &stroke : m.strokes)
-            moved.push_back(transformedStroke(stroke, shift));
-        m_document->attachStrokeChange(*m.target, m.allStrokes, std::move(moved));
+            shifted.push_back(transformedStroke(stroke, shift));
+        const auto &t = *m.target;
+        std::vector<doc::VectorStroke> moved =
+            m_document->rejoined(t.cel, t.drawing, t.layer, m.allStrokes, m.restStrokes, shifted);
+        if (m_document->picksOn(t.cel, t.drawing, t.layer) && m_document->pickedStrokes()->brushes) {
+            // Whole lines, each in its place among the others: drawn again, not laid over.
+            doc::TiledImage drawn;
+            drawStrokes(drawn, moved, *m_document->pickedStrokes()->brushes, {});
+            *m.image = std::move(drawn);
+            m_document->notifyPainted(document::kWholeCanvas);
+        }
+        m_document->attachStrokeChange(t, m.allStrokes, std::move(moved));
     }
     m_document->endPaint(before, doc::CommandKind::Move);
 }
@@ -148,7 +157,7 @@ void MoveTool::cancel()
     for (const Moving &m : s.layers)
         *m.image = m.before;
     if (!s.selection.isEmpty())
-        m_document->setSelection(s.selection);
+        m_document->moveSelection(s.selection);
     m_document->notifyPainted(s.content.translated(s.offset) | s.content);
     m_document->cancelPaint();
 }

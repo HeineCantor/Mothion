@@ -363,8 +363,8 @@ void ShapeTool::draw(const ShapeGeometry &geometry)
         const tools::BrushSettings brush = m_state->settings(tools::ToolId::Shape);
         std::vector<doc::VectorStroke> strokes = shapeStrokes(settings, brush.size, brush.opacity, m_state->color(),
                                                               m_state->transparentSelected(), geometry);
-        if (m_document->hasSelection()) { // only what is inside the selection is kept
-            const SelectionMask mask = SelectionMask::fromPath(m_document->selection());
+        if (m_document->hasAreaSelection()) { // only what is inside the selection is kept
+            const SelectionMask mask = SelectionMask::fromPath(m_document->areaSelection());
             std::vector<doc::VectorStroke> inside;
             for (const doc::VectorStroke &stroke : strokes) {
                 SplitStroke cut = splitStrokeByMask(stroke, mask);
@@ -381,8 +381,8 @@ void ShapeTool::draw(const ShapeGeometry &geometry)
     }
 
     const QRect box(shape.origin, shape.image.size());
-    const SelectionMask selection = SelectionMask::fromPath(m_document->selection());
-    const bool selected = m_document->hasSelection();
+    const SelectionMask selection = SelectionMask::fromPath(m_document->areaSelection());
+    const bool selected = m_document->hasAreaSelection();
     const bool erase = m_state->transparentSelected();
     const int opacity = int(std::lround(255 * m_state->settings(tools::ToolId::Shape).opacity));
     std::vector<doc::Pixel> pixels(std::size_t(box.width()) * std::size_t(box.height()));
@@ -412,8 +412,8 @@ void ShapeTool::paintOverlay(QPainter &painter, const ViewTransform &view) const
     if (!shape.image.isNull()) {
         painter.save();
         painter.setRenderHint(QPainter::SmoothPixmapTransform, view.zoom() < 2.0);
-        if (m_document->hasSelection())
-            painter.setClipPath(view.documentToView().map(m_document->selection()));
+        if (m_document->hasAreaSelection())
+            painter.setClipPath(view.documentToView().map(m_document->areaSelection()));
         painter.setTransform(view.documentToView());
         painter.setOpacity(std::max(0.25, m_state->settings(tools::ToolId::Shape).opacity));
         painter.drawImage(shape.origin, shape.image);

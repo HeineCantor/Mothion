@@ -97,8 +97,8 @@ void EffectBrushTool::press(const QPointF &docPos, Qt::KeyboardModifiers)
     m_image = target->image;
     m_before = *m_image;
     m_mask.reset();
-    if (m_document->hasSelection())
-        m_mask = SelectionMask::fromPath(m_document->selection());
+    if (m_document->hasAreaSelection())
+        m_mask = SelectionMask::fromPath(m_document->areaSelection());
     m_dirty = QRect();
     m_last = docPos;
     m_active = true;

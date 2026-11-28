@@ -109,6 +109,8 @@ private:
     QComboBox *m_transformFilter = nullptr;
     // Correct line: what it does to the control points (tools::VectorPointSettings::Mode).
     QWidget *m_vectorPointControls = nullptr;
+    QWidget *m_vectorSelectControls = nullptr; // what a selection takes on a vector layer
+    QButtonGroup *m_vectorSelectModes = nullptr;
     QComboBox *m_vectorPointMode = nullptr;
     // Animate: the pose of the current cel on the current frame, and its key (auto-key: a field edited makes it).
     void syncAnimateFromDocument();

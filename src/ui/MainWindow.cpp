@@ -153,6 +153,11 @@ MainWindow::MainWindow(QWidget *parent)
     // The vector eraser's mode is kept from one session to the next: as it was last set, and kept as it changes.
     m_toolState->setVectorEraser(
         {static_cast<tools::VectorEraserSettings::Mode>(tools::Preferences::instance().vectorEraserMode())});
+    m_toolState->setVectorSelect(
+        {static_cast<tools::VectorSelectSettings::Mode>(tools::Preferences::instance().vectorSelectMode())});
+    connect(m_toolState, &tools::ToolState::vectorSelectChanged, this, [this] {
+        tools::Preferences::instance().setVectorSelectMode(int(m_toolState->vectorSelect().mode));
+    });
     connect(m_toolState, &tools::ToolState::vectorEraserChanged, this, [this] {
         tools::Preferences::instance().setVectorEraserMode(int(m_toolState->vectorEraser().mode));
     });

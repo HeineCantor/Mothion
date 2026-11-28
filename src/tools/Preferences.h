@@ -62,6 +62,9 @@ public:
     // it is as it was at the next start. Not a choice of the Settings window: the tool's properties keep it.
     int vectorEraserMode() const { return m_vectorEraserMode; }
     void setVectorEraserMode(int mode);
+    // The same for the selections' mode on a vector layer (a VectorSelectSettings::Mode's number: 0 is the area).
+    int vectorSelectMode() const { return m_vectorSelectMode; }
+    void setVectorSelectMode(int mode);
     // The symmetry's kind (a SymmetrySettings::Kind's number), its copies and its tiles as they were last set, likewise.
     // Whether it is on is not kept: each session starts without it.
     int symmetryKind() const { return m_symmetryKind; }
@@ -113,6 +116,7 @@ private:
     int m_mousePressure = 100;
     int m_autosaveMinutes = kDefaultAutosaveMinutes;
     int m_vectorEraserMode = 0;
+    int m_vectorSelectMode = 0;
     int m_symmetryKind = 0;
     int m_symmetryCount = 4;
     int m_symmetryTiles = 2;

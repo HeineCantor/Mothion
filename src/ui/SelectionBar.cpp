@@ -83,6 +83,15 @@ SelectionBar::SelectionBar(canvas::CanvasView *canvas, document::DocumentControl
     add(IconId::FlipVertical, tr("Flip vertically"), [this] { runWithReason(&Controller::flipSelectionVertically); })
         ->setObjectName(QStringLiteral("flipVertical"));
 
+    // With whole lines selected there is no area to turn inside out, grow, shrink or fill.
+    auto fitSelection = [this] {
+        const bool area = !m_document->pickedStrokes();
+        for (const char *name : {"invert", "expand", "shrink", "fill"})
+            if (auto *button = findChild<QToolButton *>(QLatin1String(name)))
+                button->setVisible(area);
+        adjustSize();
+    };
+    connect(m_document, &Controller::selectionChanged, this, fitSelection);
     connect(m_document, &Controller::selectionChanged, this, &SelectionBar::place);
     connect(m_document, &Controller::documentReplaced, this, &SelectionBar::place);
     connect(m_canvas, &canvas::CanvasView::viewChanged, this, &SelectionBar::place);

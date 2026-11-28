@@ -1,6 +1,8 @@
 #include "document/DocumentController.h"
 
 #include "canvas/ColorAdjust.h"
+#include "tools/ToolState.h"
+#include "canvas/VectorPoints.h"
 #include "canvas/FrameRenderer.h"
 #include "tools/Preferences.h"
 #include "canvas/SelectionMask.h"
@@ -76,9 +78,15 @@ QRect opaqueBounds(const QImage &image)
 class SelectionCommand : public doc::Command
 {
 public:
-    using Assign = std::function<void(const QPainterPath &)>;
+    // What is selected: the outline, and the whole lines, if it is of those.
+    struct State
+    {
+        QPainterPath area;
+        std::optional<DocumentController::StrokePick> pick;
+    };
+    using Assign = std::function<void(const State &)>;
 
-    SelectionCommand(doc::CommandKind kind, Assign assign, QPainterPath before, QPainterPath after)
+    SelectionCommand(doc::CommandKind kind, Assign assign, State before, State after)
         : m_kind(kind)
         , m_assign(std::move(assign))
         , m_before(std::move(before))
@@ -101,8 +109,8 @@ public:
 private:
     doc::CommandKind m_kind;
     Assign m_assign;
-    QPainterPath m_before;
-    QPainterPath m_after;
+    State m_before;
+    State m_after;
 };
 
 // The keys of a trajectory's path chosen before and after a step (see choosePathKeys()).
@@ -186,6 +194,11 @@ DocumentController::DocumentController(QObject *parent)
     : QObject(parent)
     , m_document(makeDefaultDocument())
 {
+    for (auto signal : {&DocumentController::structureChanged, &DocumentController::historyChanged})
+        connect(this, signal, this, &DocumentController::dropStalePick);
+    connect(this, &DocumentController::currentCelChanged, this, &DocumentController::dropStalePick);
+    connect(this, &DocumentController::currentFrameChanged, this, &DocumentController::dropStalePick);
+    connect(this, &DocumentController::currentLayerChanged, this, &DocumentController::dropStalePick);
     m_currentCel = m_document->celAt(0).id();
     // The time layers put right after each step (one changed in a drawing changes in all of them, a new drawing gets them).
     m_history.setAfterChange([this] { return m_document->syncTimeLayers(); },
@@ -259,6 +272,7 @@ void DocumentController::replaceDocument(std::unique_ptr<doc::Document> document
     m_layerSelection.clear();
     m_frameSelection.clear();
     m_selection = QPainterPath();
+    m_pick.reset();
     if (const doc::Drawing *drawing = currentDrawing(); drawing && !drawing->layers.empty()) {
         m_currentLayer = drawing->layers.back().id;
         m_currentLayerName = drawing->layers.back().properties.name;
@@ -3063,21 +3077,123 @@ bool DocumentController::clearCurrentLayer(QString *reason)
 
 void DocumentController::setSelection(const QPainterPath &area)
 {
+    changeSelection(area, std::nullopt);
+}
+
+void DocumentController::moveSelection(const QPainterPath &area)
+{
+    changeSelection(area, m_pick);
+}
+
+void DocumentController::changeSelection(const QPainterPath &area, std::optional<StrokePick> pick)
+{
     QPainterPath clipped = area;
-    if (clipped.boundingRect().isEmpty())
+    if (clipped.boundingRect().isEmpty()) {
         clipped = QPainterPath();
-    if (clipped == m_selection)
+        pick.reset();
+    }
+    if (clipped == m_selection && pick == m_pick)
         return;
     if (m_paint) { // recorded with the paint, by endPaint()
-        assignSelection(clipped);
+        assignSelection(clipped, std::move(pick));
         return;
     }
-    QPainterPath before = m_selection;
-    assignSelection(clipped);
+    SelectionCommand::State before{m_selection, m_pick};
+    assignSelection(clipped, std::move(pick));
     m_history.pushApplied(std::make_unique<SelectionCommand>(
-        doc::CommandKind::Select, [this](const QPainterPath &a) { assignSelection(a); }, std::move(before),
-        m_selection));
+        doc::CommandKind::Select, [this](const SelectionCommand::State &s) { assignSelection(s.area, s.pick); },
+        std::move(before), SelectionCommand::State{m_selection, m_pick}));
     emit historyChanged();
+}
+
+void DocumentController::selectStrokes(std::vector<int> indices, const tools::ToolState &brushes)
+{
+    const doc::Layer *layer = currentLayerIsVector()
+                                  ? m_document->layer(m_currentCel, currentDrawingId(), m_currentLayer)
+                                  : nullptr;
+    std::sort(indices.begin(), indices.end());
+    indices.erase(std::unique(indices.begin(), indices.end()), indices.end());
+    QRectF box;
+    if (layer)
+        for (int i : indices)
+            if (i >= 0 && i < int(layer->strokes.size()))
+                box |= canvas::strokeReach(layer->strokes[std::size_t(i)]);
+    if (box.isEmpty()) {
+        clearSelection();
+        return;
+    }
+    QPainterPath area;
+    area.addRect(QRectF(box.toAlignedRect()));
+    changeSelection(area, StrokePick{m_currentCel, currentDrawingId(), m_currentLayer, std::move(indices),
+                                     layer->strokes.size(), &brushes});
+}
+
+void DocumentController::dropStalePick()
+{
+    if (!m_pick || m_paint)
+        return;
+    const doc::Layer *layer = m_document->layer(m_pick->cel, m_pick->drawing, m_pick->layer);
+    if (m_pick->cel != m_currentCel || m_pick->drawing != currentDrawingId() || m_pick->layer != m_currentLayer
+        || !layer || layer->strokes.size() != m_pick->count)
+        assignSelection({});
+}
+
+DocumentController::SelectionParts DocumentController::splitStrokes(doc::CelId cel, doc::DrawingId drawing,
+                                                                    doc::LayerId layer,
+                                                                    const std::vector<doc::VectorStroke> &strokes,
+                                                                    const canvas::SelectionMask &mask) const
+{
+    SelectionParts parts;
+    if (m_pick) {
+        const bool here = picksOn(cel, drawing, layer);
+        for (std::size_t i = 0; i < strokes.size(); ++i) {
+            const bool picked = here && std::binary_search(m_pick->strokes.begin(), m_pick->strokes.end(), int(i));
+            (picked ? parts.inside : parts.outside).push_back(strokes[i]);
+        }
+        return parts;
+    }
+    for (const doc::VectorStroke &stroke : strokes) {
+        canvas::SplitStroke split = canvas::splitStrokeByMask(stroke, mask, m_selection);
+        parts.inside.insert(parts.inside.end(), split.inside.begin(), split.inside.end());
+        parts.outside.insert(parts.outside.end(), split.outside.begin(), split.outside.end());
+    }
+    return parts;
+}
+
+void DocumentController::splitPixels(doc::CelId cel, doc::DrawingId drawing, doc::LayerId layer,
+                                     const std::vector<doc::VectorStroke> &strokes, const doc::TiledImage &image,
+                                     const canvas::SelectionMask &mask, doc::TiledImage &inside,
+                                     doc::TiledImage &outside) const
+{
+    if (!m_pick || !m_pick->brushes) {
+        canvas::splitByMask(image, mask, inside, outside);
+        return;
+    }
+    inside = {};
+    if (!picksOn(cel, drawing, layer)) {
+        outside = image;
+        return;
+    }
+    outside = {};
+    const SelectionParts parts = splitStrokes(cel, drawing, layer, strokes, mask);
+    canvas::drawStrokes(inside, parts.inside, *m_pick->brushes, {});
+    canvas::drawStrokes(outside, parts.outside, *m_pick->brushes, {});
+}
+
+std::vector<doc::VectorStroke> DocumentController::rejoined(doc::CelId cel, doc::DrawingId drawing, doc::LayerId layer,
+                                                            const std::vector<doc::VectorStroke> &original,
+                                                            const std::vector<doc::VectorStroke> &outside,
+                                                            const std::vector<doc::VectorStroke> &inside) const
+{
+    if (picksOn(cel, drawing, layer) && inside.size() == m_pick->strokes.size()) {
+        std::vector<doc::VectorStroke> out = original;
+        for (std::size_t i = 0; i < inside.size(); ++i)
+            out[std::size_t(m_pick->strokes[i])] = inside[i];
+        return out;
+    }
+    std::vector<doc::VectorStroke> out = outside;
+    out.insert(out.end(), inside.begin(), inside.end());
+    return out;
 }
 
 void DocumentController::choosePathKeys(doc::CelId cel, const std::set<int> &frames, int clicked)
@@ -3112,9 +3228,10 @@ void DocumentController::assignPathKeys(doc::CelId cel, const std::set<int> &fra
     emit pathKeysChosen(cel, std::vector<int>(frames.begin(), frames.end()), clicked);
 }
 
-void DocumentController::assignSelection(const QPainterPath &area)
+void DocumentController::assignSelection(const QPainterPath &area, std::optional<StrokePick> pick)
 {
     m_selection = area;
+    m_pick = std::move(pick);
     emit selectionChanged();
 }
 
@@ -3132,6 +3249,8 @@ void DocumentController::clearSelection()
 
 void DocumentController::invertSelection()
 {
+    if (m_pick)
+        return; // whole lines: no area to turn inside out
     QPainterPath page;
     page.addRect(0, 0, m_document->width(), m_document->height());
     setSelection(page.subtracted(m_selection));
@@ -3139,6 +3258,11 @@ void DocumentController::invertSelection()
 
 bool DocumentController::growSelection(int pixels, QString *reason)
 {
+    if (m_pick) {
+        if (reason)
+            *reason = tr("Whole lines are selected, not an area");
+        return false;
+    }
     if (!hasSelection()) {
         if (reason)
             *reason = tr("Nothing is selected");
@@ -3158,6 +3282,11 @@ bool DocumentController::growSelection(int pixels, QString *reason)
 
 bool DocumentController::fillSelection(const QColor &color, QString *reason)
 {
+    if (m_pick) {
+        if (reason)
+            *reason = tr("Whole lines are selected, not an area");
+        return false;
+    }
     interruptStroke();
     if (!hasSelection()) {
         if (reason)
@@ -3222,21 +3351,18 @@ bool DocumentController::eraseBySelection(bool insideIt, QString *reason)
         emit historyChanged();
         return true;
     }
-    canvas::splitByMask(layer->image, mask, inside, outside);
+    splitPixels(m_currentCel, currentDrawingId(), m_currentLayer, layer->strokes, layer->image, mask, inside, outside);
     if (!insideIt)
         std::swap(inside, outside); // `inside` is what goes, `outside` what stays
     // A vector layer's strokes are cut along the outline: the other side stays.
     const bool vector = layer->kind == doc::LayerKind::Vector;
     std::vector<doc::VectorStroke> strokesKept;
     bool strokesErased = false;
-    if (vector)
-        for (const doc::VectorStroke &stroke : layer->strokes) {
-            canvas::SplitStroke split = canvas::splitStrokeByMask(stroke, mask, m_selection);
-            const auto &erased = insideIt ? split.inside : split.outside;
-            const auto &kept = insideIt ? split.outside : split.inside;
-            strokesErased |= !erased.empty();
-            strokesKept.insert(strokesKept.end(), kept.begin(), kept.end());
-        }
+    if (vector) {
+        SelectionParts parts = splitStrokes(m_currentCel, currentDrawingId(), m_currentLayer, layer->strokes, mask);
+        strokesErased = !(insideIt ? parts.inside : parts.outside).empty();
+        strokesKept = std::move(insideIt ? parts.outside : parts.inside);
+    }
     if (inside.isEmpty() && !strokesErased) {
         if (reason)
             *reason = insideIt ? nothing : tr("Nothing outside the selection on this frame");
@@ -3451,7 +3577,9 @@ bool DocumentController::beginColorAdjust(QString *reason)
     std::optional<canvas::SelectionMask> mask;
     if (a.selection) {
         mask = canvas::SelectionMask::fromPath(m_selection);
-        canvas::splitByMask(a.before, *mask, a.inside, a.outside);
+        const doc::Layer *layer = target->vector ? m_document->layer(target->cel, target->drawing, target->layer) : nullptr;
+        splitPixels(target->cel, target->drawing, target->layer,
+                    layer ? layer->strokes : std::vector<doc::VectorStroke>(), a.before, *mask, a.inside, a.outside);
     } else {
         a.inside = a.before;
     }
@@ -3463,7 +3591,14 @@ bool DocumentController::beginColorAdjust(QString *reason)
                 a.strokesInside.push_back(stroke);
                 continue;
             }
-            canvas::SplitStroke split = canvas::splitStrokeByMask(stroke, *mask);
+            canvas::SplitStroke split;
+            if (m_pick) {
+                const SelectionParts parts = splitStrokes(target->cel, target->drawing, target->layer, layer->strokes, *mask);
+                a.strokesKept = parts.outside;
+                a.strokesInside = parts.inside;
+                break;
+            }
+            split = canvas::splitStrokeByMask(stroke, *mask);
             a.strokesKept.insert(a.strokesKept.end(), split.outside.begin(), split.outside.end());
             a.strokesInside.insert(a.strokesInside.end(), split.inside.begin(), split.inside.end());
         }
@@ -3550,22 +3685,33 @@ bool DocumentController::flipSelection(bool horizontal, QString *reason)
     for (const PaintTarget &target : targets) {
         before.push_back(*target.image);
         doc::TiledImage inside, outside;
-        canvas::splitByMask(*target.image, mask, inside, outside);
-        // The strokes of a vector layer: those inside the outline are mirrored, the rest stays.
+        const doc::Layer *vectorLayer =
+            target.vector ? m_document->layer(target.cel, target.drawing, target.layer) : nullptr;
+        splitPixels(target.cel, target.drawing, target.layer,
+                    vectorLayer ? vectorLayer->strokes : std::vector<doc::VectorStroke>(), *target.image, mask, inside,
+                    outside);
+        // The strokes of a vector layer: those selected are mirrored, the rest stays.
         bool strokesInside = false;
-        if (target.vector) {
-            const doc::Layer *vectorLayer = m_document->layer(target.cel, target.drawing, target.layer);
-            std::vector<doc::VectorStroke> kept, flipped;
-            for (const doc::VectorStroke &stroke : vectorLayer->strokes) {
-                canvas::SplitStroke split = canvas::splitStrokeByMask(stroke, mask, m_selection);
-                kept.insert(kept.end(), split.outside.begin(), split.outside.end());
-                for (const doc::VectorStroke &piece : split.inside)
-                    flipped.push_back(canvas::transformedStroke(piece, across));
-            }
+        if (vectorLayer) {
+            const SelectionParts parts =
+                splitStrokes(target.cel, target.drawing, target.layer, vectorLayer->strokes, mask);
+            std::vector<doc::VectorStroke> flipped;
+            for (const doc::VectorStroke &piece : parts.inside)
+                flipped.push_back(canvas::transformedStroke(piece, across));
             strokesInside = !flipped.empty();
             if (strokesInside) {
-                kept.insert(kept.end(), flipped.begin(), flipped.end());
-                attachStrokeChange(target, vectorLayer->strokes, std::move(kept));
+                std::vector<doc::VectorStroke> after = rejoined(target.cel, target.drawing, target.layer,
+                                                                vectorLayer->strokes, parts.outside, flipped);
+                if (picksOn(target.cel, target.drawing, target.layer) && m_pick->brushes) {
+                    // Whole lines, each in its place among the others: drawn again, not laid over.
+                    doc::TiledImage drawn;
+                    canvas::drawStrokes(drawn, after, *m_pick->brushes, {});
+                    attachStrokeChange(target, vectorLayer->strokes, std::move(after));
+                    *target.image = std::move(drawn);
+                    anything = true;
+                    continue;
+                }
+                attachStrokeChange(target, vectorLayer->strokes, std::move(after));
             }
         }
         if (inside.isEmpty() && !strokesInside)
@@ -3594,7 +3740,7 @@ bool DocumentController::flipSelection(bool horizontal, QString *reason)
             *reason = nothing;
         return false;
     }
-    setSelection(across.map(m_selection));
+    moveSelection(across.map(m_selection));
     notifyPainted(box);
     endPaint(before, doc::CommandKind::Flip);
     return true;
@@ -3631,7 +3777,7 @@ bool DocumentController::selectionToLayer(bool cut, QString *reason)
     const doc::DrawingId drawingId = currentDrawingId();
     const canvas::SelectionMask mask = canvas::SelectionMask::fromPath(m_selection);
     doc::TiledImage inside, outside;
-    canvas::splitByMask(layer->image, mask, inside, outside);
+    splitPixels(m_currentCel, drawingId, m_currentLayer, layer->strokes, layer->image, mask, inside, outside);
     if (inside.isEmpty()) {
         if (reason)
             *reason = nothing;
@@ -3641,12 +3787,11 @@ bool DocumentController::selectionToLayer(bool cut, QString *reason)
     // A vector layer's strokes are cut along the outline too: the new layer is a vector layer with the parts inside.
     const bool vector = layer->kind == doc::LayerKind::Vector;
     std::vector<doc::VectorStroke> strokesInside, strokesOutside;
-    if (vector)
-        for (const doc::VectorStroke &stroke : layer->strokes) {
-            canvas::SplitStroke split = canvas::splitStrokeByMask(stroke, mask, m_selection);
-            strokesInside.insert(strokesInside.end(), split.inside.begin(), split.inside.end());
-            strokesOutside.insert(strokesOutside.end(), split.outside.begin(), split.outside.end());
-        }
+    if (vector) {
+        SelectionParts parts = splitStrokes(m_currentCel, drawingId, m_currentLayer, layer->strokes, mask);
+        strokesInside = std::move(parts.inside);
+        strokesOutside = std::move(parts.outside);
+    }
 
     // The source loses its part (cut), then a new layer above it in the same
     // drawing gets the part: applied now, recorded together.
@@ -3704,7 +3849,8 @@ QImage DocumentController::copyPixels(QPoint *origin, QString *reason)
     doc::TiledImage copied = layer->image;
     if (hasSelection()) {
         doc::TiledImage outside;
-        canvas::splitByMask(layer->image, canvas::SelectionMask::fromPath(m_selection), copied, outside);
+        splitPixels(m_currentCel, currentDrawingId(), m_currentLayer, layer->strokes, layer->image,
+                    canvas::SelectionMask::fromPath(m_selection), copied, outside);
     }
     const QRect tiles = boundsOf(copied.tileCoords());
     QRect crop;
@@ -3725,11 +3871,9 @@ QImage DocumentController::copyPixels(QPoint *origin, QString *reason)
         if (!hasSelection()) {
             m_copiedStrokes = layer->strokes;
         } else {
-            const canvas::SelectionMask mask = canvas::SelectionMask::fromPath(m_selection);
-            for (const doc::VectorStroke &stroke : layer->strokes) {
-                canvas::SplitStroke cut = canvas::splitStrokeByMask(stroke, mask, m_selection);
-                m_copiedStrokes.insert(m_copiedStrokes.end(), cut.inside.begin(), cut.inside.end());
-            }
+            m_copiedStrokes = splitStrokes(m_currentCel, currentDrawingId(), m_currentLayer, layer->strokes,
+                                           canvas::SelectionMask::fromPath(m_selection))
+                                  .inside;
         }
     }
     return area.copy(crop);
@@ -4095,6 +4239,7 @@ std::optional<DocumentController::PaintTarget> DocumentController::beginPaint(bo
         state.target.vector = false; // a mask holds pixels only
     }
     state.selectionBefore = m_selection;
+    state.pickBefore = m_pick;
     m_paint = std::move(state);
     return m_paint->target;
 }
@@ -4179,6 +4324,7 @@ std::vector<DocumentController::PaintTarget> DocumentController::beginPaintLayer
     state.target = targets.front();
     state.others.assign(targets.begin() + 1, targets.end());
     state.selectionBefore = m_selection;
+    state.pickBefore = m_pick;
     m_paint = std::move(state);
     return targets;
 }
@@ -4231,10 +4377,10 @@ void DocumentController::endPaint(const std::vector<doc::TiledImage> &before, do
     } else if (state.createdDrawing) { // nothing drawn: the drawing we created is not wanted
         publish(state.createdDrawing->revert(*m_document));
     }
-    if (m_selection != state.selectionBefore)
+    if (m_selection != state.selectionBefore || m_pick != state.pickBefore)
         steps.push_back(std::make_unique<SelectionCommand>(
-            doc::CommandKind::Move, [this](const QPainterPath &a) { assignSelection(a); }, state.selectionBefore,
-            m_selection));
+            doc::CommandKind::Move, [this](const SelectionCommand::State &a) { assignSelection(a.area, a.pick); },
+            SelectionCommand::State{state.selectionBefore, state.pickBefore}, SelectionCommand::State{m_selection, m_pick}));
     if (steps.empty())
         return;
     if (steps.size() == 1 && steps.front()->kind() == kind)

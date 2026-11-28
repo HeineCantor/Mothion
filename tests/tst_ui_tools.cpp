@@ -495,7 +495,8 @@ private slots:
     void selectionToolsSetAndClearTheSelection()
     {
         document::DocumentController controller;
-        canvas::SelectionTool rect(&controller, canvas::SelectionTool::Shape::Rectangle);
+        tools::ToolState selectState;
+        canvas::SelectionTool rect(&controller, &selectState, canvas::SelectionTool::Shape::Rectangle);
         rect.press({10.2, 20.4}, Qt::NoModifier);
         rect.move({50, 40}, Qt::NoModifier);
         rect.release({60.4, 70.6}, Qt::NoModifier);
@@ -509,7 +510,7 @@ private slots:
         rect.release({10, 10}, Qt::NoModifier);
         QCOMPARE(controller.selection().boundingRect(), QRectF(-100, -100, 110, 110));
 
-        canvas::SelectionTool lasso(&controller, canvas::SelectionTool::Shape::Lasso);
+        canvas::SelectionTool lasso(&controller, &selectState, canvas::SelectionTool::Shape::Lasso);
         lasso.press({100, 100}, Qt::NoModifier);
         lasso.move({200, 100}, Qt::NoModifier);
         lasso.release({200, 200}, Qt::NoModifier); // triangle (100,100) (200,100) (200,200)
@@ -517,6 +518,119 @@ private slots:
         QVERIFY(!controller.selection().contains(QPointF(110, 190))); // the triangle's other half
     }
 
+
+    // On a vector layer the selections can take whole lines: those wholly inside, or all those they touch. What works
+    // on a selection then takes those lines whole, each staying in its place among the others.
+    void selectionTakesWholeLinesOfAVectorLayer()
+    {
+        tools::ToolState state;
+        document::DocumentController controller;
+        doc::Document &d = controller.documentForCommands();
+        controller.execute(doc::makeNewDrawing(d, controller.currentCel(), 0, 4, "Lines").command);
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Vector));
+        auto layer = [&]() -> doc::Layer & {
+            return *d.layer(controller.currentCel(), controller.currentDrawingId(), controller.currentLayer());
+        };
+        auto line = [](double x0, double x1, double y) {
+            doc::VectorStroke s;
+            s.size = 6;
+            for (double x = x0; x <= x1; x += 2) {
+                brush::BrushInput in;
+                in.x = x;
+                in.y = y;
+                in.pressure = 1;
+                s.points.push_back(in);
+            }
+            return s;
+        };
+        // Inside the box to be drawn, across it, and far away; the first under the others.
+        layer().strokes = {line(120, 180, 150), line(50, 300, 170), line(500, 600, 500)};
+        const std::vector<doc::VectorStroke> drawn = layer().strokes;
+
+        canvas::SelectionTool rect(&controller, &state, canvas::SelectionTool::Shape::Rectangle);
+        auto select = [&] {
+            rect.press({100, 100}, Qt::NoModifier);
+            rect.release({200, 200}, Qt::NoModifier);
+        };
+        state.setVectorSelect({tools::VectorSelectSettings::Mode::Enclosed});
+        select();
+        QVERIFY(controller.pickedStrokes());
+        QCOMPARE(controller.pickedStrokes()->strokes, std::vector<int>({0}));
+        QVERIFY(controller.hasSelection());
+        QVERIFY(!controller.hasAreaSelection()); // painting is not held inside the box
+        state.setVectorSelect({tools::VectorSelectSettings::Mode::Touched});
+        select();
+        QCOMPARE(controller.pickedStrokes()->strokes, std::vector<int>({0, 1}));
+        controller.undo(); // back to the one before
+        QCOMPARE(controller.pickedStrokes()->strokes, std::vector<int>({0}));
+
+        // Moved: that line whole, still the first, the others as they were.
+        canvas::MoveTool move(&controller, [](const QString &) {});
+        move.press({150, 150}, Qt::NoModifier);
+        move.move({150, 190}, Qt::NoModifier);
+        move.release({150, 190}, Qt::NoModifier);
+        QCOMPARE(layer().strokes.size(), std::size_t(3));
+        QCOMPARE(layer().strokes[0].points.front().y, 190.0);
+        QCOMPARE(layer().strokes[0].points.size(), drawn[0].points.size());
+        QCOMPARE(layer().strokes[1], drawn[1]);
+        QVERIFY(controller.pickedStrokes());
+        controller.undo();
+        QCOMPARE(layer().strokes, drawn);
+
+        // Erased: the whole of the lines taken (the crossing one too, which goes on out of the box).
+        state.setVectorSelect({tools::VectorSelectSettings::Mode::Touched});
+        select();
+        QString reason;
+        QVERIFY2(controller.eraseSelection(&reason), qPrintable(reason));
+        QCOMPARE(layer().strokes, std::vector<doc::VectorStroke>({drawn[2]}));
+        QVERIFY(!controller.pickedStrokes()); // the lines are not there any more
+        controller.undo();
+        QCOMPARE(layer().strokes, drawn);
+
+        // Transformed: the line moved inside the box goes, in its place; flipped: mirrored in its box; copied to a new
+        // layer: that line alone.
+        state.setVectorSelect({tools::VectorSelectSettings::Mode::Enclosed});
+        select();
+        {
+            canvas::TransformTool transform(&controller, &state, [](const QString &) {}, [] {});
+            transform.activated();
+            const QPointF inside(150, 150);
+            transform.press(inside, Qt::NoModifier);
+            transform.move(inside + QPointF(30, 0), Qt::NoModifier);
+            transform.release(inside + QPointF(30, 0), Qt::NoModifier);
+            transform.commit();
+        }
+        QCOMPARE(layer().strokes.size(), std::size_t(3));
+        QCOMPARE(layer().strokes[0].points.front().x, 150.0);
+        QCOMPARE(layer().strokes[1], drawn[1]);
+        QCOMPARE(layer().strokes[2], drawn[2]);
+        QVERIFY(controller.pickedStrokes());
+        controller.undo();
+        QCOMPARE(layer().strokes, drawn);
+
+        select();
+        QVERIFY2(controller.flipSelectionHorizontally(&reason), qPrintable(reason));
+        QCOMPARE(layer().strokes.size(), std::size_t(3));
+        QVERIFY(layer().strokes[0].points.front().x > layer().strokes[0].points.back().x);
+        QCOMPARE(layer().strokes[1], drawn[1]);
+        controller.undo();
+        QCOMPARE(layer().strokes, drawn);
+
+        select();
+        const doc::LayerId source = controller.currentLayer();
+        QVERIFY2(controller.copySelectionToLayer(&reason), qPrintable(reason));
+        QCOMPARE(layer().strokes, std::vector<doc::VectorStroke>({drawn[0]}));
+        QVERIFY(!controller.pickedStrokes()); // on the new layer now
+        controller.undo();
+        controller.setCurrentLayer(source);
+
+        // Another layer: nothing selected there.
+        select();
+        QVERIFY(controller.pickedStrokes());
+        QVERIFY(controller.addLayer(true, doc::LayerKind::Raster));
+        QVERIFY(!controller.pickedStrokes());
+        QVERIFY(!controller.hasSelection());
+    }
 
     void moveToolMovesOnlyTheSelection()
     {
@@ -594,7 +708,8 @@ private slots:
     void lassoShowsNoClosingLineWhileDrawn()
     {
         document::DocumentController controller;
-        canvas::SelectionTool lasso(&controller, canvas::SelectionTool::Shape::Lasso);
+        tools::ToolState selectState;
+        canvas::SelectionTool lasso(&controller, &selectState, canvas::SelectionTool::Shape::Lasso);
         lasso.press({10, 10}, Qt::NoModifier);
         lasso.move({90, 10}, Qt::NoModifier);
         lasso.move({90, 90}, Qt::NoModifier);

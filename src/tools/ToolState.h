@@ -78,6 +78,16 @@ struct VectorEraserSettings
     bool operator==(const VectorEraserSettings &) const = default;
 };
 
+// What the rectangle and lasso selections take on a vector layer: Area, the area drawn, the lines cut along its outline;
+// Enclosed, the whole of every line wholly inside it; Touched, the whole of every line it takes in or crosses.
+struct VectorSelectSettings
+{
+    enum class Mode { Area, Enclosed, Touched };
+    Mode mode = Mode::Area;
+
+    bool operator==(const VectorSelectSettings &) const = default;
+};
+
 // Paint bucket options.
 struct FillSettings
 {
@@ -297,6 +307,8 @@ public:
 
     VectorEraserSettings vectorEraser() const { return m_vectorEraser; }
     void setVectorEraser(const VectorEraserSettings &settings);
+    VectorSelectSettings vectorSelect() const { return m_vectorSelect; }
+    void setVectorSelect(const VectorSelectSettings &settings);
     SymmetrySettings symmetry() const { return m_symmetry; }
     void setSymmetry(const SymmetrySettings &settings);
     VectorPointSettings vectorPoints() const { return m_vectorPoints; }
@@ -331,6 +343,7 @@ signals:
     void liquifySettingsChanged();
     void shapeSettingsChanged();
     void vectorEraserChanged();
+    void vectorSelectChanged();
     void vectorPointsChanged();
     void symmetryChanged();
     void onionSkinChanged();
@@ -364,6 +377,7 @@ private:
     LiquifySettings m_liquify;
     ShapeSettings m_shape;
     VectorEraserSettings m_vectorEraser;
+    VectorSelectSettings m_vectorSelect;
     VectorPointSettings m_vectorPoints;
     SymmetrySettings m_symmetry;
     OnionSkinSettings m_onion;

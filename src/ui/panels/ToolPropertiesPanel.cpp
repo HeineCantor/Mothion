@@ -37,6 +37,41 @@ using tools::ToolState;
 
 namespace {
 
+// What each mode of a selection takes on a vector layer: the dashed outline over a line cut at it, a line inside it
+// taken whole, a line crossing it taken whole.
+QIcon vectorSelectIcon(int mode, const QColor &color)
+{
+    QPixmap pixmap(48, 48);
+    pixmap.fill(Qt::transparent);
+    QPainter p(&pixmap);
+    p.setRenderHint(QPainter::Antialiasing);
+    QColor faded = color;
+    faded.setAlphaF(0.3f);
+    const QPen solid(color, 4.0, Qt::SolidLine, Qt::RoundCap), ghost(faded, 4.0, Qt::SolidLine, Qt::RoundCap);
+    p.setPen(QPen(color, 2.0, Qt::DashLine));
+    p.drawRect(QRectF(10, 10, 28, 28));
+    switch (mode) {
+    case 0: // the part of a line inside the outline
+        p.setPen(ghost);
+        p.drawLine(QPointF(3, 24), QPointF(45, 24));
+        p.setPen(solid);
+        p.drawLine(QPointF(12, 24), QPointF(36, 24));
+        break;
+    case 1: // a line inside it taken, one that crosses it not
+        p.setPen(solid);
+        p.drawLine(QPointF(16, 19), QPointF(32, 19));
+        p.setPen(ghost);
+        p.drawLine(QPointF(3, 30), QPointF(45, 30));
+        break;
+    default: // the whole of a line that crosses it
+        p.setPen(solid);
+        p.drawLine(QPointF(3, 24), QPointF(45, 24));
+        break;
+    }
+    p.end();
+    return QIcon(pixmap);
+}
+
 // What each mode of the vector eraser does, in a few strokes: the pixels of a brush, a gap in a line, a line cut up to
 // the crossing, a line gone whole.
 QIcon vectorEraserIcon(int mode, const QColor &color)
@@ -337,6 +372,43 @@ ToolPropertiesPanel::ToolPropertiesPanel(ToolState *state, QWidget *parent)
     // The filter of the transform (as in Krita's): bicubic by default, Lanczos3 for making a small picture bigger, nearest
     // neighbor for pixel art. The choice is kept (Preferences), and is taken up at once by a transform that is open.
     // Correct line: what a press on the control points of a vector stroke does, and how.
+    m_vectorSelectControls = new QWidget(this);
+    {
+        m_vectorSelectModes = new QButtonGroup(this);
+        m_vectorSelectModes->setExclusive(true);
+        auto *row = new QHBoxLayout(m_vectorSelectControls);
+        row->setContentsMargins(0, 0, 0, 0);
+        row->setSpacing(2);
+        row->addWidget(new QLabel(tr("Vector layer"), m_vectorSelectControls));
+        const QString tips[] = {
+            tr("Area: what is inside the outline; lines are cut along it"),
+            tr("Enclosed lines: the whole of every line wholly inside the outline"),
+            tr("Touched lines: the whole of every line the outline takes in or crosses"),
+        };
+        for (int i = 0; i < 3; ++i) {
+            auto *button = new QToolButton(m_vectorSelectControls);
+            button->setObjectName(QStringLiteral("vectorSelectMode%1").arg(i));
+            button->setCheckable(true);
+            button->setAutoRaise(true);
+            button->setIcon(vectorSelectIcon(i, palette().color(QPalette::ButtonText)));
+            button->setIconSize(QSize(24, 24));
+            button->setToolTip(tips[i]);
+            m_vectorSelectModes->addButton(button, i);
+            row->addWidget(button);
+        }
+        row->addStretch(1);
+        connect(m_vectorSelectModes, &QButtonGroup::idClicked, this, [this](int i) {
+            m_state->setVectorSelect({static_cast<tools::VectorSelectSettings::Mode>(i)});
+        });
+        auto sync = [this] {
+            if (QAbstractButton *button = m_vectorSelectModes->button(int(m_state->vectorSelect().mode)))
+                button->setChecked(true);
+        };
+        connect(m_state, &ToolState::vectorSelectChanged, this, sync);
+        sync();
+    }
+    layout->addWidget(m_vectorSelectControls);
+
     m_vectorPointControls = new QWidget(this);
     m_vectorPointMode = new QComboBox(m_vectorPointControls);
     m_vectorPointMode->setObjectName(QStringLiteral("vectorPointMode"));
@@ -565,6 +637,7 @@ void ToolPropertiesPanel::syncFromState()
     syncEffectFromState();
     m_transformHelp->setVisible(transform);
     m_transformControls->setVisible(transform);
+    m_vectorSelectControls->setVisible(tool == ToolId::RectSelect || tool == ToolId::LassoSelect);
     m_vectorPointControls->setVisible(vectorPoints);
     m_animateControls->setVisible(movesCel);
     m_transformHelp->setVisible(transform && !movesCel);

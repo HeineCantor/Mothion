@@ -89,18 +89,17 @@ bool PuppetTool::start(bool quiet)
                 part.allStrokes = layer->strokes;
                 if (!mask) {
                     part.strokes = layer->strokes;
-                } else { // cut along the outline: the strokes inside are warped, the rest stays
-                    for (const doc::VectorStroke &stroke : layer->strokes) {
-                        SplitStroke cut = splitStrokeByMask(stroke, *mask, m_document->selection());
-                        part.strokes.insert(part.strokes.end(), cut.inside.begin(), cut.inside.end());
-                        part.restStrokes.insert(part.restStrokes.end(), cut.outside.begin(), cut.outside.end());
-                    }
+                } else { // cut along the outline (or the lines selected): the strokes inside are warped, the rest stays
+                    auto parts = m_document->splitStrokes(target.cel, target.drawing, target.layer, layer->strokes, *mask);
+                    part.strokes = std::move(parts.inside);
+                    part.restStrokes = std::move(parts.outside);
                 }
             }
         }
         doc::TiledImage pixels;
         if (mask)
-            splitByMask(part.before, *mask, pixels, part.rest);
+            m_document->splitPixels(target.cel, target.drawing, target.layer, part.allStrokes, part.before, *mask, pixels,
+                                    part.rest);
         else
             pixels = part.before;
         area |= boundsOf(pixels);
@@ -148,9 +147,9 @@ void PuppetTool::render()
     for (Part &part : s.parts) {
         if (part.vector && !dragging) {
             doc::TiledImage result;
-            std::vector<doc::VectorStroke> shown = part.restStrokes; // what stays, then what is warped
-            for (doc::VectorStroke &stroke : warpedStrokes(part.strokes, *s.rig))
-                shown.push_back(std::move(stroke));
+            const std::vector<doc::VectorStroke> shown =
+                m_document->rejoined(part.vector->cel, part.vector->drawing, part.vector->layer, part.allStrokes,
+                                     part.restStrokes, warpedStrokes(part.strokes, *s.rig));
             drawStrokes(result, shown, *m_toolState, {}); // the canvas has no end
             *part.image = std::move(result);
             continue;
@@ -455,9 +454,9 @@ void PuppetTool::commit()
             before.push_back(part.before);
             // The strokes of a vector layer go where the mesh took them, in the same undo step as its pixels.
             if (part.vector) {
-                std::vector<doc::VectorStroke> after = part.restStrokes;
-                for (doc::VectorStroke &stroke : warpedStrokes(part.strokes, *s->rig))
-                    after.push_back(std::move(stroke));
+                std::vector<doc::VectorStroke> after =
+                    m_document->rejoined(part.vector->cel, part.vector->drawing, part.vector->layer, part.allStrokes,
+                                         part.restStrokes, warpedStrokes(part.strokes, *s->rig));
                 m_document->attachStrokeChange(*part.vector, part.allStrokes, std::move(after));
             }
         }

@@ -14,8 +14,59 @@ namespace {
 constexpr double kClickTolerance = 2.0; // document px: below this a drag is a click
 }
 
-SelectionTool::SelectionTool(document::DocumentController *document, Shape shape)
+std::vector<int> selectedStrokes(const std::vector<doc::VectorStroke> &strokes, const QPainterPath &area,
+                                 tools::VectorSelectSettings::Mode mode)
+{
+    using Mode = tools::VectorSelectSettings::Mode;
+    std::vector<int> lines, erasers;
+    if (mode == Mode::Area)
+        return lines;
+    const QPolygonF outline = area.toFillPolygon();
+    const QRectF bounds = outline.boundingRect();
+    std::vector<QLineF> edges;
+    for (qsizetype i = 0; i + 1 < outline.size(); ++i)
+        edges.emplace_back(outline[i], outline[i + 1]);
+    auto enclosed = [&](const doc::VectorStroke &stroke) {
+        return std::all_of(stroke.points.begin(), stroke.points.end(),
+                           [&](const brush::BrushInput &p) { return area.contains(QPointF(p.x, p.y)); });
+    };
+    auto touched = [&](const doc::VectorStroke &stroke) {
+        QPointF last;
+        for (std::size_t i = 0; i < stroke.points.size(); ++i) {
+            const QPointF at(stroke.points[i].x, stroke.points[i].y);
+            if (area.contains(at))
+                return true;
+            if (i > 0 && bounds.intersects(QRectF(last, at).normalized().adjusted(-0.5, -0.5, 0.5, 0.5))) {
+                const QLineF piece(last, at);
+                for (const QLineF &edge : edges)
+                    if (piece.intersects(edge) == QLineF::BoundedIntersection)
+                        return true;
+            }
+            last = at;
+        }
+        return false;
+    };
+    for (int i = 0; i < int(strokes.size()); ++i) {
+        const doc::VectorStroke &stroke = strokes[std::size_t(i)];
+        if (stroke.points.empty())
+            continue;
+        if (stroke.erase) {
+            if (enclosed(stroke))
+                erasers.push_back(i);
+        } else if (mode == Mode::Enclosed ? enclosed(stroke) : touched(stroke)) {
+            lines.push_back(i);
+        }
+    }
+    if (!lines.empty()) {
+        lines.insert(lines.end(), erasers.begin(), erasers.end());
+        std::sort(lines.begin(), lines.end());
+    }
+    return lines;
+}
+
+SelectionTool::SelectionTool(document::DocumentController *document, tools::ToolState *toolState, Shape shape)
     : m_document(document)
+    , m_toolState(toolState)
     , m_shape(shape)
 {
 }
@@ -48,8 +99,16 @@ void SelectionTool::release(const QPointF &docPos, Qt::KeyboardModifiers modifie
     const QRectF box = area.boundingRect();
     if (box.width() < kClickTolerance && box.height() < kClickTolerance)
         m_document->clearSelection(); // a click deselects
-    else
+    else if (m_toolState->vectorSelect().mode != tools::VectorSelectSettings::Mode::Area
+             && m_document->currentLayerIsVector()) {
+        const doc::Layer *layer = m_document->document().layer(m_document->currentCel(), m_document->currentDrawingId(),
+                                                               m_document->currentLayer());
+        m_document->selectStrokes(layer ? selectedStrokes(layer->strokes, area, m_toolState->vectorSelect().mode)
+                                        : std::vector<int>(),
+                                  *m_toolState);
+    } else {
         m_document->setSelection(area);
+    }
 }
 
 void SelectionTool::cancel()

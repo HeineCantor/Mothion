@@ -186,9 +186,9 @@ CanvasView::CanvasView(ToolState *toolState, document::DocumentController *docum
 
     m_moveTool = std::make_unique<MoveTool>(m_document, [this](const QString &text) { emit statusMessage(text); });
     m_rectSelectTool =
-        std::make_unique<SelectionTool>(m_document, SelectionTool::Shape::Rectangle);
+        std::make_unique<SelectionTool>(m_document, m_toolState, SelectionTool::Shape::Rectangle);
     m_lassoSelectTool =
-        std::make_unique<SelectionTool>(m_document, SelectionTool::Shape::Lasso);
+        std::make_unique<SelectionTool>(m_document, m_toolState, SelectionTool::Shape::Lasso);
     m_puppetTool = std::make_unique<PuppetTool>(
         m_document, m_toolState, [this](const QString &text) { emit statusMessage(text); },
         [this] {
@@ -658,6 +658,28 @@ void CanvasView::paintEvent(QPaintEvent *)
         p.setWorldTransform(m_view.viewToDocument() * QTransform(m.a, m.b, m.c, m.d, m.e, m.f) * m_view.documentToView());
     }
     paintSelectionOutline(p, m_view, m_document->selection(), m_antsPhase);
+    // Whole lines selected: they show lit, inside the box (not while an edit moves them: they are drawn again after).
+    if (const auto &pick = m_document->pickedStrokes(); pick && !m_editTool && transformBounds().isNull()
+        && m_document->picksOn(m_document->currentCel(), m_document->currentDrawingId(), m_document->currentLayer())) {
+        if (const doc::Layer *layer = m_document->document().layer(pick->cel, pick->drawing, pick->layer)) {
+            const QTransform toView = m_view.documentToView(); // (the painter takes it through the cel's pose)
+            p.setRenderHint(QPainter::Antialiasing);
+            p.setBrush(Qt::NoBrush);
+            for (int i : pick->strokes) {
+                if (i < 0 || i >= int(layer->strokes.size()) || layer->strokes[std::size_t(i)].erase)
+                    continue;
+                QPainterPath path;
+                for (const brush::BrushInput &in : layer->strokes[std::size_t(i)].points) {
+                    const QPointF at = toView.map(QPointF(in.x, in.y));
+                    path.elementCount() ? path.lineTo(at) : path.moveTo(at);
+                }
+                p.setPen(QPen(QColor(255, 255, 255, 200), 3.0));
+                p.drawPath(path);
+                p.setPen(QPen(QColor(0x3d, 0x9b, 0xff), 1.2));
+                p.drawPath(path);
+            }
+        }
+    }
     p.restore();
     if (const CanvasTool *tool = canvasTool()) {
         p.save();
@@ -1328,8 +1350,8 @@ void CanvasView::beginStroke(const PenSample &sample)
     stamper->setSecondaryColor(target->tint(m_toolState->inactiveColor()));
     m_strokeImage = target->image;
     m_stroke.emplace(*target->image, std::move(stamper), settings.opacity, m_eraseStroke); // the canvas has no end
-    if (m_document->hasSelection())
-        m_stroke->setSelection(m_document->selection()); // paint or erase only inside it
+    if (m_document->hasAreaSelection())
+        m_stroke->setSelection(m_document->areaSelection()); // paint or erase only inside it
     m_stroke->setStyle(style);
     m_seed = QRandomGenerator::global()->generate();
     m_dabs.emplace(style, m_seed);
@@ -1601,8 +1623,8 @@ void CanvasView::endStroke()
                 in = transformedInput(in, copy.transform);
             kept.push_back(std::move(moved));
         }
-        const bool inSelection = m_document->hasSelection(); // painted only inside the selection: so is what is kept
-        const SelectionMask mask = inSelection ? SelectionMask::fromPath(m_document->selection()) : SelectionMask();
+        const bool inSelection = m_document->hasAreaSelection(); // painted only inside the selection: so is what is kept
+        const SelectionMask mask = inSelection ? SelectionMask::fromPath(m_document->areaSelection()) : SelectionMask();
         for (doc::VectorStroke &stroke : kept) {
             if (!inSelection) {
                 m_document->attachStroke(std::move(stroke));
