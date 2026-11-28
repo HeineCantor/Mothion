@@ -63,11 +63,15 @@ namespace mothion::io {
 // text (see doc::VectorStroke); their tiles are saved as the raster layers' are. Older files have none.
 // Format 18 adds the table "symmetry": the axes of the brushes' symmetry, once placed.
 // Format 19 adds the table "mouth_charts": the cels that are mouth charts, for the lip sync. Older files have none.
+// Format 20 adds the deformation cels: the tables "deformer_cels" and "deformer_parts".
+// Format 21 adds the time layers: the tables "time_layers" and "time_layer_places".
+// Format 22 adds the 3D model cels: the table "model_cels" (the model's glTF file whole, and the settings of its bones).
+// Older files have none.
 //
 // A save writes a new file next to the target and renames it over the old
 // one at the end, so a failed save never damages the previous file.
 
-inline constexpr int kProjectFormatVersion = 21;
+inline constexpr int kProjectFormatVersion = 22;
 inline constexpr char kProjectSuffix[] = "moth";
 inline constexpr char kOldProjectSuffix[] = "mothion"; // what projects were named before; they still open
 

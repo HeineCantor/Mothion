@@ -33,6 +33,14 @@ add_library(mothion_core STATIC
     core/deform/BoneField.h core/deform/BoneField.cpp
     core/deform/CurveField.h core/deform/CurveField.cpp
     core/deform/DeformRaster.h core/deform/DeformRaster.cpp
+    core/rig3d/Math3d.h
+    core/rig3d/Model.h
+    core/rig3d/Pose.h core/rig3d/Pose.cpp
+    core/rig3d/GltfLoader.h core/rig3d/GltfLoader.cpp
+    core/rig3d/Skinning.h core/rig3d/Skinning.cpp
+    core/rig3d/JointLimit.h core/rig3d/JointLimit.cpp
+    core/rig3d/Ik.h core/rig3d/Ik.cpp
+    core/rig3d/SoftwareRaster.h core/rig3d/SoftwareRaster.cpp
 
     core/document/Tile.h
     core/document/TiledImage.h core/document/TiledImage.cpp
@@ -61,13 +69,14 @@ add_library(mothion_core STATIC
     core/document/commands/BlenderLinkCommands.h core/document/commands/BlenderLinkCommands.cpp
     core/document/CelMotion.h core/document/CelMotion.cpp
     core/document/Deformer.h
+    core/document/ModelCel.h core/document/ModelCel.cpp
     core/document/LipSync.h core/document/LipSync.cpp
     core/document/Compositing.h
 )
 set_target_properties(mothion_core PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
 target_include_directories(mothion_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(mothion_core PUBLIC cxx_std_20) # our headers need C++20
-target_link_libraries(mothion_core PRIVATE Eigen3::Eigen) # puppet warp solver (.cpp only)
+target_link_libraries(mothion_core PRIVATE Eigen3::Eigen mothion_cgltf) # puppet warp solver; glTF reader (.cpp only)
 mothion_set_warnings(mothion_core)
 
 # ---------------------------------------------------------------------------
@@ -126,6 +135,8 @@ qt_add_library(mothion_gui STATIC
     canvas/CameraGizmo.h canvas/CameraGizmo.cpp
     canvas/TrajectoryGizmo.h canvas/TrajectoryGizmo.cpp
     canvas/BoneGizmo.h canvas/BoneGizmo.cpp
+    canvas/ModelRenderer.h canvas/ModelRenderer.cpp
+    canvas/ModelGizmo.h canvas/ModelGizmo.cpp
     canvas/DragThrottle.h canvas/DragThrottle.cpp
     canvas/CurveGizmo.h canvas/CurveGizmo.cpp
     canvas/ViewTransform.h canvas/ViewTransform.cpp
@@ -153,6 +164,7 @@ qt_add_library(mothion_gui STATIC
     ui/BlenderLiveLink.h ui/BlenderLiveLink.cpp
     ui/BlenderSessionDialog.h ui/BlenderSessionDialog.cpp
     ui/TweenDialog.h ui/TweenDialog.cpp
+    ui/ModelDialogs.h ui/ModelDialogs.cpp
     ui/HueSaturationDialog.h ui/HueSaturationDialog.cpp
     ui/LipSyncDialog.h ui/LipSyncDialog.cpp
     ui/PanelDock.h ui/PanelDock.cpp
@@ -258,7 +270,7 @@ endif()
 target_include_directories(mothion_gui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 find_package(Qt6 REQUIRED COMPONENTS Sql) # .sut brushes and .moth projects are SQLite databases
 find_package(Qt6 REQUIRED COMPONENTS Network) # the local socket of Discord's Rich Presence
-target_link_libraries(mothion_gui PUBLIC mothion_core Qt6::Widgets Qt6::Network PRIVATE Qt6::Sql Qt6::Multimedia) # (Network is public: the link server is in a header the tests use)
+target_link_libraries(mothion_gui PUBLIC mothion_core Qt6::Widgets Qt6::Network PRIVATE Qt6::Sql Qt6::Multimedia Qt6::OpenGL) # (Network is public: the link server is in a header the tests use)
 mothion_set_warnings(mothion_gui)
 
 # ONNX Runtime (MIT), which runs the ZIPA phone recognizer of the lip sync from the audio. Optional: without it the lip

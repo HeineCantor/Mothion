@@ -20,6 +20,8 @@ enum class IconId {
     CorrectLine, Symmetry,
     // A time layer (a layer in every frame of its cel): a clock; a new one, a clock with a plus.
     TimeLayer, AddTimeLayer,
+    // A 3D model cel: a cube with a plus (a new one).
+    NewModel3D,
 };
 
 // Provisional icons, drawn in code as simple line art on a 24x24 grid.

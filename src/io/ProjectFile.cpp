@@ -100,6 +100,10 @@ const char *const kSchema[] = {
     // ... and where it is in each other drawing of the cel.
     "create table time_layer_places (layer integer not null references time_layers(layer),"
     " drawing integer not null references drawings(id), position integer not null, primary key (layer, drawing))",
+    // Format 22: the 3D model cels: the model's file (its name and its bytes, whole) and the settings of its nodes, as
+    // JSON (their poses are the keys of their motion's Deform channel).
+    "create table model_cels (cel integer primary key references cels(id), file_name text not null, model blob not null, "
+    "joints text not null)",
 };
 
 // Stored by name, so reordering the enum cannot change old files.
@@ -581,6 +585,65 @@ doc::Deformer deformerFromJson(const QString &text, doc::DeformerKind kind)
     return deformer;
 }
 
+// The settings of a model's nodes (see rig3d::JointSettings) as JSON: an array with an object for each node, holding only
+// what differs from the default (a anchor, f follow, k stiffness, t twist [min, max], b0 / b1 a bend [min, max] (each
+// there only when limited), r rectangle, s soft zone).
+QString jointsToJson(const std::vector<mothion::rig3d::JointSettings> &joints)
+{
+    QJsonArray out;
+    const mothion::rig3d::JointSettings plain;
+    for (const auto &j : joints) {
+        QJsonObject o;
+        if (j.anchor)
+            o["a"] = true;
+        if (j.follow)
+            o["f"] = true;
+        if (j.stiffness != plain.stiffness)
+            o["k"] = j.stiffness;
+        if (j.limitTwist)
+            o["t"] = QJsonArray{j.twistMin, j.twistMax};
+        for (int a = 0; a < 2; ++a)
+            if (j.limitBend[a])
+                o[a == 0 ? "b0" : "b1"] = QJsonArray{j.bendMin[a], j.bendMax[a]};
+        if (j.rectangle)
+            o["r"] = true;
+        if (j.softZone != plain.softZone)
+            o["s"] = j.softZone;
+        out.append(o);
+    }
+    return QString::fromUtf8(QJsonDocument(out).toJson(QJsonDocument::Compact));
+}
+
+std::vector<mothion::rig3d::JointSettings> jointsFromJson(const QString &text, std::size_t count)
+{
+    std::vector<mothion::rig3d::JointSettings> joints(count);
+    const QJsonArray a = QJsonDocument::fromJson(text.toUtf8()).array();
+    auto number = [](const QJsonValue &v, double fallback) {
+        return v.isDouble() && std::isfinite(v.toDouble()) ? v.toDouble() : fallback;
+    };
+    for (qsizetype i = 0; i < a.size() && std::size_t(i) < count; ++i) {
+        const QJsonObject o = a[i].toObject();
+        auto &j = joints[std::size_t(i)];
+        j.anchor = o.value("a").toBool();
+        j.follow = o.value("f").toBool();
+        j.stiffness = std::clamp(number(o.value("k"), 0.0), 0.0, 0.99);
+        if (o.contains("t")) {
+            j.limitTwist = true;
+            j.twistMin = number(o.value("t").toArray().at(0), j.twistMin);
+            j.twistMax = number(o.value("t").toArray().at(1), j.twistMax);
+        }
+        for (int b = 0; b < 2; ++b)
+            if (const QJsonValue v = o.value(b == 0 ? "b0" : "b1"); v.isArray()) {
+                j.limitBend[b] = true;
+                j.bendMin[b] = number(v.toArray().at(0), j.bendMin[b]);
+                j.bendMax[b] = number(v.toArray().at(1), j.bendMax[b]);
+            }
+        j.rectangle = o.value("r").toBool();
+        j.softZone = std::max(0.0, number(o.value("s"), 0.0));
+    }
+    return joints;
+}
+
 QString motionToJson(const doc::CelMotion &motion)
 {
     QJsonObject channels;
@@ -739,7 +802,7 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
         return false;
     }
 
-    QSqlQuery cel(db), drawing(db), layer(db), exposure(db), tile(db), mask(db), maskTile(db), clipped(db), trajectory(db), trajectoryParent(db), vectorStrokes(db), mouthChart(db), deformer(db), deformerPart(db), timeLayer(db), timePlace(db);
+    QSqlQuery cel(db), drawing(db), layer(db), exposure(db), tile(db), mask(db), maskTile(db), clipped(db), trajectory(db), trajectoryParent(db), vectorStrokes(db), mouthChart(db), deformer(db), deformerPart(db), timeLayer(db), timePlace(db), modelCel(db);
     timeLayer.prepare(QStringLiteral("insert into time_layers values (?, ?, ?, ?, ?)"));
     timePlace.prepare(QStringLiteral("insert into time_layer_places values (?, ?, ?)"));
     cel.prepare(QStringLiteral("insert into cels values (?, ?, ?, ?, ?, ?, ?)"));
@@ -755,6 +818,7 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
     mouthChart.prepare(QStringLiteral("insert into mouth_charts values (?)"));
     deformer.prepare(QStringLiteral("insert into deformer_cels values (?, ?, ?)"));
     deformerPart.prepare(QStringLiteral("insert into deformer_parts values (?, ?)"));
+    modelCel.prepare(QStringLiteral("insert into model_cels values (?, ?, ?, ?)"));
     vectorStrokes.prepare(QStringLiteral("insert into vector_strokes values (?, ?)"));
     auto exec = [&](QSqlQuery &query, std::initializer_list<QVariant> values) {
         for (const QVariant &v : values)
@@ -778,6 +842,13 @@ bool writeDocument(QSqlDatabase &db, const doc::Document &d, QString &failure)
         if (p.deformer != doc::DeformerKind::None
             && !exec(deformer, {idValue(l.id()), QString::fromLatin1(deformerKindName(p.deformer)), deformerToJson(l.deformer())}))
             return false;
+        if (p.model3d && l.model().source) {
+            const auto &source = *l.model().source;
+            if (!exec(modelCel, {idValue(l.id()), QString::fromStdString(source.fileName),
+                                 QByteArray(reinterpret_cast<const char *>(source.bytes.data()), qsizetype(source.bytes.size())),
+                                 jointsToJson(l.model().joints)}))
+                return false;
+        }
         if (p.parent != doc::kNoId && !exec(trajectoryParent, {idValue(l.id()), idValue(p.parent)}))
             return false;
         if (p.parent != doc::kNoId && p.parentPart >= 0 && !exec(deformerPart, {idValue(l.id()), p.parentPart}))
@@ -1135,6 +1206,27 @@ std::unique_ptr<doc::Document> readDocument(QSqlDatabase &db, QString &failure)
                 properties.deformer = kind;
                 cel->setProperties(std::move(properties));
                 cel->setDeformer(deformerFromJson(q.value(2).toString(), kind));
+            }
+    }
+
+    // (Format 22; files saved by the branch the 3D model cels were made on have them as format 21.)
+    if (version >= 21 && q.exec(QStringLiteral("select cel, file_name, model, joints from model_cels"))) {
+        while (q.next())
+            if (doc::Cel *cel = d->cel(idFrom(q.value(0)))) {
+                doc::CelProperties properties = cel->properties();
+                properties.model3d = true;
+                cel->setProperties(std::move(properties));
+                const QByteArray bytes = q.value(2).toByteArray();
+                doc::ModelRig rig;
+                // A model that cannot be read any more stays a model cel that shows nothing (its keys are kept).
+                rig.source = doc::makeModelSource(q.value(1).toString().toStdString(),
+                                                  std::vector<std::uint8_t>(bytes.begin(), bytes.end()));
+                if (const auto *model = rig.model())
+                    rig.joints = jointsFromJson(q.value(3).toString(), model->nodes.size());
+                doc::Deformer rest;
+                rest.rest = doc::modelRestPose(rig);
+                cel->setDeformer(std::move(rest));
+                cel->setModel(std::move(rig));
             }
     }
 

@@ -14,6 +14,7 @@
 #include "tools/ToolState.h"
 #include "audio/AudioPlayer.h"
 #include "ui/AutoplayWindow.h"
+#include "ui/ModelDialogs.h"
 #include "ui/panels/timeline/TimelinePlayer.h"
 #include "ui/compositing/CompositingWindow.h"
 #include "tools/Preferences.h"
@@ -231,6 +232,17 @@ MainWindow::MainWindow(QWidget *parent)
             [this](const QString &reason) { statusBar()->showMessage(reason, 4000); });
     connect(m_canvas, &canvas::CanvasView::statusMessage, this,
             [this](const QString &text) { statusBar()->showMessage(text, 4000); });
+    // A joint of a 3D model double clicked: its settings.
+    connect(m_canvas, &canvas::CanvasView::modelJointEditRequested, this, [this](doc::CelId celId, int node) {
+        const doc::Cel *cel = m_document->document().cel(celId);
+        if (!cel || cel->model().isEmpty() || node < 0 || node >= int(cel->model().model()->nodes.size()))
+            return;
+        const rig3d::JointSettings current =
+            std::size_t(node) < cel->model().joints.size() ? cel->model().joints[std::size_t(node)] : rig3d::JointSettings{};
+        ModelJointDialog dialog(QString::fromStdString(cel->model().model()->nodes[std::size_t(node)].name), current, this);
+        if (dialog.exec() == QDialog::Accepted)
+            m_document->setModelJoint(celId, node, dialog.settings());
+    });
     {
         TimelineView *timeline = static_cast<TimelinePanel *>(panels.timeline)->view();
         connect(timeline, &TimelineView::audioImportRequested, this, &MainWindow::importAudio);

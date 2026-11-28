@@ -30,7 +30,7 @@ version the program shows is the tag's; a tag with a dash (`v0.2.0-beta1`) makes
 
 - CMake ≥ 3.21
 - C++20 compiler
-- Qt ≥ 6.5 (Core, Gui, Widgets, Sql, Network, Multimedia; Test for the test suite)
+- Qt ≥ 6.5 (Core, Gui, Widgets, Sql, Network, Multimedia, OpenGL; Test for the test suite)
 - Eigen 3.4 (MPL-2.0, header-only)
 
 Qt Multimedia, with its FFmpeg backend, decodes and plays the project's audio track. It is a separate package or module in most Qt distributions (`qt6-multimedia-dev` on Debian/Ubuntu, the *Qt Multimedia* module in the Qt Online Installer).
@@ -40,6 +40,8 @@ Exporting a video (File > Export video…) runs the `ffmpeg` program, which is n
 Qt's SQLite driver (`qsqlite`) is used to read `.sut` brush files. Qt must be dynamically linked, as required by the LGPL. CMake checks for static Qt builds and stops if one is found.
 
 Eigen is used by the puppet warp implementation. CMake looks for a system installation first and downloads it during configuration if none is available.
+
+The 3D model cels read glTF with [cgltf](https://github.com/jkuhlmann/cgltf) (MIT, a single header), which CMake downloads at a fixed release during configuration. They draw with OpenGL when it is there and on the CPU otherwise.
 
 The lip sync from the audio hears the voice with ZIPA, which needs [ONNX Runtime](https://onnxruntime.ai) (MIT): `scripts/fetch-onnxruntime.sh` puts Microsoft's NuGet package of it (1.23.2, checked against its hash) in `third_party/onnxruntime`, where CMake finds it (or pass `-DMOTHION_ONNXRUNTIME_DIR`). Without it Mothion builds all the same, and the lip sync has Rhubarb Lip Sync alone. ZIPA's model is not part of the build: `scripts/fetch-zipa.sh` puts it beside the executable (the tests that run it skip when it is not there).
 
@@ -321,6 +323,7 @@ recover the work; a copy older than the project's file is dropped without asking
 | Input debug overlay | F12 |
 | Timeline | Click or drag to select frame/layer. Arrow keys navigate; Home/End go to the first/last frame. Ctrl+wheel changes frame zoom. |
 | Lip sync | Make a cel a mouth chart (its menu: *Mouth chart*); draw its mouths A–H and X in the Mouth chart panel. The Timeline's mouth bar puts a shape at the current frame (or its letter, with the focus in the timeline); *From the audio…* puts them all: heard by [ZIPA](https://github.com/lingjzhu/zipa), a phone recognizer of any language run inside Mothion, or by [Rhubarb Lip Sync](https://github.com/DanielSWolf/rhubarb-lip-sync). Both come with the Windows releases; for a Linux build, `scripts/fetch-onnxruntime.sh` before building and `scripts/fetch-zipa.sh` (ZIPA), `scripts/fetch-rhubarb.sh` (Rhubarb). |
+| 3D model cels | The cube button in the Timeline's cel bar opens a glTF model (.glb). Drag a joint to aim its bone, Shift+drag for IK, Ctrl+drag to twist a bone; drag on nothing to orbit (Alt: pan, Ctrl: dolly). Double-click a joint for its limits, stiffness, anchor and follow; the cel's menu has *Blend shapes…*. See [docs/rig-3d.md](docs/rig-3d.md). |
 | Hold | Drag the right edge of an exposure block to extend it and shift later frames. |
 | Drawings | Drawing on an empty frame creates a new drawing. Right-click the timeline for drawing/frame operations. |
 | Layers | Add, delete and reorder using the timeline controls. Eye toggles visibility; padlock toggles locking; double-click to rename. |
@@ -384,7 +387,7 @@ Press **F12** to open the input debug overlay. Check the following:
 Mothion is free software under the GNU General Public License, version 3 or later (see `LICENSE`); so is the Blender
 add-on in `blender/mothion_link`.
 
-Qt is used under LGPL v3 with dynamic linking. Eigen is MPL-2.0, the Montserrat font is under the SIL Open Font License.
+Qt is used under LGPL v3 with dynamic linking. Eigen is MPL-2.0, cgltf is MIT, the Montserrat font is under the SIL Open Font License.
 The Windows downloads also carry `ffmpeg.exe` (GPL v3, a program of its own that the video export runs) and the
 Microsoft C++ runtime; their licenses and sources are listed in the `licenses` folder that comes with them.
 

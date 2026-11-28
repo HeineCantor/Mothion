@@ -21,3 +21,15 @@ else()
     add_library(Eigen3::Eigen ALIAS mothion_eigen)
     message(STATUS "Eigen: downloaded 3.4.0")
 endif()
+
+# cgltf (MIT, a single C header): reads the glTF / GLB models of the 3D model cels. Downloaded once at configure time,
+# at a fixed release.
+include(FetchContent)
+FetchContent_Declare(cgltf
+    URL https://github.com/jkuhlmann/cgltf/archive/refs/tags/v1.14.tar.gz
+    URL_HASH SHA256=2f3c97a6b989943f50e7d7f228688f6558fe37b1411c13a350e3560d061707d8
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    SOURCE_SUBDIR do-not-build)
+FetchContent_MakeAvailable(cgltf)
+add_library(mothion_cgltf INTERFACE)
+target_include_directories(mothion_cgltf SYSTEM INTERFACE ${cgltf_SOURCE_DIR})

@@ -730,6 +730,24 @@ void drawGlyph(QPainter &p, IconId id)
         path.moveTo(14.5, 18);
         path.lineTo(22.5, 18);
         break;
+    case IconId::NewModel3D: // a cube seen from a corner, with a plus
+        path.moveTo(9.5, 8);
+        path.lineTo(16, 11.5);
+        path.lineTo(9.5, 15);
+        path.lineTo(3, 11.5);
+        path.closeSubpath();
+        path.moveTo(3, 11.5);
+        path.lineTo(3, 18.5);
+        path.lineTo(9.5, 22);
+        path.lineTo(16, 18.5);
+        path.lineTo(16, 11.5);
+        path.moveTo(9.5, 15);
+        path.lineTo(9.5, 22);
+        path.moveTo(19, 2.5);
+        path.lineTo(19, 8.5);
+        path.moveTo(16, 5.5);
+        path.lineTo(22, 5.5);
+        break;
     case IconId::Filter: // a funnel
         path.moveTo(4, 5);
         path.lineTo(20, 5);

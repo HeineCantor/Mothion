@@ -15,6 +15,7 @@ import/export), ma le API interne e l'esperienza utente possono ancora evolvere.
   partire dal [README](../README.md).
 - Per la griglia prospettica, vedere [Griglia prospettica](perspective-layer.md).
 - Per i dettagli dell'algoritmo di deformazione, vedere [Puppet warp](puppet-warp.md).
+- Per i cel di modelli 3D (glTF, IK CCD, limiti dei giunti, skinning), vedere [Cel di modelli 3D](rig-3d.md).
 - Per i livelli vettoriali (tratti salvati, gomma vettoriale, strumenti), vedere
   [Livelli vettoriali](vector-layers.md).
 - Per un riferimento tecnico più fitto a classi e gruppi di sorgenti, vedere la
@@ -304,6 +305,10 @@ Il modello supporta più strumenti e proprietà temporali:
   un rig di mesh, pin e deformazione ARAP nel core. Applicare la deformazione produce
   una modifica raster annullabile. Algoritmo e limiti sono descritti in
   [puppet-warp.md](puppet-warp.md).
+- **Cel di modelli 3D**: un cel che mostra un modello glTF riggato (il file è conservato intero nel progetto). La posa
+  è la chiave Deform del cel: si trascinano i giunti (IK CCD con Shift, torsione con Ctrl) entro i limiti swing/twist di
+  ciascun giunto; lo skinning è lineare sulla CPU e il disegno usa OpenGL, o la CPU dove manca. Dettagli in
+  [rig-3d.md](rig-3d.md).
 - **Audio**: il documento conserva una traccia con i byte del file, offset in
   fotogrammi, volume e mute. `AudioPlayer` usa Qt Multimedia; la riproduzione
   dell'audio è sincronizzata con i fotogrammi dalla UI e può supportare lo scrub.
@@ -335,7 +340,7 @@ dialoghi di importazione/esportazione e pannelli sono organizzati sotto `src/ui/
 
 [`ProjectFile`](../src/io/ProjectFile.h) memorizza il documento in un database SQLite.
 È il formato nativo, con versione esplicita tramite `PRAGMA user_version` e
-identificatore applicazione `MOTH`. La versione corrente è 17. Il database contiene
+identificatore applicazione `MOTH`. La versione corrente è 22. Il database contiene
 metadati del documento, cels, disegni, livelli (con i tratti dei livelli vettoriali, in
 formato JSON nella tabella `vector_strokes`), esposizioni, tile, miniature, audio,
 grafo compositing, camera, maschere, marcatori, intervallo di riproduzione (Da/A della Timeline), motion e riferimenti Blender.

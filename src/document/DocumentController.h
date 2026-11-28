@@ -106,6 +106,13 @@ public:
     // if it is a drawn one, is bent by it (it becomes its parent, and follows the trajectory the cel followed). One undo
     // step; the new cel is chosen.
     void addDeformer(doc::DeformerKind kind);
+    // A 3D model cel above the current one (see doc::CelProperties::model3d) showing the glTF model of the file at `path`
+    // (kept whole in the project), named after the file, and chosen. One undo step; false, with `error` saying why, if the
+    // file cannot be read or holds no model Mothion can show.
+    bool addModelCel(const QString &path, QString *error = nullptr);
+    // What the person set for a node of a 3D model cel's model, to pose it (see rig3d::JointSettings). One undo step;
+    // false if nothing changes.
+    bool setModelJoint(doc::CelId cel, int node, const rig3d::JointSettings &settings);
     // A bone added to a Bones deformation cel, from `from` to `to` on the page as drawn: a child of `parent` (-1: a root),
     // its start where `from` is from the parent's end. Its zone grows with its length. Every key of the cel's Deform
     // channel gets it as it is at rest. One undo step; the new bone's index, or -1 for a cel that is no Bones deformer or a
@@ -123,7 +130,8 @@ public:
     // The bones and the rest of a deformation cel (as many bones as it has: its keys keep their numbers). One undo step;
     // false if nothing changes or the bones are not as many.
     bool setDeformerRest(doc::CelId cel, doc::Deformer deformer);
-    // A key of a deformation cel's Deform channel on `frame`, with `pose` (see doc::Deformer). One undo step.
+    // A key of a deformation cel's (or a 3D model cel's) Deform channel on `frame`, with `pose` (see doc::Deformer,
+    // rig3d::Pose). One undo step.
     bool setDeformKey(doc::CelId cel, int frame, std::vector<double> pose);
     // Adds an empty layer of `kind` to the current drawing, above the current
     // layer (on top if `onTop`), named "Layer N" (or "Perspective N") with the
